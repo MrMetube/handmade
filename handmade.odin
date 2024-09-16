@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "vendor:miniaudio" //this is a concession to cpp oop code used in wasapi/xaudio2
 import win "core:sys/windows"
 
 // TODO this is a global for now
@@ -9,7 +8,7 @@ RUNNING : b32
 the_sound_buffer: ^IDirectSoundBuffer
 
 main :: proc() {
-	load_xInput()
+	init_xInput()
 
 	window_class := win.WNDCLASSW{
 		hInstance = cast(win.HINSTANCE) win.GetModuleHandleW(nil),
@@ -44,18 +43,26 @@ main :: proc() {
 		// TODO Logging
 	}
 
-	{
-		samplerate :: 48000
-		num_channels :: 2
-		bytes_per_sample :: size_of(i16)
-		init_dSound(window, samplerate * num_channels * bytes_per_sample, samplerate)
-	}
+	device_context := win.GetDC(window)
+
+	// graphics test
+	xOffset, yOffset: i32
+
+	samples_per_second :: 48000
+	num_channels :: 2
+	bytes_per_sample :: size_of(i16)*2 
+	audio_buffer_size: u32 = samples_per_second * num_channels * bytes_per_sample
+	init_dSound(window, audio_buffer_size, samples_per_second)
+	// sound test
+	running_sample_index: u32
+	tone_hz :u32: 440
+	square_wave_period :u32: samples_per_second / tone_hz
+	square_wave_period_half :: square_wave_period / 2
+	tone_volumne :: 1000
+	sound_is_playing := false
 
 
 	RUNNING = true
-	xOffset, yOffset: i32
-	
-	device_context := win.GetDC(window)
 
 	for RUNNING {
 		message : win.MSG
@@ -105,6 +112,68 @@ main :: proc() {
 		XInputSetState(0, &vibration)
 		
 		render_weird_gradient(back_buffer, xOffset, yOffset)
+
+		// Direct Sound output test
+		play_cursor, write_cursor : win.DWORD
+		
+		if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result){
+			byte_to_lock := (running_sample_index*bytes_per_sample) % audio_buffer_size
+			bytes_to_write: win.DWORD
+			if byte_to_lock == play_cursor {
+				bytes_to_write = audio_buffer_size
+			} else if byte_to_lock > play_cursor {
+				bytes_to_write = play_cursor - byte_to_lock + audio_buffer_size
+			} else{
+				bytes_to_write = play_cursor - byte_to_lock
+			}
+
+			region1, region2 : rawptr
+			region1_size, region2_size: win.DWORD
+
+			if result := the_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+				// TODO assert that region1/2_size is valid
+				// TODO  Collapse these two loops
+				// TODO use [2]i16 for [LEFT RIGHT]
+				sample_out := cast([^]i16) region1
+				region1_sample_count := region1_size / bytes_per_sample
+				sample_out_index := 0
+				for sample_index in 0..<region1_sample_count {
+					sample_value: i16 = (cast(b32) ((running_sample_index / square_wave_period_half) % 2)) ? tone_volumne : -tone_volumne
+					
+					sample_out[sample_out_index + 0] = sample_value
+					sample_out[sample_out_index + 1] = sample_value
+					sample_out_index += 2
+					
+					running_sample_index += 1
+				}
+
+				sample_out = cast([^]i16) region2
+				region2_sample_count := region2_size / bytes_per_sample
+				sample_out_index = 0
+				for sample_index in 0..<region2_sample_count {
+					sample_value: i16 = (cast(b32) ((running_sample_index / square_wave_period_half) % 2)) ? tone_volumne : -tone_volumne
+
+					sample_out[sample_out_index + 0] = sample_value
+					sample_out[sample_out_index + 1] = sample_value
+					sample_out_index += 2
+					
+					running_sample_index += 1
+				}
+				
+				the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+
+				if !sound_is_playing {
+					the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
+					sound_is_playing = true
+				}
+
+			} else {
+				// TODO Logging
+			}
+		} else {
+			// TODO Logging
+		}
+
 		window_width, window_height := get_window_dimension(window)
 		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
 	}

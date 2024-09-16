@@ -2,7 +2,9 @@ package main
 
 import win "core:sys/windows"
 
-load_xInput :: proc() {
+init_xInput :: proc() {
+	assert(XInputGetState == XInputGetStateStub, "xInput has already been initialized")
+
 	xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("xinput1_4.dll"))
 	if xInput_lib == nil {
 		// TODO Diagnostics

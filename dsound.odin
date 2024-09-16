@@ -4,7 +4,7 @@ import win "core:sys/windows"
 import "vendor:directx/dxgi"
 
 init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) {
-	assert(buffer_size_in_bytes >= samples_per_second * 2 * size_of(i16))
+	assert(the_sound_buffer == nil, "DSound has already been initialized")
 
 	dSound_lib := win.LoadLibraryW(win.utf8_to_wstring("dsound.dll"))
 	if dSound_lib == nil {
@@ -25,9 +25,9 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
 		wFormatTag      = WAVE_FORMAT_PCM,
 		nChannels       = 2,
 		nSamplesPerSec  = samples_per_second,
-		wBitsPerSample  = 16,
-		nBlockAlign     = 2 * 16 / 8,
-		nAvgBytesPerSec = samples_per_second * (2 * 16 / 8),
+		wBitsPerSample  = size_of(i16) * 8,
+		nBlockAlign     = 2 * size_of(i16),
+		nAvgBytesPerSec = samples_per_second * 2 * size_of(i16),
 	}
 	if result := direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY); win.FAILED(result) {
 		// TODO Diagnostics
@@ -183,6 +183,13 @@ DSSCL_PRIORITY :: 0x00000002
 DSBCAPS_PRIMARYBUFFER :: 0x00000001
 DSBCAPS_GETCURRENTPOSITION2 :: 0x00010000
 DSBCAPS_GLOBALFOCUS  :: 0x00008000
+
+DSBPLAY_LOOPING              :: 0x00000001
+DSBPLAY_LOCHARDWARE          :: 0x00000002
+DSBPLAY_LOCSOFTWARE          :: 0x00000004
+DSBPLAY_TERMINATEBY_TIME     :: 0x00000008
+DSBPLAY_TERMINATEBY_DISTANCE :: 0x000000010
+DSBPLAY_TERMINATEBY_PRIORITY :: 0x000000020
 
 
 DSCAPS :: struct {
