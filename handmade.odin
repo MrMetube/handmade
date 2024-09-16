@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math" // TODO implement sin ourself
 import win "core:sys/windows"
 
 // TODO this is a global for now
@@ -48,20 +49,23 @@ main :: proc() {
 	// graphics test
 	xOffset, yOffset: i32
 
-	samples_per_second :: 48000
-	num_channels :: 2
-	bytes_per_sample :: size_of(i16)*2 
-	audio_buffer_size: u32 = samples_per_second * num_channels * bytes_per_sample
-	init_dSound(window, audio_buffer_size, samples_per_second)
 	// sound test
-	running_sample_index: u32
-	tone_hz :u32: 440
-	square_wave_period :u32: samples_per_second / tone_hz
-	square_wave_period_half :: square_wave_period / 2
-	tone_volumne :: 1000
-	sound_is_playing := false
+	sound_output : SoundOutput
+	sound_output.samples_per_second = 48000
+	sound_output.num_channels = 2
+	sound_output.bytes_per_sample = size_of(i16) * sound_output.num_channels
+	sound_output.audio_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample
+	sound_output.latency_sample_count = sound_output.samples_per_second / 15
 
+	sound_output.tone_hz = 440
+	sound_output.wave_period = sound_output.samples_per_second / sound_output.tone_hz
+	sound_output.tone_volumne = 1000
 
+	init_dSound(window, sound_output.audio_buffer_size, sound_output.samples_per_second)
+	
+	fill_sound_buffer(&sound_output, 0, sound_output.latency_sample_count * sound_output.bytes_per_sample)
+	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
+	
 	RUNNING = true
 
 	for RUNNING {
@@ -101,8 +105,18 @@ main :: proc() {
 				right_stick_x := pad.sThumbRX
 				right_stick_y := pad.sThumbRY
 
-				if a do yOffset += 2
+
+
+				if back do RUNNING = false	
+				
+				yOffset += i32(f32(left_stick_y) / -30000)
+
+				sound_output.tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
+				fmt.println(sound_output.tone_hz)
+				sound_output.wave_period = sound_output.samples_per_second / sound_output.tone_hz
+				
 				if b do vibration.wLeftMotorSpeed = 0x7FFF
+
 			} else {
 				// The controller is unavailable
 			}
@@ -117,65 +131,82 @@ main :: proc() {
 		play_cursor, write_cursor : win.DWORD
 		
 		if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result){
-			byte_to_lock := (running_sample_index*bytes_per_sample) % audio_buffer_size
+			byte_to_lock := (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.audio_buffer_size
+			
+			target_cursor := (play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.audio_buffer_size
 			bytes_to_write: win.DWORD
-			if byte_to_lock == play_cursor {
-				bytes_to_write = audio_buffer_size
-			} else if byte_to_lock > play_cursor {
-				bytes_to_write = play_cursor - byte_to_lock + audio_buffer_size
+			
+			// TODO Change this to using a lower latency offset from the playcursor
+			// when we actually start having sound effects.
+			if byte_to_lock > target_cursor {
+				bytes_to_write = target_cursor - byte_to_lock + sound_output.audio_buffer_size
 			} else{
-				bytes_to_write = play_cursor - byte_to_lock
+				bytes_to_write = target_cursor - byte_to_lock
 			}
 
-			region1, region2 : rawptr
-			region1_size, region2_size: win.DWORD
-
-			if result := the_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-				// TODO assert that region1/2_size is valid
-				// TODO  Collapse these two loops
-				// TODO use [2]i16 for [LEFT RIGHT]
-				sample_out := cast([^]i16) region1
-				region1_sample_count := region1_size / bytes_per_sample
-				sample_out_index := 0
-				for sample_index in 0..<region1_sample_count {
-					sample_value: i16 = (cast(b32) ((running_sample_index / square_wave_period_half) % 2)) ? tone_volumne : -tone_volumne
-					
-					sample_out[sample_out_index + 0] = sample_value
-					sample_out[sample_out_index + 1] = sample_value
-					sample_out_index += 2
-					
-					running_sample_index += 1
-				}
-
-				sample_out = cast([^]i16) region2
-				region2_sample_count := region2_size / bytes_per_sample
-				sample_out_index = 0
-				for sample_index in 0..<region2_sample_count {
-					sample_value: i16 = (cast(b32) ((running_sample_index / square_wave_period_half) % 2)) ? tone_volumne : -tone_volumne
-
-					sample_out[sample_out_index + 0] = sample_value
-					sample_out[sample_out_index + 1] = sample_value
-					sample_out_index += 2
-					
-					running_sample_index += 1
-				}
-				
-				the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
-
-				if !sound_is_playing {
-					the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
-					sound_is_playing = true
-				}
-
-			} else {
-				// TODO Logging
-			}
+			fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write)
 		} else {
 			// TODO Logging
 		}
 
 		window_width, window_height := get_window_dimension(window)
 		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
+	}
+}
+
+SoundOutput :: struct {
+	samples_per_second  : u32,
+	num_channels        : u32,
+	bytes_per_sample    : u32,
+	audio_buffer_size   : u32,
+	running_sample_index: u32,
+	latency_sample_count: u32,
+
+	tone_hz             : u32,
+	wave_period         : u32,
+	tone_volumne        : i16,
+	t_sine: f32,
+}
+
+fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32) {
+	region1, region2 : rawptr
+	region1_size, region2_size: win.DWORD
+
+	if result := the_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+		// TODO assert that region1/2_size is valid
+		// TODO Collapse these two loops
+		// TODO use [2]i16 for [LEFT RIGHT]
+		sample_out := cast([^]i16) region1
+		region1_sample_count := region1_size / sound_output.bytes_per_sample
+		sample_out_index := 0
+		for sample_index in 0..<region1_sample_count {
+			sample_value := cast(i16) (math.sin(sound_output.t_sine) * f32(sound_output.tone_volumne))
+			
+			sample_out[sample_out_index + 0] = sample_value
+			sample_out[sample_out_index + 1] = sample_value
+			sample_out_index += 2
+
+			sound_output.t_sine += math.TAU / f32(sound_output.wave_period)
+			sound_output.running_sample_index += 1
+		}
+
+		sample_out = cast([^]i16) region2
+		region2_sample_count := region2_size / sound_output.bytes_per_sample
+		sample_out_index = 0
+		for sample_index in 0..<region2_sample_count {
+			sample_value := cast(i16) (math.sin(sound_output.t_sine) * f32(sound_output.tone_volumne))
+			
+			sample_out[sample_out_index + 0] = sample_value
+			sample_out[sample_out_index + 1] = sample_value
+			sample_out_index += 2
+
+			sound_output.t_sine += math.TAU / f32(sound_output.wave_period)
+			sound_output.running_sample_index += 1
+		}
+		
+		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+	} else {
+		// TODO Logging
 	}
 }
 
