@@ -5,7 +5,11 @@ import win "core:sys/windows"
 init_xInput :: proc() {
 	assert(XInputGetState == XInputGetStateStub, "xInput has already been initialized")
 
-	xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("xinput1_4.dll"))
+	xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
+	if xInput_lib == nil {
+		// TODO Diagnostics
+		xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("XInput9_1_0.dll"))
+	}
 	if xInput_lib == nil {
 		// TODO Diagnostics
 		xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))

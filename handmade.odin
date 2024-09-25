@@ -1,8 +1,12 @@
 package main
 
+import "base:intrinsics"
+
 import "core:fmt"
-import "core:math" // TODO implement sin ourself
+import "core:math" // TODO implement sine ourself
+
 import win "core:sys/windows"
+
 
 // TODO this is a global for now
 RUNNING : b32
@@ -25,11 +29,15 @@ main :: proc() {
 		// TODO Logging
 	}
 
-	// TODO why is the name not seen as wstring / 2nd byte of short is 0 so it only shows an "H"
+
+	// NOTE: lpWindowName is either a cstring or a wstring depending on if UNICODE is defined
+	// Odin expects that to be the case, but here it seems to be undefined so yeah.
+	_window_title := "Handmade"
+	window_title := cast([^]u16) raw_data(_window_title[:])
 	window := win.CreateWindowExW(
 		0,
 		window_class.lpszClassName,
-		win.utf8_to_wstring("Handmade"),
+		window_title,
 		win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
 		win.CW_USEDEFAULT,
 		win.CW_USEDEFAULT,
@@ -67,6 +75,13 @@ main :: proc() {
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
 	
 	RUNNING = true
+
+	last_counter : win.LARGE_INTEGER
+	perf_counter_frequency : win.LARGE_INTEGER
+	win.QueryPerformanceCounter(&last_counter)
+	win.QueryPerformanceFrequency(&perf_counter_frequency)
+
+	last_cycle_count := intrinsics.read_cycle_counter()
 
 	for RUNNING {
 		message : win.MSG
@@ -106,11 +121,13 @@ main :: proc() {
 				right_stick_y := pad.sThumbRY
 
 
+				// TODO deal with the dead zones properly
+				xOffset += cast(i32) (left_stick_x / 4096)
+				yOffset -= cast(i32) (left_stick_y / 4096)
+
 
 				if back do RUNNING = false	
 				
-				yOffset += i32(f32(left_stick_y) / -30000)
-
 				sound_output.tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
 				fmt.println(sound_output.tone_hz)
 				sound_output.wave_period = sound_output.samples_per_second / sound_output.tone_hz
@@ -122,7 +139,6 @@ main :: proc() {
 			}
 		}
 
-		xOffset += 1
 		XInputSetState(0, &vibration)
 		
 		render_weird_gradient(back_buffer, xOffset, yOffset)
@@ -151,6 +167,22 @@ main :: proc() {
 
 		window_width, window_height := get_window_dimension(window)
 		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
+
+		end_counter : win.LARGE_INTEGER
+		win.QueryPerformanceCounter(&end_counter)
+
+		end_cycle_counter := intrinsics.read_cycle_counter()
+
+		cycles_elapsed := end_cycle_counter - last_cycle_count
+		mega_cycles_elapsed := f32(cycles_elapsed) / (1000 * 1000)
+
+		counter_elapsed   := end_counter - last_counter
+		ms_per_frame      := f32(counter_elapsed) / f32(perf_counter_frequency) * 1000
+		frames_per_second := f32(perf_counter_frequency) / f32(counter_elapsed)
+		fmt.printfln("Milliseconds/frame: %2.02f - frames/second: %4.02f - Megacycles/frame: %3.02f", ms_per_frame, frames_per_second, mega_cycles_elapsed) 
+ 		
+		last_counter = end_counter
+		last_cycle_count = end_cycle_counter
 	}
 }
 
