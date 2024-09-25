@@ -7,6 +7,26 @@ import "core:math" // TODO implement sine ourself
 
 import win "core:sys/windows"
 
+/*
+	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
+
+	- Saved game locations
+	- Getting a handle to our own executable file
+	- Asset loading path
+	- Threading (launch a thread)
+	- Raw Input (support for multiple keyboards
+	- Sleep/timeBeginPeriod
+	- ClipCursor() (for multimonitor support)
+	- Fullscreen support
+	- WM_SETCURSOR (control cursor visibility)
+	- QueryCancelAutoplay
+	- WM_ACTIVATEAPP (for when we are not the active application)
+	- Blit speed improvements (BitBlt)
+	- Hardware acceleration (OpenGL or Direct3D or BOTH ?? )
+	- GetKeyboardLayout (for French keyboards, international WASD support)
+
+	Just a partial list of stuff !!
+*/
 
 // TODO this is a global for now
 RUNNING : b32
@@ -70,10 +90,10 @@ main :: proc() {
 	sound_output.tone_volumne = 1000
 
 	init_dSound(window, sound_output.audio_buffer_size, sound_output.samples_per_second)
-	
+
 	fill_sound_buffer(&sound_output, 0, sound_output.latency_sample_count * sound_output.bytes_per_sample)
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
-	
+
 	RUNNING = true
 
 	last_counter : win.LARGE_INTEGER
@@ -126,12 +146,12 @@ main :: proc() {
 				yOffset -= cast(i32) (left_stick_y / 4096)
 
 
-				if back do RUNNING = false	
-				
+				if back do RUNNING = false
+
 				sound_output.tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
 				fmt.println(sound_output.tone_hz)
 				sound_output.wave_period = sound_output.samples_per_second / sound_output.tone_hz
-				
+
 				if b do vibration.wLeftMotorSpeed = 0x7FFF
 
 			} else {
@@ -140,20 +160,23 @@ main :: proc() {
 		}
 
 		XInputSetState(0, &vibration)
-		
-		render_weird_gradient(back_buffer, xOffset, yOffset)
+
+		buffer := GameOffscreenBuffer{
+			memory = back_buffer.memory,
+			width  = back_buffer.width,
+			height = back_buffer.height,
+		}
+		game_update_and_render(buffer, xOffset, yOffset)
 
 		// Direct Sound output test
 		play_cursor, write_cursor : win.DWORD
-		
+
 		if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result){
 			byte_to_lock := (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.audio_buffer_size
-			
+
 			target_cursor := (play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.audio_buffer_size
 			bytes_to_write: win.DWORD
-			
-			// TODO Change this to using a lower latency offset from the playcursor
-			// when we actually start having sound effects.
+
 			if byte_to_lock > target_cursor {
 				bytes_to_write = target_cursor - byte_to_lock + sound_output.audio_buffer_size
 			} else{
@@ -179,8 +202,8 @@ main :: proc() {
 		counter_elapsed   := end_counter - last_counter
 		ms_per_frame      := f32(counter_elapsed) / f32(perf_counter_frequency) * 1000
 		frames_per_second := f32(perf_counter_frequency) / f32(counter_elapsed)
-		fmt.printfln("Milliseconds/frame: %2.02f - frames/second: %4.02f - Megacycles/frame: %3.02f", ms_per_frame, frames_per_second, mega_cycles_elapsed) 
- 		
+		// fmt.printfln("Milliseconds/frame: %2.02f - frames/second: %4.02f - Megacycles/frame: %3.02f", ms_per_frame, frames_per_second, mega_cycles_elapsed)
+
 		last_counter = end_counter
 		last_cycle_count = end_cycle_counter
 	}
@@ -211,9 +234,9 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 		sample_out := cast([^]i16) region1
 		region1_sample_count := region1_size / sound_output.bytes_per_sample
 		sample_out_index := 0
-		for sample_index in 0..<region1_sample_count {
+		for _ in 0..<region1_sample_count {
 			sample_value := cast(i16) (math.sin(sound_output.t_sine) * f32(sound_output.tone_volumne))
-			
+
 			sample_out[sample_out_index + 0] = sample_value
 			sample_out[sample_out_index + 1] = sample_value
 			sample_out_index += 2
@@ -225,9 +248,9 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 		sample_out = cast([^]i16) region2
 		region2_sample_count := region2_size / sound_output.bytes_per_sample
 		sample_out_index = 0
-		for sample_index in 0..<region2_sample_count {
+		for _ in 0..<region2_sample_count {
 			sample_value := cast(i16) (math.sin(sound_output.t_sine) * f32(sound_output.tone_volumne))
-			
+
 			sample_out[sample_out_index + 0] = sample_value
 			sample_out[sample_out_index + 1] = sample_value
 			sample_out_index += 2
@@ -235,7 +258,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 			sound_output.t_sine += math.TAU / f32(sound_output.wave_period)
 			sound_output.running_sample_index += 1
 		}
-		
+
 		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
 		// TODO Logging
@@ -248,7 +271,6 @@ OffscreenBuffer :: struct {
 	width  : i32,
 	height : i32,
 }
-
 back_buffer : OffscreenBuffer
 
 get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
@@ -259,25 +281,6 @@ get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32)
 	return width, height
 }
 
-render_weird_gradient :: proc "system" (buffer: OffscreenBuffer , xOffset, yOffset: i32) {
-	WindowsColor :: struct {
-		b, g, r, pad: u8
-	}
-
-	bitmap_memory_size := buffer.width * buffer.height * size_of(WindowsColor)
-	bytes := cast([^]u8) buffer.memory
-	row_index: i32 = 0
-
-	for y in 0..<buffer.height {
-		for x in 0..<buffer.width {
-			pixel := cast(^WindowsColor) &bytes[row_index]
-			pixel.b = u8(x + xOffset)
-			pixel.g = u8(y + yOffset)
-			row_index += size_of(WindowsColor)
-		}
-	}
-}
-
 resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i32) {
 	// TODO Bulletproof this.
 	// Maybe don't free first, free after, then free first if that fails.
@@ -285,7 +288,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 		win.VirtualFree(buffer.memory, 0, win.MEM_RELEASE)
 	}
 
-	buffer.width = width
+	buffer.width  = width
 	buffer.height = height
 
 	/* When the biHeight field is negative, this is the clue to
@@ -311,7 +314,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 }
 
 display_buffer_in_window :: proc "system" (
-	buffer: OffscreenBuffer, device_context: win.HDC, 
+	buffer: OffscreenBuffer, device_context: win.HDC,
 	window_width, window_height: i32
 ){
 	buffer := buffer
@@ -364,7 +367,7 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 	case win.WM_PAINT:
 		paint: win.PAINTSTRUCT
 		device_context := win.BeginPaint(window, &paint)
-		
+
 		window_width, window_height := get_window_dimension(window)
 		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
 
