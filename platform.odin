@@ -82,17 +82,18 @@ main :: proc() {
 	sound_output.samples_per_second = 48000
 	sound_output.num_channels = 2
 	sound_output.bytes_per_sample = size_of(i16) * sound_output.num_channels
-	sound_output.audio_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample
+	sound_output.sound_buffer_size_in_bytes = sound_output.samples_per_second * sound_output.bytes_per_sample
 	sound_output.latency_sample_count = sound_output.samples_per_second / 15
 
-	sound_output.tone_hz = 440
-	sound_output.wave_period = sound_output.samples_per_second / sound_output.tone_hz
-	sound_output.tone_volumne = 1000
+	clear_sound_buffer(&sound_output)
 
-	init_dSound(window, sound_output.audio_buffer_size, sound_output.samples_per_second)
-
-	fill_sound_buffer(&sound_output, 0, sound_output.latency_sample_count * sound_output.bytes_per_sample)
+	init_dSound(window, sound_output.sound_buffer_size_in_bytes, sound_output.samples_per_second)
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
+	
+	// TODO make this like sixty seconds?
+	// TODO pool with bitmap alloc
+	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.sound_buffer_size_in_bytes, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+
 
 	RUNNING = true
 
@@ -120,20 +121,20 @@ main :: proc() {
 				// The controller is plugged in
 				// TODO see if dwPacketNumber increments too rapidly
 				pad := &controller_state.Gamepad
-				dpad_up        := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)
-				dpad_down      := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)
-				dpad_left      := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)
-				dpad_right     := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)
-				start          := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_START)
-				back           := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_BACK)
-				left_thumb     := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
-				right_thumb    := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
-				left_shoulder  := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)
-				right_shoulder := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-				a              := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_A)
-				b              := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_B)
-				x              := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_X)
-				y              := cast(b32) (pad.wButtons & XINPUT_GAMEPAD_Y)
+				dpad_up        := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)
+				dpad_down      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)
+				dpad_left      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)
+				dpad_right     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)
+				start          := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_START)
+				back           := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK)
+				left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
+				right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
+				left_shoulder  := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)
+				right_shoulder := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+				a              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_A)
+				b              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_B)
+				x              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_X)
+				y              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_Y)
 
 				left_stick_x  := pad.sThumbLX
 				left_stick_y  := pad.sThumbLY
@@ -148,48 +149,64 @@ main :: proc() {
 
 				if back do RUNNING = false
 
-				sound_output.tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
-				fmt.println(sound_output.tone_hz)
-				sound_output.wave_period = sound_output.samples_per_second / sound_output.tone_hz
-
 				if b do vibration.wLeftMotorSpeed = 0x7FFF
 
 			} else {
 				// The controller is unavailable
 			}
 		}
-
+		
 		XInputSetState(0, &vibration)
 
-		buffer := GameOffscreenBuffer{
+
+
+		// TODO: Tighten up sound logic so that we know where we should be
+		// writing to and can anticipate the time spent in the game update.
+		sound_is_valid: b32
+
+		byte_to_lock  : u32
+		bytes_to_write: win.DWORD
+		{
+			play_cursor, write_cursor : win.DWORD
+			if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result){
+				byte_to_lock = (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.sound_buffer_size_in_bytes
+
+				target_cursor := (play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.sound_buffer_size_in_bytes
+
+				if byte_to_lock > target_cursor {
+					bytes_to_write = target_cursor - byte_to_lock + sound_output.sound_buffer_size_in_bytes
+				} else{
+					bytes_to_write = target_cursor - byte_to_lock
+				}
+				
+				sound_is_valid = true
+			} else {
+				// TODO Logging
+			}
+		}
+
+		sound_buffer := GameSoundBuffer{
+			samples_per_second = sound_output.samples_per_second,
+			samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)/2],
+		}
+
+		offscreen_buffer := GameOffscreenBuffer{
 			memory = back_buffer.memory,
 			width  = back_buffer.width,
 			height = back_buffer.height,
 		}
-		game_update_and_render(buffer, xOffset, yOffset)
+		game_update_and_render(offscreen_buffer, sound_buffer, xOffset, yOffset)
 
 		// Direct Sound output test
-		play_cursor, write_cursor : win.DWORD
-
-		if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result){
-			byte_to_lock := (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.audio_buffer_size
-
-			target_cursor := (play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.audio_buffer_size
-			bytes_to_write: win.DWORD
-
-			if byte_to_lock > target_cursor {
-				bytes_to_write = target_cursor - byte_to_lock + sound_output.audio_buffer_size
-			} else{
-				bytes_to_write = target_cursor - byte_to_lock
-			}
-
-			fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write)
-		} else {
-			// TODO Logging
+		if sound_is_valid {
+			fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
 		}
 
 		window_width, window_height := get_window_dimension(window)
 		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
+
+
+
 
 		end_counter : win.LARGE_INTEGER
 		win.QueryPerformanceCounter(&end_counter)
@@ -213,17 +230,12 @@ SoundOutput :: struct {
 	samples_per_second  : u32,
 	num_channels        : u32,
 	bytes_per_sample    : u32,
-	audio_buffer_size   : u32,
+	sound_buffer_size_in_bytes   : u32,
 	running_sample_index: u32,
 	latency_sample_count: u32,
-
-	tone_hz             : u32,
-	wave_period         : u32,
-	tone_volumne        : i16,
-	t_sine: f32,
 }
 
-fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32) {
+fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
 	region1, region2 : rawptr
 	region1_size, region2_size: win.DWORD
 
@@ -231,33 +243,64 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 		// TODO assert that region1/2_size is valid
 		// TODO Collapse these two loops
 		// TODO use [2]i16 for [LEFT RIGHT]
-		sample_out := cast([^]i16) region1
+
+		dest_samples := cast([^]i16) region1
 		region1_sample_count := region1_size / sound_output.bytes_per_sample
-		sample_out_index := 0
+		dest_sample_index := 0
+		source_sample_index := 0
+
 		for _ in 0..<region1_sample_count {
-			sample_value := cast(i16) (math.sin(sound_output.t_sine) * f32(sound_output.tone_volumne))
+			if source_sample_index >= len(source.samples) do break
+			if source_sample_index+1 >= len(source.samples) do break
+			dest_samples[dest_sample_index + 0] = source.samples[source_sample_index].x
+			dest_samples[dest_sample_index + 1] = source.samples[source_sample_index].y
+			dest_sample_index += 2
+			source_sample_index += 1
 
-			sample_out[sample_out_index + 0] = sample_value
-			sample_out[sample_out_index + 1] = sample_value
-			sample_out_index += 2
-
-			sound_output.t_sine += math.TAU / f32(sound_output.wave_period)
 			sound_output.running_sample_index += 1
 		}
 
-		sample_out = cast([^]i16) region2
+		dest_samples = cast([^]i16) region2
 		region2_sample_count := region2_size / sound_output.bytes_per_sample
-		sample_out_index = 0
+		dest_sample_index = 0
+
 		for _ in 0..<region2_sample_count {
-			sample_value := cast(i16) (math.sin(sound_output.t_sine) * f32(sound_output.tone_volumne))
+			if source_sample_index >= len(source.samples) do break
+			if source_sample_index+1 >= len(source.samples) do break
+			dest_samples[dest_sample_index + 0] = source.samples[source_sample_index].x
+			dest_samples[dest_sample_index + 1] = source.samples[source_sample_index].y
+			dest_sample_index += 2
+			source_sample_index += 1
 
-			sample_out[sample_out_index + 0] = sample_value
-			sample_out[sample_out_index + 1] = sample_value
-			sample_out_index += 2
-
-			sound_output.t_sine += math.TAU / f32(sound_output.wave_period)
 			sound_output.running_sample_index += 1
 		}
+
+		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+	} else {
+		// TODO Logging
+	}
+}
+
+clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
+	region1, region2 : rawptr
+	region1_size, region2_size: win.DWORD
+
+	if result := the_sound_buffer->Lock(0, sound_output.sound_buffer_size_in_bytes , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+		// TODO assert that region1/2_size is valid
+		// TODO Collapse these two loops
+		// TODO use [2]i16 for [LEFT RIGHT]
+
+		dest_samples := cast([^]u8) region1
+		for index in 0..<region1_size {
+			dest_samples[index] = 0
+		}
+		sound_output.running_sample_index += region1_size
+
+		dest_samples = cast([^]u8) region2
+		for index in 0..<region2_size {
+			dest_samples[index] = 0
+		}
+		sound_output.running_sample_index += region2_size
 
 		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
@@ -315,7 +358,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 
 display_buffer_in_window :: proc "system" (
 	buffer: OffscreenBuffer, device_context: win.HDC,
-	window_width, window_height: i32
+	window_width, window_height: i32,
 ){
 	buffer := buffer
 	// TODO aspect ratio correction
