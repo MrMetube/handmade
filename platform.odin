@@ -30,7 +30,25 @@ import win "core:sys/windows"
 
 // TODO this is a global for now
 RUNNING : b32
+
+the_back_buffer : OffscreenBuffer
 the_sound_buffer: ^IDirectSoundBuffer
+
+SoundOutput :: struct {
+	samples_per_second  : u32,
+	num_channels        : u32,
+	bytes_per_sample    : u32,
+	sound_buffer_size_in_bytes   : u32,
+	running_sample_index: u32,
+	latency_sample_count: u32,
+}
+
+OffscreenBuffer :: struct {
+	info   : win.BITMAPINFO,
+	memory : rawptr,
+	width  : i32,
+	height : i32,
+}
 
 main :: proc() {
 	init_xInput()
@@ -43,7 +61,7 @@ main :: proc() {
 		lpfnWndProc = main_window_callback,
 	}
 
-	resize_DIB_section(&back_buffer, 1280, 720)
+	resize_DIB_section(&the_back_buffer, 1280, 720)
 
 	if win.RegisterClassW(&window_class) != 0 {
 		// TODO Logging
@@ -74,10 +92,8 @@ main :: proc() {
 
 	device_context := win.GetDC(window)
 
-	// graphics test
-	xOffset, yOffset: i32
 
-	// sound test
+
 	sound_output : SoundOutput
 	sound_output.samples_per_second = 48000
 	sound_output.num_channels = 2
@@ -85,14 +101,19 @@ main :: proc() {
 	sound_output.sound_buffer_size_in_bytes = sound_output.samples_per_second * sound_output.bytes_per_sample
 	sound_output.latency_sample_count = sound_output.samples_per_second / 15
 
+	init_dSound(window, sound_output.sound_buffer_size_in_bytes, sound_output.samples_per_second)
+
 	clear_sound_buffer(&sound_output)
 
-	init_dSound(window, sound_output.sound_buffer_size_in_bytes, sound_output.samples_per_second)
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
 	
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
 	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.sound_buffer_size_in_bytes, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+
+	input : [2]GameInput
+	old_input, new_input := input[0], input[1]
+
 
 
 	RUNNING = true
@@ -112,53 +133,78 @@ main :: proc() {
 			win.DispatchMessageW(&message)
 		}
 
+		// ---------------------- Input
+
+		max_controller_count := XUSER_MAX_COUNT
+		if max_controller_count > len(GameInput{}.controllers) {
+			max_controller_count = len(GameInput{}.controllers)
+		}
 		// TODO should we poll this more frequently
-		vibration : XINPUT_VIBRATION
 		// TODO only check connected controllers, catch messages on connect / disconnect
 		for controller_index in u32(0)..< XUSER_MAX_COUNT {
 			controller_state : XINPUT_STATE
+
+			old_controller := old_input.controllers[controller_index]
+			new_controller := &new_input.controllers[controller_index]
+
 			if XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
 				// The controller is plugged in
 				// TODO see if dwPacketNumber increments too rapidly
-				pad := &controller_state.Gamepad
+				pad := controller_state.Gamepad
+				
+				// TODO all buttons
 				dpad_up        := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)
 				dpad_down      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)
 				dpad_left      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)
 				dpad_right     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)
+				
 				start          := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_START)
 				back           := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK)
+
 				left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
 				right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
-				left_shoulder  := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER)
-				right_shoulder := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-				a              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_A)
-				b              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_B)
-				x              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_X)
-				y              := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_Y)
 
-				left_stick_x  := pad.sThumbLX
-				left_stick_y  := pad.sThumbLY
-				right_stick_x := pad.sThumbRX
-				right_stick_y := pad.sThumbRY
+				process_Xinput_digital_button :: proc(xInput_button_state: win.WORD, old_state: GameInputButton, new_state: ^GameInputButton, button_bit: win.WORD) {
+					new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
+					new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
+				}
 
+				process_Xinput_digital_button(pad.wButtons, old_controller.left_shoulder,  &new_controller.left_shoulder,  XINPUT_GAMEPAD_LEFT_SHOULDER)
+				process_Xinput_digital_button(pad.wButtons, old_controller.right_shoulder, &new_controller.right_shoulder, XINPUT_GAMEPAD_RIGHT_SHOULDER)
+				process_Xinput_digital_button(pad.wButtons, old_controller.down,  &new_controller.down,  XINPUT_GAMEPAD_A)
+				process_Xinput_digital_button(pad.wButtons, old_controller.right, &new_controller.right, XINPUT_GAMEPAD_B)
+				process_Xinput_digital_button(pad.wButtons, old_controller.left,  &new_controller.left,  XINPUT_GAMEPAD_X)
+				process_Xinput_digital_button(pad.wButtons, old_controller.up,    &new_controller.up,    XINPUT_GAMEPAD_Y)
 
-				// TODO deal with the dead zones properly
-				xOffset += cast(i32) (left_stick_x / 4096)
-				yOffset -= cast(i32) (left_stick_y / 4096)
+				x, y : f32
+				if pad.sThumbLX < 0 {
+					x = (cast(f32)pad.sThumbLX) / 32768
+				} else {
+					x = (cast(f32)pad.sThumbLX) / 32767
+				}
+				if pad.sThumbLY < 0 {
+					y = (cast(f32)pad.sThumbLY) / 32768
+				} else {
+					y = (cast(f32)pad.sThumbLY) / 32767
+				}
 
+				new_controller.is_analog = true
+				new_controller.start = old_controller.end
+				new_controller.min = {x,y}
+				new_controller.max = {x,y}
+				new_controller.end = {x,y}
+
+				// TODO right stick
 
 				if back do RUNNING = false
 
-				if b do vibration.wLeftMotorSpeed = 0x7FFF
 
 			} else {
 				// The controller is unavailable
 			}
 		}
-		
-		XInputSetState(0, &vibration)
 
-
+		// ---------------------- Update, Sound and Render
 
 		// TODO: Tighten up sound logic so that we know where we should be
 		// writing to and can anticipate the time spent in the game update.
@@ -191,11 +237,14 @@ main :: proc() {
 		}
 
 		offscreen_buffer := GameOffscreenBuffer{
-			memory = back_buffer.memory,
-			width  = back_buffer.width,
-			height = back_buffer.height,
+			memory = the_back_buffer.memory,
+			width  = the_back_buffer.width,
+			height = the_back_buffer.height,
 		}
-		game_update_and_render(offscreen_buffer, sound_buffer, xOffset, yOffset)
+
+		game_update_and_render(offscreen_buffer, sound_buffer, new_input)
+
+		// ---------------------- Output
 
 		// Direct Sound output test
 		if sound_is_valid {
@@ -203,10 +252,10 @@ main :: proc() {
 		}
 
 		window_width, window_height := get_window_dimension(window)
-		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
+		display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
 
 
-
+		// ---------------------- Performance Counters
 
 		end_counter : win.LARGE_INTEGER
 		win.QueryPerformanceCounter(&end_counter)
@@ -223,16 +272,11 @@ main :: proc() {
 
 		last_counter = end_counter
 		last_cycle_count = end_cycle_counter
-	}
-}
 
-SoundOutput :: struct {
-	samples_per_second  : u32,
-	num_channels        : u32,
-	bytes_per_sample    : u32,
-	sound_buffer_size_in_bytes   : u32,
-	running_sample_index: u32,
-	latency_sample_count: u32,
+		// ----------------------
+		
+		swap(&old_input, &new_input)
+	}
 }
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
@@ -307,14 +351,6 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 		// TODO Logging
 	}
 }
-
-OffscreenBuffer :: struct {
-	info   : win.BITMAPINFO,
-	memory : rawptr,
-	width  : i32,
-	height : i32,
-}
-back_buffer : OffscreenBuffer
 
 get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
 	client_rect : win.RECT
@@ -412,7 +448,7 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 		device_context := win.BeginPaint(window, &paint)
 
 		window_width, window_height := get_window_dimension(window)
-		display_buffer_in_window(back_buffer, device_context, window_width, window_height)
+		display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
 
 		win.EndPaint(window, &paint)
 	case:
