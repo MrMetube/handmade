@@ -31,7 +31,6 @@ GameInputController :: struct {
 	min:   [2]f32,
 	max:   [2]f32,
 	
-	// TODO maybe [enum]array // TODO xbox/ps raw union ?
 	using _ : struct #raw_union {
 		buttons: [GameInputButtons]GameInputButton,
 		using _ : struct {
@@ -48,39 +47,59 @@ GameInputController :: struct {
 
 // TODO allow outputing vibration
 GameInput :: struct {
+	// TODO insert clock values here
 	controllers: [4]GameInputController
 }
 
-// timing, controller/keyboard input
-game_update_and_render :: proc(offscreen_buffer: GameOffscreenBuffer, sound_buffer: GameSoundBuffer, input: GameInput){
-	@(static)
-	greenOffset, blueOffset: i32
+GameMemory :: struct {
+	is_initialized: b32,
+	// Note: REQUIRED to be cleared to zero at startup
+	permanent_storage: []u8, 
+	transient_storage: []u8,
+}
+
+GameState :: struct {
+	green_offset, blue_offset: i32,
+	tone_hz:u32,
+}
+
+// timing, keyboard input
+game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, sound_buffer: GameSoundBuffer, input: GameInput){
+	assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
+	
+	game_state := cast(^GameState) raw_data(memory.permanent_storage)
+
+	if !memory.is_initialized {
+		game_state.tone_hz = 420
+
+		// TODO this may be more appropriate to do in the platform layer
+		memory.is_initialized = true
+	}
+
 	// TODO deal with the dead zones properly
 	// xOffset += cast(i32) (left_stick_x / 4096)
 	// yOffset -= cast(i32) (left_stick_y / 4096)
-	@(static)
-	tone_hz:u32 = 420
 	// tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
 
 	input0 := input.controllers[0]
 
 	if input0.is_analog {
 		// TODO analog movement tuning
-		greenOffset += cast(i32) (4 * input0.end.x)
-		tone_hz = 420 + cast(u32)(210 * input0.end.y)
+		game_state.green_offset += cast(i32) (4 * input0.end.x)
+		game_state.tone_hz = 420 + cast(u32)(210 * input0.end.y)
 	} else {
 		// TODO digital movement tuning
 
 	}
 
 	if input0.down.ended_down {
-		blueOffset += 1
+		game_state.blue_offset += 1
 	}
 
 	
 	// TODO: Allow sample offsets here for more robust platform options
-	game_output_sound(sound_buffer, tone_hz)
-	render_weird_gradient(offscreen_buffer, greenOffset, blueOffset)
+	game_output_sound(sound_buffer, game_state.tone_hz)
+	render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
 }
 
 game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){

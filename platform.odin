@@ -1,6 +1,7 @@
 package main
 
 import "base:intrinsics"
+import "base:runtime"
 
 import "core:fmt"
 import "core:math" // TODO implement sine ourself
@@ -64,7 +65,7 @@ main :: proc() {
 	resize_DIB_section(&the_back_buffer, 1280, 720)
 
 	if win.RegisterClassW(&window_class) != 0 {
-		// TODO Logging
+		return // TODO Logging
 	}
 
 
@@ -87,8 +88,9 @@ main :: proc() {
 		nil,
 	)
 	if window == nil {
-		// TODO Logging
+		return // TODO Logging
 	}
+
 
 	device_context := win.GetDC(window)
 
@@ -115,6 +117,27 @@ main :: proc() {
 	old_input, new_input := input[0], input[1]
 
 
+
+	free_all(context.temp_allocator)
+	context.allocator = {}
+	context.temp_allocator = {}
+
+	game_memory : GameMemory
+	{
+		base_address: rawptr = cast(rawptr) terabytes(1) when #defined(INTERNAL) else nil
+		
+		permanent_storage_size := megabytes(64)
+		transient_storage_size := gigabytes(4)
+		total_size := permanent_storage_size + transient_storage_size
+
+		storage_ptr := cast([^]u8) win.VirtualAlloc(base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+		game_memory.permanent_storage = storage_ptr[0:][:permanent_storage_size]
+		game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size] 
+	}
+
+	if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
+		return // TODO logging
+	}
 
 	RUNNING = true
 
@@ -227,7 +250,7 @@ main :: proc() {
 				
 				sound_is_valid = true
 			} else {
-				// TODO Logging
+				return // TODO Logging
 			}
 		}
 
@@ -242,7 +265,7 @@ main :: proc() {
 			height = the_back_buffer.height,
 		}
 
-		game_update_and_render(offscreen_buffer, sound_buffer, new_input)
+		game_update_and_render(&game_memory, offscreen_buffer, sound_buffer, new_input)
 
 		// ---------------------- Output
 
@@ -321,7 +344,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 
 		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
-		// TODO Logging
+		return // TODO Logging
 	}
 }
 
@@ -348,7 +371,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 
 		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
-		// TODO Logging
+		return // TODO Logging
 	}
 }
 
