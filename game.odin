@@ -72,6 +72,11 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	if !memory.is_initialized {
 		game_state.tone_hz = 420
 
+		file := DEBUG_read_entire_file(#file)
+		if file != nil {
+			DEBUG_write_entire_file("D:/projekte/handmade/data/testfile.test", file)
+			DEBUG_free_file_memory(file)
+		}
 		// TODO this may be more appropriate to do in the platform layer
 		memory.is_initialized = true
 	}
