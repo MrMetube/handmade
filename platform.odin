@@ -44,9 +44,13 @@ SoundOutput :: struct {
 	latency_sample_count: u32,
 }
 
+OffscreenBufferColor :: struct{
+	b, g, r, pad: u8
+}
+
 OffscreenBuffer :: struct {
 	info   : win.BITMAPINFO,
-	memory : rawptr,
+	memory : [^]OffscreenBufferColor,
 	width  : i32,
 	height : i32,
 }
@@ -64,7 +68,7 @@ main :: proc() {
 
 	resize_DIB_section(&the_back_buffer, 1280, 720)
 
-	if win.RegisterClassW(&window_class) != 0 {
+	if win.RegisterClassW(&window_class) == 0 {
 		return // TODO Logging
 	}
 
@@ -410,7 +414,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 
 	bytes_per_pixel :: 4
 	bitmap_memory_size := buffer.width * buffer.height * bytes_per_pixel
-	buffer.memory = win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+	buffer.memory = cast([^]OffscreenBufferColor) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
 
 	// TODO probably clear this to black
 }

@@ -8,7 +8,7 @@ GameSoundBuffer :: struct {
 }
 
 GameOffscreenBuffer :: struct {
-	memory : rawptr, // TODO should this just be [^]struct{bb, gg, rr, xx} ?
+	memory : [^]OffscreenBufferColor,
 	width  : i32,
 	height : i32,
 }
@@ -117,19 +117,15 @@ game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){
 }
 
 render_weird_gradient :: proc(buffer: GameOffscreenBuffer , greenOffset, blueOffset: i32) {
-	Color :: struct {
-		b, g, r, pad: u8
-	}
-
-	bytes := cast([^]u8) buffer.memory
+	bytes := buffer.memory
 	row_index: i32 = 0
 
 	for y in 0..<buffer.height {
 		for x in 0..<buffer.width {
-			pixel := cast(^Color) &bytes[row_index]
+			pixel := &bytes[row_index]
 			pixel.b = u8(y + blueOffset)
 			pixel.g = u8(x + greenOffset)
-			row_index += size_of(Color)
+			row_index += 1
 		}
 	}
 }
