@@ -1,6 +1,6 @@
 package main
 
-import "core:math"
+import "core:math"  // TODO implement sine ourself
 
 GameSoundBuffer :: struct {
 	samples            : [][2]i16,

@@ -4,13 +4,15 @@ import "base:intrinsics"
 import "base:runtime"
 
 import "core:fmt"
-import "core:math" // TODO implement sine ourself
 
 import win "core:sys/windows"
 
+
+INTERNAL :: #config(INTERNAL, false)
+
 /*
 	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
-
+ 
 	- Saved game locations
 	- Getting a handle to our own executable file
 	- Asset loading path
@@ -120,19 +122,17 @@ main :: proc() {
 	input : [2]GameInput
 	old_input, new_input := input[0], input[1]
 
-
-
 	context.allocator = {}
 
 	game_memory : GameMemory
 	{
-		base_address: rawptr = cast(rawptr) terabytes(1) when #defined(INTERNAL) else nil
-		
+		base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
+
 		permanent_storage_size := megabytes(64)
 		transient_storage_size := gigabytes(4)
 		total_size := permanent_storage_size + transient_storage_size
 
-		storage_ptr := cast([^]u8) win.VirtualAlloc(base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 		game_memory.permanent_storage = storage_ptr[0:][:permanent_storage_size]
 		game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size] 
 	}
@@ -142,7 +142,7 @@ main :: proc() {
 	}
 
 	RUNNING = true
-
+	
 	last_counter : win.LARGE_INTEGER
 	perf_counter_frequency : win.LARGE_INTEGER
 	win.QueryPerformanceCounter(&last_counter)
@@ -154,8 +154,48 @@ main :: proc() {
 		message : win.MSG
 		for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
 			if message.message == win.WM_QUIT do RUNNING = false
-			win.TranslateMessage(&message)
-			win.DispatchMessageW(&message)
+
+			keyboard_controller := &new_input.controllers[0]
+			keyboard_controller^ = {}
+
+			switch message.message {
+				case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
+					vk_code := message.wParam
+
+					was_down := cast(b32) (message.lParam & (1 << 30))
+					is_down: b32 = !(cast(b32) (message.lParam & (1 << 31)))
+
+					alt_down := cast(b32) (message.lParam & (1 << 29))
+
+					if was_down != is_down {
+						switch vk_code {
+						case win.VK_W:
+						case win.VK_A:
+						case win.VK_S:
+						case win.VK_D:
+						case win.VK_Q:
+							process_win_keyboard_message(&keyboard_controller.left_shoulder, is_down)
+						case win.VK_E:
+							process_win_keyboard_message(&keyboard_controller.right_shoulder, is_down)
+						case win.VK_UP:
+							process_win_keyboard_message(&keyboard_controller.up, is_down)
+						case win.VK_DOWN:
+							process_win_keyboard_message(&keyboard_controller.down, is_down)
+						case win.VK_LEFT:
+							process_win_keyboard_message(&keyboard_controller.left, is_down)
+						case win.VK_RIGHT:
+							process_win_keyboard_message(&keyboard_controller.right, is_down)
+						case win.VK_ESCAPE:
+							RUNNING = false
+						case win.VK_SPACE:
+						case win.VK_F4:
+							if alt_down do RUNNING = false
+						}
+					}
+				case:
+					win.TranslateMessage(&message)
+					win.DispatchMessageW(&message)
+				}
 		}
 
 		// ---------------------- Input
@@ -189,17 +229,12 @@ main :: proc() {
 				left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
 				right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
 
-				process_Xinput_digital_button :: proc(xInput_button_state: win.WORD, old_state: GameInputButton, new_state: ^GameInputButton, button_bit: win.WORD) {
-					new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
-					new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
-				}
-
-				process_Xinput_digital_button(pad.wButtons, old_controller.left_shoulder,  &new_controller.left_shoulder,  XINPUT_GAMEPAD_LEFT_SHOULDER)
-				process_Xinput_digital_button(pad.wButtons, old_controller.right_shoulder, &new_controller.right_shoulder, XINPUT_GAMEPAD_RIGHT_SHOULDER)
-				process_Xinput_digital_button(pad.wButtons, old_controller.down,  &new_controller.down,  XINPUT_GAMEPAD_A)
-				process_Xinput_digital_button(pad.wButtons, old_controller.right, &new_controller.right, XINPUT_GAMEPAD_B)
-				process_Xinput_digital_button(pad.wButtons, old_controller.left,  &new_controller.left,  XINPUT_GAMEPAD_X)
-				process_Xinput_digital_button(pad.wButtons, old_controller.up,    &new_controller.up,    XINPUT_GAMEPAD_Y)
+				process_Xinput_digital_button(&new_controller.left_shoulder, old_controller.left_shoulder,    pad.wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER)
+				process_Xinput_digital_button(&new_controller.right_shoulder, old_controller.right_shoulder,  pad.wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER)
+				process_Xinput_digital_button(&new_controller.up, old_controller.up,        pad.wButtons, XINPUT_GAMEPAD_Y)
+				process_Xinput_digital_button(&new_controller.down, old_controller.down,    pad.wButtons, XINPUT_GAMEPAD_A)
+				process_Xinput_digital_button(&new_controller.left, old_controller.left,    pad.wButtons, XINPUT_GAMEPAD_X)
+				process_Xinput_digital_button(&new_controller.right, old_controller.right,  pad.wButtons, XINPUT_GAMEPAD_B)
 
 				x, y : f32
 				if pad.sThumbLX < 0 {
@@ -302,6 +337,15 @@ main :: proc() {
 		
 		swap(&old_input, &new_input)
 	}
+}
+process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
+	new_state.ended_down = is_down
+	new_state.half_transition_count += 1
+}
+
+process_Xinput_digital_button :: proc(new_state: ^GameInputButton, old_state: GameInputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
+	new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
+	new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
 }
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
@@ -417,10 +461,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 	// TODO probably clear this to black
 }
 
-display_buffer_in_window :: proc "system" (
-	buffer: OffscreenBuffer, device_context: win.HDC,
-	window_width, window_height: i32,
-){
+display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
 	buffer := buffer
 	// TODO aspect ratio correction
 	win.StretchDIBits(
@@ -437,32 +478,8 @@ display_buffer_in_window :: proc "system" (
 main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
 	switch message {
 	case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
-		vk_code := w_param
-
-		was_down :b32= cast(b32) (l_param & (1 << 30))
-		is_down  :b32= ! (cast(b32) (l_param & (1 << 31)))
-
-		alt_down := cast(b32) (l_param & (1 << 29))
-
-		if was_down != is_down {
-			switch vk_code {
-			case win.VK_W:
-			case win.VK_A:
-			case win.VK_S:
-			case win.VK_D:
-			case win.VK_Q:
-			case win.VK_E:
-			case win.VK_UP:
-			case win.VK_DOWN:
-			case win.VK_LEFT:
-			case win.VK_RIGHT:
-			case win.VK_ESCAPE:
-				RUNNING = false
-			case win.VK_SPACE:
-			case win.VK_F4:
-				if alt_down do RUNNING = false
-			}
-		}
+		context = runtime.default_context()
+		assert(false,"keyboard-event came in through a non-dispatched event")
 	case win.WM_CLOSE: // TODO Handle this with a message to the user
 		RUNNING = false
 	case win.WM_DESTROY: // TODO handle this as an error - recreate window?
@@ -480,64 +497,4 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 		result = win.DefWindowProcA(window, message, w_param, l_param)
 	}
 	return result
-}
-
-when #config(INTERNAL, false) {
-/* IMPORTANT:
-	These are not for doing anything in the shipping game
-	they are blocking and the write doesnt protect against lost data!
- */
-
-DEBUG_read_entire_file :: proc(filename: string) -> (result: []u8) {
-	handle := win.CreateFileW(win.utf8_to_wstring(filename), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
-	defer win.CloseHandle(handle)
-
-	if handle == win.INVALID_HANDLE {
-		return nil // TODO Logging
-	}
-
-	file_size : win.LARGE_INTEGER
-	if !win.GetFileSizeEx(handle, &file_size) {
-		return nil // TODO Logging
-	}
-	
-	file_size_32 := safe_truncate_u64(cast(u64) file_size)
-	result_ptr := cast([^]u8) win.VirtualAlloc(nil, cast(uint) file_size_32, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-	if result_ptr == nil {
-		return nil // TODO Logging
-	}
-	result = result_ptr[:file_size_32]
-
-	bytes_read: win.DWORD
-	if !win.ReadFile(handle, result_ptr, file_size_32, &bytes_read, nil) || file_size_32 != bytes_read {
-		DEBUG_free_file_memory(result)
-		return nil // TODO Logging
-	}
-	
-	return result_ptr[:file_size_32]
-}
-
-DEBUG_write_entire_file :: proc(filename: string, memory: []u8) -> b32 {
-	handle := win.CreateFileW(win.utf8_to_wstring(filename), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
-	defer win.CloseHandle(handle)
-
-	if handle == win.INVALID_HANDLE {
-		return false // TODO Logging
-	}
-
-	file_size : win.LARGE_INTEGER
-	bytes_written: win.DWORD
-	if !win.WriteFile(handle, raw_data(memory), cast(u32) len(memory), &bytes_written, nil) {
-		return false // TODO Logging
-	}
-
-	return true
-}
-
-DEBUG_free_file_memory :: proc(memory: []u8) {
-	if memory != nil {
-		win.VirtualFree(raw_data(memory), 0, win.MEM_RELEASE)
-	}
-}
-
 }
