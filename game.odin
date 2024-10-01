@@ -2,8 +2,10 @@ package main
 
 import "core:math"  // TODO implement sine ourself
 
+Sample :: [2]i16
+
 GameSoundBuffer :: struct {
-	samples            : [][2]i16,
+	samples            : []Sample,
 	samples_per_second : u32,
 }
 
