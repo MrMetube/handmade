@@ -8,7 +8,7 @@ import "core:fmt"
 import win "core:sys/windows"
 
 
-INTERNAL :: #config(INTERNAL, false)
+INTERNAL :: #config(INTERNAL, true)
 
 /*
 	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
@@ -37,6 +37,10 @@ RUNNING : b32
 the_back_buffer : OffscreenBuffer
 the_sound_buffer: ^IDirectSoundBuffer
 
+global_perf_counter_frequency : win.LARGE_INTEGER
+
+
+
 SoundOutput :: struct {
 	samples_per_second         : u32,
 	num_channels               : u32,
@@ -58,6 +62,13 @@ OffscreenBuffer :: struct {
 }
 
 main :: proc() {
+	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
+
+	
+	// NOTE: Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
+	desired_scheduler_ms :: 1
+	sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
+
 	window : win.HWND
 	{ // ---------------------- Window Setup
 
@@ -102,14 +113,21 @@ main :: proc() {
 	device_context := win.GetDC(window)
 
 
+	// ---------------------- Video Setup
+	// TODO: how do we reliably query this on windows?
+	monitor_refresh_hz :: 144
+	game_update_hz: u32 = monitor_refresh_hz / 2
+	target_seconds_per_frame: f32 = 1 / cast(f32) game_update_hz
+
+	frames_of_audio_latency :: 1 when monitor_refresh_hz == 144 else 3
 
 	// ---------------------- Sound Setup
 	sound_output : SoundOutput
 	sound_output.samples_per_second = 48000
 	sound_output.num_channels = 2
-	sound_output.bytes_per_sample = size_of(i16) * sound_output.num_channels
+	sound_output.bytes_per_sample = size_of(Sample)
 	sound_output.sound_buffer_size_in_bytes = sound_output.samples_per_second * sound_output.bytes_per_sample
-	sound_output.latency_sample_count = sound_output.samples_per_second / 15
+	sound_output.latency_sample_count = frames_of_audio_latency * (sound_output.samples_per_second / game_update_hz)
 
 	init_dSound(window, sound_output.sound_buffer_size_in_bytes, sound_output.samples_per_second)
 
@@ -117,6 +135,13 @@ main :: proc() {
 
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
 	
+	sound_is_valid: b32
+	last_play_cursor: win.DWORD
+
+	when INTERNAL {
+		debug_last_time_markers: [72]DebugTimeMarker
+	}
+
 
 
 	// ---------------------- Input Setup
@@ -126,7 +151,7 @@ main :: proc() {
 	old_input, new_input := input[0], input[1]
 
 
-
+    
 	// ---------------------- Memory Setup
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
@@ -152,14 +177,11 @@ main :: proc() {
 	}
 
 	RUNNING = true
-	
-	last_counter : win.LARGE_INTEGER
-	perf_counter_frequency : win.LARGE_INTEGER
-	win.QueryPerformanceCounter(&last_counter)
-	win.QueryPerformanceFrequency(&perf_counter_frequency)
 
+	// ---------------------- Timer Setup
+	last_counter := get_wall_clock()
 	last_cycle_count := intrinsics.read_cycle_counter()
-
+	
 	for RUNNING {
 		{ // ---------------------- Input
 			old_keyboard_controller := &old_input.controllers[0]
@@ -220,44 +242,37 @@ main :: proc() {
 					process_Xinput_button(&new_controller.thumb_right, old_controller.thumb_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_THUMB)
 					
 					process_Xinput_stick :: proc(thumbstick: win.SHORT, deadzone: i16) -> f32 {
-						if thumbstick < deadzone {
-							return (cast(f32)thumbstick) / 32768
+						if thumbstick < -deadzone {
+							return cast(f32) (thumbstick + deadzone) / (32768 - cast(f32) deadzone)
 						} else if thumbstick > deadzone {
-							return (cast(f32)thumbstick) / 32767
+							return cast(f32) (thumbstick - deadzone) / (32767 - cast(f32) deadzone)
 						}
 						return 0
 					}
 
-					// TODO right stick, triggers
-					new_controller.is_analog = true
+					// TODO: right stick, triggers
+					// TODO: This is a square deadzone, check XInput to
+					// verify that the deadzone is "round" and show how to do
+					// round deadzone processing.
 					new_controller.stick_average = {
 						process_Xinput_stick(pad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
-						process_Xinput_stick(pad.sThumbLY, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE),
+						process_Xinput_stick(pad.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
 					}
+					if new_controller.stick_average != {0,0} do new_controller.is_analog = true
+
+					// TODO what if we dont want to override the stick
+					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) { new_controller.stick_average.x =  1; new_controller.is_analog = false }
+					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
+					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
+					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
 
 					THRESHOLD :: 0.5
-
-					dpad_up        := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)
-					dpad_down      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)
-					dpad_left      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)
-					dpad_right     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)
-					
-					// TODO what if we dont want to override the stick
-					if dpad_right do new_controller.stick_average.x =  1
-					if dpad_left  do new_controller.stick_average.x = -1
-					if dpad_up    do new_controller.stick_average.y =  1
-					if dpad_down  do new_controller.stick_average.y = -1
-
 					process_Xinput_button(&new_controller.stick_left , old_controller.stick_left , 1, new_controller.stick_average.x < -THRESHOLD ? 1 : 0)
 					process_Xinput_button(&new_controller.stick_right, old_controller.stick_right, 1, new_controller.stick_average.x >  THRESHOLD ? 1 : 0)
 					process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -THRESHOLD ? 1 : 0)
 					process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  THRESHOLD ? 1 : 0)
 		
-
-
-					back           := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK)
-
-					if back do RUNNING = false
+					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do RUNNING = false
 				} else {
 					new_controller.is_connected = false
 				}
@@ -265,34 +280,27 @@ main :: proc() {
 		}
 
 		{ // ---------------------- Update, Sound and Render
-			// TODO: Tighten up sound logic so that we know where we should be
-			// writing to and can anticipate the time spent in the game update.
-			sound_is_valid: b32
-
 			byte_to_lock  : u32
 			bytes_to_write: win.DWORD
 			{
-				play_cursor, write_cursor : win.DWORD
-				if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result){
+				if sound_is_valid {
 					byte_to_lock = (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.sound_buffer_size_in_bytes
 
-					target_cursor := (play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.sound_buffer_size_in_bytes
+					target_cursor := (last_play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.sound_buffer_size_in_bytes
 
 					if byte_to_lock > target_cursor {
 						bytes_to_write = target_cursor - byte_to_lock + sound_output.sound_buffer_size_in_bytes
 					} else{
 						bytes_to_write = target_cursor - byte_to_lock
 					}
-					
-					sound_is_valid = true
 				} else {
-					return // TODO Logging
+					// TODO Logging
 				}
 			}
 
 			sound_buffer := GameSoundBuffer{
 				samples_per_second = sound_output.samples_per_second,
-				samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)/2],
+				samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)],
 			}
 
 			offscreen_buffer := GameOffscreenBuffer{
@@ -301,38 +309,96 @@ main :: proc() {
 				height = the_back_buffer.height,
 			}
 
+			when INTERNAL {
+				for &c in the_back_buffer.memory[:the_back_buffer.width*the_back_buffer.height] {
+					c.r = u8(f32(c.r) * 0.98)
+					c.g = u8(f32(c.g) * 0.98)
+					c.b = u8(f32(c.b) * 0.98)
+				}
+			}
+
 			game_update_and_render(&game_memory, offscreen_buffer, sound_buffer, new_input)
 
 			if sound_is_valid {
+				when INTERNAL {
+					play_cursor, write_cursor : win.DWORD
+					the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
+					fmt.printfln("LPC %v - PC %v WC %v", last_play_cursor, play_cursor, write_cursor)
+				}
+				
 				fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
 			}
 
+			swap(&old_input, &new_input)
+		}
+
+		
+		{ // ---------------------- Display Frame & Performance Counters
+			seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
+			if seconds_elapsed_for_frame < target_seconds_per_frame {
+				if sleep_is_granular {
+					sleep_ms := (target_seconds_per_frame - seconds_elapsed_for_frame) * 1000
+					if sleep_ms > 0 do win.Sleep(cast(u32) sleep_ms)
+				}
+				for seconds_elapsed_for_frame < target_seconds_per_frame {
+					seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
+				} 
+			} else {
+				// TODO: Missed frame, Logging
+			}
+
+			end_counter := get_wall_clock()
+			end_cycle_count := intrinsics.read_cycle_counter()
+
 			window_width, window_height := get_window_dimension(window)
+			when INTERNAL {
+				DEBUG_sync_display(the_back_buffer, debug_last_time_markers[:], sound_output, target_seconds_per_frame)
+			}
 			display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
-		}
 
-		
-		{ // ---------------------- Performance Counters
-			end_counter : win.LARGE_INTEGER
-			win.QueryPerformanceCounter(&end_counter)
+			
+			play_cursor, write_cursor : win.DWORD
+			if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
+				last_play_cursor = play_cursor
+				if !sound_is_valid {
+					sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample
+					sound_is_valid = true
+				}
+			} else {
+				sound_is_valid = false
+			}
 
-			end_cycle_counter := intrinsics.read_cycle_counter()
+			when INTERNAL {
+				#reverse for cursor, index in debug_last_time_markers {
+					if index < len(debug_last_time_markers)-1 do debug_last_time_markers[index+1] = cursor
+				}
 
-			cycles_elapsed := end_cycle_counter - last_cycle_count
-			mega_cycles_elapsed := f32(cycles_elapsed) / (1000 * 1000)
+				debug_last_time_markers[0] = {play_cursor, write_cursor}
+			}
 
-			counter_elapsed   := end_counter - last_counter
-			ms_per_frame      := f32(counter_elapsed) / f32(perf_counter_frequency) * 1000
-			frames_per_second := f32(perf_counter_frequency) / f32(counter_elapsed)
-			// fmt.printfln("Milliseconds/frame: %2.02f - frames/second: %4.02f - Megacycles/frame: %3.02f", ms_per_frame, frames_per_second, mega_cycles_elapsed)
 
+			when INTERNAL {
+				cycles_elapsed        := end_cycle_count - last_cycle_count
+				mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
+				ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
+				frames_per_second     := 1000 / ms_per_frame
+				// fmt.printfln("Milliseconds/frame: %2.02f - frames/second: %4.02f - Megacycles/frame: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
+			}
+
+			last_cycle_count = end_cycle_count
 			last_counter = end_counter
-			last_cycle_count = end_cycle_counter
 		}
-		// ----------------------
-		
-		swap(&old_input, &new_input)
 	}
+}
+
+get_wall_clock :: #force_inline proc() -> i64 {
+	result : win.LARGE_INTEGER
+	win.QueryPerformanceCounter(&result)
+	return cast(i64) result
+}
+
+get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
+	return f32(end - start) / f32(global_perf_counter_frequency)
 }
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
@@ -349,7 +415,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 		source_sample_index := 0
 
 		for dest_sample_index in 0..<region1_sample_count {
-			if source_sample_index >= len(source.samples) do break
+			assert(source_sample_index < len(source.samples))
 
 			dest_samples[dest_sample_index] = source.samples[source_sample_index]
 
@@ -361,8 +427,8 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 		region2_sample_count := region2_size / sound_output.bytes_per_sample
 		
 		for dest_sample_index in 0..<region2_sample_count {
-			if source_sample_index >= len(source.samples) do break
-			
+			assert(source_sample_index < len(source.samples))
+
 			dest_samples[dest_sample_index] = source.samples[source_sample_index]
 
 			source_sample_index += 1

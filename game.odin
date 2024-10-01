@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:math"  // TODO implement sine ourself
 
 Sample :: [2]i16
@@ -118,7 +119,7 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	
 	// TODO: Allow sample offsets here for more robust platform options
 	game_output_sound(sound_buffer, game_state.tone_hz)
-	render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
+	// render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
 }
 
 game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){
@@ -136,15 +137,10 @@ game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){
 }
 
 render_weird_gradient :: proc(buffer: GameOffscreenBuffer , greenOffset, blueOffset: i32) {
-	bytes := buffer.memory
-	row_index: i32 = 0
-
 	for y in 0..<buffer.height {
 		for x in 0..<buffer.width {
-			pixel := &bytes[row_index]
-			pixel.b = u8(y + blueOffset)
-			pixel.g = u8(x + greenOffset)
-			row_index += 1
+			pixel := &buffer.memory[y*buffer.width + x]
+			pixel^ = { b = u8(y + blueOffset), g = u8(x + greenOffset) }
 		}
 	}
 }
