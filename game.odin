@@ -18,37 +18,47 @@ GameInputButton :: struct {
 	ended_down : b32,
 }
 
-GameInputButtons :: enum {
-	up, down, left, right,
-	left_shoulder, right_shoulder,
-}
-
 GameInputController :: struct {
+	is_connected: b32,
 	is_analog: b32,
 
-	start: [2]f32,
-	end:   [2]f32,
-	min:   [2]f32,
-	max:   [2]f32,
+	stick_average: [2]f32,
 	
-	using _ : struct #raw_union {
-		buttons: [GameInputButtons]GameInputButton,
-		using _ : struct {
-			up    : GameInputButton,
-			down  : GameInputButton,
-			left  : GameInputButton,
-			right : GameInputButton,
+	using _buttons_array_and_enum : struct #raw_union {
+		buttons: [18]GameInputButton,
+		using _buttons_enum : struct {
+			stick_up    : GameInputButton,
+			stick_down  : GameInputButton,
+			stick_left  : GameInputButton,
+			stick_right : GameInputButton,
+			
+			button_up    : GameInputButton,
+			button_down  : GameInputButton,
+			button_left  : GameInputButton,
+			button_right : GameInputButton,
 
-			left_shoulder  : GameInputButton,
-			right_shoulder : GameInputButton,
+			dpad_up    : GameInputButton,
+			dpad_down  : GameInputButton,
+			dpad_left  : GameInputButton,
+			dpad_right : GameInputButton,
+
+			start : GameInputButton,
+			back  : GameInputButton,
+
+			shoulder_left  : GameInputButton,
+			shoulder_right : GameInputButton,
+
+			thumb_left  : GameInputButton,
+			thumb_right : GameInputButton,
 		},
 	},
 }
+#assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
 
 // TODO allow outputing vibration
 GameInput :: struct {
 	// TODO insert clock values here
-	controllers: [4]GameInputController
+	controllers: [5]GameInputController
 }
 
 GameMemory :: struct {
@@ -81,24 +91,26 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 		memory.is_initialized = true
 	}
 
-	// TODO deal with the dead zones properly
-	// xOffset += cast(i32) (left_stick_x / 4096)
-	// yOffset -= cast(i32) (left_stick_y / 4096)
 	// tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
 
-	input0 := input.controllers[0]
+	for controller in input.controllers {
+		if controller.is_analog {
+			// NOTE use analog movement tuning
+			game_state.green_offset += cast(i32) (4 * controller.stick_average.x)
+			game_state.tone_hz = 420 + cast(u32)(210 * controller.stick_average.y)
+		} else {
+			// NOTE Use digital movement tuning
+			if controller.stick_left.ended_down {
+				game_state.green_offset -= 1
+			}
+			if controller.stick_right.ended_down {
+				game_state.green_offset += 1
+			}
+		}
 
-	if input0.is_analog {
-		// TODO analog movement tuning
-		game_state.green_offset += cast(i32) (4 * input0.end.x)
-		game_state.tone_hz = 420 + cast(u32)(210 * input0.end.y)
-	} else {
-		// TODO digital movement tuning
-
-	}
-
-	if input0.down.ended_down {
-		game_state.blue_offset += 1
+		if controller.button_down.ended_down {
+			game_state.blue_offset += 1
+		}
 	}
 
 	

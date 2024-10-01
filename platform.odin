@@ -38,12 +38,12 @@ the_back_buffer : OffscreenBuffer
 the_sound_buffer: ^IDirectSoundBuffer
 
 SoundOutput :: struct {
-	samples_per_second  : u32,
-	num_channels        : u32,
-	bytes_per_sample    : u32,
-	sound_buffer_size_in_bytes   : u32,
-	running_sample_index: u32,
-	latency_sample_count: u32,
+	samples_per_second         : u32,
+	num_channels               : u32,
+	bytes_per_sample           : u32,
+	sound_buffer_size_in_bytes : u32,
+	running_sample_index       : u32,
+	latency_sample_count       : u32,
 }
 
 OffscreenBufferColor :: struct{
@@ -151,116 +151,106 @@ main :: proc() {
 	last_cycle_count := intrinsics.read_cycle_counter()
 
 	for RUNNING {
-		message : win.MSG
-		for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
-			if message.message == win.WM_QUIT do RUNNING = false
-
-			keyboard_controller := &new_input.controllers[0]
-			keyboard_controller^ = {}
-
-			switch message.message {
-				case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
-					vk_code := message.wParam
-
-					was_down := cast(b32) (message.lParam & (1 << 30))
-					is_down: b32 = !(cast(b32) (message.lParam & (1 << 31)))
-
-					alt_down := cast(b32) (message.lParam & (1 << 29))
-
-					if was_down != is_down {
-						switch vk_code {
-						case win.VK_W:
-						case win.VK_A:
-						case win.VK_S:
-						case win.VK_D:
-						case win.VK_Q:
-							process_win_keyboard_message(&keyboard_controller.left_shoulder, is_down)
-						case win.VK_E:
-							process_win_keyboard_message(&keyboard_controller.right_shoulder, is_down)
-						case win.VK_UP:
-							process_win_keyboard_message(&keyboard_controller.up, is_down)
-						case win.VK_DOWN:
-							process_win_keyboard_message(&keyboard_controller.down, is_down)
-						case win.VK_LEFT:
-							process_win_keyboard_message(&keyboard_controller.left, is_down)
-						case win.VK_RIGHT:
-							process_win_keyboard_message(&keyboard_controller.right, is_down)
-						case win.VK_ESCAPE:
-							RUNNING = false
-						case win.VK_SPACE:
-						case win.VK_F4:
-							if alt_down do RUNNING = false
-						}
-					}
-				case:
-					win.TranslateMessage(&message)
-					win.DispatchMessageW(&message)
-				}
-		}
-
 		// ---------------------- Input
 
-		max_controller_count := XUSER_MAX_COUNT
-		if max_controller_count > len(GameInput{}.controllers) {
-			max_controller_count = len(GameInput{}.controllers)
+		old_keyboard_controller := &old_input.controllers[0]
+		new_keyboard_controller := &new_input.controllers[0]
+		new_keyboard_controller^ = {}
+		new_keyboard_controller.is_connected = true
+
+		for &button, index in new_keyboard_controller.buttons {
+			button.ended_down = old_keyboard_controller.buttons[index].ended_down
 		}
+		
+		process_pending_messages(new_keyboard_controller)
+
+		max_controller_count: u32 = min(XUSER_MAX_COUNT, len(GameInput{}.controllers) - 1)
+		// TODO Need to not poll disconnected controllers to avoid xinput frame rate hit
+		// on older libraries.
 		// TODO should we poll this more frequently
 		// TODO only check connected controllers, catch messages on connect / disconnect
-		for controller_index in u32(0)..< XUSER_MAX_COUNT {
+		for controller_index in 0..<max_controller_count {
 			controller_state : XINPUT_STATE
 
-			old_controller := old_input.controllers[controller_index]
-			new_controller := &new_input.controllers[controller_index]
+			our_controller_index := controller_index+1
+
+			old_controller := old_input.controllers[our_controller_index]
+			new_controller := &new_input.controllers[our_controller_index]
 
 			if XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
-				// The controller is plugged in
+				new_controller.is_connected = true
 				// TODO see if dwPacketNumber increments too rapidly
 				pad := controller_state.Gamepad
 				
 				// TODO all buttons
+				left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
+				right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
+				
+				process_Xinput_button :: proc(new_state: ^GameInputButton, old_state: GameInputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
+					new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
+					new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
+				}
+				
+				process_Xinput_button(&new_controller.button_up    , old_controller.button_up    , pad.wButtons, XINPUT_GAMEPAD_Y)
+				process_Xinput_button(&new_controller.button_down  , old_controller.button_down  , pad.wButtons, XINPUT_GAMEPAD_A)
+				process_Xinput_button(&new_controller.button_left  , old_controller.button_left  , pad.wButtons, XINPUT_GAMEPAD_X)
+				process_Xinput_button(&new_controller.button_right , old_controller.button_right , pad.wButtons, XINPUT_GAMEPAD_B)
+	
+				process_Xinput_button(&new_controller.start, old_controller.start, pad.wButtons, XINPUT_GAMEPAD_START)
+				process_Xinput_button(&new_controller.back, old_controller.back, pad.wButtons, XINPUT_GAMEPAD_BACK)
+
+				process_Xinput_button(&new_controller.shoulder_left , old_controller.shoulder_left , pad.wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER)
+				process_Xinput_button(&new_controller.shoulder_right, old_controller.shoulder_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER)
+	
+				process_Xinput_button(&new_controller.dpad_up    , old_controller.dpad_up    , pad.wButtons, XINPUT_GAMEPAD_DPAD_UP)
+				process_Xinput_button(&new_controller.dpad_down  , old_controller.dpad_down  , pad.wButtons, XINPUT_GAMEPAD_DPAD_DOWN)
+				process_Xinput_button(&new_controller.dpad_left  , old_controller.dpad_left  , pad.wButtons, XINPUT_GAMEPAD_DPAD_LEFT)
+				process_Xinput_button(&new_controller.dpad_right , old_controller.dpad_right , pad.wButtons, XINPUT_GAMEPAD_DPAD_RIGHT)
+				
+				process_Xinput_button(&new_controller.thumb_left , old_controller.thumb_left , pad.wButtons, XINPUT_GAMEPAD_LEFT_THUMB)
+				process_Xinput_button(&new_controller.thumb_right, old_controller.thumb_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_THUMB)
+				
+				process_Xinput_stick :: proc(thumbstick: win.SHORT, deadzone: i16) -> f32 {
+					if thumbstick < deadzone {
+						return (cast(f32)thumbstick) / 32768
+					} else if thumbstick > deadzone {
+						return (cast(f32)thumbstick) / 32767
+					}
+					return 0
+				}
+
+				// TODO right stick, triggers
+				new_controller.is_analog = true
+				new_controller.stick_average = {
+					process_Xinput_stick(pad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
+					process_Xinput_stick(pad.sThumbLY, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE),
+				}
+
+				THRESHOLD :: 0.5
+
 				dpad_up        := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)
 				dpad_down      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)
 				dpad_left      := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)
 				dpad_right     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT)
 				
-				start          := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_START)
+				// TODO what if we dont want to override the stick
+				if dpad_right do new_controller.stick_average.x =  1
+				if dpad_left  do new_controller.stick_average.x = -1
+				if dpad_up    do new_controller.stick_average.y =  1
+				if dpad_down  do new_controller.stick_average.y = -1
+
+				process_Xinput_button(&new_controller.stick_left , old_controller.stick_left , 1, new_controller.stick_average.x < -THRESHOLD ? 1 : 0)
+				process_Xinput_button(&new_controller.stick_right, old_controller.stick_right, 1, new_controller.stick_average.x >  THRESHOLD ? 1 : 0)
+				process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -THRESHOLD ? 1 : 0)
+				process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  THRESHOLD ? 1 : 0)
+	
+
+
 				back           := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK)
 
-				left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
-				right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
-
-				process_Xinput_digital_button(&new_controller.left_shoulder, old_controller.left_shoulder,    pad.wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER)
-				process_Xinput_digital_button(&new_controller.right_shoulder, old_controller.right_shoulder,  pad.wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER)
-				process_Xinput_digital_button(&new_controller.up, old_controller.up,        pad.wButtons, XINPUT_GAMEPAD_Y)
-				process_Xinput_digital_button(&new_controller.down, old_controller.down,    pad.wButtons, XINPUT_GAMEPAD_A)
-				process_Xinput_digital_button(&new_controller.left, old_controller.left,    pad.wButtons, XINPUT_GAMEPAD_X)
-				process_Xinput_digital_button(&new_controller.right, old_controller.right,  pad.wButtons, XINPUT_GAMEPAD_B)
-
-				x, y : f32
-				if pad.sThumbLX < 0 {
-					x = (cast(f32)pad.sThumbLX) / 32768
-				} else {
-					x = (cast(f32)pad.sThumbLX) / 32767
-				}
-				if pad.sThumbLY < 0 {
-					y = (cast(f32)pad.sThumbLY) / 32768
-				} else {
-					y = (cast(f32)pad.sThumbLY) / 32767
-				}
-
-				new_controller.is_analog = true
-				new_controller.start = old_controller.end
-				new_controller.min = {x,y}
-				new_controller.max = {x,y}
-				new_controller.end = {x,y}
-
-				// TODO right stick
-
 				if back do RUNNING = false
-
-
 			} else {
-				// The controller is unavailable
+				new_controller.is_connected = false
 			}
 		}
 
@@ -337,15 +327,6 @@ main :: proc() {
 		
 		swap(&old_input, &new_input)
 	}
-}
-process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
-	new_state.ended_down = is_down
-	new_state.half_transition_count += 1
-}
-
-process_Xinput_digital_button :: proc(new_state: ^GameInputButton, old_state: GameInputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
-	new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
-	new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
 }
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
@@ -479,7 +460,7 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 	switch message {
 	case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
 		context = runtime.default_context()
-		assert(false,"keyboard-event came in through a non-dispatched event")
+		assert(false, "keyboard-event came in through a non-dispatched event")
 	case win.WM_CLOSE: // TODO Handle this with a message to the user
 		RUNNING = false
 	case win.WM_DESTROY: // TODO handle this as an error - recreate window?
@@ -497,4 +478,63 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 		result = win.DefWindowProcA(window, message, w_param, l_param)
 	}
 	return result
+}
+
+process_pending_messages :: proc(keyboard_controller: ^GameInputController) {
+	process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
+		assert(is_down != new_state.ended_down)
+		new_state.ended_down = is_down
+		new_state.half_transition_count += 1
+	}
+
+	message : win.MSG
+	for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
+		switch message.message {
+		case win.WM_QUIT:
+			RUNNING = false
+		case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
+			vk_code := message.wParam
+
+			was_down := cast(b32) (message.lParam & (1 << 30))
+			is_down: b32 = !(cast(b32) (message.lParam & (1 << 31)))
+
+			alt_down := cast(b32) (message.lParam & (1 << 29))
+
+			if was_down != is_down {
+				switch vk_code {
+				case win.VK_W:
+					process_win_keyboard_message(&keyboard_controller.stick_up      , is_down)
+				case win.VK_A:
+					process_win_keyboard_message(&keyboard_controller.stick_left    , is_down)
+				case win.VK_S: 
+					process_win_keyboard_message(&keyboard_controller.stick_down    , is_down)
+				case win.VK_D:
+					process_win_keyboard_message(&keyboard_controller.stick_right   , is_down)
+				case win.VK_Q:
+					process_win_keyboard_message(&keyboard_controller.shoulder_left , is_down)
+				case win.VK_E:
+					process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
+				case win.VK_UP:
+					process_win_keyboard_message(&keyboard_controller.button_up     , is_down)
+				case win.VK_DOWN:
+					process_win_keyboard_message(&keyboard_controller.button_down   , is_down)
+				case win.VK_LEFT:
+					process_win_keyboard_message(&keyboard_controller.button_left   , is_down)
+				case win.VK_RIGHT:
+					process_win_keyboard_message(&keyboard_controller.button_right  , is_down)
+				case win.VK_ESCAPE:
+					RUNNING = false
+					process_win_keyboard_message(&keyboard_controller.back          , is_down)
+				case win.VK_TAB:
+					process_win_keyboard_message(&keyboard_controller.start         , is_down)
+				case win.VK_SPACE:
+				case win.VK_F4:
+					if alt_down do RUNNING = false
+				}
+			}
+		case:
+			win.TranslateMessage(&message)
+			win.DispatchMessageW(&message)
+		}
+	}
 }
