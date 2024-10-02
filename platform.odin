@@ -39,7 +39,7 @@ the_sound_buffer: ^IDirectSoundBuffer
 
 global_perf_counter_frequency : win.LARGE_INTEGER
 
-
+GLOBAL_PAUSE := false
 
 SoundOutput :: struct {
 	samples_per_second         : u32,
@@ -47,7 +47,7 @@ SoundOutput :: struct {
 	bytes_per_sample           : u32,
 	sound_buffer_size_in_bytes : u32,
 	running_sample_index       : u32,
-	latency_sample_count       : u32,
+	safety_bytes               : u32,
 }
 
 OffscreenBufferColor :: struct{
@@ -119,15 +119,14 @@ main :: proc() {
 	game_update_hz: u32 = monitor_refresh_hz / 2
 	target_seconds_per_frame: f32 = 1 / cast(f32) game_update_hz
 
-	frames_of_audio_latency :: 1 when monitor_refresh_hz == 144 else 3
-
 	// ---------------------- Sound Setup
 	sound_output : SoundOutput
 	sound_output.samples_per_second = 48000
 	sound_output.num_channels = 2
 	sound_output.bytes_per_sample = size_of(Sample)
 	sound_output.sound_buffer_size_in_bytes = sound_output.samples_per_second * sound_output.bytes_per_sample
-	sound_output.latency_sample_count = frames_of_audio_latency * (sound_output.samples_per_second / game_update_hz)
+	// TODO actually computre this variance and set a reasonable value
+	sound_output.safety_bytes = (sound_output.samples_per_second * sound_output.bytes_per_sample / game_update_hz)
 
 	init_dSound(window, sound_output.sound_buffer_size_in_bytes, sound_output.samples_per_second)
 
@@ -135,11 +134,12 @@ main :: proc() {
 
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
 	
+	audio_latency_bytes: u32
+	audio_latency_seconds: f32
 	sound_is_valid: b32
-	last_play_cursor: win.DWORD
-
+	
 	when INTERNAL {
-		debug_last_time_markers: [72]DebugTimeMarker
+		debug_last_time_markers: [36]DebugTimeMarker
 	}
 
 
@@ -180,8 +180,12 @@ main :: proc() {
 
 	// ---------------------- Timer Setup
 	last_counter := get_wall_clock()
+	flip_counter := get_wall_clock()
 	last_cycle_count := intrinsics.read_cycle_counter()
 	
+	
+	
+
 	for RUNNING {
 		{ // ---------------------- Input
 			old_keyboard_controller := &old_input.controllers[0]
@@ -279,56 +283,109 @@ main :: proc() {
 			}
 		}
 
+		if GLOBAL_PAUSE do continue
 		{ // ---------------------- Update, Sound and Render
-			byte_to_lock  : u32
-			bytes_to_write: win.DWORD
-			{
-				if sound_is_valid {
-					byte_to_lock = (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.sound_buffer_size_in_bytes
-
-					target_cursor := (last_play_cursor + sound_output.latency_sample_count * sound_output.bytes_per_sample)  % sound_output.sound_buffer_size_in_bytes
-
-					if byte_to_lock > target_cursor {
-						bytes_to_write = target_cursor - byte_to_lock + sound_output.sound_buffer_size_in_bytes
-					} else{
-						bytes_to_write = target_cursor - byte_to_lock
-					}
-				} else {
-					// TODO Logging
-				}
-			}
-
-			sound_buffer := GameSoundBuffer{
-				samples_per_second = sound_output.samples_per_second,
-				samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)],
-			}
-
+				
 			offscreen_buffer := GameOffscreenBuffer{
 				memory = the_back_buffer.memory,
 				width  = the_back_buffer.width,
 				height = the_back_buffer.height,
 			}
-
+			
 			when INTERNAL {
 				for &c in the_back_buffer.memory[:the_back_buffer.width*the_back_buffer.height] {
-					c.r = u8(f32(c.r) * 0.98)
-					c.g = u8(f32(c.g) * 0.98)
-					c.b = u8(f32(c.b) * 0.98)
+					c = {}
 				}
 			}
 
-			game_update_and_render(&game_memory, offscreen_buffer, sound_buffer, new_input)
+			game_update_and_render(&game_memory, offscreen_buffer, new_input)
+			
+			sound_is_valid = true
+			play_cursor, write_cursor : win.DWORD
+			audio_counter := get_wall_clock()
+			from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
+			if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
+				/*
+					Here is how sound output computation works.
 
-			if sound_is_valid {
-				when INTERNAL {
-					play_cursor, write_cursor : win.DWORD
-					the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
-					fmt.printfln("LPC %v - PC %v WC %v", last_play_cursor, play_cursor, write_cursor)
-				}
+					We define a safety value that is the number of samples we think our game update loop
+					may vary by (let's say up to 2ms)
+
+					When we wake up to write audio, we will look and see what the play cursor position is and we
+					will forecast ahead where we think the play cursor will be on the next frame boundary.
+
+					We will then look to see if the write cursor is before that by at least our safety value. If
+					it is, the target fill position is that frame boundary plus one frame. This gives us perfect
+					audio sync in the case of a card that has low enough latency.
+
+					If the write cursor is _after_ that safety margin, then we assume we can never sync the
+					audio perfectly, so we will write one frame's worth of audio plus the safety margin's worth
+					of guard samples.
+				*/
 				
-				fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
-			}
+				if !sound_is_valid {
+					sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample
+					sound_is_valid = true
+				}
 
+				byte_to_lock := (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.sound_buffer_size_in_bytes
+
+				expected_sound_bytes_per_frame := sound_output.samples_per_second * sound_output.bytes_per_sample / game_update_hz
+				
+				seconds_left_until_flip := target_seconds_per_frame-from_begin_to_audio
+				expected_sound_bytes_until_flip := cast(win.DWORD) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
+
+				expected_frame_boundary_byte := play_cursor + expected_sound_bytes_until_flip
+
+				safe_write_cursor := write_cursor
+				if safe_write_cursor < play_cursor {
+					safe_write_cursor += sound_output.sound_buffer_size_in_bytes
+				}
+				assert(safe_write_cursor >= play_cursor)
+				safe_write_cursor += sound_output.safety_bytes
+
+				audio_card_is_low_latency := safe_write_cursor < expected_frame_boundary_byte
+
+				target_cursor : win.DWORD
+				if audio_card_is_low_latency {
+					target_cursor = expected_frame_boundary_byte + expected_sound_bytes_per_frame
+				} else {
+					target_cursor = write_cursor + sound_output.safety_bytes + expected_sound_bytes_per_frame
+				}
+				target_cursor %= sound_output.sound_buffer_size_in_bytes
+
+				bytes_to_write: win.DWORD
+				if byte_to_lock > target_cursor {
+					bytes_to_write = target_cursor - byte_to_lock + sound_output.sound_buffer_size_in_bytes
+				} else{
+					bytes_to_write = target_cursor - byte_to_lock
+				}
+
+				sound_buffer := GameSoundBuffer{
+					samples_per_second = sound_output.samples_per_second,
+					samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)],
+				}
+				game_output_sound_samples(&game_memory, sound_buffer)
+				
+				when INTERNAL {
+					the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result)
+					debug_last_time_markers[0].output_play_cursor           = play_cursor
+					debug_last_time_markers[0].output_write_cursor          = write_cursor
+					debug_last_time_markers[0].output_location              = byte_to_lock
+					debug_last_time_markers[0].output_byte_count            = bytes_to_write
+					debug_last_time_markers[0].expected_frame_boundary_byte = expected_frame_boundary_byte
+
+					audio_latency_bytes = ((write_cursor - play_cursor) + sound_output.sound_buffer_size_in_bytes) % sound_output.sound_buffer_size_in_bytes
+					audio_latency_seconds = (cast(f32)audio_latency_bytes / cast(f32)sound_output.bytes_per_sample) / cast(f32)sound_output.samples_per_second
+
+					// fmt.printfln("PC %v WC %v Delta %v Seconds %vs", play_cursor, write_cursor, audio_latency_bytes, audio_latency_seconds)
+				}
+
+				fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
+			} else {
+				sound_is_valid = false
+			}
+			
 			swap(&old_input, &new_input)
 		}
 
@@ -336,15 +393,19 @@ main :: proc() {
 		{ // ---------------------- Display Frame & Performance Counters
 			seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
 			if seconds_elapsed_for_frame < target_seconds_per_frame {
-				if sleep_is_granular {
-					sleep_ms := (target_seconds_per_frame - seconds_elapsed_for_frame) * 1000
-					if sleep_ms > 0 do win.Sleep(cast(u32) sleep_ms)
+				// if sleep_is_granular {
+				// 	sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
+				// 	if sleep_ms > 0 do win.Sleep(cast(u32) sleep_ms)
+				// }
+				test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
+				if test_seconds_elapsed < target_seconds_per_frame {
+					// TODO: Log sleep miss here
 				}
 				for seconds_elapsed_for_frame < target_seconds_per_frame {
 					seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
 				} 
 			} else {
-				// TODO: Missed frame, Logging
+				// TODO: Missed frame, Logging, maybe because window was moved
 			}
 
 			end_counter := get_wall_clock()
@@ -356,24 +417,12 @@ main :: proc() {
 			}
 			display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
 
-			
-			play_cursor, write_cursor : win.DWORD
-			if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
-				last_play_cursor = play_cursor
-				if !sound_is_valid {
-					sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample
-					sound_is_valid = true
-				}
-			} else {
-				sound_is_valid = false
-			}
-
+			flip_counter = get_wall_clock()
 			when INTERNAL {
-				#reverse for cursor, index in debug_last_time_markers {
-					if index < len(debug_last_time_markers)-1 do debug_last_time_markers[index+1] = cursor
-				}
-
-				debug_last_time_markers[0] = {play_cursor, write_cursor}
+				play_cursor, write_cursor : win.DWORD
+				the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
+				debug_last_time_markers[0].flip_play_cursor = play_cursor
+				debug_last_time_markers[0].flip_write_cursor = write_cursor
 			}
 
 
@@ -387,6 +436,11 @@ main :: proc() {
 
 			last_cycle_count = end_cycle_count
 			last_counter = end_counter
+			when INTERNAL {
+				#reverse for cursor, index in debug_last_time_markers {
+					if index < len(debug_last_time_markers)-1 do debug_last_time_markers[index+1] = cursor
+				}
+			}
 		}
 	}
 }
@@ -593,6 +647,8 @@ process_pending_messages :: proc(keyboard_controller: ^GameInputController) {
 				case win.VK_X:
 					process_win_keyboard_message(&keyboard_controller.start         , is_down)
 				case win.VK_SPACE:
+				case win.VK_P:
+					if is_down do GLOBAL_PAUSE = !GLOBAL_PAUSE
 				case win.VK_F4:
 					if alt_down do RUNNING = false
 				}

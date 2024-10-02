@@ -77,7 +77,7 @@ GameState :: struct {
 }
 
 // timing, keyboard input
-game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, sound_buffer: GameSoundBuffer, input: GameInput){
+game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, input: GameInput){
 	assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
 	
 	game_state := cast(^GameState) raw_data(memory.permanent_storage)
@@ -117,10 +117,18 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	}
 
 	
-	// TODO: Allow sample offsets here for more robust platform options
-	game_output_sound(sound_buffer, game_state.tone_hz)
 	// render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
 }
+
+// NOTE: at the moment this has to be a really fast function. It shall not be slower than a 
+// millisecond or so.
+// TODO: reduce the pressure on the performance of this function by measuring
+game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
+	// TODO: Allow sample offsets here for more robust platform options
+	game_state := cast(^GameState) raw_data(memory.permanent_storage)
+	game_output_sound(sound_buffer, game_state.tone_hz)
+}
+
 
 game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){
 	@(static)
@@ -133,6 +141,7 @@ game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){
 
 		sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
 		t_sine += math.TAU / f32(wave_period)
+		if t_sine > math.TAU do t_sine -= math.TAU
 	}
 }
 

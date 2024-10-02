@@ -61,7 +61,10 @@ when INTERNAL {
 	}
 
 	DebugTimeMarker :: struct {
-		play_cursor, write_cursor: win.DWORD
+		output_play_cursor, output_write_cursor: win.DWORD,
+		output_location, output_byte_count: win.DWORD,
+		flip_play_cursor, flip_write_cursor: win.DWORD,
+		expected_frame_boundary_byte: win.DWORD,
 	}
 
 	DEBUG_sync_display :: proc(back_buffer: OffscreenBuffer, last_time_markers: []DebugTimeMarker, sound_output: SoundOutput, target_seconds_per_frame: f32){
@@ -76,27 +79,42 @@ when INTERNAL {
 			DEBUG_draw_vertical(back_buffer, i32(x) + padx, top, bottom, color)
 		}
 
-		y := (top + middle - pad.y) / 2
-		for x in pad.x..<back_buffer.width-pad.x {
-			pixel := &back_buffer.memory[y*back_buffer.width + x]
-			pixel^ = OffscreenBufferColor{0xff, 0xff, 0xff, 0xff}
-		}
-		y = (middle + pad.y + bottom) / 2
-		for x in pad.x..<back_buffer.width-pad.x {
-			pixel := &back_buffer.memory[y*back_buffer.width + x]
-			pixel^ = OffscreenBufferColor{0xff, 0xff, 0xff, 0xff}
-		}
+		play_color := transmute(OffscreenBufferColor) u32(0x00ffffff)
+		write_color := transmute(OffscreenBufferColor) u32(0x00ff0000)
+		expected_color := transmute(OffscreenBufferColor) u32(0x00ffff00)
+		window_color := transmute(OffscreenBufferColor) u32(0x00ff00ff)
 
-		for marker in last_time_markers {
-			draw_cursor(back_buffer, marker.play_cursor, c, pad.x, top, middle - pad.y, OffscreenBufferColor{0xFF, 0x00, 0xff, 0xFF})
-			draw_cursor(back_buffer, marker.write_cursor, c, pad.x, middle + pad.y, bottom, OffscreenBufferColor{0x00, 0xFF, 0xFF, 0xFF})
+		for marker, i in last_time_markers {
+			if i == 0 {
+
+				draw_cursor(back_buffer, marker.output_location, c, pad.x, middle - pad.y*6, middle - pad.y*5, play_color)
+				draw_cursor(back_buffer, marker.output_location + marker.output_byte_count, c, pad.x, middle - pad.y*6, middle - pad.y*5, write_color)
+
+				draw_cursor(back_buffer, marker.expected_frame_boundary_byte, c, pad.x, middle - pad.y*4, middle - pad.y*1, expected_color)
+				draw_cursor(back_buffer, marker.output_play_cursor, c, pad.x, middle - pad.y*4, middle - pad.y*3, play_color)
+				draw_cursor(back_buffer, marker.output_write_cursor, c, pad.x, middle - pad.y*4, middle - pad.y*3, write_color)
+
+				draw_cursor(back_buffer, marker.flip_play_cursor, c, pad.x, middle - pad.y*2, middle - pad.y, play_color)
+				draw_cursor(back_buffer, marker.flip_play_cursor + 480 * sound_output.bytes_per_sample, c, pad.x, middle - pad.y*2, middle - pad.y, window_color)
+				draw_cursor(back_buffer, marker.flip_write_cursor, c, pad.x, middle - pad.y*2, middle - pad.y, write_color)
+
+			} else {
+				draw_cursor(back_buffer, marker.flip_play_cursor, c, pad.x, middle + pad.y-10, middle + pad.y*2, play_color)
+				draw_cursor(back_buffer, marker.flip_write_cursor, c, pad.x, middle + pad.y, middle + pad.y*2+10, write_color)
+			}
 		}
 	}
 
 	DEBUG_draw_vertical :: proc(back_buffer: OffscreenBuffer, x, top, bottom: i32, color: OffscreenBufferColor) {
-		for y in top..<bottom {
-			pixel := &back_buffer.memory[y*back_buffer.width + x]
-			pixel^ = color
+		top, bottom := top, bottom
+		if top < 0 do top = 0
+		if bottom > back_buffer.height do bottom = back_buffer.height
+
+		if x >= 0 && x < back_buffer.width {
+			for y in top..<bottom {
+				pixel := &back_buffer.memory[y*back_buffer.width + x]
+				pixel^ = color
+			}
 		}
 	}
 
