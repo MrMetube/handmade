@@ -192,7 +192,7 @@ main :: proc() {
 		_window_title := "Handmade"
 		window_title := cast([^]u16) raw_data(_window_title[:])
 		window = win.CreateWindowExW(
-			win.WS_EX_TOPMOST,
+			win.WS_EX_TOPMOST | win.WS_EX_LAYERED,
 			window_class.lpszClassName,
 			window_title,
 			win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
@@ -765,7 +765,7 @@ display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_conte
 	)
 }
 
-main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
+main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
 	switch message {
 	case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
 		context = runtime.default_context()
@@ -775,6 +775,14 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 	case win.WM_DESTROY: // TODO handle this as an error - recreate window?
 		RUNNING = false
 	case win.WM_ACTIVATEAPP:
+		LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
+		LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color. 
+
+		if w_param != 0 {
+			win.SetLayeredWindowAttributes(window, win.RGB(0,0,0), 255, LWA_ALPHA)
+		} else {
+			win.SetLayeredWindowAttributes(window, win.RGB(0,0,0),  64, LWA_ALPHA)
+		}
 	case win.WM_PAINT:
 		paint: win.PAINTSTRUCT
 		device_context := win.BeginPaint(window, &paint)
