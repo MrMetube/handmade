@@ -1,12 +1,14 @@
 package main
 
+import "core:fmt"
 import win "core:sys/windows"
 
 game_update_and_render    := game_update_and_render_stub
 game_output_sound_samples := game_output_sound_samples_stub
 
-init_game_lib :: proc(source_dll_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
-	temp_dll_name   := win.utf8_to_wstring("temp_game.dll")
+init_game_lib :: proc(source_dll_name: string) -> (is_valid:b32, last_write_time: u64) {
+	w_source_dll_name := win.utf8_to_wstring(source_dll_name)
+	temp_dll_name := win.utf8_to_wstring(fmt.tprint(source_dll_name, "temp.dll", sep="-"))
 	
 	if game_lib == nil {
 		assert(game_update_and_render == game_update_and_render_stub, "Game.dll has already been initialized")
@@ -17,7 +19,7 @@ init_game_lib :: proc(source_dll_name: win.wstring) -> (is_valid:b32, last_write
 		}
 	}
 
-	win.CopyFileW(source_dll_name, temp_dll_name, false)
+	win.CopyFileW(w_source_dll_name, temp_dll_name, false)
 	last_write_time = get_last_write_time(source_dll_name)
 	game_lib = win.LoadLibraryW(temp_dll_name)
 

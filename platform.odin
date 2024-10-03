@@ -139,10 +139,21 @@ GameState :: struct {
 
 // TODO Copypaste END
 
+State :: struct {
+	exe_path : string,
+
+	game_memory_block : []u8,
+
+	input_record_handle : win.HANDLE,
+	input_record_index  : i32,
+	input_replay_handle : win.HANDLE,
+	input_replay_index  : i32,
+}
+
 main :: proc() {
 	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
 	
-	exe_path : string
+	state: State
 	{
 		exe_path_buffer : [win.MAX_PATH_WIDE]u16
 		size_of_filename := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
@@ -153,9 +164,8 @@ main :: proc() {
 				one_past_last_slash = cast(u32) i + 1
 			}
 		}
-		exe_path = exe_path_and_name[:one_past_last_slash]
+		state.exe_path = exe_path_and_name[:one_past_last_slash]
 	}
-
 	// NOTE: Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
 	desired_scheduler_ms :: 1
 	sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
@@ -166,7 +176,7 @@ main :: proc() {
 			hInstance = cast(win.HINSTANCE) win.GetModuleHandleW(nil),
 			lpszClassName = win.utf8_to_wstring("HandmadeWindowClass"),
 			// hIcon =,
-			style = win.CS_HREDRAW | win.CS_VREDRAW | win.CS_OWNDC,
+			style = win.CS_HREDRAW | win.CS_VREDRAW,
 			lpfnWndProc = main_window_callback,
 		}
 
@@ -182,7 +192,7 @@ main :: proc() {
 		_window_title := "Handmade"
 		window_title := cast([^]u16) raw_data(_window_title[:])
 		window = win.CreateWindowExW(
-			0,
+			win.WS_EX_TOPMOST,
 			window_class.lpszClassName,
 			window_title,
 			win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
@@ -200,7 +210,6 @@ main :: proc() {
 			return // TODO Logging
 		}
 	}
-	device_context := win.GetDC(window)
 
 
 	// ---------------------- Video Setup
@@ -239,9 +248,8 @@ main :: proc() {
 	old_input, new_input := input[0], input[1]
 
 
-    
 	// ---------------------- Memory Setup
-	game_dll_name := win.utf8_to_wstring("game.dll")
+	game_dll_name := fmt.tprint(state.exe_path, "game.dll", sep="\\")
 	_, game_dll_write_time := init_game_lib(game_dll_name)
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
@@ -253,11 +261,14 @@ main :: proc() {
 	{
 		base_address := cast(rawptr) cast(uintptr) util.terabytes(1) when INTERNAL else 0
 
-		permanent_storage_size := util.megabytes(64)
-		transient_storage_size := util.gigabytes(4)
-		total_size := permanent_storage_size + transient_storage_size
+		permanent_storage_size := util.megabytes(u64(64))
+		transient_storage_size := util.gigabytes(u64(2))
+		total_size :u64= permanent_storage_size + transient_storage_size
 
 		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+		assert(total_size < util.gigabytes(u64(4)))
+		state.game_memory_block = storage_ptr[:total_size]
+
 		game_memory.permanent_storage = storage_ptr[0:][:permanent_storage_size]
 		game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size] 
 
@@ -293,7 +304,7 @@ main :: proc() {
 				button.ended_down = old_keyboard_controller.buttons[index].ended_down
 			}
 			
-			process_pending_messages(new_keyboard_controller)
+			process_pending_messages(&state, new_keyboard_controller)
 
 			max_controller_count: u32 = min(XUSER_MAX_COUNT, len(GameInput{}.controllers) - 1)
 			// TODO Need to not poll disconnected controllers to avoid xinput frame rate hit
@@ -392,6 +403,13 @@ main :: proc() {
 				for &c in the_back_buffer.memory[:the_back_buffer.width*the_back_buffer.height] {
 					c = {}
 				}
+			}
+
+			if state.input_record_index != 0 {
+				record_input(&state, &new_input)
+			}
+			if state.input_replay_index != 0 {
+				replay_input(&state, &new_input)
 			}
 
 			game_update_and_render(&game_memory, offscreen_buffer, new_input)
@@ -511,7 +529,12 @@ main :: proc() {
 			when INTERNAL {
 				DEBUG_sync_display(the_back_buffer, debug_last_time_markers[:], sound_output, target_seconds_per_frame)
 			}
-			display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
+
+			{
+				device_context := win.GetDC(window)
+				display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
+				win.ReleaseDC(window, device_context)
+			}
 
 			flip_counter = get_wall_clock()
 			when INTERNAL {
@@ -541,6 +564,10 @@ main :: proc() {
 	}
 }
 
+
+
+
+
 get_wall_clock :: #force_inline proc() -> i64 {
 	result : win.LARGE_INTEGER
 	win.QueryPerformanceCounter(&result)
@@ -551,15 +578,72 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
 	return f32(end - start) / f32(global_perf_counter_frequency)
 }
 
-get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
+
+
+
+get_last_write_time :: proc(filename: string) -> (last_write_time: u64) {
 	find_data: win.WIN32_FIND_DATAW
-	find_handle := win.FindFirstFileW(filename, &find_data)
+	w_filename := win.utf8_to_wstring(filename)
+	find_handle := win.FindFirstFileW(w_filename, &find_data)
 	if find_handle != win.INVALID_HANDLE_VALUE {
 		last_write_time = (cast(u64) (find_data.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (find_data.ftLastWriteTime.dwLowDateTime)
 		win.FindClose(find_handle)
 	} 
 	return last_write_time
 }
+
+
+
+
+begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
+	state.input_record_index = input_recording_index
+	state.input_record_handle = win.CreateFileW(win.utf8_to_wstring("foo.handmade_input"), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
+	bytes_written: u32
+	win.WriteFile(state.input_record_handle, raw_data(state.game_memory_block), cast(u32) len(state.game_memory_block), &bytes_written, nil) 
+}
+
+record_input :: proc(state: ^State, input: ^GameInput) {
+	bytes_written: u32
+	win.WriteFile(state.input_record_handle, input, cast(u32) size_of(GameInput), &bytes_written, nil) 
+}
+
+end_recording_input :: proc(state: ^State) {
+	win.CloseHandle(state.input_record_handle)
+	state.input_record_index = 0
+}
+
+begin_replaying_input :: proc(state: ^State, input_replaying_index: i32) {
+	state.input_replay_index = input_replaying_index
+	state.input_replay_handle = win.CreateFileW(win.utf8_to_wstring("foo.handmade_input"), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
+	
+	bytes_read: u32
+	win.ReadFile(state.input_replay_handle, raw_data(state.game_memory_block), cast(u32) len(state.game_memory_block), &bytes_read, nil)
+	if bytes_read != 0 {
+
+	} else {
+		// TODO: Logging
+	}
+}
+
+replay_input :: proc(state: ^State, input: ^GameInput) {
+	bytes_read: u32
+	win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(GameInput), &bytes_read, nil)
+	if bytes_read != 0 {
+		// NOTE: the is still input
+	} else {
+		// NOTE: we reached the end of the stream go back to beginning
+		replay_index := state.input_replay_index
+		end_replaying_input(state)
+		begin_replaying_input(state, replay_index)
+	}
+}
+
+end_replaying_input :: proc(state: ^State) {
+	win.CloseHandle(state.input_replay_handle)
+	state.input_replay_index = 0
+}
+
+
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
 	region1, region2 : rawptr
@@ -705,7 +789,7 @@ main_window_callback :: proc "system" (window:  win.HWND, message: win.UINT, w_p
 	return result
 }
 
-process_pending_messages :: proc(keyboard_controller: ^GameInputController) {
+process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputController) {
 	process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
 		assert(is_down != new_state.ended_down)
 		new_state.ended_down = is_down
@@ -753,6 +837,18 @@ process_pending_messages :: proc(keyboard_controller: ^GameInputController) {
 				case win.VK_X:
 					process_win_keyboard_message(&keyboard_controller.start         , is_down)
 				case win.VK_SPACE:
+				case win.VK_L:
+					if is_down {
+						if state.input_replay_index != 0 {
+							end_replaying_input(state)
+						} else if state.input_record_index == 0 {
+							assert(state.input_replay_index == 0)
+							begin_recording_input(state, 1)
+						} else {
+							end_recording_input(state)
+							begin_replaying_input(state, 1)
+						}
+					}
 				case win.VK_P:
 					if is_down do GLOBAL_PAUSE = !GLOBAL_PAUSE
 				case win.VK_F4:

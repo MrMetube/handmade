@@ -104,6 +104,7 @@ GameState :: struct {
 	green_offset, blue_offset: i32,
 	tone_hz:u32,
 	t_sine: f32,
+	player: [2]i32,
 }
 
 // timing
@@ -115,6 +116,8 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 	if !memory.is_initialized {
 		game_state.tone_hz = 420
+
+		game_state.player = 100
 
 		file := memory.debug.read_entire_file(#file)
 		if file != nil {
@@ -128,27 +131,40 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	// tone_hz = 440 + u32(440 * f32(left_stick_y) / 60000)
 
 	for controller in input.controllers {
-		if controller.is_analog {
-			// NOTE use analog movement tuning
-			game_state.green_offset += cast(i32) (4 * controller.stick_average.x)
-			game_state.tone_hz = 420 + cast(u32)(210 * controller.stick_average.y)
-		} else {
-			// NOTE Use digital movement tuning
-			if controller.stick_left.ended_down {
-				game_state.green_offset -= 1
-			}
-			if controller.stick_right.ended_down {
-				game_state.green_offset += 1
-			}
+		// if controller.is_analog {
+		// 	// NOTE use analog movement tuning
+		// 	game_state.green_offset += cast(i32) (4 * controller.stick_average.x)
+		// 	game_state.tone_hz = 420 + cast(u32)(210 * controller.stick_average.y)
+		// } else {
+		// 	// NOTE Use digital movement tuning
+		// 	if controller.stick_left.ended_down {
+		// 		game_state.green_offset -= 1
+		// 	}
+		// 	if controller.stick_right.ended_down {
+		// 		game_state.green_offset += 1
+		// 	}
+		// }
+
+		// if controller.button_down.ended_down {
+		// 	game_state.blue_offset += 1
+		// }
+		game_state.player += {cast(i32) (10*controller.stick_average.x), cast(i32) (-10*controller.stick_average.y)}
+
+
+		floor := offscreen_buffer.height / 2
+		if game_state.player.y > floor  {
+			game_state.player.y = floor 
 		}
 
-		if controller.button_down.ended_down {
-			game_state.blue_offset += 1
+		if game_state.player.y < floor {
+			game_state.player.y += 1
 		}
+
+		if controller.button_down.ended_down do game_state.player.y -= 50
 	}
 
-	
 	render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
+	render_player(offscreen_buffer, game_state^)
 }
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a 
@@ -158,7 +174,7 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
 	// TODO: Allow sample offsets here for more robust platform options
 	game_state := cast(^GameState) raw_data(memory.permanent_storage)
-	output_sound(sound_buffer, game_state)
+	// output_sound(sound_buffer, game_state)
 }
 
 
@@ -175,7 +191,21 @@ output_sound :: proc(sound_buffer: GameSoundBuffer, game_state:^GameState){
 	}
 }
 
-render_weird_gradient :: proc(buffer: GameOffscreenBuffer , greenOffset, blueOffset: i32) {
+render_player :: proc(buffer: GameOffscreenBuffer, game_state: GameState){
+	top, bottom := game_state.player.y, game_state.player.y+10
+	
+	if top < 0 do top = 0
+	if bottom > buffer.height do bottom = buffer.height
+
+	for x in game_state.player.x..<game_state.player.x +10 {
+		for y in top..<bottom {
+			pixel := &buffer.memory[y*buffer.width + x]
+			pixel^ = OffscreenBufferColor{b=125, g=240, r=200}
+		}
+	}
+}
+
+render_weird_gradient :: proc(buffer: GameOffscreenBuffer, greenOffset, blueOffset: i32) {
 	for y in 0..<buffer.height {
 		for x in 0..<buffer.width {
 			pixel := &buffer.memory[y*buffer.width + x]
