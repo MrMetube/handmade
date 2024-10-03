@@ -59,6 +59,12 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
 	}
 }
 
+
+
+// ---------------------- Internal stuff
+
+
+
 @(private="file")
 ProcDirectSoundCreate :: #type proc(lpGuid: win.LPGUID, ppDS: ^^IDirectSound,   pUnkOuter: win.LPUNKNOWN) -> win.HRESULT
 

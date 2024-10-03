@@ -7,9 +7,8 @@ IF NOT EXIST .\build mkdir .\build
 REM TODO shipping build
 
 REM debug build
-IF EXIST .\build\game.pdb del .\build\game.pdb
-odin build game -build-mode:dll -out:.\build\game.dll %build-flags% %debug-flags%
+del .\build\*.pdb
+odin build game -build-mode:dll -out:.\build\game.dll %build-flags% %debug-flags% -pdb-name:.\build\game-%time:~0,2%-%time:~3,2%-%time:~6,2%-%time:~9,2%.pdb
 odin build . -out:.\build\debug.exe %build-flags% %debug-flags% -define:INTERNAL=true
-
 
 exit /b 0

@@ -141,8 +141,21 @@ GameState :: struct {
 
 main :: proc() {
 	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
-
 	
+	exe_path : string
+	{
+		exe_path_buffer : [win.MAX_PATH_WIDE]u16
+		size_of_filename := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
+		exe_path_and_name := win.wstring_to_utf8(raw_data(exe_path_buffer[:size_of_filename]), cast(int) size_of_filename) or_else ""
+		one_past_last_slash : u32
+		for r, i in exe_path_and_name {
+			if r == '\\' {
+				one_past_last_slash = cast(u32) i + 1
+			}
+		}
+		exe_path = exe_path_and_name[:one_past_last_slash]
+	}
+
 	// NOTE: Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
 	desired_scheduler_ms :: 1
 	sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
@@ -192,7 +205,7 @@ main :: proc() {
 
 	// ---------------------- Video Setup
 	// TODO: how do we reliably query this on windows?
-	monitor_refresh_hz :: 144
+	monitor_refresh_hz :: 60
 	game_update_hz: u32 = monitor_refresh_hz / 2
 	target_seconds_per_frame: f32 = 1 / cast(f32) game_update_hz
 
@@ -211,11 +224,11 @@ main :: proc() {
 
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
 	
-	audio_latency_bytes: u32
-	audio_latency_seconds: f32
 	sound_is_valid: b32
 	
 	when INTERNAL {
+		audio_latency_bytes: u32
+		audio_latency_seconds: f32
 		debug_last_time_markers: [36]DebugTimeMarker
 	}
 
@@ -228,7 +241,8 @@ main :: proc() {
 
     
 	// ---------------------- Memory Setup
-	init_game_lib()
+	game_dll_name := win.utf8_to_wstring("game.dll")
+	_, game_dll_write_time := init_game_lib(game_dll_name)
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
 	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.sound_buffer_size_in_bytes, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -263,10 +277,12 @@ main :: proc() {
 	flip_counter := get_wall_clock()
 	last_cycle_count := intrinsics.read_cycle_counter()
 	
-	
-	
-
 	for RUNNING {
+		// TODO: if this is too slow the audio and the whole game will lag
+		if get_last_write_time(game_dll_name) != game_dll_write_time {
+			_, game_dll_write_time = init_game_lib(game_dll_name)
+		}
+
 		{ // ---------------------- Input
 			old_keyboard_controller := &old_input.controllers[0]
 			new_keyboard_controller := &new_input.controllers[0]
@@ -535,6 +551,16 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
 	return f32(end - start) / f32(global_perf_counter_frequency)
 }
 
+get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
+	find_data: win.WIN32_FIND_DATAW
+	find_handle := win.FindFirstFileW(filename, &find_data)
+	if find_handle != win.INVALID_HANDLE_VALUE {
+		last_write_time = (cast(u64) (find_data.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (find_data.ftLastWriteTime.dwLowDateTime)
+		win.FindClose(find_handle)
+	} 
+	return last_write_time
+}
+
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
 	region1, region2 : rawptr
 	region1_size, region2_size: win.DWORD
@@ -727,8 +753,6 @@ process_pending_messages :: proc(keyboard_controller: ^GameInputController) {
 				case win.VK_X:
 					process_win_keyboard_message(&keyboard_controller.start         , is_down)
 				case win.VK_SPACE:
-				case win.VK_R:
-					if is_down do init_game_lib()
 				case win.VK_P:
 					if is_down do GLOBAL_PAUSE = !GLOBAL_PAUSE
 				case win.VK_F4:

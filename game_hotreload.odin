@@ -2,19 +2,24 @@ package main
 
 import win "core:sys/windows"
 
-init_game_lib :: proc() -> (is_valid:b32) {
+game_update_and_render    := game_update_and_render_stub
+game_output_sound_samples := game_output_sound_samples_stub
+
+init_game_lib :: proc(source_dll_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
+	temp_dll_name   := win.utf8_to_wstring("temp_game.dll")
+	
 	if game_lib == nil {
 		assert(game_update_and_render == game_update_and_render_stub, "Game.dll has already been initialized")
 		assert(game_output_sound_samples == game_output_sound_samples_stub, "Game.dll has already been initialized")
 	} else {
 		if !win.FreeLibrary(game_lib) {
 			// TODO Diagnotics
-			_ = 123
 		}
 	}
-	
-	win.CopyFileW(win.utf8_to_wstring("game.dll"), win.utf8_to_wstring("temp_game.dll"), false)
-	game_lib = win.LoadLibraryW(win.utf8_to_wstring("temp_game.dll"))
+
+	win.CopyFileW(source_dll_name, temp_dll_name, false)
+	last_write_time = get_last_write_time(source_dll_name)
+	game_lib = win.LoadLibraryW(temp_dll_name)
 
 	if (game_lib != nil) {
 		game_update_and_render    = cast(proc_game_update_and_render)    win.GetProcAddress(game_lib, "game_update_and_render")
@@ -30,14 +35,16 @@ init_game_lib :: proc() -> (is_valid:b32) {
 		game_output_sound_samples = game_output_sound_samples_stub
 	}
 	
-	return is_valid
+	return is_valid, last_write_time
 }
+
+
+
+// ---------------------- Internal stuff
+
+
 @(private="file")
 game_lib : win.HMODULE
-
-
-game_update_and_render    := game_update_and_render_stub
-game_output_sound_samples := game_output_sound_samples_stub
 
 @(private="file")
 proc_game_update_and_render    :: #type proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, input: GameInput)
