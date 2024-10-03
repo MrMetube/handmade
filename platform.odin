@@ -4,9 +4,8 @@ import "base:intrinsics"
 import "base:runtime"
 
 import "core:fmt"
-
 import win "core:sys/windows"
-
+import "util"
 
 INTERNAL :: #config(INTERNAL, true)
 
@@ -61,6 +60,85 @@ OffscreenBuffer :: struct {
 	height : i32,
 }
 
+// TODO Copypasta from game package
+
+Sample :: [2]i16
+
+GameSoundBuffer :: struct {
+	samples            : []Sample,
+	samples_per_second : u32,
+}
+
+GameOffscreenBuffer :: struct {
+	memory : [^]OffscreenBufferColor,
+	width  : i32,
+	height : i32,
+}
+
+GameInputButton :: struct {
+	half_transition_count: i32,
+	ended_down : b32,
+}
+
+GameInputController :: struct {
+	is_connected: b32,
+	is_analog: b32,
+
+	stick_average: [2]f32,
+	
+	using _buttons_array_and_enum : struct #raw_union {
+		buttons: [18]GameInputButton,
+		using _buttons_enum : struct {
+			stick_up    : GameInputButton,
+			stick_down  : GameInputButton,
+			stick_left  : GameInputButton,
+			stick_right : GameInputButton,
+			
+			button_up    : GameInputButton,
+			button_down  : GameInputButton,
+			button_left  : GameInputButton,
+			button_right : GameInputButton,
+
+			dpad_up    : GameInputButton,
+			dpad_down  : GameInputButton,
+			dpad_left  : GameInputButton,
+			dpad_right : GameInputButton,
+
+			start : GameInputButton,
+			back  : GameInputButton,
+
+			shoulder_left  : GameInputButton,
+			shoulder_right : GameInputButton,
+
+			thumb_left  : GameInputButton,
+			thumb_right : GameInputButton,
+		},
+	},
+}
+#assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
+
+// TODO allow outputing vibration
+GameInput :: struct {
+	// TODO insert clock values here
+	controllers: [5]GameInputController
+}
+
+GameMemory :: struct {
+	is_initialized: b32,
+	// Note: REQUIRED to be cleared to zero at startup
+	permanent_storage: []u8, 
+	transient_storage: []u8,
+
+	debug: DEBUG_code
+}
+
+GameState :: struct {
+	green_offset, blue_offset: i32,
+	tone_hz:u32,
+}
+
+// TODO Copypaste END
+
 main :: proc() {
 	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
 
@@ -71,7 +149,6 @@ main :: proc() {
 
 	window : win.HWND
 	{ // ---------------------- Window Setup
-
 		window_class := win.WNDCLASSW{
 			hInstance = cast(win.HINSTANCE) win.GetModuleHandleW(nil),
 			lpszClassName = win.utf8_to_wstring("HandmadeWindowClass"),
@@ -142,8 +219,6 @@ main :: proc() {
 		debug_last_time_markers: [36]DebugTimeMarker
 	}
 
-
-
 	// ---------------------- Input Setup
 	init_xInput()
 
@@ -153,6 +228,7 @@ main :: proc() {
 
     
 	// ---------------------- Memory Setup
+	init_game_lib()
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
 	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.sound_buffer_size_in_bytes, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -161,15 +237,19 @@ main :: proc() {
 
 	game_memory : GameMemory
 	{
-		base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
+		base_address := cast(rawptr) cast(uintptr) util.terabytes(1) when INTERNAL else 0
 
-		permanent_storage_size := megabytes(64)
-		transient_storage_size := gigabytes(4)
+		permanent_storage_size := util.megabytes(64)
+		transient_storage_size := util.gigabytes(4)
 		total_size := permanent_storage_size + transient_storage_size
 
 		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 		game_memory.permanent_storage = storage_ptr[0:][:permanent_storage_size]
 		game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size] 
+
+		game_memory.debug.read_entire_file  = DEBUG_read_entire_file
+		game_memory.debug.write_entire_file = DEBUG_write_entire_file
+		game_memory.debug.free_file_memory  = DEBUG_free_file_memory
 	}
 
 	if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
@@ -386,7 +466,7 @@ main :: proc() {
 				sound_is_valid = false
 			}
 			
-			swap(&old_input, &new_input)
+			util.swap(&old_input, &new_input)
 		}
 
 		
@@ -647,6 +727,8 @@ process_pending_messages :: proc(keyboard_controller: ^GameInputController) {
 				case win.VK_X:
 					process_win_keyboard_message(&keyboard_controller.start         , is_down)
 				case win.VK_SPACE:
+				case win.VK_R:
+					if is_down do init_game_lib()
 				case win.VK_P:
 					if is_down do GLOBAL_PAUSE = !GLOBAL_PAUSE
 				case win.VK_F4:

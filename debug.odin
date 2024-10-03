@@ -1,14 +1,25 @@
 package main
 
 import win "core:sys/windows"
+import "util"
 
 when INTERNAL {
+
+	DEBUG_code :: struct {
+		read_entire_file  : proc_DEBUG_read_entire_file,
+		write_entire_file : proc_DEBUG_write_entire_file,
+		free_file_memory  : proc_DEBUG_free_file_memory,
+	}
+
+	proc_DEBUG_read_entire_file :: #type proc(filename: string) -> (result: []u8)
+	proc_DEBUG_write_entire_file :: #type proc(filename: string, memory: []u8) -> b32
+	proc_DEBUG_free_file_memory :: #type proc(memory: []u8)
+
 	/* IMPORTANT:
 		These are not for doing anything in the shipping game
 		they are blocking and the write doesnt protect against lost data!
 	*/
-
-	DEBUG_read_entire_file :: proc(filename: string) -> (result: []u8) {
+	DEBUG_read_entire_file : proc_DEBUG_read_entire_file : proc(filename: string) -> (result: []u8) {
 		handle := win.CreateFileW(win.utf8_to_wstring(filename), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
 		defer win.CloseHandle(handle)
 
@@ -21,7 +32,7 @@ when INTERNAL {
 			return nil // TODO Logging
 		}
 		
-		file_size_32 := safe_truncate_u64(cast(u64) file_size)
+		file_size_32 := util.safe_truncate_u64(cast(u64) file_size)
 		result_ptr := cast([^]u8) win.VirtualAlloc(nil, cast(uint) file_size_32, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 		if result_ptr == nil {
 			return nil // TODO Logging
@@ -37,7 +48,7 @@ when INTERNAL {
 		return result_ptr[:file_size_32]
 	}
 
-	DEBUG_write_entire_file :: proc(filename: string, memory: []u8) -> b32 {
+	DEBUG_write_entire_file : proc_DEBUG_write_entire_file : proc(filename: string, memory: []u8) -> b32 {
 		handle := win.CreateFileW(win.utf8_to_wstring(filename), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
 		defer win.CloseHandle(handle)
 
@@ -54,7 +65,7 @@ when INTERNAL {
 		return true
 	}
 
-	DEBUG_free_file_memory :: proc(memory: []u8) {
+	DEBUG_free_file_memory : proc_DEBUG_free_file_memory : proc(memory: []u8) {
 		if memory != nil {
 			win.VirtualFree(raw_data(memory), 0, win.MEM_RELEASE)
 		}
@@ -67,7 +78,7 @@ when INTERNAL {
 		expected_frame_boundary_byte: win.DWORD,
 	}
 
-	DEBUG_sync_display :: proc(back_buffer: OffscreenBuffer, last_time_markers: []DebugTimeMarker, sound_output: SoundOutput, target_seconds_per_frame: f32){
+	DEBUG_sync_display :: proc(back_buffer: OffscreenBuffer, last_time_markers: []DebugTimeMarker, sound_output: SoundOutput, target_seconds_per_frame: f32) {
 		pad: [2]i32 = {100, 20}
 		c := f32(back_buffer.width - 2*pad.x) / f32(sound_output.sound_buffer_size_in_bytes)
 

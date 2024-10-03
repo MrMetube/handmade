@@ -1,10 +1,26 @@
-package main
+package game
 
 import "core:fmt"
 import "core:math"  // TODO implement sine ourself
 
-Sample :: [2]i16
+// TODO Copypasta from platform
+SoundOutput :: struct {
+	samples_per_second         : u32,
+	num_channels               : u32,
+	bytes_per_sample           : u32,
+	sound_buffer_size_in_bytes : u32,
+	running_sample_index       : u32,
+	safety_bytes               : u32,
+}
 
+OffscreenBufferColor :: struct{
+	b, g, r, pad: u8
+}
+
+// TODO Copypasta END
+
+Sample :: [2]i16
+	
 GameSoundBuffer :: struct {
 	samples            : []Sample,
 	samples_per_second : u32,
@@ -58,6 +74,17 @@ GameInputController :: struct {
 }
 #assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
 
+// TODO COPYPASTA from debug
+DEBUG_code :: struct {
+	read_entire_file  : proc_DEBUG_read_entire_file,
+	write_entire_file : proc_DEBUG_write_entire_file,
+	free_file_memory  : proc_DEBUG_free_file_memory,
+}
+
+proc_DEBUG_read_entire_file :: #type proc(filename: string) -> (result: []u8)
+proc_DEBUG_write_entire_file :: #type proc(filename: string, memory: []u8) -> b32
+proc_DEBUG_free_file_memory :: #type proc(memory: []u8)
+
 // TODO allow outputing vibration
 GameInput :: struct {
 	// TODO insert clock values here
@@ -69,14 +96,18 @@ GameMemory :: struct {
 	// Note: REQUIRED to be cleared to zero at startup
 	permanent_storage: []u8, 
 	transient_storage: []u8,
+
+	debug: DEBUG_code
 }
 
 GameState :: struct {
 	green_offset, blue_offset: i32,
 	tone_hz:u32,
+	t_sine: f32,
 }
 
-// timing, keyboard input
+// timing
+@export
 game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, input: GameInput){
 	assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
 	
@@ -85,10 +116,10 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	if !memory.is_initialized {
 		game_state.tone_hz = 420
 
-		file := DEBUG_read_entire_file(#file)
+		file := memory.debug.read_entire_file(#file)
 		if file != nil {
-			DEBUG_write_entire_file("D:/projekte/handmade/data/testfile.test", file)
-			DEBUG_free_file_memory(file)
+			memory.debug.write_entire_file("D:/projekte/handmade/data/testfile.test", file)
+			memory.debug.free_file_memory(file)
 		}
 		// TODO this may be more appropriate to do in the platform layer
 		memory.is_initialized = true
@@ -117,31 +148,30 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	}
 
 	
-	// render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
+	render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
 }
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a 
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
+@export
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
 	// TODO: Allow sample offsets here for more robust platform options
 	game_state := cast(^GameState) raw_data(memory.permanent_storage)
-	game_output_sound(sound_buffer, game_state.tone_hz)
+	output_sound(sound_buffer, game_state)
 }
 
 
-game_output_sound :: proc(sound_buffer: GameSoundBuffer, tone_hz: u32){
-	@(static)
-	t_sine: f32 = 0
+output_sound :: proc(sound_buffer: GameSoundBuffer, game_state:^GameState){
 	tone_volumne :: 1000
-	wave_period := sound_buffer.samples_per_second / tone_hz
+	wave_period := sound_buffer.samples_per_second / game_state.tone_hz
 
 	for sample_out_index in 0..<len(sound_buffer.samples){
-		sample_value := cast(i16) (math.sin(t_sine) * tone_volumne)
+		sample_value := cast(i16) (math.sin(game_state.t_sine) * tone_volumne)
 
 		sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
-		t_sine += math.TAU / f32(wave_period)
-		if t_sine > math.TAU do t_sine -= math.TAU
+		game_state.t_sine += math.TAU / f32(wave_period)
+		if game_state.t_sine > math.TAU do game_state.t_sine -= math.TAU
 	}
 }
 
