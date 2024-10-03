@@ -174,7 +174,7 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
 	// TODO: Allow sample offsets here for more robust platform options
 	game_state := cast(^GameState) raw_data(memory.permanent_storage)
-	// output_sound(sound_buffer, game_state)
+	output_sound (sound_buffer, game_state)
 }
 
 

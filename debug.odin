@@ -80,7 +80,7 @@ when INTERNAL {
 
 	DEBUG_sync_display :: proc(back_buffer: OffscreenBuffer, last_time_markers: []DebugTimeMarker, sound_output: SoundOutput, target_seconds_per_frame: f32) {
 		pad: [2]i32 = {100, 20}
-		c := f32(back_buffer.width - 2*pad.x) / f32(sound_output.sound_buffer_size_in_bytes)
+		c := f32(back_buffer.width - 2*pad.x) / f32(sound_output.buffer_size)
 
 		bottom, top  := back_buffer.height - pad.y, pad.y
 		middle := back_buffer.height/2
@@ -90,25 +90,24 @@ when INTERNAL {
 			DEBUG_draw_vertical(back_buffer, i32(x) + padx, top, bottom, color)
 		}
 
-		play_color := transmute(OffscreenBufferColor) u32(0x00ffffff)
-		write_color := transmute(OffscreenBufferColor) u32(0x00ff0000)
-		expected_color := transmute(OffscreenBufferColor) u32(0x00ffff00)
-		window_color := transmute(OffscreenBufferColor) u32(0x00ff00ff)
+		play_color     := OffscreenBufferColor{r=0xff, g=0xff, b=0xff}
+		write_color    := OffscreenBufferColor{r=0xff, g=0x00, b=0x00}
+		expected_color := OffscreenBufferColor{r=0xff, g=0xff, b=0x00}
+		window_color   := OffscreenBufferColor{r=0xff, g=0x00, b=0xff}
 
 		for marker, i in last_time_markers {
 			if i == 0 {
-
 				draw_cursor(back_buffer, marker.output_location, c, pad.x, middle - pad.y*6, middle - pad.y*5, play_color)
 				draw_cursor(back_buffer, marker.output_location + marker.output_byte_count, c, pad.x, middle - pad.y*6, middle - pad.y*5, write_color)
 
 				draw_cursor(back_buffer, marker.expected_frame_boundary_byte, c, pad.x, middle - pad.y*4, middle - pad.y*1, expected_color)
+
 				draw_cursor(back_buffer, marker.output_play_cursor, c, pad.x, middle - pad.y*4, middle - pad.y*3, play_color)
 				draw_cursor(back_buffer, marker.output_write_cursor, c, pad.x, middle - pad.y*4, middle - pad.y*3, write_color)
 
 				draw_cursor(back_buffer, marker.flip_play_cursor, c, pad.x, middle - pad.y*2, middle - pad.y, play_color)
 				draw_cursor(back_buffer, marker.flip_play_cursor + 480 * sound_output.bytes_per_sample, c, pad.x, middle - pad.y*2, middle - pad.y, window_color)
 				draw_cursor(back_buffer, marker.flip_write_cursor, c, pad.x, middle - pad.y*2, middle - pad.y, write_color)
-
 			} else {
 				draw_cursor(back_buffer, marker.flip_play_cursor, c, pad.x, middle + pad.y-10, middle + pad.y*2, play_color)
 				draw_cursor(back_buffer, marker.flip_write_cursor, c, pad.x, middle + pad.y, middle + pad.y*2+10, write_color)

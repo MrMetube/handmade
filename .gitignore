@@ -6,4 +6,4 @@
 *.exe
 *.pdb
 *.test
-*.handmade_input
+*.input

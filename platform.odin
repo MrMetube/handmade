@@ -7,8 +7,6 @@ import "core:fmt"
 import win "core:sys/windows"
 import "util"
 
-INTERNAL :: #config(INTERNAL, true)
-
 /*
 	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
  
@@ -30,6 +28,11 @@ INTERNAL :: #config(INTERNAL, true)
 	Just a partial list of stuff !!
 */
 
+// ---------------------- ---------------------- ---------------------- 
+// ---------------------- Globals 
+// ---------------------- ---------------------- ---------------------- 
+
+INTERNAL :: #config(INTERNAL, true)
 // TODO this is a global for now
 RUNNING : b32
 
@@ -40,11 +43,16 @@ global_perf_counter_frequency : win.LARGE_INTEGER
 
 GLOBAL_PAUSE := false
 
+
+// ---------------------- ---------------------- ---------------------- 
+// ---------------------- Types
+// ---------------------- ---------------------- ---------------------- 
+
 SoundOutput :: struct {
 	samples_per_second         : u32,
 	num_channels               : u32,
 	bytes_per_sample           : u32,
-	sound_buffer_size_in_bytes : u32,
+	buffer_size : u32,
 	running_sample_index       : u32,
 	safety_bytes               : u32,
 }
@@ -153,6 +161,12 @@ State :: struct {
 main :: proc() {
 	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
 	
+
+
+	// ---------------------- ---------------------- ---------------------- 
+	// ----------------------  Platform Setup
+	// ---------------------- ---------------------- ---------------------- 
+	
 	state: State
 	{
 		exe_path_buffer : [win.MAX_PATH_WIDE]u16
@@ -170,8 +184,16 @@ main :: proc() {
 	desired_scheduler_ms :: 1
 	sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
 
+	RUNNING = true
+
+
+
+	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- Window Setup
+	// ---------------------- ---------------------- ---------------------- 
+
 	window : win.HWND
-	{ // ---------------------- Window Setup
+	{ 
 		window_class := win.WNDCLASSW{
 			hInstance = cast(win.HINSTANCE) win.GetModuleHandleW(nil),
 			lpszClassName = win.utf8_to_wstring("HandmadeWindowClass"),
@@ -192,7 +214,7 @@ main :: proc() {
 		_window_title := "Handmade"
 		window_title := cast([^]u16) raw_data(_window_title[:])
 		window = win.CreateWindowExW(
-			win.WS_EX_TOPMOST | win.WS_EX_LAYERED,
+			0, //win.WS_EX_TOPMOST | win.WS_EX_LAYERED,
 			window_class.lpszClassName,
 			window_title,
 			win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
@@ -212,22 +234,31 @@ main :: proc() {
 	}
 
 
+
+	// ---------------------- ---------------------- ---------------------- 
 	// ---------------------- Video Setup
+	// ---------------------- ---------------------- ---------------------- 
+	
 	// TODO: how do we reliably query this on windows?
-	monitor_refresh_hz :: 60
+	monitor_refresh_hz :: 144
 	game_update_hz: u32 = monitor_refresh_hz / 2
 	target_seconds_per_frame: f32 = 1 / cast(f32) game_update_hz
 
+
+
+	// ---------------------- ---------------------- ---------------------- 
 	// ---------------------- Sound Setup
+	// ---------------------- ---------------------- ---------------------- 
+	
 	sound_output : SoundOutput
 	sound_output.samples_per_second = 48000
 	sound_output.num_channels = 2
 	sound_output.bytes_per_sample = size_of(Sample)
-	sound_output.sound_buffer_size_in_bytes = sound_output.samples_per_second * sound_output.bytes_per_sample
+	sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample
 	// TODO actually computre this variance and set a reasonable value
 	sound_output.safety_bytes = (sound_output.samples_per_second * sound_output.bytes_per_sample / game_update_hz)
 
-	init_dSound(window, sound_output.sound_buffer_size_in_bytes, sound_output.samples_per_second)
+	init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
 
 	clear_sound_buffer(&sound_output)
 
@@ -241,19 +272,29 @@ main :: proc() {
 		debug_last_time_markers: [36]DebugTimeMarker
 	}
 
+
+
+	// ---------------------- ---------------------- ---------------------- 
 	// ---------------------- Input Setup
+	// ---------------------- ---------------------- ---------------------- 
+
 	init_xInput()
 
 	input : [2]GameInput
 	old_input, new_input := input[0], input[1]
 
 
+
+	// ---------------------- ---------------------- ---------------------- 
 	// ---------------------- Memory Setup
-	game_dll_name := fmt.tprint(state.exe_path, "game.dll", sep="\\")
-	_, game_dll_write_time := init_game_lib(game_dll_name)
+	// ---------------------- ---------------------- ---------------------- 
+
+	game_dll_name := build_exe_path(state, "game.dll")
+	temp_dll_name := build_exe_path(state, "game_temp.dll")
+	game_lib_is_valid, game_dll_write_time := init_game_lib(game_dll_name, temp_dll_name)
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
-	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.sound_buffer_size_in_bytes, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 
 	context.allocator = {}
 
@@ -262,7 +303,7 @@ main :: proc() {
 		base_address := cast(rawptr) cast(uintptr) util.terabytes(1) when INTERNAL else 0
 
 		permanent_storage_size := util.megabytes(u64(64))
-		transient_storage_size := util.gigabytes(u64(2))
+		transient_storage_size := util.gigabytes(u64(1))
 		total_size :u64= permanent_storage_size + transient_storage_size
 
 		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -281,9 +322,12 @@ main :: proc() {
 		return // TODO logging
 	}
 
-	RUNNING = true
 
+
+	// ---------------------- ---------------------- ---------------------- 
 	// ---------------------- Timer Setup
+	// ---------------------- ---------------------- ---------------------- 
+
 	last_counter := get_wall_clock()
 	flip_counter := get_wall_clock()
 	last_cycle_count := intrinsics.read_cycle_counter()
@@ -291,7 +335,7 @@ main :: proc() {
 	for RUNNING {
 		// TODO: if this is too slow the audio and the whole game will lag
 		if get_last_write_time(game_dll_name) != game_dll_write_time {
-			_, game_dll_write_time = init_game_lib(game_dll_name)
+			game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name)
 		}
 
 		{ // ---------------------- Input
@@ -321,6 +365,7 @@ main :: proc() {
 
 				if XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
 					new_controller.is_connected = true
+					new_controller.is_analog = old_controller.is_analog
 					// TODO see if dwPacketNumber increments too rapidly
 					pad := controller_state.Gamepad
 					
@@ -391,8 +436,12 @@ main :: proc() {
 		}
 
 		if GLOBAL_PAUSE do continue
-		{ // ---------------------- Update, Sound and Render
-				
+		
+		
+		// ---------------------- ---------------------- ---------------------- 
+		// ---------------------- Update, Sound and Render
+		// ---------------------- ---------------------- ---------------------- 
+		{ 
 			offscreen_buffer := GameOffscreenBuffer{
 				memory = the_back_buffer.memory,
 				width  = the_back_buffer.width,
@@ -412,7 +461,9 @@ main :: proc() {
 				replay_input(&state, &new_input)
 			}
 
-			game_update_and_render(&game_memory, offscreen_buffer, new_input)
+			if game_lib_is_valid {
+				game_update_and_render(&game_memory, offscreen_buffer, new_input)
+			}
 			
 			sound_is_valid = true
 			play_cursor, write_cursor : win.DWORD
@@ -442,9 +493,9 @@ main :: proc() {
 					sound_is_valid = true
 				}
 
-				byte_to_lock := (sound_output.running_sample_index*sound_output.bytes_per_sample) % sound_output.sound_buffer_size_in_bytes
+				byte_to_lock := (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.buffer_size
 
-				expected_sound_bytes_per_frame := sound_output.samples_per_second * sound_output.bytes_per_sample / game_update_hz
+				expected_sound_bytes_per_frame := (sound_output.samples_per_second * sound_output.bytes_per_sample) / game_update_hz
 				
 				seconds_left_until_flip := target_seconds_per_frame-from_begin_to_audio
 				expected_sound_bytes_until_flip := cast(win.DWORD) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
@@ -453,7 +504,7 @@ main :: proc() {
 
 				safe_write_cursor := write_cursor
 				if safe_write_cursor < play_cursor {
-					safe_write_cursor += sound_output.sound_buffer_size_in_bytes
+					safe_write_cursor += sound_output.buffer_size
 				}
 				assert(safe_write_cursor >= play_cursor)
 				safe_write_cursor += sound_output.safety_bytes
@@ -466,11 +517,11 @@ main :: proc() {
 				} else {
 					target_cursor = write_cursor + sound_output.safety_bytes + expected_sound_bytes_per_frame
 				}
-				target_cursor %= sound_output.sound_buffer_size_in_bytes
+				target_cursor %= sound_output.buffer_size
 
 				bytes_to_write: win.DWORD
 				if byte_to_lock > target_cursor {
-					bytes_to_write = target_cursor - byte_to_lock + sound_output.sound_buffer_size_in_bytes
+					bytes_to_write = target_cursor - byte_to_lock + sound_output.buffer_size
 				} else{
 					bytes_to_write = target_cursor - byte_to_lock
 				}
@@ -479,8 +530,10 @@ main :: proc() {
 					samples_per_second = sound_output.samples_per_second,
 					samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)],
 				}
-				game_output_sound_samples(&game_memory, sound_buffer)
-				
+				if game_lib_is_valid {
+					game_output_sound_samples(&game_memory, sound_buffer)
+				}
+
 				when INTERNAL {
 					the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result)
 					debug_last_time_markers[0].output_play_cursor           = play_cursor
@@ -489,7 +542,7 @@ main :: proc() {
 					debug_last_time_markers[0].output_byte_count            = bytes_to_write
 					debug_last_time_markers[0].expected_frame_boundary_byte = expected_frame_boundary_byte
 
-					audio_latency_bytes = ((write_cursor - play_cursor) + sound_output.sound_buffer_size_in_bytes) % sound_output.sound_buffer_size_in_bytes
+					audio_latency_bytes = ((write_cursor - play_cursor) + sound_output.buffer_size) % sound_output.buffer_size
 					audio_latency_seconds = (cast(f32)audio_latency_bytes / cast(f32)sound_output.bytes_per_sample) / cast(f32)sound_output.samples_per_second
 
 					// fmt.printfln("PC %v WC %v Delta %v Seconds %vs", play_cursor, write_cursor, audio_latency_bytes, audio_latency_seconds)
@@ -503,8 +556,10 @@ main :: proc() {
 			util.swap(&old_input, &new_input)
 		}
 
-		
-		{ // ---------------------- Display Frame & Performance Counters
+		// ---------------------- ---------------------- ---------------------- 
+		// ---------------------- Display Frame & Performance Counters
+		// ---------------------- ---------------------- ---------------------- 
+		{ 
 			seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
 			if seconds_elapsed_for_frame < target_seconds_per_frame {
 				// if sleep_is_granular {
@@ -582,22 +637,41 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
 
 
 get_last_write_time :: proc(filename: string) -> (last_write_time: u64) {
-	find_data: win.WIN32_FIND_DATAW
 	w_filename := win.utf8_to_wstring(filename)
-	find_handle := win.FindFirstFileW(w_filename, &find_data)
-	if find_handle != win.INVALID_HANDLE_VALUE {
-		last_write_time = (cast(u64) (find_data.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (find_data.ftLastWriteTime.dwLowDateTime)
-		win.FindClose(find_handle)
-	} 
+	FILE_ATTRIBUTE_DATA :: struct {
+		dwFileAttributes : win.DWORD,
+		ftCreationTime : win.FILETIME,
+		ftLastAccessTime : win.FILETIME,
+		ftLastWriteTime : win.FILETIME,
+		nFileSizeHigh : win.DWORD,
+		nFileSizeLow : win.DWORD,
+	}
+
+	file_information : FILE_ATTRIBUTE_DATA
+	if win.GetFileAttributesExW(w_filename, win.GetFileExInfoStandard, &file_information) {
+		last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)
+	}
 	return last_write_time
+}
+
+build_exe_path :: proc(state: State, filename: string) -> string {
+	return fmt.tprint(state.exe_path, filename, sep="")
 }
 
 
 
+// ---------------------- ---------------------- ---------------------- 
+// ---------------------- Record and Replay 
+// ---------------------- ---------------------- ---------------------- 
+
+get_record_replay_filepath :: proc(state: State) -> win.wstring {
+	return win.utf8_to_wstring(build_exe_path(state, "editloop.input"))
+}
 
 begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
 	state.input_record_index = input_recording_index
-	state.input_record_handle = win.CreateFileW(win.utf8_to_wstring("foo.handmade_input"), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
+	state.input_record_handle = win.CreateFileW(get_record_replay_filepath(state^), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
+
 	bytes_written: u32
 	win.WriteFile(state.input_record_handle, raw_data(state.game_memory_block), cast(u32) len(state.game_memory_block), &bytes_written, nil) 
 }
@@ -614,7 +688,7 @@ end_recording_input :: proc(state: ^State) {
 
 begin_replaying_input :: proc(state: ^State, input_replaying_index: i32) {
 	state.input_replay_index = input_replaying_index
-	state.input_replay_handle = win.CreateFileW(win.utf8_to_wstring("foo.handmade_input"), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
+	state.input_replay_handle = win.CreateFileW(get_record_replay_filepath(state^), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
 	
 	bytes_read: u32
 	win.ReadFile(state.input_replay_handle, raw_data(state.game_memory_block), cast(u32) len(state.game_memory_block), &bytes_read, nil)
@@ -629,12 +703,13 @@ replay_input :: proc(state: ^State, input: ^GameInput) {
 	bytes_read: u32
 	win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(GameInput), &bytes_read, nil)
 	if bytes_read != 0 {
-		// NOTE: the is still input
+		// NOTE: there is still input
 	} else {
 		// NOTE: we reached the end of the stream go back to beginning
 		replay_index := state.input_replay_index
 		end_replaying_input(state)
 		begin_replaying_input(state, replay_index)
+		win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(GameInput), &bytes_read, nil)
 	}
 }
 
@@ -643,6 +718,9 @@ end_replaying_input :: proc(state: ^State) {
 	state.input_replay_index = 0
 }
 
+// ---------------------- ---------------------- ---------------------- 
+// ---------------------- Sound Buffer
+// ---------------------- ---------------------- ---------------------- 
 
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
@@ -689,7 +767,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 	region1, region2 : rawptr
 	region1_size, region2_size: win.DWORD
 
-	if result := the_sound_buffer->Lock(0, sound_output.sound_buffer_size_in_bytes , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+	if result := the_sound_buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
 		// TODO assert that region1/2_size is valid
 		// TODO Collapse these two loops
 
@@ -710,6 +788,12 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 		return // TODO Logging
 	}
 }
+
+
+
+// ---------------------- ---------------------- ---------------------- 
+// ---------------------- Window Drawing 
+// ---------------------- ---------------------- ---------------------- 
 
 get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
 	client_rect : win.RECT
@@ -754,9 +838,10 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
 	buffer := buffer
 	// TODO aspect ratio correction
+	// TODO stretch to fill window once we are fine with our renderer
 	win.StretchDIBits(
 		device_context,
-		0, 0, window_width, window_height,
+		0, 0, buffer.width, buffer.height,
 		0, 0, buffer.width, buffer.height,
 		buffer.memory,
 		&buffer.info,
@@ -764,6 +849,12 @@ display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_conte
 		win.SRCCOPY
 	)
 }
+
+
+
+// ---------------------- ---------------------- ---------------------- 
+// ---------------------- Windows Messages
+// ---------------------- ---------------------- ---------------------- 
 
 main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
 	switch message {
