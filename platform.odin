@@ -49,12 +49,12 @@ GLOBAL_PAUSE := false
 // ---------------------- ---------------------- ----------------------
 
 SoundOutput :: struct {
-	samples_per_second         : u32,
-	num_channels               : u32,
-	bytes_per_sample           : u32,
-	buffer_size : u32,
-	running_sample_index       : u32,
-	safety_bytes               : u32,
+	samples_per_second   : u32,
+	num_channels         : u32,
+	bytes_per_sample     : u32,
+	buffer_size          : u32,
+	running_sample_index : u32,
+	safety_bytes         : u32,
 }
 
 OffscreenBufferColor :: struct{
@@ -63,7 +63,7 @@ OffscreenBufferColor :: struct{
 
 OffscreenBuffer :: struct {
 	info   : win.BITMAPINFO,
-	memory : [^]OffscreenBufferColor,
+	memory : []OffscreenBufferColor,
 	width  : i32,
 	height : i32,
 }
@@ -78,7 +78,7 @@ GameSoundBuffer :: struct {
 }
 
 GameOffscreenBuffer :: struct {
-	memory : [^]OffscreenBufferColor,
+	memory : []OffscreenBufferColor,
 	width  : i32,
 	height : i32,
 }
@@ -93,53 +93,35 @@ GameInputController :: struct {
 	is_analog: b32,
 
 	stick_average: [2]f32,
-
+	
 	using _buttons_array_and_enum : struct #raw_union {
 		buttons: [18]GameInputButton,
 		using _buttons_enum : struct {
-			stick_up    : GameInputButton,
-			stick_down  : GameInputButton,
-			stick_left  : GameInputButton,
-			stick_right : GameInputButton,
+			stick_up , stick_down , stick_left , stick_right ,
+			button_up, button_down, button_left, button_right,
+ 			dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
 
-			button_up    : GameInputButton,
-			button_down  : GameInputButton,
-			button_left  : GameInputButton,
-			button_right : GameInputButton,
-
-			dpad_up    : GameInputButton,
-			dpad_down  : GameInputButton,
-			dpad_left  : GameInputButton,
-			dpad_right : GameInputButton,
-
-			start : GameInputButton,
-			back  : GameInputButton,
-
-			shoulder_left  : GameInputButton,
-			shoulder_right : GameInputButton,
-
-			thumb_left  : GameInputButton,
-			thumb_right : GameInputButton,
+			start, back,
+			shoulder_left, shoulder_right,
+			thumb_left   , thumb_right : GameInputButton,
 		},
 	},
 }
 #assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
 
-// TODO allow outputing vibration
 GameInput :: struct {
+	seconds_to_advance_over_update: f32,
+
 	using _mouse_buttons_array_and_enum : struct #raw_union {
 		mouse_buttons: [5]GameInputButton,
 		using _buttons_enum : struct {
-			mouse_left   : GameInputButton,
-			mouse_right  : GameInputButton,
-			mouse_middle : GameInputButton,
-			mouse_extra1 : GameInputButton,
-			mouse_extra2 : GameInputButton,
+			mouse_left,	mouse_right, mouse_middle, 
+			mouse_extra1, mouse_extra2 : GameInputButton,
 		},
 	},
 	mouse_position: [2]i32,
 	mouse_wheel: i32,
-	// TODO insert clock values here
+
 	controllers: [5]GameInputController
 }
 #assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
@@ -155,8 +137,6 @@ GameMemory :: struct {
 }
 
 GameState :: struct {
-	green_offset, blue_offset: i32,
-	tone_hz:u32,
 }
 
 // TODO Copypaste END
@@ -232,7 +212,7 @@ main :: proc() {
 			lpfnWndProc = main_window_callback,
 		}
 
-		resize_DIB_section(&the_back_buffer, 1280, 720)
+		resize_DIB_section(&the_back_buffer, 960, 540)
 
 		if win.RegisterClassW(&window_class) == 0 {
 			return // TODO Logging
@@ -325,7 +305,6 @@ main :: proc() {
 	old_input, new_input := input[0], input[1]
 
 
-
 	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Memory Setup
 	// ---------------------- ---------------------- ----------------------
@@ -400,6 +379,7 @@ main :: proc() {
 		// ---------------------- Input
 		// ---------------------- ---------------------- ----------------------
 		{
+			new_input.seconds_to_advance_over_update = target_seconds_per_frame
 			{ // Mouse Input 
 				mouse : win.POINT
 				win.GetCursorPos(&mouse)
@@ -894,7 +874,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 	// TODO Bulletproof this.
 	// Maybe don't free first, free after, then free first if that fails.
 	if buffer.memory != nil {
-		win.VirtualFree(buffer.memory, 0, win.MEM_RELEASE)
+		win.VirtualFree(raw_data(buffer.memory), 0, win.MEM_RELEASE)
 	}
 
 	buffer.width  = width
@@ -917,7 +897,8 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 
 	bytes_per_pixel :: 4
 	bitmap_memory_size := buffer.width * buffer.height * bytes_per_pixel
-	buffer.memory = cast([^]OffscreenBufferColor) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+	buffer_ptr := cast([^]OffscreenBufferColor) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+	buffer.memory = buffer_ptr[:buffer.width*buffer.height]
 
 	// TODO probably clear this to black
 }
@@ -930,7 +911,7 @@ display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_conte
 		device_context,
 		0, 0, buffer.width, buffer.height,
 		0, 0, buffer.width, buffer.height,
-		buffer.memory,
+		raw_data(buffer.memory),
 		&buffer.info,
 		win.DIB_RGB_COLORS,
 		win.SRCCOPY
