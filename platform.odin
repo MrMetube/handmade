@@ -9,7 +9,7 @@ import "util"
 
 /*
 	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
- 
+
 	- Saved game locations
 	- Getting a handle to our own executable file
 	- Asset loading path
@@ -28,9 +28,9 @@ import "util"
 	Just a partial list of stuff !!
 */
 
-// ---------------------- ---------------------- ---------------------- 
-// ---------------------- Globals 
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Globals
+// ---------------------- ---------------------- ----------------------
 
 INTERNAL :: #config(INTERNAL, true)
 // TODO this is a global for now
@@ -44,9 +44,9 @@ global_perf_counter_frequency : win.LARGE_INTEGER
 GLOBAL_PAUSE := false
 
 
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
 // ---------------------- Types
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
 
 SoundOutput :: struct {
 	samples_per_second         : u32,
@@ -93,7 +93,7 @@ GameInputController :: struct {
 	is_analog: b32,
 
 	stick_average: [2]f32,
-	
+
 	using _buttons_array_and_enum : struct #raw_union {
 		buttons: [18]GameInputButton,
 		using _buttons_enum : struct {
@@ -101,7 +101,7 @@ GameInputController :: struct {
 			stick_down  : GameInputButton,
 			stick_left  : GameInputButton,
 			stick_right : GameInputButton,
-			
+
 			button_up    : GameInputButton,
 			button_down  : GameInputButton,
 			button_left  : GameInputButton,
@@ -127,14 +127,28 @@ GameInputController :: struct {
 
 // TODO allow outputing vibration
 GameInput :: struct {
+	using _mouse_buttons_array_and_enum : struct #raw_union {
+		mouse_buttons: [5]GameInputButton,
+		using _buttons_enum : struct {
+			mouse_left   : GameInputButton,
+			mouse_right  : GameInputButton,
+			mouse_middle : GameInputButton,
+			mouse_extra1 : GameInputButton,
+			mouse_extra2 : GameInputButton,
+		},
+	},
+	mouse_position: [2]i32,
+	mouse_wheel: i32,
 	// TODO insert clock values here
 	controllers: [5]GameInputController
 }
+#assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
+
 
 GameMemory :: struct {
 	is_initialized: b32,
 	// Note: REQUIRED to be cleared to zero at startup
-	permanent_storage: []u8, 
+	permanent_storage: []u8,
 	transient_storage: []u8,
 
 	debug: DEBUG_code
@@ -151,6 +165,7 @@ State :: struct {
 	exe_path : string,
 
 	game_memory_block : []u8,
+	replay_buffers: [4]ReplayBuffer,
 
 	input_record_handle : win.HANDLE,
 	input_record_index  : i32,
@@ -158,15 +173,24 @@ State :: struct {
 	input_replay_index  : i32,
 }
 
+ReplayBuffer :: struct {
+	filename: win.wstring,
+	filehandle: win.HANDLE,
+	memory_map: win.HANDLE,
+	memory_block: []u8,
+}
+
+ThreadContext :: struct {
+	placeholder: i32
+}
+
 main :: proc() {
 	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
-	
 
-
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ----------------------  Platform Setup
-	// ---------------------- ---------------------- ---------------------- 
-	
+	// ---------------------- ---------------------- ----------------------
+
 	state: State
 	{
 		exe_path_buffer : [win.MAX_PATH_WIDE]u16
@@ -183,17 +207,23 @@ main :: proc() {
 	// NOTE: Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
 	desired_scheduler_ms :: 1
 	sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
-
+	
+	// NOTE: We store a thread context in the context to know which thread is calling into the platform layer
+	// TODO: Once there are multiple threads each call into the threads game code needs its own thread context
+	main_thread_context : ThreadContext
+	main_thread_context.placeholder = 123
+	context.user_ptr = &main_thread_context
+	
 	RUNNING = true
 
 
 
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Window Setup
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 
 	window : win.HWND
-	{ 
+	{
 		window_class := win.WNDCLASSW{
 			hInstance = cast(win.HINSTANCE) win.GetModuleHandleW(nil),
 			lpszClassName = win.utf8_to_wstring("HandmadeWindowClass"),
@@ -235,38 +265,49 @@ main :: proc() {
 
 
 
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Video Setup
-	// ---------------------- ---------------------- ---------------------- 
-	
+	// ---------------------- ---------------------- ----------------------
+
 	// TODO: how do we reliably query this on windows?
-	monitor_refresh_hz :: 144
-	game_update_hz: u32 = monitor_refresh_hz / 2
-	target_seconds_per_frame: f32 = 1 / cast(f32) game_update_hz
+	game_update_hz: f32
+	{
+		monitor_refresh_hz: u32 = 60
+		device_context := win.GetDC(window)
+		VREFRESH :: 116
+		refresh_rate := win.GetDeviceCaps(device_context, VREFRESH)
+		if refresh_rate > 1 {
+			monitor_refresh_hz = cast(u32) refresh_rate
+		}
+		win.ReleaseDC(window, device_context)
+		// TODO why divide by 2
+		game_update_hz = cast(f32) monitor_refresh_hz / 2
+	}
+	target_seconds_per_frame := 1 / game_update_hz
 
 
 
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Sound Setup
-	// ---------------------- ---------------------- ---------------------- 
-	
+	// ---------------------- ---------------------- ----------------------
+
 	sound_output : SoundOutput
 	sound_output.samples_per_second = 48000
 	sound_output.num_channels = 2
 	sound_output.bytes_per_sample = size_of(Sample)
 	sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample
 	// TODO actually computre this variance and set a reasonable value
-	sound_output.safety_bytes = (sound_output.samples_per_second * sound_output.bytes_per_sample / game_update_hz)
+	sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32)sound_output.samples_per_second * cast(f32)sound_output.bytes_per_sample) * 1 // TODO check why we increased this
 
 	init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
 
 	clear_sound_buffer(&sound_output)
 
 	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
-	
+
 	sound_is_valid: b32
-	
-	when INTERNAL {
+
+	when false &&  INTERNAL {
 		audio_latency_bytes: u32
 		audio_latency_seconds: f32
 		debug_last_time_markers: [36]DebugTimeMarker
@@ -274,9 +315,9 @@ main :: proc() {
 
 
 
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Input Setup
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 
 	init_xInput()
 
@@ -285,9 +326,9 @@ main :: proc() {
 
 
 
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Memory Setup
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 
 	game_dll_name := build_exe_path(state, "game.dll")
 	temp_dll_name := build_exe_path(state, "game_temp.dll")
@@ -304,14 +345,31 @@ main :: proc() {
 
 		permanent_storage_size := util.megabytes(u64(64))
 		transient_storage_size := util.gigabytes(u64(1))
-		total_size :u64= permanent_storage_size + transient_storage_size
+		total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
 
-		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-		assert(total_size < util.gigabytes(u64(4)))
+		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+		assert(total_size < util.gigabytes(uint(4)))
 		state.game_memory_block = storage_ptr[:total_size]
 
+		for &buffer, index in state.replay_buffers {
+			buffer.filename = get_record_replay_filepath(state, cast(i32) index)
+			buffer.filehandle = win.CreateFileW(buffer.filename, win.GENERIC_READ|win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
+		
+			size_high:= cast(win.DWORD)(total_size >> 32)
+			size_low := cast(win.DWORD)total_size
+			buffer.memory_map = win.CreateFileMappingW(buffer.filehandle, nil, win.PAGE_READWRITE, size_high, size_low, nil)
+
+			buffer_storage_ptr := cast([^]u8) win.MapViewOfFile(buffer.memory_map, win.FILE_MAP_ALL_ACCESS, 0, 0, total_size)
+			error := win.GetLastError()
+			if buffer_storage_ptr != nil {
+				buffer.memory_block = buffer_storage_ptr[:total_size]
+			} else {
+				// TODO Diagnotic
+			}
+		}
+
 		game_memory.permanent_storage = storage_ptr[0:][:permanent_storage_size]
-		game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size] 
+		game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size]
 
 		game_memory.debug.read_entire_file  = DEBUG_read_entire_file
 		game_memory.debug.write_entire_file = DEBUG_write_entire_file
@@ -324,32 +382,52 @@ main :: proc() {
 
 
 
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Timer Setup
-	// ---------------------- ---------------------- ---------------------- 
+	// ---------------------- ---------------------- ----------------------
 
 	last_counter := get_wall_clock()
 	flip_counter := get_wall_clock()
 	last_cycle_count := intrinsics.read_cycle_counter()
-	
+
 	for RUNNING {
 		// TODO: if this is too slow the audio and the whole game will lag
 		if get_last_write_time(game_dll_name) != game_dll_write_time {
 			game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name)
 		}
 
-		{ // ---------------------- Input
-			old_keyboard_controller := &old_input.controllers[0]
-			new_keyboard_controller := &new_input.controllers[0]
-			new_keyboard_controller^ = {}
-			new_keyboard_controller.is_connected = true
-
-			for &button, index in new_keyboard_controller.buttons {
-				button.ended_down = old_keyboard_controller.buttons[index].ended_down
+		// ---------------------- ---------------------- ----------------------
+		// ---------------------- Input
+		// ---------------------- ---------------------- ----------------------
+		{
+			{ // Mouse Input 
+				mouse : win.POINT
+				win.GetCursorPos(&mouse)
+				win.ScreenToClient(window, &mouse)
+				new_input.mouse_position = transmute([2]i32) mouse
+				// TODO: support mouse wheel
+				new_input.mouse_wheel = 0
+				is_down_mask := transmute(win.SHORT) u16(1 << 15)
+				// TODO Do we need to update the input button on every event?
+				process_win_keyboard_message(&new_input.mouse_left,   cast(b32) (win.GetKeyState(win.VK_LBUTTON)  & is_down_mask))
+				process_win_keyboard_message(&new_input.mouse_right,  cast(b32) (win.GetKeyState(win.VK_RBUTTON)  & is_down_mask))
+				process_win_keyboard_message(&new_input.mouse_middle, cast(b32) (win.GetKeyState(win.VK_MBUTTON)  & is_down_mask))
+				process_win_keyboard_message(&new_input.mouse_extra1, cast(b32) (win.GetKeyState(win.VK_XBUTTON1) & is_down_mask))
+				process_win_keyboard_message(&new_input.mouse_extra2, cast(b32) (win.GetKeyState(win.VK_XBUTTON2) & is_down_mask))
 			}
-			
-			process_pending_messages(&state, new_keyboard_controller)
 
+			{ // Keyboard Input
+				old_keyboard_controller := &old_input.controllers[0]
+				new_keyboard_controller := &new_input.controllers[0]
+				new_keyboard_controller^ = {}
+				new_keyboard_controller.is_connected = true
+
+				for &button, index in new_keyboard_controller.buttons {
+					button.ended_down = old_keyboard_controller.buttons[index].ended_down
+				}
+
+				process_pending_messages(&state, new_keyboard_controller)
+			}
 			max_controller_count: u32 = min(XUSER_MAX_COUNT, len(GameInput{}.controllers) - 1)
 			// TODO Need to not poll disconnected controllers to avoid xinput frame rate hit
 			// on older libraries.
@@ -368,35 +446,35 @@ main :: proc() {
 					new_controller.is_analog = old_controller.is_analog
 					// TODO see if dwPacketNumber increments too rapidly
 					pad := controller_state.Gamepad
-					
+
 					// TODO all buttons
 					left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
 					right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
-					
+
 					process_Xinput_button :: proc(new_state: ^GameInputButton, old_state: GameInputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
 						new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
 						new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
 					}
-					
+
 					process_Xinput_button(&new_controller.button_up    , old_controller.button_up    , pad.wButtons, XINPUT_GAMEPAD_Y)
 					process_Xinput_button(&new_controller.button_down  , old_controller.button_down  , pad.wButtons, XINPUT_GAMEPAD_A)
 					process_Xinput_button(&new_controller.button_left  , old_controller.button_left  , pad.wButtons, XINPUT_GAMEPAD_X)
 					process_Xinput_button(&new_controller.button_right , old_controller.button_right , pad.wButtons, XINPUT_GAMEPAD_B)
-		
+
 					process_Xinput_button(&new_controller.start, old_controller.start, pad.wButtons, XINPUT_GAMEPAD_START)
 					process_Xinput_button(&new_controller.back, old_controller.back, pad.wButtons, XINPUT_GAMEPAD_BACK)
 
 					process_Xinput_button(&new_controller.shoulder_left , old_controller.shoulder_left , pad.wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER)
 					process_Xinput_button(&new_controller.shoulder_right, old_controller.shoulder_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER)
-		
+
 					process_Xinput_button(&new_controller.dpad_up    , old_controller.dpad_up    , pad.wButtons, XINPUT_GAMEPAD_DPAD_UP)
 					process_Xinput_button(&new_controller.dpad_down  , old_controller.dpad_down  , pad.wButtons, XINPUT_GAMEPAD_DPAD_DOWN)
 					process_Xinput_button(&new_controller.dpad_left  , old_controller.dpad_left  , pad.wButtons, XINPUT_GAMEPAD_DPAD_LEFT)
 					process_Xinput_button(&new_controller.dpad_right , old_controller.dpad_right , pad.wButtons, XINPUT_GAMEPAD_DPAD_RIGHT)
-					
+
 					process_Xinput_button(&new_controller.thumb_left , old_controller.thumb_left , pad.wButtons, XINPUT_GAMEPAD_LEFT_THUMB)
 					process_Xinput_button(&new_controller.thumb_right, old_controller.thumb_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_THUMB)
-					
+
 					process_Xinput_stick :: proc(thumbstick: win.SHORT, deadzone: i16) -> f32 {
 						if thumbstick < -deadzone {
 							return cast(f32) (thumbstick + deadzone) / (32768 - cast(f32) deadzone)
@@ -427,7 +505,7 @@ main :: proc() {
 					process_Xinput_button(&new_controller.stick_right, old_controller.stick_right, 1, new_controller.stick_average.x >  THRESHOLD ? 1 : 0)
 					process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -THRESHOLD ? 1 : 0)
 					process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  THRESHOLD ? 1 : 0)
-		
+
 					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do RUNNING = false
 				} else {
 					new_controller.is_connected = false
@@ -436,18 +514,18 @@ main :: proc() {
 		}
 
 		if GLOBAL_PAUSE do continue
-		
-		
-		// ---------------------- ---------------------- ---------------------- 
+
+
+		// ---------------------- ---------------------- ----------------------
 		// ---------------------- Update, Sound and Render
-		// ---------------------- ---------------------- ---------------------- 
-		{ 
+		// ---------------------- ---------------------- ----------------------
+		{
 			offscreen_buffer := GameOffscreenBuffer{
 				memory = the_back_buffer.memory,
 				width  = the_back_buffer.width,
 				height = the_back_buffer.height,
 			}
-			
+
 			when INTERNAL {
 				for &c in the_back_buffer.memory[:the_back_buffer.width*the_back_buffer.height] {
 					c = {}
@@ -464,7 +542,7 @@ main :: proc() {
 			if game_lib_is_valid {
 				game_update_and_render(&game_memory, offscreen_buffer, new_input)
 			}
-			
+
 			sound_is_valid = true
 			play_cursor, write_cursor : win.DWORD
 			audio_counter := get_wall_clock()
@@ -487,7 +565,7 @@ main :: proc() {
 					audio perfectly, so we will write one frame's worth of audio plus the safety margin's worth
 					of guard samples.
 				*/
-				
+
 				if !sound_is_valid {
 					sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample
 					sound_is_valid = true
@@ -495,8 +573,8 @@ main :: proc() {
 
 				byte_to_lock := (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.buffer_size
 
-				expected_sound_bytes_per_frame := (sound_output.samples_per_second * sound_output.bytes_per_sample) / game_update_hz
-				
+				expected_sound_bytes_per_frame := cast(u32) (cast(f32)sound_output.bytes_per_sample * cast(f32) sound_output.samples_per_second * target_seconds_per_frame)
+
 				seconds_left_until_flip := target_seconds_per_frame-from_begin_to_audio
 				expected_sound_bytes_until_flip := cast(win.DWORD) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
 
@@ -534,7 +612,7 @@ main :: proc() {
 					game_output_sound_samples(&game_memory, sound_buffer)
 				}
 
-				when INTERNAL {
+				when false &&  INTERNAL {
 					the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result)
 					debug_last_time_markers[0].output_play_cursor           = play_cursor
 					debug_last_time_markers[0].output_write_cursor          = write_cursor
@@ -552,14 +630,14 @@ main :: proc() {
 			} else {
 				sound_is_valid = false
 			}
-			
+
 			util.swap(&old_input, &new_input)
 		}
 
-		// ---------------------- ---------------------- ---------------------- 
+		// ---------------------- ---------------------- ----------------------
 		// ---------------------- Display Frame & Performance Counters
-		// ---------------------- ---------------------- ---------------------- 
-		{ 
+		// ---------------------- ---------------------- ----------------------
+		{
 			seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
 			if seconds_elapsed_for_frame < target_seconds_per_frame {
 				// if sleep_is_granular {
@@ -572,7 +650,7 @@ main :: proc() {
 				}
 				for seconds_elapsed_for_frame < target_seconds_per_frame {
 					seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
-				} 
+				}
 			} else {
 				// TODO: Missed frame, Logging, maybe because window was moved
 			}
@@ -581,7 +659,7 @@ main :: proc() {
 			end_cycle_count := intrinsics.read_cycle_counter()
 
 			window_width, window_height := get_window_dimension(window)
-			when INTERNAL {
+			when false && INTERNAL {
 				DEBUG_sync_display(the_back_buffer, debug_last_time_markers[:], sound_output, target_seconds_per_frame)
 			}
 
@@ -592,7 +670,7 @@ main :: proc() {
 			}
 
 			flip_counter = get_wall_clock()
-			when INTERNAL {
+			when false && INTERNAL {
 				play_cursor, write_cursor : win.DWORD
 				the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
 				debug_last_time_markers[0].flip_play_cursor = play_cursor
@@ -610,7 +688,7 @@ main :: proc() {
 
 			last_cycle_count = end_cycle_count
 			last_counter = end_counter
-			when INTERNAL {
+			when  false && INTERNAL {
 				#reverse for cursor, index in debug_last_time_markers {
 					if index < len(debug_last_time_markers)-1 do debug_last_time_markers[index+1] = cursor
 				}
@@ -620,6 +698,10 @@ main :: proc() {
 }
 
 
+
+get_thread_context :: proc() -> ThreadContext {
+	return (cast(^ThreadContext)context.user_ptr)^
+}
 
 
 
@@ -660,42 +742,48 @@ build_exe_path :: proc(state: State, filename: string) -> string {
 
 
 
-// ---------------------- ---------------------- ---------------------- 
-// ---------------------- Record and Replay 
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Record and Replay
+// ---------------------- ---------------------- ----------------------
 
-get_record_replay_filepath :: proc(state: State) -> win.wstring {
-	return win.utf8_to_wstring(build_exe_path(state, "editloop.input"))
+get_record_replay_filepath :: proc(state: State, index:i32) -> win.wstring {
+	return win.utf8_to_wstring(build_exe_path(state, fmt.tprintf("editloop_%d.input", index)))
 }
 
 begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
-	state.input_record_index = input_recording_index
-	state.input_record_handle = win.CreateFileW(get_record_replay_filepath(state^), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
+	replay_buffer := state.replay_buffers[input_recording_index]
 
-	bytes_written: u32
-	win.WriteFile(state.input_record_handle, raw_data(state.game_memory_block), cast(u32) len(state.game_memory_block), &bytes_written, nil) 
+	if replay_buffer.memory_block != nil {
+		state.input_record_index = input_recording_index
+		state.input_record_handle = replay_buffer.filehandle
+		// TODO this is slow on the first start
+		file_position := cast(win.LARGE_INTEGER) len(state.game_memory_block)
+		win.SetFilePointerEx(state.input_record_handle, file_position, nil, win.FILE_BEGIN)
+		
+		copy_slice(replay_buffer.memory_block, state.game_memory_block)
+	}
 }
 
 record_input :: proc(state: ^State, input: ^GameInput) {
 	bytes_written: u32
-	win.WriteFile(state.input_record_handle, input, cast(u32) size_of(GameInput), &bytes_written, nil) 
+	win.WriteFile(state.input_record_handle, input, cast(u32) size_of(GameInput), &bytes_written, nil)
 }
 
 end_recording_input :: proc(state: ^State) {
-	win.CloseHandle(state.input_record_handle)
 	state.input_record_index = 0
 }
 
 begin_replaying_input :: proc(state: ^State, input_replaying_index: i32) {
-	state.input_replay_index = input_replaying_index
-	state.input_replay_handle = win.CreateFileW(get_record_replay_filepath(state^), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
-	
-	bytes_read: u32
-	win.ReadFile(state.input_replay_handle, raw_data(state.game_memory_block), cast(u32) len(state.game_memory_block), &bytes_read, nil)
-	if bytes_read != 0 {
+	replay_buffer := state.replay_buffers[input_replaying_index]
 
-	} else {
-		// TODO: Logging
+	if replay_buffer.memory_block != nil {
+		state.input_replay_index = input_replaying_index
+		state.input_replay_handle = replay_buffer.filehandle
+		
+		file_position := cast(win.LARGE_INTEGER) len(state.game_memory_block)
+		win.SetFilePointerEx(state.input_replay_handle, file_position, nil, win.FILE_BEGIN)
+
+		copy(state.game_memory_block, replay_buffer.memory_block)
 	}
 }
 
@@ -714,13 +802,12 @@ replay_input :: proc(state: ^State, input: ^GameInput) {
 }
 
 end_replaying_input :: proc(state: ^State) {
-	win.CloseHandle(state.input_replay_handle)
 	state.input_replay_index = 0
 }
 
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
 // ---------------------- Sound Buffer
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
 
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
@@ -730,10 +817,10 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 	if result := the_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
 		// TODO assert that region1/2_size is valid
 		// TODO Collapse these two loops
-		
+
 		dest_samples := cast([^]Sample) region1
 		region1_sample_count := region1_size / sound_output.bytes_per_sample
-		
+
 		source_sample_index := 0
 
 		for dest_sample_index in 0..<region1_sample_count {
@@ -747,7 +834,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 
 		dest_samples = cast([^]Sample) region2
 		region2_sample_count := region2_size / sound_output.bytes_per_sample
-		
+
 		for dest_sample_index in 0..<region2_sample_count {
 			assert(source_sample_index < len(source.samples))
 
@@ -791,9 +878,9 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 
 
 
-// ---------------------- ---------------------- ---------------------- 
-// ---------------------- Window Drawing 
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Window Drawing
+// ---------------------- ---------------------- ----------------------
 
 get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
 	client_rect : win.RECT
@@ -852,9 +939,9 @@ display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_conte
 
 
 
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
 // ---------------------- Windows Messages
-// ---------------------- ---------------------- ---------------------- 
+// ---------------------- ---------------------- ----------------------
 
 main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
 	switch message {
@@ -867,7 +954,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
 		RUNNING = false
 	case win.WM_ACTIVATEAPP:
 		LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
-		LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color. 
+		LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color.
 
 		if w_param != 0 {
 			win.SetLayeredWindowAttributes(window, win.RGB(0,0,0), 255, LWA_ALPHA)
@@ -888,13 +975,14 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
 	return result
 }
 
-process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputController) {
-	process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
-		assert(is_down != new_state.ended_down)
+process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
+	if is_down != new_state.ended_down {
 		new_state.ended_down = is_down
 		new_state.half_transition_count += 1
 	}
+}
 
+process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputController) {
 	message : win.MSG
 	for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
 		switch message.message {
@@ -914,7 +1002,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
 					process_win_keyboard_message(&keyboard_controller.stick_up      , is_down)
 				case win.VK_A:
 					process_win_keyboard_message(&keyboard_controller.stick_left    , is_down)
-				case win.VK_S: 
+				case win.VK_S:
 					process_win_keyboard_message(&keyboard_controller.stick_down    , is_down)
 				case win.VK_D:
 					process_win_keyboard_message(&keyboard_controller.stick_right   , is_down)

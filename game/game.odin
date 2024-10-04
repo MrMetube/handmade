@@ -5,12 +5,12 @@ import "core:math"  // TODO implement sine ourself
 
 // TODO Copypasta from platform
 SoundOutput :: struct {
-	samples_per_second         : u32,
-	num_channels               : u32,
-	bytes_per_sample           : u32,
-	sound_buffer_size_in_bytes : u32,
-	running_sample_index       : u32,
-	safety_bytes               : u32,
+	samples_per_second   : u32,
+	num_channels         : u32,
+	bytes_per_sample     : u32,
+	buffer_size          : u32,
+	running_sample_index : u32,
+	safety_bytes         : u32,
 }
 
 OffscreenBufferColor :: struct{
@@ -87,9 +87,23 @@ proc_DEBUG_free_file_memory  :: #type proc(memory: []u8)
 
 // TODO allow outputing vibration
 GameInput :: struct {
+	using _mouse_buttons_array_and_enum : struct #raw_union {
+		mouse_buttons: [5]GameInputButton,
+		using _buttons_enum : struct {
+			mouse_left   : GameInputButton,
+			mouse_right  : GameInputButton,
+			mouse_middle : GameInputButton,
+			mouse_extra1 : GameInputButton,
+			mouse_extra2 : GameInputButton,
+		},
+	},
+	mouse_position: [2]i32,
+	mouse_wheel: i32,
 	// TODO insert clock values here
 	controllers: [5]GameInputController
 }
+#assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
+
 
 GameMemory :: struct {
 	is_initialized: b32,
@@ -108,16 +122,16 @@ GameState :: struct {
 }
 
 // timing
-@export
+@(export)
 game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, input: GameInput){
 	assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
 	
-	game_state := cast(^GameState) raw_data(memory.permanent_storage)
+	state := cast(^GameState) raw_data(memory.permanent_storage)
 
 	if !memory.is_initialized {
-		game_state.tone_hz = 420
+		state.tone_hz = 420
 
-		game_state.player = 100
+		state.player = 100
 
 		file := memory.debug.read_entire_file(#file)
 		if file != nil {
@@ -148,29 +162,34 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 		// if controller.button_down.ended_down {
 		// 	game_state.blue_offset += 1
 		// }
-		game_state.player += {cast(i32) (10*controller.stick_average.x), cast(i32) (-10*controller.stick_average.y)}
+		state.player += {cast(i32) (10*controller.stick_average.x), cast(i32) (-10*controller.stick_average.y)}
 
 
 		floor := offscreen_buffer.height / 2
-		if game_state.player.y > floor  {
-			game_state.player.y = floor 
+		if state.player.y > floor  {
+			state.player.y = floor 
 		}
 
-		if game_state.player.y < floor {
-			game_state.player.y += 1
+		if state.player.y < floor {
+			state.player.y += 1
 		}
 
-		if controller.button_down.ended_down do game_state.player.y -= 50
+		if controller.button_down.ended_down do state.player.y -= 50
 	}
 
-	render_weird_gradient(offscreen_buffer, game_state.green_offset, game_state.blue_offset)
-	render_player(offscreen_buffer, game_state^)
+	render_weird_gradient(offscreen_buffer, state.green_offset, state.blue_offset)
+	render_player(offscreen_buffer, state.player)
+	for button, i in input.mouse_buttons {
+		if button.ended_down {
+			render_player(offscreen_buffer, [2]i32{10 + 20 * cast(i32)(i), 10})
+		}
+	}
 }
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a 
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
-@export
+@(export)
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
 	// TODO: Allow sample offsets here for more robust platform options
 	game_state := cast(^GameState) raw_data(memory.permanent_storage)
@@ -178,26 +197,26 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 }
 
 
-output_sound :: proc(sound_buffer: GameSoundBuffer, game_state:^GameState){
+output_sound :: proc(sound_buffer: GameSoundBuffer, state:^GameState){
 	tone_volumne :: 1000
-	wave_period := sound_buffer.samples_per_second / game_state.tone_hz
+	wave_period := sound_buffer.samples_per_second / state.tone_hz
 
 	for sample_out_index in 0..<len(sound_buffer.samples){
-		sample_value := cast(i16) (math.sin(game_state.t_sine) * tone_volumne)
+		sample_value := cast(i16) (math.sin(state.t_sine) * tone_volumne)
 
 		sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
-		game_state.t_sine += math.TAU / f32(wave_period)
-		if game_state.t_sine > math.TAU do game_state.t_sine -= math.TAU
+		state.t_sine += math.TAU / f32(wave_period)
+		if state.t_sine > math.TAU do state.t_sine -= math.TAU
 	}
 }
 
-render_player :: proc(buffer: GameOffscreenBuffer, game_state: GameState){
-	top, bottom := game_state.player.y, game_state.player.y+10
+render_player :: proc(buffer: GameOffscreenBuffer, player: [2]i32){
+	top, bottom := player.y, player.y+10
 	
 	if top < 0 do top = 0
 	if bottom > buffer.height do bottom = buffer.height
 
-	for x in game_state.player.x..<game_state.player.x +10 {
+	for x in player.x..<player.x+10 {
 		for y in top..<bottom {
 			pixel := &buffer.memory[y*buffer.width + x]
 			pixel^ = OffscreenBufferColor{b=125, g=240, r=200}
