@@ -253,13 +253,15 @@ main :: proc() {
 	game_update_hz: f32
 	{
 		monitor_refresh_hz: u32 = 60
-		device_context := win.GetDC(window)
-		VREFRESH :: 116
-		refresh_rate := win.GetDeviceCaps(device_context, VREFRESH)
-		if refresh_rate > 1 {
-			monitor_refresh_hz = cast(u32) refresh_rate
+		when false {
+			device_context := win.GetDC(window)
+			VREFRESH :: 116
+			refresh_rate := win.GetDeviceCaps(device_context, VREFRESH)
+			if refresh_rate > 1 {
+				monitor_refresh_hz = cast(u32) refresh_rate
+			}
+			win.ReleaseDC(window, device_context)
 		}
-		win.ReleaseDC(window, device_context)
 		// TODO why divide by 2
 		game_update_hz = cast(f32) monitor_refresh_hz / 2
 	}
@@ -323,7 +325,7 @@ main :: proc() {
 		base_address := cast(rawptr) cast(uintptr) util.terabytes(1) when INTERNAL else 0
 
 		permanent_storage_size := util.megabytes(u64(64))
-		transient_storage_size := util.gigabytes(u64(1))
+		transient_storage_size := util.megabytes(u64(256))
 		total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
 
 		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -369,6 +371,11 @@ main :: proc() {
 	flip_counter := get_wall_clock()
 	last_cycle_count := intrinsics.read_cycle_counter()
 
+
+
+	// ---------------------- ---------------------- ----------------------
+	// ---------------------- Game Loop
+	// ---------------------- ---------------------- ----------------------
 	for RUNNING {
 		// TODO: if this is too slow the audio and the whole game will lag
 		if get_last_write_time(game_dll_name) != game_dll_write_time {
@@ -506,12 +513,6 @@ main :: proc() {
 				height = the_back_buffer.height,
 			}
 
-			when INTERNAL {
-				for &c in the_back_buffer.memory[:the_back_buffer.width*the_back_buffer.height] {
-					c = {}
-				}
-			}
-
 			if state.input_record_index != 0 {
 				record_input(&state, &new_input)
 			}
@@ -645,7 +646,7 @@ main :: proc() {
 
 			{
 				device_context := win.GetDC(window)
-				display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
+				display_buffer_in_window(&the_back_buffer, device_context, window_width, window_height)
 				win.ReleaseDC(window, device_context)
 			}
 
@@ -903,13 +904,20 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 	// TODO probably clear this to black
 }
 
-display_buffer_in_window :: proc "system" (buffer: OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
-	buffer := buffer
+display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
+	offset :: 10
+	win.PatBlt(device_context, 0, 0, buffer.width+offset, offset, win.BLACKNESS )
+	win.PatBlt(device_context, 0, offset, offset, buffer.height+offset, win.BLACKNESS )
+	
+	win.PatBlt(device_context, buffer.width+offset, 0, window_width, window_height, win.BLACKNESS )
+	win.PatBlt(device_context, 0, buffer.height+offset, buffer.width+offset, window_height, win.BLACKNESS )
+	
 	// TODO aspect ratio correction
 	// TODO stretch to fill window once we are fine with our renderer
+	
 	win.StretchDIBits(
 		device_context,
-		0, 0, buffer.width, buffer.height,
+		offset, offset, buffer.width, buffer.height,
 		0, 0, buffer.width, buffer.height,
 		raw_data(buffer.memory),
 		&buffer.info,
@@ -947,7 +955,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
 		device_context := win.BeginPaint(window, &paint)
 
 		window_width, window_height := get_window_dimension(window)
-		display_buffer_in_window(the_back_buffer, device_context, window_width, window_height)
+		display_buffer_in_window(&the_back_buffer, device_context, window_width, window_height)
 
 		win.EndPaint(window, &paint)
 	case:
