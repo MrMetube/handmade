@@ -2,8 +2,8 @@ package game
 
 import "base:intrinsics"
 
+// TODO do these myself
 import "core:fmt"
-import "core:math"  // TODO implement sine ourself
 
 // TODO Copypasta from platform
 
@@ -25,9 +25,9 @@ proc_DEBUG_free_file_memory  :: #type proc(memory: []u8)
 
 // TODO Copypasta END
 
-// TODO allow outputing vibration
 Sample :: [2]i16
 
+// TODO allow outputing vibration
 GameSoundBuffer :: struct {
 	samples            : []Sample,
 	samples_per_second : u32,
@@ -107,6 +107,7 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 	if !memory.is_initialized {
 		state.player = {100,  100}
+
 		memory.is_initialized = true
 	}
 	
@@ -118,9 +119,9 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 
-		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 0},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
+		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 0},
 
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
@@ -131,8 +132,8 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 
-		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{0, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
+		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
@@ -167,25 +168,23 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	}
 
 	world := World{
+		tile_size_in_meter = 1.4,
+		tile_size_in_pixels = 60,
 		tile_offset = {-30, 0},
-		tile_size = 60,
 		tiles = {
 			{tiles_top, tiles_top2},
 			{tiles_bottom, tiles_bottom2},
 		}
 	}
 	player_size: [2]f32 : {30, 45}
-	player_bounds: [2]f32 : {30, 15}
 
 	for controller, index in input.controllers {
 		if controller.is_analog {
 			// NOTE use analog movement tuning
 		} else {
 			// NOTE Use digital movement tuning
-			// TODO only handle the keyboard for now
-			if index != 0 do continue
 
-			speed: f32 : 400
+			speed: f32 : 300
 			direction : [2]f32
 			if controller.button_left.ended_down {
 				direction.x -= 1
@@ -199,20 +198,14 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 			if controller.button_down.ended_down {
 				direction.y += 1
 			}
-
 			direction = normalize(direction)
+
+
 			new_position := state.player + direction * speed * input.delta_time
+			player_left  := new_position - {0.5*player_size.x, 0}
+			player_right := new_position + {0.5*player_size.x, 0}
 
-			move_is_valid: b32 = false
-
-			half_size := player_size - player_bounds * 0.5
-				
-			player_draw_position := (new_position + player_size * {-0.5, -1})
-			foo := player_draw_position+{0,player_size.y}-{0, player_bounds.y}
-			move_is_valid  = is_world_point_empty(world, new_position) &&
-				is_world_point_empty(world, foo) &&
-				is_world_point_empty(world, foo + player_bounds)
-
+			move_is_valid := is_world_point_empty(world, new_position) && is_world_point_empty(world, player_left) && is_world_point_empty(world, player_right)
 			if move_is_valid {
 				state.player = new_position
 			}
@@ -222,11 +215,11 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 
 
-	Gray :: GameColor{0.5,0.5,0.5}
+	Gray  :: GameColor{0.5,0.5,0.5}
 	White :: GameColor{1,1,1}
 
-	current_tile_index := point_to_tilemap_index(state.player, world.tile_size)
-	current_tile := world.tiles[current_tile_index.y][current_tile_index.x]
+	can_pos := get_cannonical_position(world, state.player)
+	current_tile := get_tilemap(world, can_pos.tile_index)
 	for row, ri in current_tile {
 		for cell, ci in row {
 			color : GameColor
@@ -235,16 +228,14 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 			} else {
 				color = White
 			}
-			position := world.tile_offset + cast_vec(f32, [2]int{ci, ri}) * world.tile_size
-			draw_rectangle(offscreen_buffer, position, world.tile_size, color)
+			position := world.tile_offset + cast_vec(f32, cast_vec(i32, [2]int{ci, ri}) * world.tile_size_in_pixels) 
+			draw_rectangle(offscreen_buffer, position, cast_vec(f32, [2]i32{world.tile_size_in_pixels, world.tile_size_in_pixels}), color)
 		}
 	}
 
-	player_tile_position := point_to_tilemap_space(state.player, world.tile_size)
+	player_tile_position := can_pos.tile_position
 	player_draw_position := world.tile_offset + (player_tile_position + player_size * {-0.5, -1})
 	draw_rectangle(offscreen_buffer, player_draw_position , player_size, {0, 0.59, 0.28})
-	// draw_rectangle(offscreen_buffer, player_draw_position+{0,player_size.y}-{0, player_bounds.y} , player_bounds, {0, 0.28, 0.59})
-	// draw_rectangle(offscreen_buffer, world.tile_offset + player_tile_position-2, 4, {0.89, 0, 0.98})
 }
 
 
@@ -252,38 +243,52 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 
 Tilemap :: [9][17]u32
-
+ 
 World :: struct {
-	tile_offset: [2]f32,
-	tile_size:   [2]f32,
+	tile_size_in_meter: f32,
+	tile_size_in_pixels: i32,
 
+	tile_offset: [2]f32,
 	tiles : [][]Tilemap,
 }
 
-point_to_tilemap_index :: proc(point, tile_size: [2]f32) -> [2]i32 {
-	tilemap_size := tile_size*{len(Tilemap{}[0]), len(Tilemap{})}
-	return truncate(point / tilemap_size)
+CanonicalPosition :: struct {
+	tile_index:    [2]i32,
+	tile_position: [2]f32,
 }
- 
-point_to_tilemap_space :: proc(point, tile_size: [2]f32 ) -> [2]f32 {
-	tilemap_size := tile_size*{len(Tilemap{}[0]), len(Tilemap{})}
-	return mod(point, tilemap_size)
+
+
+
+get_tilemap :: proc(world: World, tile_index: [2]i32) -> (tilemap: Tilemap, ok: b32) #optional_ok {
+	if in_bounds(world.tiles, tile_index) {
+		return world.tiles[tile_index.y][tile_index.x], true
+	}
+	return
+}
+
+get_cannonical_position :: #force_inline proc(world: World, point: [2]f32) -> CanonicalPosition {
+	xdiv, xmod := divmod(point.x, cast(f32) world.tile_size_in_pixels)
+	ydiv, ymod := divmod(point.y, cast(f32) world.tile_size_in_pixels)
+
+	return {
+		floor([2]f32{xdiv, ydiv}),
+		{xmod, ymod}
+	}
 }
 
 is_world_point_empty :: proc(world: World, point: [2]f32) -> b32 {
 	empty : b32
-	tile_index := point_to_tilemap_index(point, world.tile_size)
-	if in_bounds(world.tiles, tile_index) {
-		current_tile := world.tiles[tile_index.y][tile_index.x]
-		point_in_tilemap := point_to_tilemap_space(point, world.tile_size)
-		empty = is_tilemap_point_empty(&current_tile, point_in_tilemap, world.tile_size)
+	can_pos := get_cannonical_position(world, point) 
+	current_tile, ok := get_tilemap(world, can_pos.tile_index)
+	if in_bounds(world.tiles, can_pos.tile_index) {
+		empty = is_tilemap_point_empty(&current_tile, can_pos.tile_position, cast(f32) world.tile_size_in_pixels)
 	}
 	return empty
 }
 
-is_tilemap_point_empty :: proc(tilemap: ^Tilemap, point_in_tilemap, tile_size: [2]f32) -> b32 {
+is_tilemap_point_empty :: proc(tilemap: ^Tilemap, point_in_tilemap: [2]f32, tile_size: f32) -> b32 {
 	empty : b32
-	point_tile := truncate(point_in_tilemap / tile_size)
+	point_tile := cast_vec(i32, floor(point_in_tilemap / tile_size))
 	if in_bounds(tilemap[:], point_tile) {
 		tile := tilemap[point_tile.y][point_tile.x]
 		empty = tile == 0

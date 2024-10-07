@@ -3,5 +3,6 @@
 	"checker_args": "-define:INTERNAL=true",
 
 	"enable_procedure_snippet": true,
-	"enable_format": false
+	"enable_format": false,
+	"enable_rename": true
 }
