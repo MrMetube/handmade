@@ -7,7 +7,7 @@ if not exist .\build mkdir .\build
 :: TODO shipping build
 
 :: Debug build
-del .\build\*.pdb
+if exist .\build\*.pdb del .\build\*.pdb
 odin build game -build-mode:dll -out:.\build\game.dll %build-flags% %debug-flags% -pdb-name:.\build\game-%random%.pdb
 if %errorlevel% neq 0 exit /b 1
 

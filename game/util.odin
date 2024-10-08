@@ -33,14 +33,32 @@ cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 &
 in_bounds :: proc {
 	in_bounds_array,
 	in_bounds_slice,
+	in_bounds_array_2,
+	in_bounds_slice_2,
 }
 
-in_bounds_array :: proc(arrays: [][$N]$T, index: [2]i32) -> b32 {
-	return index.x >= 0 && index.x < cast(i32) len(arrays[0]) && index.y >= 0 && index.y < cast(i32) len(arrays)
+in_bounds_array :: #force_inline proc(arrays: [][$N]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
+	return in_bounds_array_2(arrays, index.x, index.y)
 }
 
-in_bounds_slice :: proc(slices: [][]$T, index: [2]i32) -> b32 {
-	return index.x >= 0 && index.x < cast(i32) len(slices[0]) && index.y >= 0 && index.y < cast(i32) len(slices)
+in_bounds_slice :: #force_inline proc(slices: [][]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
+	return in_bounds_slice_2(slices, index.x, index.y)
+}
+
+in_bounds_array_2 :: #force_inline proc(arrays: [][$N]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
+	when intrinsics.type_is_unsigned(I) {
+		return x < cast(I) len(arrays[0]) && y < cast(I) len(arrays)
+	} else {
+		return x >= 0 && x < cast(I) len(arrays[0]) && y >= 0 && y < cast(I) len(arrays)
+	}
+}
+
+in_bounds_slice_2 :: #force_inline proc(slices: [][]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
+	when intrinsics.type_is_unsigned(I) {
+		return x < cast(I) len(slices[0]) && y < cast(I) len(slices)
+	} else {
+		return x >= 0 && x < cast(I) len(slices[0]) && y >= 0 && y < cast(I) len(slices)
+	}
 }
 
 
