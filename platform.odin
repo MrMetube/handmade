@@ -230,8 +230,8 @@ main :: proc() {
 			win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
 			win.CW_USEDEFAULT,
 			win.CW_USEDEFAULT,
-			win.CW_USEDEFAULT,
-			win.CW_USEDEFAULT,
+			960*1.05,// win.CW_USEDEFAULT, // TODO undo hardcoding
+			540*1.1,// win.CW_USEDEFAULT,
 			nil,
 			nil,
 			window_class.hInstance,
@@ -332,6 +332,9 @@ main :: proc() {
 		assert(total_size < util.gigabytes(uint(4)))
 		state.game_memory_block = storage_ptr[:total_size]
 
+		// TODO(casey): TransientStorage needs to be broken up
+		// into game transient and cache transient, and only
+		// the former need be saved for state playback.
 		for &buffer, index in state.replay_buffers {
 			buffer.filename = get_record_replay_filepath(state, cast(i32) index)
 			buffer.filehandle = win.CreateFileW(buffer.filename, win.GENERIC_READ|win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)

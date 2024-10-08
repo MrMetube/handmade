@@ -94,10 +94,6 @@ GameMemory :: struct {
 	debug: DEBUG_code
 }
 
-GameState :: struct {
-	player : [2]f32,
-}
-
 // timing
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscreenBuffer, input: GameInput){
@@ -105,8 +101,13 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 	state := cast(^GameState) raw_data(memory.permanent_storage)
 
+
 	if !memory.is_initialized {
-		state.player = {100,  100}
+		state.player = {
+			tilemap_index = {0,0},
+			tile_index = {3,3},
+			tile_position = {1, 1},
+		}
 
 		memory.is_initialized = true
 	}
@@ -138,7 +139,7 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
-		{1, 1, 1, 1,   1, 1, 1, 1,  0,  1, 1, 1, 1,   1, 1, 1, 1},
+		{1, 1, 1, 1,   1, 1, 0, 0,  0,  0, 0, 1, 1,   1, 1, 1, 1},
 	}
 	tiles_bottom := Tilemap{
 		{1, 1, 1, 1,   1, 1, 1, 1,  0,  1, 1, 1, 1,   1, 1, 1, 1},
@@ -154,7 +155,7 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 		{1, 1, 1, 1,   1, 1, 1, 1,  1,  1, 1, 1, 1,   1, 1, 1, 1},
 	}
 	tiles_bottom2 := Tilemap{
-		{1, 1, 1, 1,   1, 1, 1, 1,  0,  1, 1, 1, 1,   1, 1, 1, 1},
+		{1, 1, 1, 1,   1, 1, 0, 0,  0,  0, 0, 1, 1,   1, 1, 1, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 		{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1},
 
@@ -168,23 +169,26 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 	}
 
 	world := World{
-		tile_size_in_meter = 1.4,
+		tile_size_in_meters = 1.4,
 		tile_size_in_pixels = 60,
 		tile_offset = {-30, 0},
+		tilemap_size = {17, 9},
 		tiles = {
 			{tiles_top, tiles_top2},
 			{tiles_bottom, tiles_bottom2},
 		}
 	}
-	player_size: [2]f32 : {30, 45}
+	world.meters_to_pixels = cast(f32) world.tile_size_in_pixels / world.tile_size_in_meters
+	assert(world.tilemap_size.x == len(Tilemap{}[0]) && world.tilemap_size.y == len(Tilemap{}))
+
+	player_size: [2]f32 = {.75 * world.tile_size_in_meters, world.tile_size_in_meters}
+	player_speed_in_mps: f32 : 6
 
 	for controller, index in input.controllers {
 		if controller.is_analog {
 			// NOTE use analog movement tuning
 		} else {
 			// NOTE Use digital movement tuning
-
-			speed: f32 : 300
 			direction : [2]f32
 			if controller.button_left.ended_down {
 				direction.x -= 1
@@ -200,10 +204,18 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 			}
 			direction = normalize(direction)
 
+			new_position := state.player
+			delta := direction * player_speed_in_mps * input.delta_time
+			new_position.tile_position += direction * player_speed_in_mps * input.delta_time
+			new_position = get_cannonical_position(world, new_position)
+			
+			player_left := new_position
+			player_left.tile_position -= {0.5*player_size.x, 0}
+			player_left = get_cannonical_position(world, player_left)
 
-			new_position := state.player + direction * speed * input.delta_time
-			player_left  := new_position - {0.5*player_size.x, 0}
-			player_right := new_position + {0.5*player_size.x, 0}
+			player_right := new_position
+			player_right.tile_position += {0.5*player_size.x, 0}
+			player_right = get_cannonical_position(world, player_right)
 
 			move_is_valid := is_world_point_empty(world, new_position) && is_world_point_empty(world, player_left) && is_world_point_empty(world, player_right)
 			if move_is_valid {
@@ -217,27 +229,35 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 
 	Gray  :: GameColor{0.5,0.5,0.5}
 	White :: GameColor{1,1,1}
+	Black :: GameColor{0,0,0}
 
-	can_pos := get_cannonical_position(world, state.player)
-	current_tile := get_tilemap(world, can_pos.tile_index)
+	current_tile := get_tilemap(world, state.player.tilemap_index)
 	for row, ri in current_tile {
 		for cell, ci in row {
+			tile_index := [2]i32{cast(i32)ci, cast(i32)ri}
 			color : GameColor
-			if cell == 1 {
+			if state.player.tile_index == tile_index {
+				color = Black
+			} else if cell == 1 {
 				color = Gray
 			} else {
 				color = White
 			}
-			position := world.tile_offset + cast_vec(f32, cast_vec(i32, [2]int{ci, ri}) * world.tile_size_in_pixels) 
-			draw_rectangle(offscreen_buffer, position, cast_vec(f32, [2]i32{world.tile_size_in_pixels, world.tile_size_in_pixels}), color)
+			position := world.tile_offset + cast_vec(f32, tile_index * world.tile_size_in_pixels) 
+			size := cast_vec(f32, [2]i32{world.tile_size_in_pixels, world.tile_size_in_pixels})
+			draw_rectangle(offscreen_buffer, position, size, color)
 		}
 	}
 
-	player_tile_position := can_pos.tile_position
-	player_draw_position := world.tile_offset + (player_tile_position + player_size * {-0.5, -1})
-	draw_rectangle(offscreen_buffer, player_draw_position , player_size, {0, 0.59, 0.28})
+	player_draw_position := world.tile_offset + cast_vec(f32, state.player.tile_index * world.tile_size_in_pixels) + 
+		world.meters_to_pixels * state.player.tile_position + world.meters_to_pixels * player_size * {-0.5, -1}
+	draw_rectangle(offscreen_buffer, player_draw_position, world.meters_to_pixels * player_size, {0, 0.59, 0.28})
 }
 
+
+GameState :: struct {
+	player : CanonicalPosition,
+}
 
 
 
@@ -245,14 +265,18 @@ game_update_and_render :: proc(memory: ^GameMemory, offscreen_buffer: GameOffscr
 Tilemap :: [9][17]u32
  
 World :: struct {
-	tile_size_in_meter: f32,
+	tile_size_in_meters: f32,
 	tile_size_in_pixels: i32,
+	meters_to_pixels: f32,
+
+	tilemap_size: [2]i32,
 
 	tile_offset: [2]f32,
 	tiles : [][]Tilemap,
 }
 
 CanonicalPosition :: struct {
+	tilemap_index:    [2]i32,
 	tile_index:    [2]i32,
 	tile_position: [2]f32,
 }
@@ -266,31 +290,50 @@ get_tilemap :: proc(world: World, tile_index: [2]i32) -> (tilemap: Tilemap, ok: 
 	return
 }
 
-get_cannonical_position :: #force_inline proc(world: World, point: [2]f32) -> CanonicalPosition {
-	xdiv, xmod := divmod(point.x, cast(f32) world.tile_size_in_pixels)
-	ydiv, ymod := divmod(point.y, cast(f32) world.tile_size_in_pixels)
+get_cannonical_position :: #force_inline proc(world: World, point: CanonicalPosition) -> CanonicalPosition {
+	result := point
 
-	return {
-		floor([2]f32{xdiv, ydiv}),
-		{xmod, ymod}
+	offset := floor(point.tile_position / world.tile_size_in_meters)
+
+	result.tile_index    += offset
+	result.tile_position -= cast_vec(f32, offset) * world.tile_size_in_meters
+
+	assert(result.tile_position.x > 0 && result.tile_position.x < world.tile_size_in_meters)
+	assert(result.tile_position.y > 0 && result.tile_position.y < world.tile_size_in_meters)
+
+	if result.tile_index.x < 0 {
+		result.tile_index.x = result.tile_index.x + world.tilemap_size.x
+		result.tilemap_index.x -= 1
 	}
+	if result.tile_index.y < 0 {
+		result.tile_index.y = result.tile_index.y + world.tilemap_size.y
+		result.tilemap_index.y -= 1
+	}
+	if result.tile_index.x >= world.tilemap_size.x {
+		result.tile_index.x = result.tile_index.x - world.tilemap_size.x
+		result.tilemap_index.x += 1
+	}
+	if result.tile_index.y >= world.tilemap_size.y {
+		result.tile_index.y = result.tile_index.y - world.tilemap_size.y
+		result.tilemap_index.y += 1
+	}
+
+	return result
 }
 
-is_world_point_empty :: proc(world: World, point: [2]f32) -> b32 {
+is_world_point_empty :: proc(world: World, point: CanonicalPosition) -> b32 {
 	empty : b32
-	can_pos := get_cannonical_position(world, point) 
-	current_tile, ok := get_tilemap(world, can_pos.tile_index)
-	if in_bounds(world.tiles, can_pos.tile_index) {
-		empty = is_tilemap_point_empty(&current_tile, can_pos.tile_position, cast(f32) world.tile_size_in_pixels)
+	current_tile, ok := get_tilemap(world, point.tilemap_index)
+	if ok {
+		empty = is_tilemap_point_empty(&current_tile, point)
 	}
 	return empty
 }
 
-is_tilemap_point_empty :: proc(tilemap: ^Tilemap, point_in_tilemap: [2]f32, tile_size: f32) -> b32 {
+is_tilemap_point_empty :: proc(tilemap: ^Tilemap, point: CanonicalPosition) -> b32 {
 	empty : b32
-	point_tile := cast_vec(i32, floor(point_in_tilemap / tile_size))
-	if in_bounds(tilemap[:], point_tile) {
-		tile := tilemap[point_tile.y][point_tile.x]
+	if in_bounds(tilemap[:], point.tile_index) {
+		tile := tilemap[point.tile_index.y][point.tile_index.x]
 		empty = tile == 0
 	}
 	return empty

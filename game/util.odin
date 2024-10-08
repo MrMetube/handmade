@@ -4,10 +4,6 @@ import "base:intrinsics"
 import "core:math"
 import "core:simd"
 
-mod :: proc(value: [2]f32, divisor: [2]f32) -> [2]f32 {
-	return {math.mod(value.x, divisor.x), math.mod(value.y, divisor.y)}
-}
-
 length :: #force_inline proc(vec: $T/[$N]$E) -> (length:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
 	sum_of_square := abs(vec.x * vec.x + vec.y * vec.y)
 	if sum_of_square > 0 {
@@ -50,7 +46,18 @@ in_bounds_slice :: proc(slices: [][]$T, index: [2]i32) -> b32 {
 
 // TODO convert all of these to platform-efficient versions
 
-divmod :: math.divmod
+mod :: proc {
+	mod_d,
+	mod_ds,
+}
+
+mod_d :: proc(value: [2]f32, divisor: f32) -> [2]f32 {
+	return {math.mod(value.x, divisor), math.mod(value.y, divisor)}
+}
+
+mod_ds :: proc(value: [2]f32, divisor: [2]f32) -> [2]f32 {
+	return {math.mod(value.x, divisor.x), math.mod(value.y, divisor.y)}
+}
 
 round :: proc {
 	round_f32,
