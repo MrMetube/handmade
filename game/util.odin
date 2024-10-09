@@ -29,6 +29,10 @@ cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 &
 }
 
 
+lerp :: proc(a, b, t: f32) -> f32 {
+	return a + (b-a) * t
+}
+
 
 in_bounds :: proc {
 	in_bounds_array,
@@ -83,11 +87,13 @@ round :: proc {
 }
 
 round_f32 :: #force_inline proc(f: f32) -> i32 {
-	return cast(i32) (f + 0.5)
+	return cast(i32) math.round(f)
 }
 
 round_f32s :: #force_inline proc(fs: [$N]f32) -> [N]i32 where N > 1 {
-	return cast_vec(i32, fs + 0.5)
+	fs := fs
+	for &e in fs do e = math.round(e) 
+	return cast_vec(i32, fs)
 }
 
 

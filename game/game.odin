@@ -2,7 +2,6 @@ package game
 
 import "base:intrinsics"
 
-// TODO do these myself
 import "core:fmt"
 
 // TODO Copypasta from platform
@@ -94,6 +93,34 @@ GameMemory :: struct {
 	debug: DEBUG_code
 }
 
+
+MemoryArena :: struct {
+	storage: []u8,
+	used: u64 // TODO if I use a slice a can never get more than 4 Gb of memory
+}
+
+init_arena :: proc(arena: ^MemoryArena, storage: []u8) {
+	arena.storage = storage
+}
+
+push_slice :: proc(arena: ^MemoryArena, $T: typeid, len: u64) -> []T {
+	data := cast([^]T) push_size(arena, cast(u64) size_of(T) * len)
+	return data[:len]
+}
+
+push_struct :: proc(arena: ^MemoryArena, $T: typeid) -> ^T {
+	return cast(^T) push_size(arena, cast(u64)size_of(T))
+}
+push_size :: proc(arena: ^MemoryArena, size: u64) -> ^u8 {
+	assert(arena.used + size < cast(u64)len(arena.storage))
+	result := &arena.storage[arena.used]
+	arena.used += size
+	return result
+}
+
+
+
+
 // timing
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer, input: GameInput){
@@ -101,82 +128,65 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 	state := cast(^GameState) raw_data(memory.permanent_storage)
 
-
+	// ---------------------- ---------------------- ----------------------
+	// ---------------------- Initialize
+	// ---------------------- ---------------------- ----------------------
 	if !memory.is_initialized {
 		state.player = {
 			chunk_x = 0,
 			chunk_y = 0,
-			tile_x = 3,
+			tile_x = 1,
 			tile_y = 3,
 			tile_position = 0.5,
+		}
+
+		init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
+
+		state.world = World{
+			tilemap = push_struct(&state.world_arena, Tilemap)
+		}
+
+		tilemap := state.world.tilemap
+
+		tilemap.tile_size_in_meters = 1.4 // TODO maybe change this to 1m
+		tilemap.tile_size_in_pixels = 60
+		tilemap.meters_to_pixels = cast(f32) tilemap.tile_size_in_pixels / tilemap.tile_size_in_meters
+		tilemap.chunks_size = {4, 4}
+		tilemap.chunks = push_slice(&state.world_arena, Chunk, cast(u64)tilemap.chunks_size.x * cast(u64)tilemap.chunks_size.y)
+
+
+		tiles_per_screen := [2]u32{17, 9}
+
+		for screen_row in u32(0) ..< tilemap.chunks_size.y {
+			for screen_col in u32(0) ..< tilemap.chunks_size.x {
+				for tile_y in 0..< tiles_per_screen.y {
+					for tile_x in 0 ..< tiles_per_screen.x {
+						abstile := TilemapPosition{
+							chunk_tile = {
+								screen_col * tiles_per_screen.x + tile_x,
+								screen_row * tiles_per_screen.y + tile_y
+							}
+						}
+						set_tile_value(tilemap, abstile, tile_x == tile_y ? 1 : 0)
+					}
+				}
+			}
 		}
 
 		memory.is_initialized = true
 	}
 	
+	// ---------------------- ---------------------- ----------------------
+	// ---------------------- Update
+	// ---------------------- ---------------------- ----------------------
+
 	// NOTE: Clear the screen
 	draw_rectangle(buffer, {0,0}, cast_vec(f32, [2]i32{buffer.width, buffer.height}), {1,0,1})
-	chunk := cast(^Chunk) &memory.transient_storage[0] // TODO a chunk is too large for the stack
-	chunk_00 := [?]u32{1, 1, 1, 1,   1, 1, 1, 1,  1,  1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 1, 1,  1,  1, 1, 1, 1,   1, 1, 1, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_01 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_02 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_03 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 0,   0, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_04 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_05 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 0,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_06 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_07 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_08 := [?]u32{1, 1, 1, 1,   1, 1, 1, 1,  0,  1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 0, 0,  0,  0, 0, 1, 1,   1, 1, 1, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_09 := [?]u32{1, 1, 1, 1,   1, 1, 1, 1,  0,  1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 0, 0,  0,  0, 0, 1, 1,   1, 1, 1, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_10 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_11 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_12 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_13 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 0,   0, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_14 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_15 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_16 := [?]u32{1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,   1, 0, 0, 0,   0, 0, 0, 0,  0,  0, 0, 0, 0,   0, 0, 0, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	chunk_17 := [?]u32{1, 1, 1, 1,   1, 1, 1, 1,  1,  1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 1, 1,   1, 1, 1, 1,  1,  1, 1, 1, 1,   1, 1, 1, 1,    0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0}
-	for i in 0..<len(chunk_00) do chunk[00][i] = chunk_00[i]
-	for i in 0..<len(chunk_01) do chunk[01][i] = chunk_01[i]
-	for i in 0..<len(chunk_02) do chunk[02][i] = chunk_02[i]
-	for i in 0..<len(chunk_03) do chunk[03][i] = chunk_03[i]
-	for i in 0..<len(chunk_04) do chunk[04][i] = chunk_04[i]
-	for i in 0..<len(chunk_05) do chunk[05][i] = chunk_05[i]
-	for i in 0..<len(chunk_06) do chunk[06][i] = chunk_06[i]
-	for i in 0..<len(chunk_07) do chunk[07][i] = chunk_07[i]
-	for i in 0..<len(chunk_08) do chunk[08][i] = chunk_08[i]
-	for i in 0..<len(chunk_09) do chunk[09][i] = chunk_09[i]
-	for i in 0..<len(chunk_10) do chunk[10][i] = chunk_10[i]
-	for i in 0..<len(chunk_11) do chunk[11][i] = chunk_11[i]
-	for i in 0..<len(chunk_12) do chunk[12][i] = chunk_12[i]
-	for i in 0..<len(chunk_13) do chunk[13][i] = chunk_13[i]
-	for i in 0..<len(chunk_14) do chunk[14][i] = chunk_14[i]
-	for i in 0..<len(chunk_15) do chunk[15][i] = chunk_15[i]
-	for i in 0..<len(chunk_16) do chunk[16][i] = chunk_16[i]
-	for i in 0..<len(chunk_17) do chunk[17][i] = chunk_17[i]
 
-	world := World{
-		tile_size_in_meters = 1.4,
-		tile_size_in_pixels = 60,
+	tilemap := state.world.tilemap	
 
-		chunks = {{chunk}}
-	}
-	world.meters_to_pixels = cast(f32) world.tile_size_in_pixels / world.tile_size_in_meters
-
-	player_size: [2]f32 = {.75 * world.tile_size_in_meters, world.tile_size_in_meters}
+	player_size: [2]f32 = {.75, 1} * tilemap.tile_size_in_meters
 	player_speed_in_mps: f32 : 6
-
-	when false {
-		// NOTE: this is here to test the bit layout of the chunk/tile bitfield
-		man_chunk_x := state.player.chunk_tile.x >> WORLD_TILE_BITS
-		man_chunk_y := state.player.chunk_tile.y >> WORLD_TILE_BITS
-		man_tile_x  := state.player.chunk_tile.x & (1 << WORLD_TILE_BITS)-1
-		man_tile_y  := state.player.chunk_tile.y & (1 << WORLD_TILE_BITS)-1
-		chunk_tile  := state.player.chunk_tile
-		assert(man_chunk_x == state.player.chunk_x)
-		assert(man_chunk_y == state.player.chunk_y)
-		assert(man_tile_x  == state.player.tile_x)
-		assert(man_tile_y  == state.player.tile_y)
-	}
 
 	for controller, index in input.controllers {
 		if controller.is_analog {
@@ -198,20 +208,24 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 			}
 			direction = normalize(direction)
 
-			new_position := state.player
+
 			delta := direction * player_speed_in_mps * input.delta_time
-			new_position.tile_position += direction * player_speed_in_mps * input.delta_time
-			new_position = cannonicalize_position(world, new_position)
+			if controller.shoulder_left.ended_down {
+				delta *= 10
+			}
+			new_position := state.player
+			new_position.tile_position += delta
+			new_position = cannonicalize_position(tilemap, new_position)
 
 			player_left := new_position
 			player_left.tile_position -= {0.5*player_size.x, 0}
-			player_left = cannonicalize_position(world, player_left)
+			player_left = cannonicalize_position(tilemap, player_left)
 
 			player_right := new_position
 			player_right.tile_position += {0.5*player_size.x, 0}
-			player_right = cannonicalize_position(world, player_right)
+			player_right = cannonicalize_position(tilemap, player_right)
 
-			move_is_valid := is_world_position_empty(world, new_position) && is_world_position_empty(world, player_left) && is_world_position_empty(world, player_right)
+			move_is_valid := is_tilemap_position_empty(tilemap, new_position) && is_tilemap_position_empty(tilemap, player_left) && is_tilemap_position_empty(tilemap, player_right)
 			if move_is_valid {
 				state.player = new_position
 			}
@@ -227,127 +241,52 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	tile_offset := [2]f32{-30, cast(f32)buffer.height}
 
 
-	center := [2]f32{cast(f32)buffer.width, cast(f32)buffer.height} * 0.5
-	current_chunk := get_chunk(world, state.player)
-	for row in -4..=4 {
-		for col in -8..=8 {
-			chunk := cast_vec(u32, (cast_vec(int, state.player.chunk_tile) + {col, row}))
+	screen_center := [2]f32{cast(f32)buffer.width, cast(f32)buffer.height} * 0.5
+	current_chunk := get_chunk(tilemap, state.player)
+	for row in -6..=6 {
+		for col in -10..=10 {
+			chunk_tile := cast_vec(u32, (cast_vec(int, state.player.chunk_tile) + {col, row}))
 
-			tile := get_chunk_tile(current_chunk, chunk.x, chunk.y)
+			tile := get_tile_value(current_chunk, chunk_tile.x, chunk_tile.y)
 
 			color := White
 			if tile == 1 {
 				color = Gray
 			}
-			if chunk == state.player.chunk_tile {
+			if chunk_tile == state.player.chunk_tile {
 				color = Black
 			}
 
-			size := cast_vec(f32, [2]u32{world.tile_size_in_pixels, world.tile_size_in_pixels})
-			// position := tile_offset + cast_vec(f32, state.player.chunk_tile * world.tile_size_in_pixels) + cast_vec(f32, chunk * world.tile_size_in_pixels) * {1, -1}  - {0, size.y}
-			position : [2]f32
-			position.x = center.x + cast(f32) (col * cast(int)world.tile_size_in_pixels)
-			position.y = center.y - cast(f32) (row * cast(int)world.tile_size_in_pixels)
+			size := cast_vec(f32, [2]u32{tilemap.tile_size_in_pixels, tilemap.tile_size_in_pixels})
+			// position := tile_offset + cast_vec(f32, state.player.chunk_tile * tilemap.tile_radius_in_pixels) + cast_vec(f32, chunk * tilemap.tile_radius_in_pixels) * {1, -1}  - {0, size.y}
+			center : [2]f32
+			center.x = screen_center.x + cast(f32) (col * cast(int)tilemap.tile_size_in_pixels) - state.player.tile_position.x * tilemap.meters_to_pixels
+			center.y = screen_center.y - cast(f32) (row * cast(int)tilemap.tile_size_in_pixels) + state.player.tile_position.y * tilemap.meters_to_pixels
+			position := center - {1, -1} * cast(f32) tilemap.tile_size_in_pixels * 0.5
 			draw_rectangle(buffer, position, size, color)
 		}
 	}
 
 	player_chunk := [2]u32{state.player.chunk_x, state.player.chunk_y}
 	player_tile  := [2]u32{state.player.tile_x, state.player.tile_y}
-	// player_draw_position := tile_offset + (cast_vec(f32, player_tile * world.tile_size_in_pixels) + 
-	// 	world.meters_to_pixels * state.player.tile_position) * {1, -1}  + world.meters_to_pixels * player_size * {-0.5, -1}
-	player_draw_position := center + (state.player.tile_position * {1, -1} - player_size * {0.5, 1}) * world.meters_to_pixels
-	draw_rectangle(buffer, player_draw_position, world.meters_to_pixels * player_size, {0, 0.59, 0.28})
+	// player_draw_position := tile_offset + (cast_vec(f32, player_tile * tilemap.tile_size_in_pixels) + 
+	// 	tilemap.meters_to_pixels * state.player.tile_position) * {1, -1}  + tilemap.meters_to_pixels * player_size * {-0.5, -1}
+	// player_draw_position := center - (state.player.tile_position * {1, -1} + player_size * {0.5, 1}) * tilemap.meters_to_pixels
+	position : [2]f32
+	position.x = screen_center.x - player_size.x * 0.5 * tilemap.meters_to_pixels
+	position.y = screen_center.y 
+	draw_rectangle(buffer, position, tilemap.meters_to_pixels * player_size, {0, 0.59, 0.28})
 }
-
 
 GameState :: struct {
-	player : WorldPosition,
+	world_arena: MemoryArena,
+	player : TilemapPosition,
+	world: World,
 }
-
-
 
 World :: struct {
-	tile_size_in_meters: f32,
-	tile_size_in_pixels: u32,
-	meters_to_pixels: f32,
-
-	chunks : [][]^Chunk,
+	tilemap: ^Tilemap
 }
-
-WORLD_TILE_BITS  :: 8
-WORLD_CHUNK_BITS :: 32 - WORLD_TILE_BITS
-
-CHUNK_SIZE :: 1 << WORLD_TILE_BITS
-Chunk :: [CHUNK_SIZE][CHUNK_SIZE]u32
- 
-
-WorldPosition :: struct {
-	using _ : struct #raw_union {
-		chunk_tile: [2]u32,
-		using _: bit_field u64 { // TODO is this worth it?
-			tile_x:  u32 | WORLD_TILE_BITS,
-			chunk_x: u32 | WORLD_CHUNK_BITS,
-			tile_y:  u32 | WORLD_TILE_BITS,
-			chunk_y: u32 | WORLD_CHUNK_BITS,
-		}
-	},
-	
-	tile_position: [2]f32,
-}
-
-
-
-cannonicalize_position :: #force_inline proc(world: World, point: WorldPosition) -> WorldPosition {
-	result := point
-
-	// NOTE: the world is assumed to be toroidal topology
-	// if you leave on one end you end up the other end
-	offset := floor(point.tile_position / world.tile_size_in_meters)
-	result.chunk_tile    += cast_vec(u32, offset)
-	result.tile_position -= cast_vec(f32, offset) * world.tile_size_in_meters
-
-	assert(result.tile_position.x > 0 && result.tile_position.x <= world.tile_size_in_meters)
-	assert(result.tile_position.y > 0 && result.tile_position.y <= world.tile_size_in_meters)
-
-	return result
-}
-
-is_world_position_empty :: proc(world: World, point: WorldPosition) -> b32 {
-	empty : b32
-	current_chunk, ok := get_chunk(world, point)
-	if ok {
-		tile := get_chunk_tile(current_chunk, point.tile_x, point.tile_y)
-		empty = tile == 0
-	}
-	return empty
-}
-
-get_chunk :: proc {
-	get_chunk_pos,
-	get_chunk_2,
-}
-
-get_chunk_pos :: proc(world: World, point: WorldPosition) -> (chunk: ^Chunk, ok: b32) #optional_ok {
-	return get_chunk(world, point.chunk_x, point.chunk_y)
-}
-get_chunk_2 :: proc(world: World, chunk_x, chunk_y: u32) -> (chunk: ^Chunk, ok: b32) #optional_ok {
-	if in_bounds(world.chunks, chunk_x, chunk_y) {
-		return world.chunks[chunk_y][chunk_x], true
-	}
-	return
-}
-
-get_chunk_tile :: proc(chunk: ^Chunk, tile_x, tile_y: u32) -> (tile: u32) {
-	if in_bounds(chunk[:], tile_x, tile_y) {
-		tile = chunk[tile_y][tile_x]
-	}
-	return tile
-}
-
-
-
-
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
