@@ -35,17 +35,21 @@ lerp :: proc(a, b, t: f32) -> f32 {
 
 
 in_bounds :: proc {
-	in_bounds_array,
-	in_bounds_slice,
+	in_bounds_array_2d,
+	in_bounds_array_3d,
+	in_bounds_slice_2d,
+	in_bounds_slice_3d,
 	in_bounds_array_2,
+	in_bounds_array_3,
 	in_bounds_slice_2,
+	in_bounds_slice_3,
 }
 
-in_bounds_array :: #force_inline proc(arrays: [][$N]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
+in_bounds_array_2d :: #force_inline proc(arrays: [][$N]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
 	return in_bounds_array_2(arrays, index.x, index.y)
 }
 
-in_bounds_slice :: #force_inline proc(slices: [][]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
+in_bounds_slice_2d :: #force_inline proc(slices: [][]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
 	return in_bounds_slice_2(slices, index.x, index.y)
 }
 
@@ -62,6 +66,30 @@ in_bounds_slice_2 :: #force_inline proc(slices: [][]$T, x, y: $I) -> b32 where i
 		return x < cast(I) len(slices[0]) && y < cast(I) len(slices)
 	} else {
 		return x >= 0 && x < cast(I) len(slices[0]) && y >= 0 && y < cast(I) len(slices)
+	}
+}
+
+in_bounds_array_3d :: #force_inline proc(arrays: [][$N][$M]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
+	return in_bounds_array_3(arrays, index.x, index.y, index.z)
+}
+
+in_bounds_slice_3d :: #force_inline proc(slices: [][][]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
+	return in_bounds_slice_3(slices, index.x, index.y, index.z)
+}
+
+in_bounds_array_3 :: #force_inline proc(arrays: [][$N][$M]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
+	when intrinsics.type_is_unsigned(I) {
+		return x < cast(I) len(arrays[0][0]) && y < cast(I) len(arrays[0]) && z < cast(I) len(arrays)
+	} else {
+		return x >= 0 && x < cast(I) len(arrays[0][0]) && y >= 0 && y < cast(I) len(arrays[0]) && z >= 0 && z < cast(I) len(arrays)
+	}
+}
+
+in_bounds_slice_3 :: #force_inline proc(slices: [][][]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
+	when intrinsics.type_is_unsigned(I) {
+		return x < cast(I) len(slices[0][0]) && y < cast(I) len(slices[0]) && z < cast(I) len(slices)
+	} else {
+		return x >= 0 && x < cast(I) len(slices[0][0]) && y >= 0 && y < cast(I) len(slices[0]) && z >= 0 && z < cast(I) len(slices)
 	}
 }
 

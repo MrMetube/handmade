@@ -119,7 +119,8 @@ push_size :: proc(arena: ^MemoryArena, size: u64) -> ^u8 {
 }
 
 
-
+tile_size_in_pixels :u32: 60
+meters_to_pixels: f32
 
 // timing
 @(export)
@@ -131,6 +132,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	// ---------------------- ---------------------- ----------------------
 	// ---------------------- Initialize
 	// ---------------------- ---------------------- ----------------------
+
 	if !memory.is_initialized {
 		state.player = {
 			chunk_x = 0,
@@ -149,27 +151,99 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 		tilemap := state.world.tilemap
 
 		tilemap.tile_size_in_meters = 1.4 // TODO maybe change this to 1m
-		tilemap.tile_size_in_pixels = 60
-		tilemap.meters_to_pixels = cast(f32) tilemap.tile_size_in_pixels / tilemap.tile_size_in_meters
-		tilemap.chunks_size = {4, 4}
-		tilemap.chunks = push_slice(&state.world_arena, Chunk, cast(u64)tilemap.chunks_size.x * cast(u64)tilemap.chunks_size.y)
+		tilemap.chunks_size = {128, 128, 128}
+		tilemap.chunks = push_slice(
+			&state.world_arena, 
+			^Chunk, 
+			cast(u64)(tilemap.chunks_size.x * tilemap.chunks_size.y * tilemap.chunks_size.z)
+		)
+		
 
+		door_left, door_right: b32
+		door_top, door_bottom: b32
+		stair_up, stair_down: b32
 
 		tiles_per_screen := [2]u32{17, 9}
+		screen_row, screen_col, screen_height : u32
+		for screen_index in u32(0) ..< 100 {
+			random_choice : u32
+			if stair_down || stair_up {
+				random_choice = random_number[random_number_index] % 2
+			} else {
+				random_choice = random_number[random_number_index] % 3
+			}
+			random_number_index += 1
 
-		for screen_row in u32(0) ..< tilemap.chunks_size.y {
-			for screen_col in u32(0) ..< tilemap.chunks_size.x {
-				for tile_y in 0..< tiles_per_screen.y {
-					for tile_x in 0 ..< tiles_per_screen.x {
-						abstile := TilemapPosition{
-							chunk_tile = {
-								screen_col * tiles_per_screen.x + tile_x,
-								screen_row * tiles_per_screen.y + tile_y
-							}
-						}
-						set_tile_value(tilemap, abstile, tile_x == tile_y ? 1 : 0)
-					}
+			if random_choice == 0 {
+				door_right = true
+			} else if random_choice == 1 {
+				door_top = true
+			} else {
+				if screen_height == 1 {
+					stair_down = true
+				} else {
+					stair_up = true
 				}
+			}
+
+			for tile_y in 0..< tiles_per_screen.y {
+				for tile_x in 0 ..< tiles_per_screen.x {
+					abstile := TilemapPosition{
+						chunk_tile = {
+							screen_col * tiles_per_screen.x + tile_x,
+							screen_row * tiles_per_screen.y + tile_y,
+							screen_height,
+						}
+					}
+					
+					value: u32 = 3
+					if tile_x == 0 && (!door_left || tile_y != tiles_per_screen.y / 2) {
+						value = 2 
+					}
+					if tile_x == tiles_per_screen.x-1 && (!door_right || tile_y != tiles_per_screen.y / 2) {
+						value = 2 
+					}
+
+					if stair_up && tile_x == tiles_per_screen.x / 2 && tile_y == tiles_per_screen.y / 2 {
+						value = 4
+					}
+					if stair_down && tile_x == tiles_per_screen.x / 2 && tile_y == tiles_per_screen.y / 2 {
+						value = 5
+					}
+					
+					if tile_y == 0 && (!door_bottom || tile_x != tiles_per_screen.x / 2) {
+						value = 2
+					}
+					if tile_y == tiles_per_screen.y-1 && (!door_top || tile_x != tiles_per_screen.x / 2) {
+						value = 2
+					}
+					set_tile_value(&state.world_arena, tilemap, abstile, value)
+				}
+			}
+			
+			door_left   = door_right
+			door_bottom = door_top
+			if stair_down {
+				stair_up   = true
+				stair_down = false
+			} else if stair_up {
+				stair_up   = false
+				stair_down = true
+			} else {
+				stair_up   = false
+				stair_down = false
+			}
+
+			door_right  = false
+			door_top    = false
+			stair_up    = false
+			// TODO random number generator
+			if random_choice == 0 {
+				screen_col += 1
+			} else if random_choice == 1 {
+				screen_row += 1
+			} else {
+				screen_height = screen_height == 1 ? 0 : 1
 			}
 		}
 
@@ -181,9 +255,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	// ---------------------- ---------------------- ----------------------
 
 	// NOTE: Clear the screen
-	draw_rectangle(buffer, {0,0}, cast_vec(f32, [2]i32{buffer.width, buffer.height}), {1,0,1})
+	draw_rectangle(buffer, {0,0}, cast_vec(f32, [2]i32{buffer.width, buffer.height}), {1, 0.09, 0.24})
 
 	tilemap := state.world.tilemap	
+	meters_to_pixels = f32(tile_size_in_pixels) / tilemap.tile_size_in_meters
 
 	player_size: [2]f32 = {.75, 1} * tilemap.tile_size_in_meters
 	player_speed_in_mps: f32 : 6
@@ -211,7 +286,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 			delta := direction * player_speed_in_mps * input.delta_time
 			if controller.shoulder_left.ended_down {
-				delta *= 10
+				delta *= 8
 			}
 			new_position := state.player
 			new_position.tile_position += delta
@@ -235,47 +310,54 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 
 
-	Gray  :: GameColor{0.5,0.5,0.5}
-	White :: GameColor{1,1,1}
-	Black :: GameColor{0,0,0}
+	Gray   :: GameColor{0.5,0.5,0.5}
+	White  :: GameColor{1,1,1}
+	Black  :: GameColor{0,0,0}
+	Blue   :: GameColor{0.08, 0.49, 0.72}
+	Orange :: GameColor{1, 0.71, 0.2}
 	tile_offset := [2]f32{-30, cast(f32)buffer.height}
 
 
 	screen_center := [2]f32{cast(f32)buffer.width, cast(f32)buffer.height} * 0.5
-	current_chunk := get_chunk(tilemap, state.player)
-	for row in -6..=6 {
-		for col in -10..=10 {
-			chunk_tile := cast_vec(u32, (cast_vec(int, state.player.chunk_tile) + {col, row}))
+	for row in i32(-10)..=10 {
+		for col in i32(-20)..=20 {
+			chunk_tile := cast_vec(u32, (cast_vec(i32, state.player.chunk_tile) + {col, row, 0}))
+			
+			position := TilemapPosition{chunk_tile = chunk_tile}
+			tile := get_tile_value_checked(tilemap, position)
 
-			tile := get_tile_value(current_chunk, chunk_tile.x, chunk_tile.y)
+			if tile != 0 {
+				color := White
+				if tile == 4 {
+					color = Blue
+				}
+				if tile == 5 {
+					color = Orange
+				}
+				if tile == 2 {
+					color = Gray
+				}
+				if position.chunk_tile == state.player.chunk_tile {
+					color = Black
+				}
 
-			color := White
-			if tile == 1 {
-				color = Gray
+				size := [2]f32{cast(f32) tile_size_in_pixels, cast(f32)tile_size_in_pixels}
+				center : [2]f32
+				center.x = screen_center.x  +  cast(f32) (col * cast(i32) tile_size_in_pixels)  -  (state.player.tile_position.x * meters_to_pixels)
+				center.y = screen_center.y  -  cast(f32) (row * cast(i32) tile_size_in_pixels)  +  (state.player.tile_position.y * meters_to_pixels)
+				
+				position := center - {1, -1} * cast(f32) tile_size_in_pixels * 0.5
+				draw_rectangle(buffer, position, size, color)
 			}
-			if chunk_tile == state.player.chunk_tile {
-				color = Black
-			}
-
-			size := cast_vec(f32, [2]u32{tilemap.tile_size_in_pixels, tilemap.tile_size_in_pixels})
-			// position := tile_offset + cast_vec(f32, state.player.chunk_tile * tilemap.tile_radius_in_pixels) + cast_vec(f32, chunk * tilemap.tile_radius_in_pixels) * {1, -1}  - {0, size.y}
-			center : [2]f32
-			center.x = screen_center.x + cast(f32) (col * cast(int)tilemap.tile_size_in_pixels) - state.player.tile_position.x * tilemap.meters_to_pixels
-			center.y = screen_center.y - cast(f32) (row * cast(int)tilemap.tile_size_in_pixels) + state.player.tile_position.y * tilemap.meters_to_pixels
-			position := center - {1, -1} * cast(f32) tilemap.tile_size_in_pixels * 0.5
-			draw_rectangle(buffer, position, size, color)
 		}
 	}
 
-	player_chunk := [2]u32{state.player.chunk_x, state.player.chunk_y}
-	player_tile  := [2]u32{state.player.tile_x, state.player.tile_y}
-	// player_draw_position := tile_offset + (cast_vec(f32, player_tile * tilemap.tile_size_in_pixels) + 
-	// 	tilemap.meters_to_pixels * state.player.tile_position) * {1, -1}  + tilemap.meters_to_pixels * player_size * {-0.5, -1}
-	// player_draw_position := center - (state.player.tile_position * {1, -1} + player_size * {0.5, 1}) * tilemap.meters_to_pixels
-	position : [2]f32
-	position.x = screen_center.x - player_size.x * 0.5 * tilemap.meters_to_pixels
-	position.y = screen_center.y 
-	draw_rectangle(buffer, position, tilemap.meters_to_pixels * player_size, {0, 0.59, 0.28})
+
+	position := [2]f32{
+		screen_center.x - player_size.x * 0.5 * meters_to_pixels,
+		screen_center.y,
+	}
+	draw_rectangle(buffer, position, meters_to_pixels * player_size, {0, 0.59, 0.28})
 }
 
 GameState :: struct {
