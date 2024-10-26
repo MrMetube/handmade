@@ -4,17 +4,21 @@ set build-flags=-warnings-as-errors -vet-cast -vet-shadowing -error-pos-style:un
 set debug-flags=-debug -o:none
 
 if not exist .\build mkdir .\build
-:: TODO shipping build
 
 :: Debug build
+set EXE=debug.exe
+
+:: Game
 if exist .\build\*.pdb del .\build\*.pdb
+echo WAITING FOR PDB > lock.tmp
 odin build game -build-mode:dll -out:.\build\game.dll %build-flags% %debug-flags% -pdb-name:.\build\game-%random%.pdb
+del lock.tmp
 if %errorlevel% neq 0 exit /b 1
 
-:: if the game is already running exit early
-set EXE=debug.exe
+:: exit early if the game is running
 for /f %%x in ('tasklist /NH /FI "IMAGENAME eq %EXE%"') do if %%x == %EXE% exit /b 0
 
+:: Platform
 odin build . -out:.\build\%EXE% %build-flags% %debug-flags% -define:INTERNAL=true
 if %errorlevel% neq 0 exit /b 1
 

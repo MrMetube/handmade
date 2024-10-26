@@ -135,8 +135,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     if !memory.is_initialized {
         DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.backdrop = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
-        state.player   = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/Soldier.bmp")
-
+        state.player[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierRight.bmp")
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierLeft.bmp")
+		state.player_index = 1
+		
         state.player_position = {
             chunk_x = 0,
             chunk_y = 0,
@@ -269,7 +271,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
     player_size: [2]f32 = {0.75, 1} * tilemap.tile_size_in_meters
     player_speed_in_mps: f32 : 3
-
     for controller in input.controllers {
         if controller.is_analog {
             // NOTE use analog movement tuning
@@ -278,9 +279,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             direction : [2]f32
             if controller.button_left.ended_down {
                 direction.x -= 1
+				state.player_index = 0
             }
             if controller.button_right.ended_down {
                 direction.x += 1
+				state.player_index = 1
             }
             if controller.button_up.ended_down {
                 direction.y += 1
@@ -362,7 +365,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     color = Gray
                 }
                 if position.chunk_tile == state.player_position.chunk_tile {
-                    // color = Black
+                    color = Black
                 }
 
                 center : [2]f32
@@ -384,10 +387,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	
 	center := screen_center + total_delta * {1,-1}
 	tile_size := cast_vec(f32, [2]u32{tile_size_in_pixels, tile_size_in_pixels})
-	position := center - {cast(f32) state.player.width * 0.5, 0}
-	draw_rectangle(buffer, position, player_size * meters_to_pixels, Green)
+	position := center - {cast(f32) state.player[state.player_index].width * 0.5, 0}
 	// TODO bitmap "center/focus" point
-    draw_bitmap(buffer, state.player, position)
+	draw_rectangle(buffer, position, player_size * meters_to_pixels, Green) // player bounding box
+    draw_bitmap(buffer, state.player[state.player_index], position)
 }
 
 GameState :: struct {
@@ -397,7 +400,8 @@ GameState :: struct {
     world: World,
 
     backdrop: LoadedBitmap,
-    player: LoadedBitmap,
+    player: [2]LoadedBitmap,
+	player_index: i32
 }
 
 World :: struct {
@@ -424,12 +428,21 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position:
     left, right := rounded_position.x, rounded_position.x + bitmap.width
     top, bottom := rounded_position.y, rounded_position.y + bitmap.height
 
-	left   = max(left, 0)
-	top    = max(top , 0)
+	src_left: i32
+	src_top : i32
+	if left < 0 {
+		src_left = -left
+		left = 0
+	}
+	if top < 0 {
+		src_top = -top
+		top = 0
+	}
     bottom = min(bottom, buffer.height)
     right  = min(right,  buffer.width)
 
-    src_row  := (right-left) * (bottom-top-1)
+    src_row  := bitmap.width * (bitmap.height-1)
+	src_row  += -bitmap.width * src_top + src_left
     dest_row := left + top * buffer.width
     for y in top..< bottom  {
         src_index, dest_index := src_row, dest_row

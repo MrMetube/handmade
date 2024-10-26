@@ -9,15 +9,14 @@ import "util"
 
 /*
 	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
+	- Fullscreen support
+	- ClipCursor() (for multimonitor support)
 
 	- Saved game locations
 	- Getting a handle to our own executable file
 	- Asset loading path
 	- Threading (launch a thread)
 	- Raw Input (support for multiple keyboards)
-	- Sleep/timeBeginPeriod
-	- ClipCursor() (for multimonitor support)
-	- Fullscreen support
 	- WM_SETCURSOR (control cursor visibility)
 	- QueryCancelAutoplay
 	- WM_ACTIVATEAPP (for when we are not the active application)
@@ -193,7 +192,6 @@ main :: proc() {
 	main_thread_context : ThreadContext
 	main_thread_context.placeholder = 123
 	context.user_ptr = &main_thread_context
-	
 	RUNNING = true
 
 
@@ -313,7 +311,8 @@ main :: proc() {
 
 	game_dll_name := build_exe_path(state, "game.dll")
 	temp_dll_name := build_exe_path(state, "game_temp.dll")
-	game_lib_is_valid, game_dll_write_time := init_game_lib(game_dll_name, temp_dll_name)
+	lock_name     := build_exe_path(state, "lock.temp")
+	game_lib_is_valid, game_dll_write_time := init_game_lib(game_dll_name, temp_dll_name, lock_name)
 	// TODO make this like sixty seconds?
 	// TODO pool with bitmap alloc
 	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -382,7 +381,7 @@ main :: proc() {
 	for RUNNING {
 		// TODO: if this is too slow the audio and the whole game will lag
 		if get_last_write_time(game_dll_name) != game_dll_write_time {
-			game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name)
+			game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name, lock_name)
 		}
 
 		// ---------------------- ---------------------- ----------------------
@@ -667,7 +666,7 @@ main :: proc() {
 				mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
 				ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
 				frames_per_second     := 1000 / ms_per_frame
-				// fmt.printfln("Milliseconds/frame: %2.02f - frames/second: %4.02f - Megacycles/frame: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
+				fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
 			}
 
 			last_cycle_count = end_cycle_count
@@ -700,28 +699,25 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
 }
 
 
+FILE_ATTRIBUTE_DATA :: struct {
+	dwFileAttributes : win.DWORD,
+	ftCreationTime : win.FILETIME,
+	ftLastAccessTime : win.FILETIME,
+	ftLastWriteTime : win.FILETIME,
+	nFileSizeHigh : win.DWORD,
+	nFileSizeLow : win.DWORD,
+}
 
-
-get_last_write_time :: proc(filename: string) -> (last_write_time: u64) {
-	w_filename := win.utf8_to_wstring(filename)
-	FILE_ATTRIBUTE_DATA :: struct {
-		dwFileAttributes : win.DWORD,
-		ftCreationTime : win.FILETIME,
-		ftLastAccessTime : win.FILETIME,
-		ftLastWriteTime : win.FILETIME,
-		nFileSizeHigh : win.DWORD,
-		nFileSizeLow : win.DWORD,
-	}
-
+get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
 	file_information : FILE_ATTRIBUTE_DATA
-	if win.GetFileAttributesExW(w_filename, win.GetFileExInfoStandard, &file_information) {
+	if win.GetFileAttributesExW(filename, win.GetFileExInfoStandard, &file_information) {
 		last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)
 	}
 	return last_write_time
 }
 
-build_exe_path :: proc(state: State, filename: string) -> string {
-	return fmt.tprint(state.exe_path, filename, sep="")
+build_exe_path :: proc(state: State, filename: string) -> win.wstring {
+	return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
 }
 
 
@@ -731,7 +727,7 @@ build_exe_path :: proc(state: State, filename: string) -> string {
 // ---------------------- ---------------------- ----------------------
 
 get_record_replay_filepath :: proc(state: State, index:i32) -> win.wstring {
-	return win.utf8_to_wstring(build_exe_path(state, fmt.tprintf("editloop_%d.input", index)))
+	return build_exe_path(state, fmt.tprintf("editloop_%d.input", index))
 }
 
 begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
