@@ -144,7 +144,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             chunk_y = 0,
             tile_x = 5,
             tile_y = 5,
-            offset = 0.5,
+            offset = 0,
         }
 		state.camera_position = {
             chunk_x = 0,

@@ -4,7 +4,7 @@ import win "core:sys/windows"
 import "vendor:directx/dxgi"
 
 init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) {
-	assert(the_sound_buffer == nil, "DSound has already been initialized")
+	assert(GLOBAL_sound_buffer == nil, "DSound has already been initialized")
 
 	dSound_lib := win.LoadLibraryW(win.utf8_to_wstring("dsound.dll"))
 	if dSound_lib == nil {
@@ -54,7 +54,7 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
 		lpwfxFormat   = &wave_format,
 	}
 	
-	if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &the_sound_buffer, nil); win.FAILED(result) {
+	if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &GLOBAL_sound_buffer, nil); win.FAILED(result) {
 		// TODO Diagnostics
 	}
 }

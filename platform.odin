@@ -10,14 +10,13 @@ import "util"
 /*
 	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
 	- Fullscreen support
-	- ClipCursor() (for multimonitor support)
 
 	- Saved game locations
 	- Getting a handle to our own executable file
 	- Asset loading path
 	- Threading (launch a thread)
 	- Raw Input (support for multiple keyboards)
-	- WM_SETCURSOR (control cursor visibility)
+	- ClipCursor() (for multimonitor support)
 	- QueryCancelAutoplay
 	- WM_ACTIVATEAPP (for when we are not the active application)
 	- Blit speed improvements (BitBlt)
@@ -35,13 +34,15 @@ INTERNAL :: #config(INTERNAL, true)
 // TODO this is a global for now
 RUNNING : b32
 
-the_back_buffer : OffscreenBuffer
-the_sound_buffer: ^IDirectSoundBuffer
+GLOBAL_back_buffer : OffscreenBuffer
+GLOBAL_sound_buffer: ^IDirectSoundBuffer
 
-global_perf_counter_frequency : win.LARGE_INTEGER
+GLOBAL_perf_counter_frequency : win.LARGE_INTEGER
 
 GLOBAL_PAUSE := false
 
+GLOBAL_debug_show_cursor: b32
+GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Types
@@ -164,7 +165,7 @@ ThreadContext :: struct {
 }
 
 main :: proc() {
-	win.QueryPerformanceFrequency(&global_perf_counter_frequency)
+	win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
 	// ---------------------- ---------------------- ----------------------
 	// ----------------------  Platform Setup
@@ -197,20 +198,25 @@ main :: proc() {
 
 
 	// ---------------------- ---------------------- ----------------------
-	// ---------------------- Window Setup
+	// ---------------------- Windows Setup
 	// ---------------------- ---------------------- ----------------------
 
 	window : win.HWND
 	{
+		instance := cast(win.HINSTANCE) win.GetModuleHandleW(nil)
 		window_class := win.WNDCLASSW{
-			hInstance = cast(win.HINSTANCE) win.GetModuleHandleW(nil),
+			hInstance = instance,
 			lpszClassName = win.utf8_to_wstring("HandmadeWindowClass"),
-			// hIcon =,
 			style = win.CS_HREDRAW | win.CS_VREDRAW,
 			lpfnWndProc = main_window_callback,
+			hCursor = win.LoadCursorW(nil, win.MAKEINTRESOURCEW(32512)),
+			// hIcon =,
+		}
+		when INTERNAL {
+			GLOBAL_debug_show_cursor = true
 		}
 
-		resize_DIB_section(&the_back_buffer, 960, 540)
+		resize_DIB_section(&GLOBAL_back_buffer, 960, 540)
 
 		if win.RegisterClassW(&window_class) == 0 {
 			return // TODO Logging
@@ -283,7 +289,7 @@ main :: proc() {
 
 	clear_sound_buffer(&sound_output)
 
-	the_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
+	GLOBAL_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
 
 	sound_is_valid: b32
 
@@ -510,9 +516,9 @@ main :: proc() {
 		// ---------------------- ---------------------- ----------------------
 		{
 			offscreen_buffer := GameOffscreenBuffer{
-				memory = the_back_buffer.memory,
-				width  = the_back_buffer.width,
-				height = the_back_buffer.height,
+				memory = GLOBAL_back_buffer.memory,
+				width  = GLOBAL_back_buffer.width,
+				height = GLOBAL_back_buffer.height,
 			}
 
 			if state.input_record_index != 0 {
@@ -530,7 +536,7 @@ main :: proc() {
 			play_cursor, write_cursor : win.DWORD
 			audio_counter := get_wall_clock()
 			from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
-			if result := the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
+			if result := GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
 				/*
 					Here is how sound output computation works.
 
@@ -596,7 +602,7 @@ main :: proc() {
 				}
 
 				when false &&  INTERNAL {
-					the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result)
+					GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result)
 					debug_last_time_markers[0].output_play_cursor           = play_cursor
 					debug_last_time_markers[0].output_write_cursor          = write_cursor
 					debug_last_time_markers[0].output_location              = byte_to_lock
@@ -643,19 +649,19 @@ main :: proc() {
 
 			window_width, window_height := get_window_dimension(window)
 			when false && INTERNAL {
-				DEBUG_sync_display(the_back_buffer, debug_last_time_markers[:], sound_output, target_seconds_per_frame)
+				DEBUG_sync_display(GLOBAL_back_buffer, debug_last_time_markers[:], sound_output, target_seconds_per_frame)
 			}
 
 			{
 				device_context := win.GetDC(window)
-				display_buffer_in_window(&the_back_buffer, device_context, window_width, window_height)
+				display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
 				win.ReleaseDC(window, device_context)
 			}
 
 			flip_counter = get_wall_clock()
 			when false && INTERNAL {
 				play_cursor, write_cursor : win.DWORD
-				the_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
+				GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
 				debug_last_time_markers[0].flip_play_cursor = play_cursor
 				debug_last_time_markers[0].flip_write_cursor = write_cursor
 			}
@@ -695,7 +701,7 @@ get_wall_clock :: #force_inline proc() -> i64 {
 }
 
 get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
-	return f32(end - start) / f32(global_perf_counter_frequency)
+	return f32(end - start) / f32(GLOBAL_perf_counter_frequency)
 }
 
 
@@ -794,7 +800,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 	region1, region2 : rawptr
 	region1_size, region2_size: win.DWORD
 
-	if result := the_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+	if result := GLOBAL_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
 		// TODO assert that region1/2_size is valid
 		// TODO Collapse these two loops
 
@@ -824,7 +830,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 			sound_output.running_sample_index += 1
 		}
 
-		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+		GLOBAL_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
 		return // TODO Logging
 	}
@@ -834,7 +840,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 	region1, region2 : rawptr
 	region1_size, region2_size: win.DWORD
 
-	if result := the_sound_buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+	if result := GLOBAL_sound_buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
 		// TODO assert that region1/2_size is valid
 		// TODO Collapse these two loops
 
@@ -850,7 +856,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 		}
 		sound_output.running_sample_index += region2_size
 
-		the_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+		GLOBAL_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
 		return // TODO Logging
 	}
@@ -904,27 +910,64 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 }
 
 display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
-	offset :: 10
-	win.PatBlt(device_context, 0, 0, buffer.width+offset, offset, win.BLACKNESS )
-	win.PatBlt(device_context, 0, offset, offset, buffer.height+offset, win.BLACKNESS )
-	
-	win.PatBlt(device_context, buffer.width+offset, 0, window_width, window_height, win.BLACKNESS )
-	win.PatBlt(device_context, 0, buffer.height+offset, buffer.width+offset, window_height, win.BLACKNESS )
-	
-	// TODO aspect ratio correction
-	// TODO stretch to fill window once we are fine with our renderer
-	
-	win.StretchDIBits(
-		device_context,
-		offset, offset, buffer.width, buffer.height,
-		0, 0, buffer.width, buffer.height,
-		raw_data(buffer.memory),
-		&buffer.info,
-		win.DIB_RGB_COLORS,
-		win.SRCCOPY
-	)
+	if window_width >= buffer.width*2 && window_height >= buffer.height*2 {
+		offset := [2]i32{window_width - buffer.width*2, window_height - buffer.height*2} / 2
+		win.StretchDIBits(
+			device_context,
+			offset.x, offset.y, buffer.width*2, buffer.height*2,
+			0, 0, buffer.width, buffer.height,
+			raw_data(buffer.memory),
+			&buffer.info,
+			win.DIB_RGB_COLORS,
+			win.SRCCOPY
+		)	
+	} else {
+		offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
+		win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y, win.BLACKNESS )
+		win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
+		
+		win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height, win.BLACKNESS )
+		win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_height, win.BLACKNESS )
+		
+		// TODO aspect ratio correction
+		// TODO stretch to fill window once we are fine with our renderer
+		win.StretchDIBits(
+			device_context,
+			offset.x, offset.y, buffer.width, buffer.height,
+			0, 0, buffer.width, buffer.height,
+			raw_data(buffer.memory),
+			&buffer.info,
+			win.DIB_RGB_COLORS,
+			win.SRCCOPY
+		)
+	}
 }
 
+toggle_fullscreen :: proc(window: win.HWND) {
+	// NOTE(viktor): This follows Raymond Chen's prescription for fullscreen toggling, see:
+	// http://blogs.msdn.com/b/oldnewthing/archive/2010/04/12/9994016.aspx
+
+	style := cast(u32) win.GetWindowLongW(window, win.GWL_STYLE)
+	if style & win.WS_OVERLAPPEDWINDOW != 0 {
+		info := win.MONITORINFO{cbSize = size_of(win.MONITORINFO)}
+		if win.GetWindowPlacement(window, &GLOBAL_window_position) && 
+			win.GetMonitorInfoW(win.MonitorFromWindow(window, .MONITOR_DEFAULTTOPRIMARY), &info) {
+			win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style &~ win.WS_OVERLAPPEDWINDOW))
+			win.SetWindowPos(window, win.HWND_TOP, 
+				info.rcMonitor.left, info.rcMonitor.top,
+				info.rcMonitor.right - info.rcMonitor.left,
+				info.rcMonitor.bottom - info.rcMonitor.top,
+				win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED
+			)
+		}
+	} else {
+		win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style | win.WS_OVERLAPPEDWINDOW))
+		win.SetWindowPlacement(window, &GLOBAL_window_position)
+		win.SetWindowPos(window, nil, 0, 0, 0, 0, 
+			win.SWP_NOMOVE | win.SWP_NOSIZE | win.SWP_NOZORDER | 
+			win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED)
+	}
+}
 
 
 // ---------------------- ---------------------- ----------------------
@@ -954,9 +997,15 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
 		device_context := win.BeginPaint(window, &paint)
 
 		window_width, window_height := get_window_dimension(window)
-		display_buffer_in_window(&the_back_buffer, device_context, window_width, window_height)
+		display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
 
 		win.EndPaint(window, &paint)
+	case win.WM_SETCURSOR: 
+		if GLOBAL_debug_show_cursor {
+
+		} else {
+			win.SetCursor(nil)
+		}
 	case:
 		result = win.DefWindowProcA(window, message, w_param, l_param)
 	}
@@ -1018,7 +1067,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
 							end_replaying_input(state)
 						} else if state.input_record_index == 0 {
 							assert(state.input_replay_index == 0)
-							begin_recording_input(state, 1)
+							begin_recording_input(state, 1) 
 						} else {
 							end_recording_input(state)
 							begin_replaying_input(state, 1)
@@ -1027,7 +1076,10 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
 				case win.VK_P:
 					if is_down do GLOBAL_PAUSE = !GLOBAL_PAUSE
 				case win.VK_F4:
-					if alt_down do RUNNING = false
+					if is_down && alt_down do RUNNING = false
+				case win.VK_RETURN:
+					if is_down && alt_down do toggle_fullscreen(message.hwnd)
+					
 				}
 			}
 		case:
