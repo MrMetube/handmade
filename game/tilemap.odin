@@ -29,26 +29,36 @@ TilemapPosition :: struct {
 		}
 	},
 	
-	tile_position: [2]f32,
+	offset: [2]f32,
 }
 #assert(size_of(TilemapPosition{}._chunk_tile_union.chunk_tile) == size_of(TilemapPosition{}._chunk_tile_union._components))
+
+//
+//
+// TODO do these belong here?
+//
 
 cannonicalize_position :: #force_inline proc(tilemap: ^Tilemap, point: TilemapPosition) -> TilemapPosition {
 	result := point
 
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
-	offset := round(point.tile_position / tilemap.tile_size_in_meters)
+	offset := round(point.offset / tilemap.tile_size_in_meters)
 	result.chunk_tile.xy  = cast_vec(u32, cast_vec(i32, result.chunk_tile.xy) + offset)
-	result.tile_position -= cast_vec(f32, offset) * tilemap.tile_size_in_meters
+	result.offset -= cast_vec(f32, offset) * tilemap.tile_size_in_meters
 
-	assert(result.tile_position.x >= -tilemap.tile_size_in_meters * 0.5)
-	assert(result.tile_position.y >= -tilemap.tile_size_in_meters * 0.5)
-	assert(result.tile_position.x <=  tilemap.tile_size_in_meters * 0.5)
-	assert(result.tile_position.y <=  tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset.x >= -tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset.y >= -tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset.x <=  tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset.y <=  tilemap.tile_size_in_meters * 0.5)
 
 	return result
 }
+
+//
+//
+//
+//
 
 is_tilemap_position_empty :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> b32 {
 	empty : b32
@@ -60,6 +70,9 @@ is_tilemap_position_empty :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> 
 	return empty
 }
  
+are_on_same_tile :: proc(a, b: TilemapPosition) -> b32 {
+	return a.chunk_tile == b.chunk_tile
+}
 
 
 set_tile_value :: proc(arena: ^MemoryArena, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {

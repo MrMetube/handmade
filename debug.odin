@@ -22,8 +22,6 @@ when INTERNAL {
 		they are blocking and the write doesnt protect against lost data!
 	*/
 	DEBUG_read_entire_file : proc_DEBUG_read_entire_file : proc(filename: string) -> (result: []u8) {
-		fmt.println(get_thread_context())
-
 		handle := win.CreateFileW(win.utf8_to_wstring(filename), win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
 		defer win.CloseHandle(handle)
 
@@ -53,8 +51,6 @@ when INTERNAL {
 	}
 
 	DEBUG_write_entire_file : proc_DEBUG_write_entire_file : proc(filename: string, memory: []u8) -> b32 {
-		fmt.println(get_thread_context())
-
 		handle := win.CreateFileW(win.utf8_to_wstring(filename), win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
 		defer win.CloseHandle(handle)
 

@@ -23,14 +23,14 @@ cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 &
 	// TODO check if this gets optimized to have no loop
 	result : [N]T = ---
 	#no_bounds_check {
-		for e, i in value do result[i] = cast(T) value[i]
+		for _, i in value do result[i] = cast(T) value[i]
 	}
 	return result
 }
 
 
-lerp :: proc(a, b, t: f32) -> f32 {
-	return a + (b-a) * t
+lerp :: #force_inline proc(a, b, t: f32) -> f32 {
+	return (1-t) * a + t * b
 }
 
 
