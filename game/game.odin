@@ -48,7 +48,7 @@ GameInputController :: struct {
     is_connected: b32,
     is_analog: b32,
 
-    stick_average: [2]f32,
+    stick_average: v2,
 
     using _buttons_array_and_enum : struct #raw_union {
         buttons: [18]GameInputButton,
@@ -179,7 +179,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         for screen_index in u32(0) ..< 100 {
             // TODO random number generator
             random_choice : u32
-			fmt.println(random_number[random_number_index] & 0x11)
             if stair_down || stair_up {
                 random_choice = random_number[random_number_index] % 2
             } else {
@@ -268,13 +267,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     tilemap := state.world.tilemap	
     meters_to_pixels = f32(tile_size_in_pixels) / tilemap.tile_size_in_meters
 
-    player_size: [2]f32 = {0.75, 1} * tilemap.tile_size_in_meters
+    player_size: v2 = {0.75, 1} * tilemap.tile_size_in_meters
     for controller in input.controllers {
         if controller.is_analog {
             // NOTE use analog movement tuning
         } else {
             // NOTE Use digital movement tuning
-            dd_player_pos : [2]f32
+            dd_player_pos : v2
             if controller.button_left.ended_down {
                 dd_player_pos.x -= 1
 				state.player_index = 0
@@ -301,42 +300,67 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             }
 			dd_player_pos *= speed
 
-            new_position := state.player_pos
+            new_player_pos := state.player_pos
             
 			// TODO(viktor): ODE here
-			dd_player_pos += -state.d_player_pos * 1.5
+			dd_player_pos += -1.5 * state.d_player_pos
 
-			new_position.offset = 0.5*dd_player_pos * square(input.delta_time) + 
+			new_player_pos.offset = 0.5*dd_player_pos * square(input.delta_time) + 
 				state.d_player_pos * input.delta_time + 
 				state.player_pos.offset
 			state.d_player_pos = dd_player_pos * input.delta_time + state.d_player_pos
 
-            new_position = cannonicalize_position(tilemap, new_position)
+            new_player_pos = cannonicalize_position(tilemap, new_player_pos)
 
-            player_left := new_position
+            player_left := new_player_pos
             player_left.offset.x -= 0.5*player_size.x
             player_left = cannonicalize_position(tilemap, player_left)
 
-            player_right := new_position
+            player_right := new_player_pos
             player_right.offset.x += 0.5*player_size.x
             player_right = cannonicalize_position(tilemap, player_right)
 
-            move_is_valid := is_tilemap_position_empty(tilemap, new_position) && is_tilemap_position_empty(tilemap, player_left) && is_tilemap_position_empty(tilemap, player_right)
-            if move_is_valid {
-                if !are_on_same_tile(state.player_pos, new_position) {
-                    new_tile := get_tile_value_checked(tilemap, new_position)
+            collided : b32
+			collision_pos : TilemapPosition
+			
+			if !is_tilemap_position_empty(tilemap, player_left) {
+				collided = true
+				collision_pos = player_left
+			}
+			if !is_tilemap_position_empty(tilemap, player_right) {
+				collided = true
+				collision_pos = player_right
+			}
+			if !is_tilemap_position_empty(tilemap, new_player_pos) {
+				collided = true
+				collision_pos = new_player_pos
+			}
+
+            if collided {
+				wall_normal: v2
+				if collision_pos.tile_x < state.player_pos.tile_x {
+					wall_normal = v2{ 1, 0}
+				} else if collision_pos.tile_x > state.player_pos.tile_x {
+					wall_normal = v2{-1, 0}
+				} else if collision_pos.tile_y < state.player_pos.tile_y {
+					wall_normal = v2{0, 1}
+				} else if collision_pos.tile_y > state.player_pos.tile_y {
+					wall_normal = v2{0,-1}
+
+				}
+				state.d_player_pos = dont_reflect_just_move_along_axis(state.d_player_pos, wall_normal)
+			} else {
+                if !are_on_same_tile(state.player_pos, new_player_pos) {
+                    new_tile := get_tile_value_checked(tilemap, new_player_pos)
                     if new_tile == 4 {
-                        new_position.chunk_tile.z += 1
+                        new_player_pos.chunk_tile.z += 1
                     } else if new_tile == 5 {
-                        new_position.chunk_tile.z -= 1
+                        new_player_pos.chunk_tile.z -= 1
                     }
                 }
-                state.player_pos = new_position
+                state.player_pos = new_player_pos
 				state.camera_position = state.player_pos
-            } else {
-				// TODO stop velocity
-				state.d_player_pos = 0
-			}
+            }
         }
     }
 
@@ -380,7 +404,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     color = Gray
                 }
                 if position.chunk_tile == state.player_pos.chunk_tile {
-                    color = Black
+                    // color = Black
                 }
 
                 position := screen_center + 
@@ -403,7 +427,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	center := screen_center + total_delta * {1,-1}
 	position := center - {cast(f32) player_bitmap.width * 0.5, 0}
 	// TODO bitmap "center/focus" point
-	draw_rectangle(buffer, position, player_size * meters_to_pixels, Green) // player bounding box
+	// draw_rectangle(buffer, position, player_size * meters_to_pixels, Green) // player bounding box
     draw_bitmap(buffer, player_bitmap, position)
 }
 
@@ -411,7 +435,7 @@ GameState :: struct {
     world_arena: Arena,
     camera_position : TilemapPosition,
     player_pos : TilemapPosition,
-	d_player_pos : [2]f32,
+	d_player_pos : v2,
     world: World,
 
     backdrop: LoadedBitmap,
@@ -437,7 +461,7 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 }
 
 
-draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position: [2]f32) {
+draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position: v2) {
     rounded_position := round(position)
     
     left, right := rounded_position.x, rounded_position.x + bitmap.width
@@ -480,7 +504,7 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position:
 }
 
 
-draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: [2]f32, size: [2]f32, color: GameColor){
+draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor){
     rounded_position := round(position)
     rounded_size     := round(size)
     offscreen_color  := game_color_to_buffer_color(color)

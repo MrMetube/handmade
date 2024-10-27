@@ -3,6 +3,23 @@ package game
 import "base:intrinsics"
 import "core:math"
 
+v2 :: [2]f32
+v3 :: [3]f32
+v4 :: [4]f32
+
+dot :: proc(a, b: v2) -> f32 {
+	return a.x * b.x + a.y * b.y
+}
+
+reflect :: proc(v, axis:v2) -> v2 {
+	return v - 2 * dot(v, axis) * axis
+}
+
+// TODO(viktor): whats this called? half reflect / move along
+dont_reflect_just_move_along_axis :: proc(v, axis:v2) -> v2 {
+	return v - 1 * dot(v, axis) * axis
+}
+
 lerp :: #force_inline proc(a, b, t: f32) -> f32 {
 	return (1-t) * a + t * b
 }
