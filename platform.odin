@@ -672,7 +672,7 @@ main :: proc() {
 				mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
 				ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
 				frames_per_second     := 1000 / ms_per_frame
-				fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
+				// fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
 			}
 
 			last_cycle_count = end_cycle_count
@@ -912,6 +912,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
 	if window_width >= buffer.width*2 && window_height >= buffer.height*2 {
 		offset := [2]i32{window_width - buffer.width*2, window_height - buffer.height*2} / 2
+		
 		win.StretchDIBits(
 			device_context,
 			offset.x, offset.y, buffer.width*2, buffer.height*2,
@@ -923,6 +924,7 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
 		)	
 	} else {
 		offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
+
 		win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y, win.BLACKNESS )
 		win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
 		

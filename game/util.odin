@@ -4,20 +4,15 @@ import "base:intrinsics"
 import "core:math"
 import "core:simd"
 
-length :: #force_inline proc(vec: $T/[$N]$E) -> (length:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
-	sum_of_square := abs(vec.x * vec.x + vec.y * vec.y)
-	if sum_of_square > 0 {
-		length = math.sqrt(sum_of_square)
-	}
-	return length
+swap :: proc(a, b: ^$T) {
+	b^, a^ = a^, b^
 }
 
-normalize :: #force_inline proc(vec: $T/[$N]$E) -> T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
-	length := length(vec)
-	denom  := length == 0 ? 1 : length
-	return vec / denom
-}
+vec_cast :: proc { cast_vec, cast_vec_2 }
 
+cast_vec_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T {
+	return {cast(T) x, cast(T) y}
+}
 
 cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) && intrinsics.type_is_numeric(T) {
 	// TODO check if this gets optimized to have no loop
@@ -27,12 +22,6 @@ cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 &
 	}
 	return result
 }
-
-
-lerp :: #force_inline proc(a, b, t: f32) -> f32 {
-	return (1-t) * a + t * b
-}
-
 
 in_bounds :: proc {
 	in_bounds_array_2d,

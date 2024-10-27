@@ -44,8 +44,8 @@ cannonicalize_position :: #force_inline proc(tilemap: ^Tilemap, point: TilemapPo
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
 	offset := round(point.offset / tilemap.tile_size_in_meters)
-	result.chunk_tile.xy  = cast_vec(u32, cast_vec(i32, result.chunk_tile.xy) + offset)
-	result.offset -= cast_vec(f32, offset) * tilemap.tile_size_in_meters
+	result.chunk_tile.xy  = vec_cast(u32, vec_cast(i32, result.chunk_tile.xy) + offset)
+	result.offset -= vec_cast(f32, offset) * tilemap.tile_size_in_meters
 
 	assert(result.offset.x >= -tilemap.tile_size_in_meters * 0.5)
 	assert(result.offset.y >= -tilemap.tile_size_in_meters * 0.5)
@@ -75,7 +75,7 @@ are_on_same_tile :: proc(a, b: TilemapPosition) -> b32 {
 }
 
 
-set_tile_value :: proc(arena: ^MemoryArena, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {
+set_tile_value :: proc(arena: ^Arena, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {
 	chunk_ptr := get_chunk_ref(tilemap, point)
 	// TODO on demand tilechunk creatton
 	chunk: ^Chunk
