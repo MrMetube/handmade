@@ -60,20 +60,30 @@ cannonicalize_position :: #force_inline proc(tilemap: ^Tilemap, point: TilemapPo
 //
 //
 
+tilemap_difference :: #force_inline proc(state: ^GameState, a, b: TilemapPosition) -> v2 {
+	chunk_tile_delta := vec_cast(f32, a.chunk_tile.xy) - vec_cast(f32, b.chunk_tile.xy)
+	offset_delta     := a.offset - b.offset
+	total_delta      := (chunk_tile_delta * cast(f32) state.tile_size_in_pixels + offset_delta * state.meters_to_pixels)
+	return total_delta
+}
+
 is_tilemap_position_empty :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> b32 {
 	empty : b32
 	current_chunk := get_chunk(tilemap, point)
 	if current_chunk != nil {
 		tile := get_tile_value(current_chunk, point.tile_x, point.tile_y)
-		empty = tile != 2
+		empty = is_tile_empty(tile)
 	}
 	return empty
 }
+
+is_tile_empty :: #force_inline proc(tile: u32) -> b32 {
+	return tile != 2
+}
  
-are_on_same_tile :: proc(a, b: TilemapPosition) -> b32 {
+are_on_same_tile :: #force_inline proc(a, b: TilemapPosition) -> b32 {
 	return a.chunk_tile == b.chunk_tile
 }
-
 
 set_tile_value :: proc(arena: ^Arena, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {
 	chunk_ptr := get_chunk_ref(tilemap, point)
@@ -92,7 +102,7 @@ set_tile_value :: proc(arena: ^Arena, tilemap: ^Tilemap, point: TilemapPosition,
 		chunk = chunk_ptr^
 	}
 
-	if in_bounds(chunk[:], point.tile_x, point.tile_y) {
+	#no_bounds_check if in_bounds(chunk[:], point.tile_x, point.tile_y) {
 		chunk[point.tile_y][point.tile_x] = value
 	}
 }
@@ -107,7 +117,8 @@ get_chunk_ref_pos :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> ^^Chunk 
 	return get_chunk_ref(tilemap, point.chunk_x, point.chunk_y, point.chunk_z)
 }
 get_chunk_ref_2 :: proc(tilemap: ^Tilemap, chunk_x, chunk_y, chunk_z: u32) -> ^^Chunk {
-	if  0 <= chunk_x && chunk_x <= tilemap.chunks_size.x && 
+	#no_bounds_check if  
+		0 <= chunk_x && chunk_x <= tilemap.chunks_size.x && 
 		0 <= chunk_y && chunk_y <= tilemap.chunks_size.y &&
 		0 <= chunk_z && chunk_z <= tilemap.chunks_size.z {
 		return &tilemap.chunks[
@@ -133,11 +144,22 @@ get_chunk_2 :: proc(tilemap: ^Tilemap, chunk_x, chunk_y, chunk_z: u32) -> ^Chunk
 	return value != nil ? value^ : nil
 }
 
-get_tile_value_checked :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> (tile: Tile) {
-	return get_tile_value(get_chunk(tilemap, point.chunk_x, point.chunk_y, point.chunk_z), point.tile_x, point.tile_y)
+get_tile_value :: proc {
+	get_tile_value_unchecked,
+	get_tile_value_checked_tile,
+	get_tile_value_checked_tilemap_position,
 }
 
-get_tile_value :: proc(chunk: ^Chunk, tile_x, tile_y: u32) -> (tile: Tile) {
+get_tile_value_checked_tile :: proc(tilemap: ^Tilemap, x,y,z: u32) -> (tile: Tile) {
+	return get_tile_value_checked_tilemap_position(tilemap, { chunk_tile = {x, y, z} })
+}
+
+get_tile_value_checked_tilemap_position :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> (tile: Tile) {
+	chunk := get_chunk(tilemap, point.chunk_x, point.chunk_y, point.chunk_z)
+	return get_tile_value(chunk, point.tile_x, point.tile_y)
+}
+
+get_tile_value_unchecked :: proc(chunk: ^Chunk, tile_x, tile_y: u32) -> (tile: Tile) {
 	if chunk != nil && in_bounds(chunk[:], tile_x, tile_y) {
 		tile = chunk[tile_y][tile_x]
 	}

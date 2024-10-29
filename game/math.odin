@@ -29,16 +29,21 @@ square :: #force_inline proc(x: f32) -> f32 {
 }
 
 length :: #force_inline proc(vec: $T/[$N]$E) -> (length:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
+	length_squared := length_squared(vec)
+	length = math.sqrt(length_squared)
+	return length
+}
+
+length_squared :: #force_inline proc(vec: $T/[$N]$E) -> (length_squared:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
 	square := vec * vec
 	when N == 2 {
-		sum_of_square := abs(vec.x + vec.y)
+		length_squared = abs(vec.x + vec.y)
 	} else when N == 3 {
-		sum_of_square := abs(vec.x + vec.y + vec.z)
+		length_squared = abs(vec.x + vec.y + vec.z)
 	} else when N == 4 {
-		sum_of_square := abs(vec.x + vec.y + vec.z + vec.w)
+		length_squared = abs(vec.x + vec.y + vec.z + vec.w)
 	}
-	length = math.sqrt(sum_of_square)
-	return length
+	return length_squared
 }
 
 normalize :: #force_inline proc(vec: $T/[$N]$E) -> T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
