@@ -15,8 +15,8 @@ reflect :: #force_inline proc(v, axis:v2) -> v2 {
 	return v - 2 * dot(v, axis) * axis
 } 
 
-// TODO(viktor): whats this called? half reflect / move along
-dont_reflect_just_move_along_axis :: proc(v, axis:v2) -> v2 {
+// TODO(viktor): whats this called? project
+dont_reflect_just_move_along_axis :: #force_inline proc(v, axis:v2) -> v2 {
 	return v - 1 * dot(v, axis) * axis
 }
 

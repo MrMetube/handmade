@@ -358,13 +358,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	
 	for entity in state.entities {
 		if entity.exists {
-			total_delta := tilemap_difference(tilemap, entity.p, state.camera_position).xy
+			delta := tilemap_difference(tilemap, entity.p, state.camera_position).xy
 			
 			player_bitmap := state.player[entity.facing_index]
-			center := screen_center + total_delta * {1,-1}
-			position := center - {cast(f32) player_bitmap.width * 0.5, 0}
+			center := screen_center + delta * {1,-1}
+			position := center
+			position -= entity.size * state.meters_to_pixels * 0.5 - {0, 1} * state.meters_to_pixels
 			// TODO: bitmap "center/focus" point
-			// draw_rectangle(buffer, position, player_size * meters_to_pixels, Green) // player bounding box
+			// TODO(viktor): Correct this mess, this sucks
+			draw_rectangle(buffer, position, entity.size * state.meters_to_pixels, Green) // player bounding box
+			position += v2{0, -1} * (cast(f32) player_bitmap.height - entity.size.y * state.meters_to_pixels)
 			draw_bitmap(buffer, player_bitmap, position)
 		}
 	}
@@ -407,7 +410,7 @@ init_player :: proc(player: ^Entity) {
 		tile_y = 5,
 		offset_ = 0.25,
 	}
-	player.size = {0.75, 1}
+	player.size = {0.6, 0.4}
 }
 
 move_player :: proc(state: ^GameState, player: ^Entity, ddp: v2, dt: f32) {
@@ -425,73 +428,88 @@ move_player :: proc(state: ^GameState, player: ^Entity, ddp: v2, dt: f32) {
 	// TODO(viktor): ODE here
 	ddp += -8 * player.dp
 
-	
-	old_player_p := player.p
 	player_delta := 0.5*ddp * square(dt) + player.dp * dt
 	player.dp = ddp * dt + player.dp
 	
     tilemap := state.world.tilemap	
-	new_player_p := tilemap_offset(tilemap, old_player_p, player_delta)
+	new_player_p := tilemap_offset(tilemap, player.p, player_delta)
 
-	start_tile := old_player_p.position.xy
-	end_tile := new_player_p.position.xy
-	delta := sign(end_tile - start_tile)
+	min_tile := min_vec(player.p.position, new_player_p.position).xy 
+	max_tile := max_vec(player.p.position, new_player_p.position).xy 
+
+	entity_tile_size := ceil(player.size / tilemap.tile_size_in_meters)
+	min_tile = vec_cast(u32, vec_cast(i32, min_tile) - entity_tile_size)
+	max_tile = vec_cast(u32, vec_cast(i32, max_tile) + entity_tile_size)
+
+	assert(max_tile.x - min_tile.x < 32)
+	assert(max_tile.y - min_tile.y < 32)
+
+	old_player_p := player.p
 
 	abs_tile_z := player.p.position.z
-	t_min: f32 = 1
-	
-	min_corner := -0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
-	max_corner :=  0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
 
-	abs_tile_y := start_tile.y
-	for {
-		abs_tile_x := start_tile.x
-		for {
-			test_tile := TilemapPosition{ position={abs_tile_x, abs_tile_y, abs_tile_z} }
-			tile_value := get_tile_value(tilemap, test_tile)
-			if !is_tile_empty(tile_value) {
-				rel := tilemap_difference(tilemap, old_player_p, test_tile).xy
-				
-				test_wall :: proc(wall_x, player_delta_x, player_delta_y, rel_x, rel_y, min_y, max_y: f32,  t_min: ^f32) {
-					EPSILON :: 0.0001
-					if player_delta_x != 0 {
-						t_result := (wall_x - rel_x) / player_delta_x
-						y := rel_y + t_result * player_delta_y
-						if 0 <= t_result && t_result < t_min^ {
-							if y >= min_y && y <= max_y {
-								t_min^ = max(0, t_result-EPSILON)
+	t_remaining: f32 = 1
+
+	for iteration in 0..<4 {
+		if t_remaining <= 0 do break
+
+		t_min: f32 = 1
+		wall_normal: v2
+		
+		for abs_tile_y := min_tile.y; abs_tile_y <= max_tile.y; abs_tile_y += 1 {
+			for abs_tile_x := min_tile.x; abs_tile_x <= max_tile.x; abs_tile_x += 1 {
+				diameter := tilemap.tile_size_in_meters + player.size
+				min_corner := -0.5 * diameter
+				max_corner :=  0.5 * diameter
+
+				test_tile := TilemapPosition{ position={abs_tile_x, abs_tile_y, abs_tile_z} }
+				tile_value := get_tile_value(tilemap, test_tile)
+				if !is_tile_empty(tile_value) {
+					rel := tilemap_difference(tilemap, player.p, test_tile).xy
+					
+					test_wall :: proc(wall_x, player_delta_x, player_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
+						EPSILON :: 0.001
+						if player_delta_x != 0 {
+							t_result := (wall_x - rel_x) / player_delta_x
+							y := rel_y + t_result * player_delta_y
+							if 0 <= t_result && t_result < t_min^ {
+								if y >= min_y && y <= max_y {
+									t_min^ = max(0, t_result-EPSILON)
+									collided = true
+								}
 							}
 						}
+						return collided
+					}
+
+					if test_wall(min_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+						wall_normal = {-1,  0}
+					}
+					if test_wall(max_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+						wall_normal = { 1,  0}
+					}
+					if test_wall(min_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+						wall_normal = { 0, -1}
+					}
+					if test_wall(max_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+						wall_normal = { 0,  1}
 					}
 				}
-
-				test_wall(min_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min)
-				test_wall(max_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min)
-				test_wall(min_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min)
-				test_wall(max_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min)
-			}
-
-			if abs_tile_x == end_tile.x {
-				break
-			} else {
-				abs_tile_x += cast(u32) delta.x
 			}
 		}
-
-		if abs_tile_y == end_tile.y {
-			break
-		} else { 
-			abs_tile_y += cast(u32) delta.y
-		}
-	}
 	
-	player.p = tilemap_offset(tilemap, old_player_p, t_min * player_delta)
+		player.p = tilemap_offset(tilemap, player.p, t_min * player_delta)
+		player.dp = dont_reflect_just_move_along_axis(player.dp, wall_normal)
+		player_delta = dont_reflect_just_move_along_axis(player_delta, wall_normal)
+
+		t_remaining -= t_min * t_remaining
+	}
 
 	if !are_on_same_tile(player.p, old_player_p) {
 		new_tile := get_tile_value(tilemap, player.p)
 		if new_tile == 4 {
 			player.p.position.z += 1
-		} else if new_tile == 5 {
+		} else if new_tile == 5 { 
 			player.p.position.z -= 1
 		}
 	}

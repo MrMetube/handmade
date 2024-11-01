@@ -14,7 +14,7 @@ cast_vec_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T {
 	return {cast(T) x, cast(T) y}
 }
 
-cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) && intrinsics.type_is_numeric(T) {
+cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1, N <= 4, intrinsics.type_is_numeric(E), intrinsics.type_is_numeric(T) {
 	// TODO check if this gets optimized to have no loop
 	result : [N]T = ---
 	#no_bounds_check {
@@ -160,6 +160,21 @@ floor_f32 :: #force_inline proc(f: f32) -> (i:i32) {
 floor_f32_simd :: #force_inline proc(fs: [$N]f32) -> [N]i32 {
 	return cast_vec(i32, simd.to_array(simd.floor(simd.from_array(fs))))
 }
+
+ceil :: proc {
+	ceil_f32,
+	ceil_f32_simd,
+}
+
+ceil_f32 :: #force_inline proc(f: f32) -> (i:i32) {
+	return ceil_f32_simd([1]f32{f})[0]
+}
+
+ceil_f32_simd :: #force_inline proc(fs: [$N]f32) -> [N]i32 {
+	return cast_vec(i32, simd.to_array(simd.ceil(simd.from_array(fs))))
+}
+
+
 
 
 truncate :: proc {
