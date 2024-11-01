@@ -43,6 +43,16 @@ max_vec_3 :: #force_inline proc(a,b: [3]$E) -> [3]E where intrinsics.type_is_num
 }
 
 
+abs_vec :: proc { abs_vec_2, abs_vec_3 }
+abs_vec_2 :: #force_inline proc(a: [2]$E) -> [2]E where intrinsics.type_is_numeric(E) {
+	return {abs(a.x), abs(a.y)}
+}
+abs_vec_3 :: #force_inline proc(a: [3]$E) -> [3]E where intrinsics.type_is_numeric(E) {
+	return {abs(a.x), abs(a.y), abs(a.z)}
+}
+
+
+
 in_bounds :: proc {
 	in_bounds_array_2d,
 	in_bounds_array_3d,
