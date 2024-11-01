@@ -29,43 +29,43 @@ TilemapPosition :: struct {
 		}
 	},
 	
-	offset: [2]f32,
+	offset_: [2]f32,
 }
 #assert(size_of(TilemapPosition{}._chunk_tile_union.position) == size_of(TilemapPosition{}._chunk_tile_union._components))
 
-//
-//
-// TODO do these belong here?
-//
 
-cannonicalize_position :: #force_inline proc(tilemap: ^Tilemap, point: TilemapPosition) -> TilemapPosition {
+
+cannonicalize_position :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> TilemapPosition {
 	result := point
 
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
-	offset := round(point.offset / tilemap.tile_size_in_meters)
+	offset := round(point.offset_ / tilemap.tile_size_in_meters)
 	result.position.xy  = vec_cast(u32, vec_cast(i32, result.position.xy) + offset)
-	result.offset -= vec_cast(f32, offset) * tilemap.tile_size_in_meters
+	result.offset_ -= vec_cast(f32, offset) * tilemap.tile_size_in_meters
 
-	assert(result.offset.x >= -tilemap.tile_size_in_meters * 0.5)
-	assert(result.offset.y >= -tilemap.tile_size_in_meters * 0.5)
-	assert(result.offset.x <=  tilemap.tile_size_in_meters * 0.5)
-	assert(result.offset.y <=  tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset_.x >= -tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset_.y >= -tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset_.x <=  tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset_.y <=  tilemap.tile_size_in_meters * 0.5)
 
 	return result
 }
 
-//
-//
-//
-//
-
 tilemap_difference :: #force_inline proc(tilemap: ^Tilemap, a, b: TilemapPosition) -> v3 {
 	chunk_tile_delta := vec_cast(f32, a.position.xy) - vec_cast(f32, b.position.xy)
-	offset_delta     := a.offset - b.offset
+	offset_delta     := a.offset_ - b.offset_
 	total_delta      := (chunk_tile_delta * tilemap.tile_size_in_meters + offset_delta)
 	return {total_delta.x, total_delta.y, cast(f32) (a.position.z - b.position.z)}
 }
+
+tilemap_offset :: proc(tilemap: ^Tilemap, point: TilemapPosition, offset: v2) -> TilemapPosition {
+	point := point
+	point.offset_ += offset
+	return cannonicalize_position(tilemap, point)
+}
+
+
 
 is_tilemap_position_empty :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> b32 {
 	empty : b32

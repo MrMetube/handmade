@@ -104,6 +104,20 @@ in_bounds_slice_3 :: #force_inline proc(slices: [][][]$T, x, y, z: $I) -> b32 wh
 
 
 // TODO convert all of these to platform-efficient versions
+sign :: proc{ sign_i, sign_u, sign_vi, sign_vu }
+
+sign_i :: #force_inline proc(i: i32) -> i32 {
+	return i < 0 ? -1 : 1
+}
+sign_u :: #force_inline proc(i: u32) -> i32 {
+	return cast(i32) i < 0 ? -1 : 1
+}
+sign_vi :: #force_inline proc(a: [2]i32) -> [2]i32 {
+	return {sign(a.x), sign(a.y)}
+}
+sign_vu :: #force_inline proc(a: [2]u32) -> [2]i32 {
+	return {sign(a.x), sign(a.y)}
+}
 
 mod :: proc {
 	mod_d,

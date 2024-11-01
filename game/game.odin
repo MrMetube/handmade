@@ -142,7 +142,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             chunk_y = 0,
             tile_x = 8,
             tile_y = 3,
-            offset = 0.5,
+            offset_ = 0.5,
         }
 
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
@@ -310,7 +310,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- ---------------------- ----------------------
 
     // NOTE: Clear the screen
-    // draw_rectangle(buffer, {0,0}, vec_cast(f32, buffer.width, buffer.height), {1, 0.09, 0.24})
+    draw_rectangle(buffer, {0,0}, vec_cast(f32, buffer.width, buffer.height), {1, 0.09, 0.24})
 
     draw_bitmap(buffer, state.backdrop, 0)
 
@@ -346,7 +346,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
                 position := screen_center + 
 					vec_cast(f32, col,-row) * tile_size + 
-					{-1, 1} * state.camera_position.offset * state.meters_to_pixels +
+					{-1, 1} * state.camera_position.offset_ * state.meters_to_pixels +
 					{-0.5, 0.5} * tile_size
                 if color != Gray {
 					draw_rectangle(buffer, position, tile_size, color)
@@ -405,7 +405,7 @@ init_player :: proc(player: ^Entity) {
 		chunk_y = 0,
 		tile_x = 5,
 		tile_y = 5,
-		offset = 0.25,
+		offset_ = 0.25,
 	}
 	player.size = {0.75, 1}
 }
@@ -431,20 +431,22 @@ move_player :: proc(state: ^GameState, player: ^Entity, ddp: v2, dt: f32) {
 	player.dp = ddp * dt + player.dp
 	
     tilemap := state.world.tilemap	
-	new_player_p := old_player_p
-	new_player_p.offset += player_delta
-	new_player_p = cannonicalize_position(tilemap, new_player_p)
+	new_player_p := tilemap_offset(tilemap, old_player_p, player_delta)
 
-	min_tile := min_vec(old_player_p.position, new_player_p.position).xy
-	one_past_max_tile := max_vec(old_player_p.position, new_player_p.position).xy + 1
+	start_tile := old_player_p.position.xy
+	end_tile := new_player_p.position.xy
+	delta := sign(end_tile - start_tile)
 
 	abs_tile_z := player.p.position.z
 	t_min: f32 = 1
 	
 	min_corner := -0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
 	max_corner :=  0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
-	for abs_tile_y := min_tile.y; abs_tile_y != one_past_max_tile.y; abs_tile_y += 1 {
-		for abs_tile_x := min_tile.x; abs_tile_x != one_past_max_tile.x; abs_tile_x += 1 {
+
+	abs_tile_y := start_tile.y
+	for {
+		abs_tile_x := start_tile.x
+		for {
 			test_tile := TilemapPosition{ position={abs_tile_x, abs_tile_y, abs_tile_z} }
 			tile_value := get_tile_value(tilemap, test_tile)
 			if !is_tile_empty(tile_value) {
@@ -468,14 +470,22 @@ move_player :: proc(state: ^GameState, player: ^Entity, ddp: v2, dt: f32) {
 				test_wall(min_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min)
 				test_wall(max_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min)
 			}
+
+			if abs_tile_x == end_tile.x {
+				break
+			} else {
+				abs_tile_x += cast(u32) delta.x
+			}
+		}
+
+		if abs_tile_y == end_tile.y {
+			break
+		} else { 
+			abs_tile_y += cast(u32) delta.y
 		}
 	}
 	
-	new_player_p = old_player_p
-	new_player_p.offset += t_min * player_delta
-	new_player_p = cannonicalize_position(tilemap, new_player_p)
-
-	player.p = new_player_p
+	player.p = tilemap_offset(tilemap, old_player_p, t_min * player_delta)
 
 	if !are_on_same_tile(player.p, old_player_p) {
 		new_tile := get_tile_value(tilemap, player.p)
