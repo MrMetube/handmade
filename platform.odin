@@ -8,7 +8,7 @@ import win "core:sys/windows"
 import "util"
 
 /*
-	TODO: THIS IS NOT A FINAL PLATFORM LAYER !!!
+	TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
 	- Fullscreen support
 
 	- Saved game locations
@@ -31,7 +31,7 @@ import "util"
 // ---------------------- ---------------------- ----------------------
 
 INTERNAL :: #config(INTERNAL, true)
-// TODO this is a global for now
+// TODO(viktor): this is a global for now
 RUNNING : b32
 
 GLOBAL_back_buffer : OffscreenBuffer
@@ -68,7 +68,7 @@ OffscreenBuffer :: struct {
 	height : i32,
 }
 
-// TODO Copypasta from game package
+// TODO(viktor): Copypasta from game package
 
 Sample :: [2]i16
 
@@ -129,7 +129,7 @@ GameInput :: struct {
 
 GameMemory :: struct {
 	is_initialized: b32,
-	// Note: REQUIRED to be cleared to zero at startup
+	// NOTE: REQUIRED to be cleared to zero at startup
 	permanent_storage: []u8,
 	transient_storage: []u8,
 
@@ -139,7 +139,7 @@ GameMemory :: struct {
 GameState :: struct {
 }
 
-// TODO Copypaste END
+// TODO: Copypaste END
 
 State :: struct {
 	exe_path : string,
@@ -189,7 +189,7 @@ main :: proc() {
 	sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
 	
 	// NOTE: We store a thread context in the context to know which thread is calling into the platform layer
-	// TODO: Once there are multiple threads each call into the threads game code needs its own thread context
+	// TODO(viktor): Once there are multiple threads each call into the threads game code needs its own thread context
 	main_thread_context : ThreadContext
 	main_thread_context.placeholder = 123
 	context.user_ptr = &main_thread_context
@@ -234,8 +234,8 @@ main :: proc() {
 			win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
 			win.CW_USEDEFAULT,
 			win.CW_USEDEFAULT,
-			960*1.05,// win.CW_USEDEFAULT, // TODO undo hardcoding
-			540*1.1,// win.CW_USEDEFAULT,
+			960,// win.CW_USEDEFAULT, // TODO(viktor): undo hardcoding
+			540,// win.CW_USEDEFAULT,
 			nil,
 			nil,
 			window_class.hInstance,
@@ -282,8 +282,8 @@ main :: proc() {
 	sound_output.num_channels = 2
 	sound_output.bytes_per_sample = size_of(Sample)
 	sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample
-	// TODO actually computre this variance and set a reasonable value
-	sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32)sound_output.samples_per_second * cast(f32)sound_output.bytes_per_sample) * 1 // TODO check why we increased this
+	// TODO: actually computre this variance and set a reasonable value
+	sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32)sound_output.samples_per_second * cast(f32)sound_output.bytes_per_sample)
 
 	init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
 
@@ -319,8 +319,8 @@ main :: proc() {
 	temp_dll_name := build_exe_path(state, "game_temp.dll")
 	lock_name     := build_exe_path(state, "lock.temp")
 	game_lib_is_valid, game_dll_write_time := init_game_lib(game_dll_name, temp_dll_name, lock_name)
-	// TODO make this like sixty seconds?
-	// TODO pool with bitmap alloc
+	// TODO: make this like sixty seconds?
+	// TODO: pool with bitmap alloc
 	samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 
 	context.allocator = {}
@@ -337,7 +337,7 @@ main :: proc() {
 		assert(total_size < util.gigabytes(uint(4)))
 		state.game_memory_block = storage_ptr[:total_size]
 
-		// TODO(casey): TransientStorage needs to be broken up
+		// TODO(viktor): TransientStorage needs to be broken up
 		// into game transient and cache transient, and only
 		// the former need be saved for state playback.
 		for &buffer, index in state.replay_buffers {
@@ -353,7 +353,7 @@ main :: proc() {
 			if buffer_storage_ptr != nil {
 				buffer.memory_block = buffer_storage_ptr[:total_size]
 			} else {
-				// TODO Diagnotic
+				// TODO: Diagnostic
 			}
 		}
 
@@ -366,7 +366,7 @@ main :: proc() {
 	}
 
 	if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
-		return // TODO logging
+		return // TODO: logging
 	}
 
 
@@ -403,7 +403,7 @@ main :: proc() {
 				// TODO: support mouse wheel
 				new_input.mouse_wheel = 0
 				is_down_mask := transmute(win.SHORT) u16(1 << 15)
-				// TODO Do we need to update the input button on every event?
+				// TODO: Do we need to update the input button on every event?
 				process_win_keyboard_message(&new_input.mouse_left,   cast(b32) (win.GetKeyState(win.VK_LBUTTON)  & is_down_mask))
 				process_win_keyboard_message(&new_input.mouse_right,  cast(b32) (win.GetKeyState(win.VK_RBUTTON)  & is_down_mask))
 				process_win_keyboard_message(&new_input.mouse_middle, cast(b32) (win.GetKeyState(win.VK_MBUTTON)  & is_down_mask))
@@ -424,10 +424,10 @@ main :: proc() {
 				process_pending_messages(&state, new_keyboard_controller)
 			}
 			max_controller_count: u32 = min(XUSER_MAX_COUNT, len(GameInput{}.controllers) - 1)
-			// TODO Need to not poll disconnected controllers to avoid xinput frame rate hit
+			// TODO: Need to not poll disconnected controllers to avoid xinput frame rate hit
 			// on older libraries.
-			// TODO should we poll this more frequently
-			// TODO only check connected controllers, catch messages on connect / disconnect
+			// TODO: should we poll this more frequently
+			// TODO: only check connected controllers, catch messages on connect / disconnect
 			for controller_index in 0..<max_controller_count {
 				controller_state : XINPUT_STATE
 
@@ -439,12 +439,8 @@ main :: proc() {
 				if XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
 					new_controller.is_connected = true
 					new_controller.is_analog = old_controller.is_analog
-					// TODO see if dwPacketNumber increments too rapidly
+					// TODO: see if dwPacketNumber increments too rapidly
 					pad := controller_state.Gamepad
-
-					// TODO all buttons
-					left_thumb     := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB)
-					right_thumb    := cast(b16) (pad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB)
 
 					process_Xinput_button :: proc(new_state: ^GameInputButton, old_state: GameInputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
 						new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
@@ -489,7 +485,7 @@ main :: proc() {
 					}
 					if new_controller.stick_average != {0,0} do new_controller.is_analog = true
 
-					// TODO what if we dont want to override the stick
+					// TODO: what if we don't want to override the stick
 					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) { new_controller.stick_average.x =  1; new_controller.is_analog = false }
 					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
 					if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
@@ -629,10 +625,10 @@ main :: proc() {
 		{
 			seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
 			if seconds_elapsed_for_frame < target_seconds_per_frame {
-				// if sleep_is_granular {
-				// 	sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
-				// 	if sleep_ms > 0 do win.Sleep(cast(u32) sleep_ms)
-				// }
+				if sleep_is_granular {
+					sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
+					if sleep_ms > 0 do win.Sleep(cast(u32) sleep_ms)
+				}
 				test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
 				if test_seconds_elapsed < target_seconds_per_frame {
 					// TODO: Log sleep miss here
@@ -742,7 +738,7 @@ begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
 	if replay_buffer.memory_block != nil {
 		state.input_record_index = input_recording_index
 		state.input_record_handle = replay_buffer.filehandle
-		// TODO this is slow on the first start
+		// TODO: this is slow on the first start
 		file_position := cast(win.LARGE_INTEGER) len(state.game_memory_block)
 		win.SetFilePointerEx(state.input_record_handle, file_position, nil, win.FILE_BEGIN)
 		
@@ -801,8 +797,8 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 	region1_size, region2_size: win.DWORD
 
 	if result := GLOBAL_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-		// TODO assert that region1/2_size is valid
-		// TODO Collapse these two loops
+		// TODO: assert that region1/2_size is valid
+		// TODO: Collapse these two loops
 
 		dest_samples := cast([^]Sample) region1
 		region1_sample_count := region1_size / sound_output.bytes_per_sample
@@ -832,7 +828,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 
 		GLOBAL_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
-		return // TODO Logging
+		return // TODO: Logging
 	}
 }
 
@@ -841,8 +837,9 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 	region1_size, region2_size: win.DWORD
 
 	if result := GLOBAL_sound_buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-		// TODO assert that region1/2_size is valid
-		// TODO Collapse these two loops
+		// TODO: assert that region1/2_size is valid
+		// TODO: Collapse these two loops
+		// TODO: Copy pasta of fill_sound_buffer
 
 		dest_samples := cast([^]u8) region1
 		for index in 0..<region1_size {
@@ -858,7 +855,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 
 		GLOBAL_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
 	} else {
-		return // TODO Logging
+		return // TODO: Logging
 	}
 }
 
@@ -877,7 +874,7 @@ get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32)
 }
 
 resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i32) {
-	// TODO Bulletproof this.
+	// TODO: Bulletproof this.
 	// Maybe don't free first, free after, then free first if that fails.
 	if buffer.memory != nil {
 		win.VirtualFree(raw_data(buffer.memory), 0, win.MEM_RELEASE)
@@ -906,7 +903,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 	buffer_ptr := cast([^]OffscreenBufferColor) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
 	buffer.memory = buffer_ptr[:buffer.width*buffer.height]
 
-	// TODO probably clear this to black
+	// TODO: probably clear this to black
 }
 
 display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
@@ -931,8 +928,8 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
 		win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height, win.BLACKNESS )
 		win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_height, win.BLACKNESS )
 		
-		// TODO aspect ratio correction
-		// TODO stretch to fill window once we are fine with our renderer
+		// TODO: aspect ratio correction
+		// TODO: stretch to fill window once we are fine with our renderer
 		win.StretchDIBits(
 			device_context,
 			offset.x, offset.y, buffer.width, buffer.height,
@@ -981,9 +978,9 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
 	case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
 		context = runtime.default_context()
 		assert(false, "keyboard-event came in through a non-dispatched event")
-	case win.WM_CLOSE: // TODO Handle this with a message to the user
+	case win.WM_CLOSE: // TODO: Handle this with a message to the user
 		RUNNING = false
-	case win.WM_DESTROY: // TODO handle this as an error - recreate window?
+	case win.WM_DESTROY: // TODO: handle this as an error - recreate window?
 		RUNNING = false
 	case win.WM_ACTIVATEAPP:
 		LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.

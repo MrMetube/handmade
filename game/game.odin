@@ -3,13 +3,13 @@ package game
 import "core:fmt"
 import "base:intrinsics"
 
-// TODO Copypasta from platform
-// TODO Offscreenbuffer color and y-axis being down should not leak into the game layer
+// TODO: Copypasta from platform
+// TODO: Offscreenbuffer color and y-axis being down should not leak into the game layer
 OffscreenBufferColor :: struct{
     b, g, r, pad: u8
 }
 
-// TODO COPYPASTA from debug
+// TODO: COPYPASTA from debug
 
 DEBUG_code :: struct {
     read_entire_file  : proc_DEBUG_read_entire_file,
@@ -21,11 +21,11 @@ proc_DEBUG_read_entire_file  :: #type proc(filename: string) -> (result: []u8)
 proc_DEBUG_write_entire_file :: #type proc(filename: string, memory: []u8) -> b32
 proc_DEBUG_free_file_memory  :: #type proc(memory: []u8)
 
-// TODO Copypasta END
+// TODO: Copypasta END
 
 Sample :: [2]i16
 
-// TODO allow outputing vibration
+// TODO: allow outputing vibration
 GameSoundBuffer :: struct {
     samples            : []Sample,
     samples_per_second : u32,
@@ -85,7 +85,7 @@ GameInput :: struct {
 
 GameMemory :: struct {
     is_initialized: b32,
-    // Note: REQUIRED to be cleared to zero at startup
+    // NOTE: REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
 
@@ -95,7 +95,7 @@ GameMemory :: struct {
 
 Arena :: struct {
     storage: []u8,
-    used: u64 // TODO if I use a slice a can never get more than 4 Gb of memory
+    used: u64 // TODO: if I use a slice a can never get more than 4 Gb of memory
 }
 
 init_arena :: proc(arena: ^Arena, storage: []u8) {
@@ -169,7 +169,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         tiles_per_screen := [2]u32{17, 9}
         screen_row, screen_col, screen_height : u32
         for screen_index in u32(0) ..< 100 {
-            // TODO random number generator
+            // TODO: random number generator
             random_choice : u32
             if stair_down || stair_up {
                 random_choice = random_number[random_number_index] % 2
@@ -195,7 +195,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             for tile_y in 0..< tiles_per_screen.y {
                 for tile_x in 0 ..< tiles_per_screen.x {
                     abstile := TilemapPosition{
-                        chunk_tile = {
+                        position = {
                             screen_col * tiles_per_screen.x + tile_x,
                             screen_row * tiles_per_screen.y + tile_y,
                             screen_height,
@@ -261,7 +261,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     state.meters_to_pixels = f32(state.tile_size_in_pixels) / tilemap.tile_size_in_meters
 
     for controller, controller_index in input.controllers {
-
 		controlling_entity := get_entity(state, state.player_index_for_controller[controller_index])
 		if controlling_entity != nil {
 			ddp: v2
@@ -282,21 +281,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 				if controller.button_down.ended_down {
 					ddp.y -= 1
 				}
-				
-				if ddp.x != 0 && ddp.y != 0 {
-					ddp = normalize(ddp) 
-				}
-
-				player_speed_in_mpss: f32 : 50
-				speed := player_speed_in_mpss
-				if controller.shoulder_left.ended_down {
-					speed *= 5
-				}
-				ddp *= speed
-
-				// TODO(viktor): ODE here
-				ddp += -8 * controlling_entity.dp
-
 			}
 
 			move_player(state, controlling_entity, ddp, input.delta_time)
@@ -306,6 +290,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 				controlling_entity, entity_index = add_entity(state)
 				init_player(controlling_entity)
 				state.player_index_for_controller[controller_index] = entity_index
+				state.camera_following_index = entity_index
 			}
 		}
     }
@@ -325,7 +310,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- ---------------------- ----------------------
 
     // NOTE: Clear the screen
-    draw_rectangle(buffer, {0,0}, vec_cast(f32, buffer.width, buffer.height), {1, 0.09, 0.24})
+    // draw_rectangle(buffer, {0,0}, vec_cast(f32, buffer.width, buffer.height), {1, 0.09, 0.24})
 
     draw_bitmap(buffer, state.backdrop, 0)
 
@@ -342,44 +327,39 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     for row in i32(-10)..=10 {
         for col in i32(-20)..=20 {
-            chunk_tile := vec_cast(u32, (vec_cast(i32, state.camera_position.chunk_tile) + {col, row, 0}))
+            position := vec_cast(u32, (vec_cast(i32, state.camera_position.position) + {col, row, 0}))
             
-            position := TilemapPosition{chunk_tile = chunk_tile}
-            tile := get_tile_value(tilemap, position)
+            tile := TilemapPosition{position = position}
+            tile_value := get_tile_value(tilemap, tile)
 
-            if tile != 0 {
-                color := White
-                if tile == 4 {
+            if tile_value != 0 {
+                color := Gray
+                if tile_value == 4 {
                     color = Blue
                 }
-                if tile == 5 {
+                if tile_value == 5 {
                     color = Orange
                 }
-                if tile == 2 {
-                    color = Gray
+                if tile_value == 2 {
+                    color = White
                 }
-                // if position.chunk_tile == state.player_pos.chunk_tile {
-                //     // color = Black
-                // }
 
                 position := screen_center + 
 					vec_cast(f32, col,-row) * tile_size + 
 					{-1, 1} * state.camera_position.offset * state.meters_to_pixels +
 					{-0.5, 0.5} * tile_size
-                
-				draw_rectangle(buffer, position, tile_size, color)
+                if color != Gray {
+					draw_rectangle(buffer, position, tile_size, color)
+				}
             }
         }
     }
 
 	
-
-	
 	for entity in state.entities {
 		if entity.exists {
+			total_delta := tilemap_difference(tilemap, entity.p, state.camera_position).xy
 			
-			total_delta := tilemap_difference(state, entity.p, state.camera_position)
-
 			player_bitmap := state.player[entity.facing_index]
 			center := screen_center + total_delta * {1,-1}
 			position := center - {cast(f32) player_bitmap.width * 0.5, 0}
@@ -431,89 +411,78 @@ init_player :: proc(player: ^Entity) {
 }
 
 move_player :: proc(state: ^GameState, player: ^Entity, ddp: v2, dt: f32) {
-    tilemap := state.world.tilemap	
-	
-	old_player_pos := player.p
-	new_player_pos := player.p
-	player_delta := 0.5*ddp * square(dt) + 
-		player.dp * dt
-	new_player_pos.offset += player_delta
-	player.dp = ddp * dt + player.dp
+	ddp := ddp
+	ddp_length_squared := length_squared(ddp)
 
-	new_player_pos = cannonicalize_position(tilemap, new_player_pos)
-
-	player_left := new_player_pos
-	player_left.offset.x -= 0.5*player.size.x
-	player_left = cannonicalize_position(tilemap, player_left)
-
-	player_right := new_player_pos
-	player_right.offset.x += 0.5*player.size.x
-	player_right = cannonicalize_position(tilemap, player_right)
-	when !true {
-		
-		min_tile_y, min_tile_x : u32
-		one_past_max_tile_y, one_past_max_tile_x: u32
-		abs_tile_z := player.p.chunk_tile.z
-		
-		best_pos := player.p
-		best_distance_sq := length_squared(player_delta)
-		for abs_tile_y := min_tile_y; abs_tile_y != one_past_max_tile_y; abs_tile_y += 1 {
-			for abs_tile_x := min_tile_x; abs_tile_x != one_past_max_tile_x; abs_tile_x += 1 {
-				test_tile := TilemapPosition{ chunk_tile={abs_tile_x, abs_tile_y, abs_tile_z} }
-				tile := get_tile_value(tilemap, test_tile)
-				if is_tile_empty(tile) {
-					min_corner := -0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
-					max_corner :=  0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
-					rel_new_player_pos := test_tile.offset - new_player_pos.offset // TODO(viktor): check the Subtract function
-					test_pos := closest_point_in_rectangle(min_corner, max_corner, rel_new_player_pos)
-					// test_distance_sq := 
-					if test_distance_sq < best_distance_sq {
-						best_pos = test_pos
-					}
-				}
-			}
-		}
-	} else {
-		collided : b32
-		collision_pos : TilemapPosition
-		
-		if !is_tilemap_position_empty(tilemap, player_left) {
-			collided = true
-			collision_pos = player_left
-		}
-		if !is_tilemap_position_empty(tilemap, player_right) {
-			collided = true
-			collision_pos = player_right
-		}
-		if !is_tilemap_position_empty(tilemap, new_player_pos) {
-			collided = true
-			collision_pos = new_player_pos
-		}
-
-		if collided {
-			wall_normal: v2
-			if collision_pos.tile_x < player.p.tile_x {
-				wall_normal = v2{ 1, 0}
-			} else if collision_pos.tile_x > player.p.tile_x {
-				wall_normal = v2{-1, 0}
-			} else if collision_pos.tile_y < player.p.tile_y {
-				wall_normal = v2{0, 1}
-			} else if collision_pos.tile_y > player.p.tile_y {
-				wall_normal = v2{0,-1}
-
-			}
-			player.dp = dont_reflect_just_move_along_axis(player.dp, wall_normal)
-		} else {
-			player.p = new_player_pos
-		}
+	if ddp_length_squared > 1 {
+		ddp *= 1 / square_root(ddp_length_squared)
 	}
 
-	if !are_on_same_tile(player.p, old_player_pos) {
+	player_speed_in_mpss: f32 : 50
+	speed := player_speed_in_mpss
+	ddp *= speed
+
+	// TODO(viktor): ODE here
+	ddp += -8 * player.dp
+
+	
+	old_player_p := player.p
+	player_delta := 0.5*ddp * square(dt) + player.dp * dt
+	player.dp = ddp * dt + player.dp
+	
+    tilemap := state.world.tilemap	
+	new_player_p := old_player_p
+	new_player_p.offset += player_delta
+	new_player_p = cannonicalize_position(tilemap, new_player_p)
+
+	min_tile := min_vec(old_player_p.position, new_player_p.position).xy
+	one_past_max_tile := max_vec(old_player_p.position, new_player_p.position).xy + 1
+
+	abs_tile_z := player.p.position.z
+	t_min: f32 = 1
+	
+	min_corner := -0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
+	max_corner :=  0.5 * v2{tilemap.tile_size_in_meters, tilemap.tile_size_in_meters}
+	for abs_tile_y := min_tile.y; abs_tile_y != one_past_max_tile.y; abs_tile_y += 1 {
+		for abs_tile_x := min_tile.x; abs_tile_x != one_past_max_tile.x; abs_tile_x += 1 {
+			test_tile := TilemapPosition{ position={abs_tile_x, abs_tile_y, abs_tile_z} }
+			tile_value := get_tile_value(tilemap, test_tile)
+			if !is_tile_empty(tile_value) {
+				rel := tilemap_difference(tilemap, old_player_p, test_tile).xy
+				
+				test_wall :: proc(wall_x, player_delta_x, player_delta_y, rel_x, rel_y, min_y, max_y: f32,  t_min: ^f32) {
+					EPSILON :: 0.0001
+					if player_delta_x != 0 {
+						t_result := (wall_x - rel_x) / player_delta_x
+						y := rel_y + t_result * player_delta_y
+						if 0 <= t_result && t_result < t_min^ {
+							if y >= min_y && y <= max_y {
+								t_min^ = max(0, t_result-EPSILON)
+							}
+						}
+					}
+				}
+
+				test_wall(min_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min)
+				test_wall(max_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min)
+				test_wall(min_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min)
+				test_wall(max_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min)
+			}
+		}
+	}
+	
+	new_player_p = old_player_p
+	new_player_p.offset += t_min * player_delta
+	new_player_p = cannonicalize_position(tilemap, new_player_p)
+
+	player.p = new_player_p
+
+	if !are_on_same_tile(player.p, old_player_p) {
 		new_tile := get_tile_value(tilemap, player.p)
 		if new_tile == 4 {
-			player.p.chunk_tile.z += 1
+			player.p.position.z += 1
 		} else if new_tile == 5 {
-			player.p.chunk_tile.z -= 1
+			player.p.position.z -= 1
 		}
 	}
 
@@ -677,36 +646,32 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
 		blue_mask  := header.blue_mask
 		alpha_mask := ~(red_mask | green_mask | blue_mask)
 
-		red_shift   := intrinsics.count_leading_zeros(red_mask)
-        green_shift := intrinsics.count_leading_zeros(green_mask)
-        blue_shift  := intrinsics.count_leading_zeros(blue_mask)
-        alpha_shift := intrinsics.count_leading_zeros(alpha_mask)
-		assert(red_shift   != 32)
-		assert(green_shift != 32)
-		assert(blue_shift  != 32)
-		assert(alpha_shift != 32)
+		red_scan   := intrinsics.count_leading_zeros(red_mask)
+        green_scan := intrinsics.count_leading_zeros(green_mask)
+        blue_scan  := intrinsics.count_leading_zeros(blue_mask)
+        alpha_scan := intrinsics.count_leading_zeros(alpha_mask)
+		assert(red_scan   != 32)
+		assert(green_scan != 32)
+		assert(blue_scan  != 32)
+		assert(alpha_scan != 32)
 
         raw_pixels := ( cast([^]u32) &contents[header.bitmap_offset] )[:header.width * header.height]
         for y in 0..<header.height {
             for x in 0..<header.width {
                 raw_pixel := &raw_pixels[y * header.width + x]
-				// pixel_be := (cast(u32be) raw_pixel^)
-				// start4b := (cast(^[4]u8) raw_pixel)^
-
-				a := (raw_pixel^ >> alpha_shift) & 0xFF
-				r := (raw_pixel^ >> red_shift  ) & 0xFF
-				g := (raw_pixel^ >> green_shift) & 0xFF
-				b := (raw_pixel^ >> blue_shift ) & 0xFF
+				/* TODO: can odin insert rotate intrinsics ? 
+					*SourceDest++ = (RotateLeft(C & RedMask, RedShift) |
+									RotateLeft(C & GreenMask, GreenShift) |
+									RotateLeft(C & BlueMask, BlueShift)
+									RotateLeft(C & AlphaMask, AlphaShift));
+				 */
+				a := (raw_pixel^ >> alpha_scan) & 0xFF
+				r := (raw_pixel^ >> red_scan  ) & 0xFF
+				g := (raw_pixel^ >> green_scan) & 0xFF
+				b := (raw_pixel^ >> blue_scan ) & 0xFF
 
 				// TODO: what?
 				raw_pixel^ = (b << 24) | (a << 16) | (r << 8) | g
-				// middlele := cast(^u32le) raw_pixel
-				// middlebe := cast(^u32be) raw_pixel
-				// middle4b := cast(^[4]u8) raw_pixel
-				// middle4s := cast(^struct {r,g,b,a: u8}) raw_pixel
-				
-				// pixel := cast(^[4]u8) raw_pixel
-				// k := 123
             }
         }
 

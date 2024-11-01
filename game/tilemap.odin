@@ -3,7 +3,7 @@ package game
 import "core:fmt"
 
 
-TILE_BITS  :: 4
+TILE_BITS  :: 8
 CHUNK_BITS :: 32 - TILE_BITS
 
 CHUNK_SIZE :: 1 << TILE_BITS
@@ -19,7 +19,7 @@ Tilemap :: struct {
 
 TilemapPosition :: struct {
 	using _chunk_tile_union : struct #raw_union {
-		chunk_tile: [3]u32,
+		position: [3]u32,
 		using _components : bit_field [3]u32 {
 			tile_x:  u32 | TILE_BITS,
 			chunk_x: u32 | CHUNK_BITS,
@@ -31,7 +31,7 @@ TilemapPosition :: struct {
 	
 	offset: [2]f32,
 }
-#assert(size_of(TilemapPosition{}._chunk_tile_union.chunk_tile) == size_of(TilemapPosition{}._chunk_tile_union._components))
+#assert(size_of(TilemapPosition{}._chunk_tile_union.position) == size_of(TilemapPosition{}._chunk_tile_union._components))
 
 //
 //
@@ -44,7 +44,7 @@ cannonicalize_position :: #force_inline proc(tilemap: ^Tilemap, point: TilemapPo
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
 	offset := round(point.offset / tilemap.tile_size_in_meters)
-	result.chunk_tile.xy  = vec_cast(u32, vec_cast(i32, result.chunk_tile.xy) + offset)
+	result.position.xy  = vec_cast(u32, vec_cast(i32, result.position.xy) + offset)
 	result.offset -= vec_cast(f32, offset) * tilemap.tile_size_in_meters
 
 	assert(result.offset.x >= -tilemap.tile_size_in_meters * 0.5)
@@ -60,11 +60,11 @@ cannonicalize_position :: #force_inline proc(tilemap: ^Tilemap, point: TilemapPo
 //
 //
 
-tilemap_difference :: #force_inline proc(state: ^GameState, a, b: TilemapPosition) -> v2 {
-	chunk_tile_delta := vec_cast(f32, a.chunk_tile.xy) - vec_cast(f32, b.chunk_tile.xy)
+tilemap_difference :: #force_inline proc(tilemap: ^Tilemap, a, b: TilemapPosition) -> v3 {
+	chunk_tile_delta := vec_cast(f32, a.position.xy) - vec_cast(f32, b.position.xy)
 	offset_delta     := a.offset - b.offset
-	total_delta      := (chunk_tile_delta * cast(f32) state.tile_size_in_pixels + offset_delta * state.meters_to_pixels)
-	return total_delta
+	total_delta      := (chunk_tile_delta * tilemap.tile_size_in_meters + offset_delta)
+	return {total_delta.x, total_delta.y, cast(f32) (a.position.z - b.position.z)}
 }
 
 is_tilemap_position_empty :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> b32 {
@@ -78,11 +78,11 @@ is_tilemap_position_empty :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> 
 }
 
 is_tile_empty :: #force_inline proc(tile: u32) -> b32 {
-	return tile != 2
+	return tile != 2 && tile != 0
 }
  
 are_on_same_tile :: #force_inline proc(a, b: TilemapPosition) -> b32 {
-	return a.chunk_tile == b.chunk_tile
+	return a.position == b.position
 }
 
 set_tile_value :: proc(arena: ^Arena, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {
@@ -91,7 +91,10 @@ set_tile_value :: proc(arena: ^Arena, tilemap: ^Tilemap, point: TilemapPosition,
 	chunk: ^Chunk
 	if chunk_ptr == nil || chunk_ptr^ == nil {
 		chunk = push_struct(arena, Chunk)
-		tilemap.chunks[point.chunk_z * tilemap.chunks_size.y * tilemap.chunks_size.x + point.chunk_y * tilemap.chunks_size.x + point.chunk_x] = chunk
+		tilemap.chunks[
+			point.chunk_z * tilemap.chunks_size.y * tilemap.chunks_size.x + 
+			point.chunk_y * tilemap.chunks_size.x + 
+			point.chunk_x] = chunk
 		for &row in chunk {
 			for &tile in row {
 				tile = 1
@@ -151,7 +154,7 @@ get_tile_value :: proc {
 }
 
 get_tile_value_checked_tile :: proc(tilemap: ^Tilemap, x,y,z: u32) -> (tile: Tile) {
-	return get_tile_value_checked_tilemap_position(tilemap, { chunk_tile = {x, y, z} })
+	return get_tile_value_checked_tilemap_position(tilemap, { position = {x, y, z} })
 }
 
 get_tile_value_checked_tilemap_position :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> (tile: Tile) {

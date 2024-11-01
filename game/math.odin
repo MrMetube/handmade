@@ -7,13 +7,13 @@ v2 :: [2]f32
 v3 :: [3]f32
 v4 :: [4]f32
 
-dot :: proc(a, b: v2) -> f32 {
+dot :: #force_inline proc(a, b: v2) -> f32 {
 	return a.x * b.x + a.y * b.y
 }
 
-reflect :: proc(v, axis:v2) -> v2 {
+reflect :: #force_inline proc(v, axis:v2) -> v2 {
 	return v - 2 * dot(v, axis) * axis
-}
+} 
 
 // TODO(viktor): whats this called? half reflect / move along
 dont_reflect_just_move_along_axis :: proc(v, axis:v2) -> v2 {
@@ -28,28 +28,21 @@ square :: #force_inline proc(x: f32) -> f32 {
 	return x * x
 }
 
+square_root :: math.sqrt
+
 length :: #force_inline proc(vec: $T/[$N]$E) -> (length:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
 	length_squared := length_squared(vec)
 	length = math.sqrt(length_squared)
 	return length
 }
 
-length_squared :: #force_inline proc(vec: $T/[$N]$E) -> (length_squared:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
-	square := vec * vec
-	when N == 2 {
-		length_squared = abs(vec.x + vec.y)
-	} else when N == 3 {
-		length_squared = abs(vec.x + vec.y + vec.z)
-	} else when N == 4 {
-		length_squared = abs(vec.x + vec.y + vec.z + vec.w)
-	}
-	return length_squared
+length_squared :: #force_inline proc(vec: $T/[$N]$E) -> f32 where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
+	return dot(vec,vec)
 }
 
 normalize :: #force_inline proc(vec: $T/[$N]$E) -> T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
 	length := length(vec)
-	denom  := length == 0 ? 1 : length
-	return vec / denom
+	return vec / length
 }
 
 

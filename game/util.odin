@@ -23,6 +23,26 @@ cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1 &
 	return result
 }
 
+min_vec :: proc { min_vec_2, min_vec_3}
+max_vec :: proc { max_vec_2, max_vec_3}
+
+min_vec_2 :: #force_inline proc(a,b: [2]$E) -> [2]E where intrinsics.type_is_numeric(E) {
+	return {min(a.x, b.x), min(a.y, b.y)}
+}
+
+min_vec_3 :: #force_inline proc(a,b: [3]$E) -> [3]E where intrinsics.type_is_numeric(E) {
+	return {min(a.x, b.x), min(a.y, b.y), min(a.z, b.z)}
+}
+
+max_vec_2 :: #force_inline proc(a,b: [2]$E) -> [2]E where intrinsics.type_is_numeric(E) {
+	return {max(a.x, b.x), max(a.y, b.y)}
+}
+
+max_vec_3 :: #force_inline proc(a,b: [3]$E) -> [3]E where intrinsics.type_is_numeric(E) {
+	return {max(a.x, b.x), max(a.y, b.y), max(a.z, b.z)}
+}
+
+
 in_bounds :: proc {
 	in_bounds_array_2d,
 	in_bounds_array_3d,
