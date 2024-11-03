@@ -35,19 +35,19 @@ TilemapPosition :: struct {
 
 
 
-cannonicalize_position :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> TilemapPosition {
-	result := point
-
+map_into_tilespace :: proc(tilemap: ^Tilemap, center: TilemapPosition, offset: v3 = 0) -> TilemapPosition {
+	result := center
+	result.offset_ += offset.xy
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
-	offset := round(point.offset_ / tilemap.tile_size_in_meters)
-	result.position.xy  = vec_cast(u32, vec_cast(i32, result.position.xy) + offset)
-	result.offset_ -= vec_cast(f32, offset) * tilemap.tile_size_in_meters
+    rounded_offset := round(result.offset_ / tilemap.tile_size_in_meters)
+	result.position.xy  = vec_cast(u32, vec_cast(i32, result.position.xy) + rounded_offset)
+	result.offset_ -= vec_cast(f32, rounded_offset) * tilemap.tile_size_in_meters
 
-	assert(result.offset_.x >= -tilemap.tile_size_in_meters * 0.5)
-	assert(result.offset_.y >= -tilemap.tile_size_in_meters * 0.5)
-	assert(result.offset_.x <=  tilemap.tile_size_in_meters * 0.5)
-	assert(result.offset_.y <=  tilemap.tile_size_in_meters * 0.5)
+	assert(result.offset_.x >= -0.5 * tilemap.tile_size_in_meters)
+	assert(result.offset_.y >= -0.5 * tilemap.tile_size_in_meters)
+	assert(result.offset_.x <=  0.5 * tilemap.tile_size_in_meters)
+	assert(result.offset_.y <=  0.5 * tilemap.tile_size_in_meters)
 
 	return result
 }
@@ -57,12 +57,6 @@ tilemap_difference :: #force_inline proc(tilemap: ^Tilemap, a, b: TilemapPositio
 	offset_delta     := a.offset_ - b.offset_
 	total_delta      := (chunk_tile_delta * tilemap.tile_size_in_meters + offset_delta)
 	return {total_delta.x, total_delta.y, cast(f32) (a.position.z - b.position.z)}
-}
-
-tilemap_offset :: proc(tilemap: ^Tilemap, point: TilemapPosition, offset: v2) -> TilemapPosition {
-	point := point
-	point.offset_ += offset
-	return cannonicalize_position(tilemap, point)
 }
 
 

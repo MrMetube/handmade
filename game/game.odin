@@ -129,13 +129,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
-		nil_entity_index := add_entity(state)
-
         DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.backdrop  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
         state.player[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierRight.bmp")
         state.player[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierLeft.bmp")
 		
+		nil_entity := add_entity(state)
 
 		state.camera_p = {
             chunk_x = 0,
@@ -261,7 +260,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     state.meters_to_pixels = f32(state.tile_size_in_pixels) / tilemap.tile_size_in_meters
 
     for controller, controller_index in input.controllers {
-		controlling_entity := get_entity(state, .High, state.player_index_for_controller[controller_index])
+		controlling_entity := get_entity(state, state.player_index_for_controller[controller_index], .High)
 		if controlling_entity.residence != .Nonexistent {
 			ddp: v2
 			if controller.is_analog {
@@ -297,28 +296,29 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Update
     // ---------------------- ---------------------- ----------------------
 
-	
-	if entity := get_entity(state, .High, state.camera_following_index); entity.residence != .Nonexistent {
-		diff := tilemap_difference(tilemap, entity.dormant.p, state.camera_p)
-		if diff.x < -8.5 {
-			state.camera_p.offset_.x -= 17
-			state.camera_p = cannonicalize_position(tilemap, state.camera_p)
-		}
-		if diff.x > 8.5 {
-			state.camera_p.offset_.x += 17
-			state.camera_p = cannonicalize_position(tilemap, state.camera_p)
-		}
-		if diff.y < -4.5 {
-			state.camera_p.offset_.y -= 9
-			state.camera_p = cannonicalize_position(tilemap, state.camera_p)
-		}
-		if diff.y > 5.5 {
-			state.camera_p.offset_.y += 9
-			state.camera_p = cannonicalize_position(tilemap, state.camera_p)
-		}
-		state.camera_p.position.z = entity.dormant.p.position.z
-	}
+	entity_offset_for_frame: v2
+	if entity := get_entity(state, state.camera_following_index, .High); entity.residence != .Nonexistent {
+		old_camera_p := state.camera_p
 
+		state.camera_p.position.z = entity.dormant.p.position.z
+		offset := entity.high.p
+		if offset.x < -9 * tilemap.tile_size_in_meters {
+			state.camera_p.offset_.x -= 17
+		}
+		if offset.x > 9 * tilemap.tile_size_in_meters {
+			state.camera_p.offset_.x += 17
+		}
+		if offset.y < -5 * tilemap.tile_size_in_meters {
+			state.camera_p.offset_.y -= 9
+		}
+		if offset.y > 5 * tilemap.tile_size_in_meters {
+			state.camera_p.offset_.y += 9
+		}
+		
+		d_camera_p := tilemap_difference(tilemap, state.camera_p, old_camera_p)
+		state.camera_p = map_into_tilespace(tilemap, state.camera_p)
+		entity_offset_for_frame = -d_camera_p.xy
+	}
     
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Render
@@ -370,20 +370,22 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         }
     }
 
-
 	for entity_index in 1..<state.entity_count {
 		if state.entity_residency[entity_index] == .High {
-			dormant_entity := state.dormant_entities[entity_index]
-			low_entity     := state.low_entities[entity_index]
-			high_entity    := state.high_entities[entity_index]
+			dormant_entity := &state.dormant_entities[entity_index]
+			low_entity     := &state.low_entities[entity_index]
+			high_entity    := &state.high_entities[entity_index]
+
+			high_entity.p.xy += entity_offset_for_frame
 
 			player_bitmap := state.player[high_entity.facing_index]
-			position := screen_center + high_entity.p * state.meters_to_pixels * {1,-1}
-			// position -= entity.size * state.meters_to_pixels * 0.5 - {0, 1} * state.meters_to_pixels
+			position := screen_center + high_entity.p.xy * state.meters_to_pixels * {1,-1}
+
 			// TODO: bitmap "center/focus" point
-			draw_rectangle(buffer, position, dormant_entity.size * state.meters_to_pixels, Green) // player bounding box
-			position += v2{0, -1} * (cast(f32) player_bitmap.height - dormant_entity.size.y * state.meters_to_pixels)
-			draw_bitmap(buffer, player_bitmap, position)
+			draw_rectangle(buffer, position, dormant_entity.size * state.meters_to_pixels, Green)
+
+			bitmap_position := position + v2{0, -1} * (cast(f32) player_bitmap.height - dormant_entity.size.y * state.meters_to_pixels)
+			draw_bitmap(buffer, player_bitmap, bitmap_position)
 		}
 	}
 }
@@ -399,6 +401,10 @@ Entity :: struct {
 DormantEntity :: struct {
 	p: TilemapPosition,
 	size: v2,
+		
+	// NOTE(viktor): This is for "stairs"
+	d_tile_z: i32,
+	collides: b32,
 }
 
 LowEntity :: struct {
@@ -406,13 +412,13 @@ LowEntity :: struct {
 
 HighEntity :: struct {
 	// NOTE(viktor): this already relative to the camera
-	p, dp: v2, 
+	p, dp: v3, 
 
 	facing_index: i32,
 }
 
 EntityIndex :: u32
-EntityResidency :: enum { Nonexistent, Dormant, Low, High }
+EntityResidency :: enum u32 { Nonexistent, Dormant, Low, High }
 
 GameState :: struct {
     world_arena: Arena,
@@ -436,8 +442,12 @@ GameState :: struct {
 	meters_to_pixels: f32,
 }
 
-get_entity :: proc(state: ^GameState, residence: EntityResidency, index: EntityIndex) -> (entity: Entity) {
-	#no_bounds_check if index > 0 && index < state.entity_count {
+get_entity :: proc(state: ^GameState, index: EntityIndex, residence: EntityResidency) -> (entity: Entity) {
+	#no_bounds_check if index > 0 && index <= state.entity_count {
+		if state.entity_residency[index] < residence {
+			change_entity_residence(state, index, residence)
+			assert(state.entity_residency[index] >= residence)
+		}
 		entity.residence = residence
 		entity.dormant = &state.dormant_entities[index]
 		entity.low = &state.low_entities[index]
@@ -447,26 +457,38 @@ get_entity :: proc(state: ^GameState, residence: EntityResidency, index: EntityI
 }
 	
 add_entity :: proc(state: ^GameState) -> EntityIndex {
+	entity_index := state.entity_count
 	state.entity_count += 1
 	assert(state.entity_count < len(state.entity_residency))
 	assert(state.entity_count < len(state.dormant_entities))
 	assert(state.entity_count < len(state.low_entities))
 	assert(state.entity_count < len(state.high_entities))
 	
-	state.entity_residency[state.entity_count] = .Dormant
-	state.dormant_entities[state.entity_count] = {}
-	state.low_entities[state.entity_count]     = {}
-	state.high_entities[state.entity_count]    = {}
+	state.entity_residency[entity_index] = .Dormant
+	state.dormant_entities[entity_index] = {}
+	state.low_entities[entity_index]     = {}
+	state.high_entities[entity_index]    = {}
 
-	return state.entity_count
+	return entity_index
 }
 
-change_entity_residence :: proc(state: ^GameState, index: EntityIndex, residence: EntityResidency) {
+change_entity_residence :: proc(state: ^GameState, entity_index: EntityIndex, residence: EntityResidency) {
+	if residence == .High {
+		if state.entity_residency[entity_index] != .High {
+			dormant := &state.dormant_entities[entity_index]
+			high    := &state.high_entities[entity_index]
+			// NOTE(viktor): Map the entity into camera space
+			diff := tilemap_difference(state.world.tilemap, dormant.p, state.camera_p)
 
+			high^ = {}
+			high.p = diff
+		}
+	}
+	state.entity_residency[entity_index] = residence
 }
 
 init_player :: proc(state: ^GameState, index: EntityIndex) {
-	player := get_entity(state, .High, index)
+	player := get_entity(state, index, .Dormant)
 
 	player.dormant.p = {
 		chunk_x = 0,
@@ -475,14 +497,14 @@ init_player :: proc(state: ^GameState, index: EntityIndex) {
 		tile_y = 5,
 		offset_ = 0.25,
 	}
+	player.dormant.size = {0.6, 0.4}
+	player.dormant.collides = true
 
 	change_entity_residence(state, index, .High)
 
-
-	if get_entity(state, .Dormant, state.camera_following_index).residence == .Nonexistent {
+	if get_entity(state, state.camera_following_index, .Nonexistent).residence == .Nonexistent {
 		state.camera_following_index = index
 	}
-	player.dormant.size = {0.6, 0.4}
 }
 
 move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
@@ -498,14 +520,15 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 	ddp *= speed
 
 	// TODO(viktor): ODE here
-	ddp += -8 * player.high.dp
+	ddp += -8 * player.high.dp.xy
 
-	player_delta := 0.5*ddp * square(dt) + player.high.dp * dt
-	player.high.dp = ddp * dt + player.high.dp
+	player_delta := 0.5*ddp * square(dt) + player.high.dp.xy * dt
+	player.high.dp.xy = ddp * dt + player.high.dp.xy
 	
-    tilemap := state.world.tilemap	
-	new_player_p := player.high.p + player_delta
-when false {
+	new_player_p := player.high.p.xy + player_delta
+
+
+	/* 
 	min_tile := min_vec(player.high.p, new_player_p)
 	max_tile := max_vec(player.high.p, new_player_p)
 
@@ -514,33 +537,32 @@ when false {
 	max_tile = vec_cast(u32, vec_cast(i32, max_tile) + entity_tile_size)
 
 	assert(max_tile.x - min_tile.x < 32)
-	assert(max_tile.y - min_tile.y < 32)
+	assert(max_tile.y - min_tile.y < 32) 
+
+	abs_tile_z := player.high.p.position.z
+	*/
 
 	old_player_p := player.high.p
 
-	abs_tile_z := player.high.p.position.z
-
 	t_remaining: f32 = 1
-
 	for iteration in 0..<4 {
 		if t_remaining <= 0 do break
 
 		t_min: f32 = 1
 		wall_normal: v2
-		
-		for abs_tile_y := min_tile.y; abs_tile_y <= max_tile.y; abs_tile_y += 1 {
-			for abs_tile_x := min_tile.x; abs_tile_x <= max_tile.x; abs_tile_x += 1 {
-				diameter := tilemap.tile_size_in_meters + player.dormant.size
-				min_corner := -0.5 * diameter
-				max_corner :=  0.5 * diameter
+		hit_entity_index: EntityIndex
+		for entity_index in 1..<state.entity_count {
+			test_entity := get_entity(state, entity_index, .High)
+			if test_entity.high != player.high {
+				if test_entity.dormant.collides {
+					diameter := player.dormant.size + test_entity.dormant.size
+					min_corner := -0.5 * diameter
+					max_corner :=  0.5 * diameter
 
-				test_tile := TilemapPosition{ position={abs_tile_x, abs_tile_y, abs_tile_z} }
-				tile_value := get_tile_value(tilemap, test_tile)
-				if !is_tile_empty(tile_value) {
-					rel := tilemap_difference(tilemap, player.high.p, test_tile).xy
+					rel := player.high.p - test_entity.high.p
 					
 					test_wall :: proc(wall_x, player_delta_x, player_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
-						EPSILON :: 0.001
+						EPSILON :: 0.01
 						if player_delta_x != 0 {
 							t_result := (wall_x - rel_x) / player_delta_x
 							y := rel_y + t_result * player_delta_y
@@ -556,42 +578,45 @@ when false {
 
 					if test_wall(min_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
 						wall_normal = {-1,  0}
+						hit_entity_index = entity_index
 					}
 					if test_wall(max_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
 						wall_normal = { 1,  0}
+						hit_entity_index = entity_index
 					}
 					if test_wall(min_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
 						wall_normal = { 0, -1}
+						hit_entity_index = entity_index
 					}
 					if test_wall(max_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
 						wall_normal = { 0,  1}
+						hit_entity_index = entity_index
 					}
 				}
 			}
 		}
-	
-		player.p = tilemap_offset(tilemap, player.p, t_min * player_delta)
-		player.dp = dont_reflect_just_move_along_axis(player.dp, wall_normal)
-		player_delta = dont_reflect_just_move_along_axis(player_delta, wall_normal)
 
-		t_remaining -= t_min * t_remaining
-	}
+		player.high.p.xy += t_min * player_delta
 
-	if !are_on_same_tile(player.p, old_player_p) {
-		new_tile := get_tile_value(tilemap, player.p)
-		if new_tile == 4 {
-			player.p.position.z += 1
-		} else if new_tile == 5 { 
-			player.p.position.z -= 1
+		if hit_entity_index != 0 {
+			player.high.dp.xy = project(player.high.dp.xy, wall_normal)
+			player_delta = project(player_delta, wall_normal)
+			t_remaining -= t_min * t_remaining
+
+			hit_entity := get_entity(state, hit_entity_index, .Dormant)
+			player.high.p.z += cast(f32) hit_entity.dormant.d_tile_z
+		} else {
+			break
 		}
 	}
 
-	if player.dp.x < 0  {
-		player.facing_index = 0
+	if player.high.dp.x < 0  {
+		player.high.facing_index = 0
 	} else {
-		player.facing_index = 1
+		player.high.facing_index = 1
 	}
-}
+	
+	player.dormant.p = map_into_tilespace(state.world.tilemap, state.camera_p, player.high.p)
 }
 
 
@@ -605,6 +630,8 @@ LoadedBitmap :: struct {
     width, height: i32,
 }
 
+Color :: [4]u8
+
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
@@ -614,7 +641,7 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 }
 
 
-draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position: v2) {
+draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position: v2, c_alpha: f32 = 1) {
     rounded_position := round(position)
     
     left, right := rounded_position.x, rounded_position.x + bitmap.width
@@ -642,6 +669,7 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position:
 			src := vec_cast(f32, bitmap.pixels[src_index])
 			dst := &buffer.memory[dest_index]
 			a := src.a / 255
+			a *= c_alpha
 
 			dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, a)
 			dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, a)
@@ -682,8 +710,6 @@ game_color_to_buffer_color :: #force_inline proc(c: GameColor) -> OffscreenBuffe
     casted := vec_cast(u8, round(c * 255))
     return {r=casted.r, g=casted.g, b=casted.b}
 }
-
-Color :: [4]u8
 
 DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> LoadedBitmap {
     contents := read_entire_file(file_name)
@@ -742,18 +768,18 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         for y in 0..<header.height {
             for x in 0..<header.width {
                 raw_pixel := &raw_pixels[y * header.width + x]
-				/* TODO: can odin insert rotate intrinsics ? 
-					*SourceDest++ = (RotateLeft(C & RedMask, RedShift) |
-									RotateLeft(C & GreenMask, GreenShift) |
-									RotateLeft(C & BlueMask, BlueShift)
-									RotateLeft(C & AlphaMask, AlphaShift));
+				/* TODO: check what the shifts and "C" where actually 
+				raw_pixel^ = (rotate_left(raw_pixel^ & red_mask, red_shift) |
+				              rotate_left(raw_pixel^ & green_mask, green_shift) |
+				              rotate_left(raw_pixel^ & blue_mask, blue_shift) |
+				              rotate_left(raw_pixel^ & alpha_mask, alpha_shift))
 				 */
 				a := (raw_pixel^ >> alpha_scan) & 0xFF
 				r := (raw_pixel^ >> red_scan  ) & 0xFF
 				g := (raw_pixel^ >> green_scan) & 0xFF
 				b := (raw_pixel^ >> blue_scan ) & 0xFF
 
-				// TODO: what?
+				// // TODO: what?
 				raw_pixel^ = (b << 24) | (a << 16) | (r << 8) | g
             }
         }

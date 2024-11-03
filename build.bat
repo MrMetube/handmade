@@ -4,6 +4,7 @@ set build-flags=-warnings-as-errors -vet-cast -vet-shadowing -error-pos-style:un
 set debug-flags=-debug -o:none
 
 if not exist .\build mkdir .\build
+if not exist .\data  mkdir .\data
 
 :: Debug build
 set EXE=debug.exe

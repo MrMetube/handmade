@@ -242,3 +242,14 @@ atan2_f32_simd :: #force_inline proc(y, x: [$N]f32) -> [N]f32 {
 	
 }
 
+rotate_left :: #force_inline proc(value: u32, amount: i32) -> u32 {
+	// TODO: can odin insert rotate intrinsics
+	masked := amount & 31
+	return value << u32(masked) | value >> u32(32 - masked)
+}
+
+rotate_right :: #force_inline proc(value: u32, amount: i32) -> u32 {
+	// TODO: can odin insert rotate intrinsics
+	masked := amount & 31
+	return value >> u32(-masked) | value << u32(32 + masked)
+}
