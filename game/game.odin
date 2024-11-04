@@ -129,22 +129,19 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
-        DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
+		defer { 
+			memory.is_initialized = true
+		}
+
+        init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
+
+        // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.backdrop  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
         state.player[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierRight.bmp")
         state.player[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierLeft.bmp")
 		
-		nil_entity := add_entity(state)
-
-		state.camera_p = {
-            chunk_x = 0,
-            chunk_y = 0,
-            tile_x = 8,
-            tile_y = 3,
-            offset_ = 0,
-        }
-
-        init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
+		nil_entity := add_low_entity(state, .Nil)
+		state.high_entity_count = 1
 
         state.world = World{
             tilemap = push_struct(&state.world_arena, Tilemap)
@@ -166,11 +163,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         stair_up, stair_down: b32
 
         tiles_per_screen := [2]u32{17, 9}
-        screen_row, screen_col, screen_height : u32
-        for screen_index in u32(0) ..< 100 {
+        screen_row, screen_col, tile_z : u32
+        for screen_index in u32(0) ..< 2 {
             // TODO: random number generator
             random_choice : u32
-            if stair_down || stair_up {
+            if true || stair_down || stair_up {
                 random_choice = random_number[random_number_index] % 2
             } else {
                 random_choice = random_number[random_number_index] % 3
@@ -184,7 +181,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 door_top = true
             } else {
                 created_stair = true
-                if screen_height == 1 {
+                if tile_z == 1 {
                     stair_down = true
                 } else {
                     stair_up = true
@@ -197,7 +194,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                         position = {
                             screen_col * tiles_per_screen.x + tile_x,
                             screen_row * tiles_per_screen.y + tile_y,
-                            screen_height,
+                            tile_z,
                         }
                     }
                     
@@ -223,6 +220,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                         value = 2
                     }
                     set_tile_value(&state.world_arena, tilemap, abstile, value)
+					
+					if value == 2 do add_wall(state, abstile)
                 }
             }
             
@@ -244,11 +243,19 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             } else if random_choice == 1 {
                 screen_row += 1
             } else {
-                screen_height = screen_height == 1 ? 0 : 1
+                tile_z = tile_z == 1 ? 0 : 1
             }
         }
 
-        memory.is_initialized = true
+		
+		new_camera_p := TilemapPosition{
+            chunk_x = 0,
+            chunk_y = 0,
+            tile_x = 17/2,
+            tile_y = 9/2,
+            offset_ = 0,
+        }
+		set_camera(state, new_camera_p)
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -260,35 +267,40 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     state.meters_to_pixels = f32(state.tile_size_in_pixels) / tilemap.tile_size_in_meters
 
     for controller, controller_index in input.controllers {
-		controlling_entity := get_entity(state, state.player_index_for_controller[controller_index], .High)
-		if controlling_entity.residence != .Nonexistent {
+		low_index := state.player_index_for_controller[controller_index]
+		if low_index == 0 {
+			if controller.start.ended_down {
+				entity_index := add_player(state)
+				state.player_index_for_controller[controller_index] = entity_index
+			}
+		} else {
+			controlling_entity := get_high_entity(state, low_index)
+
 			ddp: v2
 			if controller.is_analog {
 				// NOTE(viktor): Use analog movement tuning
 				ddp = controller.stick_average
 			} else {
 				// NOTE(viktor): Use digital movement tuning
-				if controller.button_left.ended_down {
+				if controller.stick_left.ended_down {
 					ddp.x -= 1
 				}
-				if controller.button_right.ended_down {
+				if controller.stick_right.ended_down {
 					ddp.x += 1
 				}
-				if controller.button_up.ended_down {
+				if controller.stick_up.ended_down {
 					ddp.y += 1
 				}
-				if controller.button_down.ended_down {
+				if controller.stick_down.ended_down {
 					ddp.y -= 1
+				}
+
+				if controller.button_up.ended_down {
+					controlling_entity.high.dp.z += 2
 				}
 			}
 
 			move_player(state, controlling_entity, ddp, input.delta_time)
-		} else {
-			if controller.start.ended_down {
-				entity_index := add_entity(state)
-				init_player(state, entity_index)
-				state.player_index_for_controller[controller_index] = entity_index
-			}
 		}
     }
     
@@ -296,28 +308,26 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Update
     // ---------------------- ---------------------- ----------------------
 
-	entity_offset_for_frame: v2
-	if entity := get_entity(state, state.camera_following_index, .High); entity.residence != .Nonexistent {
-		old_camera_p := state.camera_p
+	if entity := get_high_entity(state, state.camera_following_index); entity.high != nil {
+		new_camera_p := state.camera_p
 
-		state.camera_p.position.z = entity.dormant.p.position.z
+		new_camera_p.position.z = entity.low.p.position.z
 		offset := entity.high.p
+		// TODO: isinrectangle
 		if offset.x < -9 * tilemap.tile_size_in_meters {
-			state.camera_p.offset_.x -= 17
+			new_camera_p.offset_.x -= 17
 		}
 		if offset.x > 9 * tilemap.tile_size_in_meters {
-			state.camera_p.offset_.x += 17
+			new_camera_p.offset_.x += 17
 		}
 		if offset.y < -5 * tilemap.tile_size_in_meters {
-			state.camera_p.offset_.y -= 9
+			new_camera_p.offset_.y -= 9
 		}
 		if offset.y > 5 * tilemap.tile_size_in_meters {
-			state.camera_p.offset_.y += 9
+			new_camera_p.offset_.y += 9
 		}
 		
-		d_camera_p := tilemap_difference(tilemap, state.camera_p, old_camera_p)
-		state.camera_p = map_into_tilespace(tilemap, state.camera_p)
-		entity_offset_for_frame = -d_camera_p.xy
+		set_camera(state, new_camera_p)
 	}
     
     // ---------------------- ---------------------- ----------------------
@@ -338,76 +348,105 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     Green  :: GameColor{0, 0.59, 0.28}
 
 
-	tile_size := vec_cast(f32, state.tile_size_in_pixels, state.tile_size_in_pixels)
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    for row in i32(-10)..=10 {
-        for col in i32(-20)..=20 {
-            position := vec_cast(u32, (vec_cast(i32, state.camera_p.position) + {col, row, 0}))
+// when false {
+// 	tile_size := vec_cast(f32, state.tile_size_in_pixels, state.tile_size_in_pixels)
+//     for row in i32(-10)..=10 {
+//         for col in i32(-20)..=20 {
+//             position := vec_cast(u32, (vec_cast(i32, state.camera_p.position) + {col, row, 0}))
             
-            tile := TilemapPosition{position = position}
-            tile_value := get_tile_value(tilemap, tile)
+//             tile := TilemapPosition{position = position}
+//             tile_value := get_tile_value(tilemap, tile)
 
-            if tile_value != 0 {
-                color := Gray
-                if tile_value == 4 {
-                    color = Blue
-                }
-                if tile_value == 5 {
-                    color = Orange
-                }
-                if tile_value == 2 {
-                    color = White
-                }
+//             if tile_value != 0 {
+//                 color := Gray
+//                 if tile_value == 4 {
+//                     color = Blue
+//                 }
+//                 if tile_value == 5 {
+//                     color = Orange
+//                 }
+//                 if tile_value == 2 {
+//                     color = White
+//                 }
 
-                position := screen_center + 
-					vec_cast(f32, col,-row) * tile_size + 
-					{-1, 1} * state.camera_p.offset_ * state.meters_to_pixels +
-					{-0.5, 0.5} * tile_size
-                if color != Gray {
-					draw_rectangle(buffer, position, tile_size, color)
-				}
-            }
-        }
-    }
+//                 position := screen_center + 
+// 					vec_cast(f32, col,-row) * tile_size + 
+// 					{-1, 1} * state.camera_p.offset_ * state.meters_to_pixels +
+// 					{-0.5, 0.5} * tile_size
+//                 if color != Gray {
+// 					draw_rectangle(buffer, position, tile_size, color)
+// 				}
+//             }
+//         }
+//     }
+// }
 
-	for entity_index in 1..<state.entity_count {
-		if state.entity_residency[entity_index] == .High {
-			dormant_entity := &state.dormant_entities[entity_index]
-			low_entity     := &state.low_entities[entity_index]
-			high_entity    := &state.high_entities[entity_index]
+	for entity_index in 1..<state.high_entity_count {
+		high_entity := &state.high_entities_[entity_index]
+		low_entity  := &state.low_entities[high_entity.low_index]
 
-			high_entity.p.xy += entity_offset_for_frame
+		position := screen_center + state.meters_to_pixels * (high_entity.p.xy * {1,-1} - 0.5 * low_entity.size )
+		z :=  -state.meters_to_pixels * high_entity.p.z
+		size := state.meters_to_pixels * low_entity.size
 
+		switch low_entity.type {
+		case .Nil:
+		case .Hero:
 			player_bitmap := state.player[high_entity.facing_index]
-			position := screen_center + high_entity.p.xy * state.meters_to_pixels * {1,-1}
+
+			dt := input.delta_time;
+			ddz : f32 = -9.8;
+			high_entity.p.z = 0.5 * ddz * square(dt) + high_entity.dp.z * dt + high_entity.p.z;
+			high_entity.dp.z = ddz * dt + high_entity.dp.z;
+
+			if(high_entity.p.z < 0) {
+				high_entity.p.z = 0;
+				high_entity.dp.z = 0;
+			}
+
+			c_alpha := 1 - 0.5 * high_entity.p.z;
+			if(c_alpha < 0) {
+				c_alpha = 0.0;
+			}
+
 
 			// TODO: bitmap "center/focus" point
-			draw_rectangle(buffer, position, dormant_entity.size * state.meters_to_pixels, Green)
+			draw_rectangle(buffer, position, size, Black, c_alpha) // Shadow
 
-			bitmap_position := position + v2{0, -1} * (cast(f32) player_bitmap.height - dormant_entity.size.y * state.meters_to_pixels)
-			draw_bitmap(buffer, player_bitmap, bitmap_position)
+			draw_rectangle(buffer, position + {0,z}, size, Green) // Bounds
+			bitmap_position := position + v2{-0.5, -1} * ({cast(f32) player_bitmap.width, cast(f32) player_bitmap.height} - low_entity.size * state.meters_to_pixels)
+			draw_bitmap(buffer, player_bitmap, bitmap_position + {0,z})
+		case .Wall:
+			draw_rectangle(buffer, position, size, White)
 		}
 	}
 }
 
+EntityType :: enum u32 {
+	Nil, Hero, Wall
+}
+
+EntityIndex :: u32
+LowIndex :: distinct EntityIndex
+
 Entity :: struct {
-	// TODO(viktor): shoud these be "using" ?
-	residence: EntityResidency,
-	dormant: ^DormantEntity,
+	low_index: LowIndex, // TODO(viktor): is this duplicate information? 
 	low: ^LowEntity,
 	high: ^HighEntity,
 }
 
-DormantEntity :: struct {
+LowEntity :: struct {
+	type: EntityType,
+
 	p: TilemapPosition,
 	size: v2,
 		
 	// NOTE(viktor): This is for "stairs"
 	d_tile_z: i32,
 	collides: b32,
-}
 
-LowEntity :: struct {
+	high_entity_index: EntityIndex,
 }
 
 HighEntity :: struct {
@@ -415,23 +454,22 @@ HighEntity :: struct {
 	p, dp: v3, 
 
 	facing_index: i32,
-}
 
-EntityIndex :: u32
-EntityResidency :: enum u32 { Nonexistent, Dormant, Low, High }
+	low_index: LowIndex,
+}
 
 GameState :: struct {
     world_arena: Arena,
 	// TODO(viktor): should we allow split-screen?
-	camera_following_index: u32,
+	camera_following_index: LowIndex,
     camera_p : TilemapPosition,
-	player_index_for_controller: [len(GameInput{}.controllers)]u32,
+	player_index_for_controller: [len(GameInput{}.controllers)]LowIndex,
 	
-	entity_count: u32,
-	entity_residency: [256]EntityResidency,
-	high_entities: [256]HighEntity,
-	low_entities: [256]LowEntity,
-	dormant_entities: [256]DormantEntity,
+	low_entity_count: LowIndex,
+	low_entities: [4096]LowEntity,
+
+	high_entity_count: EntityIndex,
+	high_entities_: [256]HighEntity,
     
 	world: World,
 
@@ -442,68 +480,147 @@ GameState :: struct {
 	meters_to_pixels: f32,
 }
 
-get_entity :: proc(state: ^GameState, index: EntityIndex, residence: EntityResidency) -> (entity: Entity) {
-	#no_bounds_check if index > 0 && index <= state.entity_count {
-		if state.entity_residency[index] < residence {
-			change_entity_residence(state, index, residence)
-			assert(state.entity_residency[index] >= residence)
-		}
-		entity.residence = residence
-		entity.dormant = &state.dormant_entities[index]
-		entity.low = &state.low_entities[index]
-		entity.high = &state.high_entities[index]
-	}
+get_low_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: ^LowEntity) #no_bounds_check {
+	assert(low_index > 0 && low_index <= state.low_entity_count)
+	entity = &state.low_entities[low_index]
+	
 	return entity
 }
-	
-add_entity :: proc(state: ^GameState) -> EntityIndex {
-	entity_index := state.entity_count
-	state.entity_count += 1
-	assert(state.entity_count < len(state.entity_residency))
-	assert(state.entity_count < len(state.dormant_entities))
-	assert(state.entity_count < len(state.low_entities))
-	assert(state.entity_count < len(state.high_entities))
-	
-	state.entity_residency[entity_index] = .Dormant
-	state.dormant_entities[entity_index] = {}
-	state.low_entities[entity_index]     = {}
-	state.high_entities[entity_index]    = {}
 
-	return entity_index
+get_high_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: Entity) #no_bounds_check {
+	if low_index > 0 && low_index <= state.low_entity_count {
+		entity.high = make_entity_high_frequency(state, low_index)
+		entity.low_index = low_index
+		entity.low = &state.low_entities[entity.low_index]
+	}
+
+	return entity
 }
 
-change_entity_residence :: proc(state: ^GameState, entity_index: EntityIndex, residence: EntityResidency) {
-	if residence == .High {
-		if state.entity_residency[entity_index] != .High {
-			dormant := &state.dormant_entities[entity_index]
-			high    := &state.high_entities[entity_index]
+make_entity_high_frequency :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
+	low  := &state.low_entities[low_index]
+	if low.high_entity_index == 0 {
+		if state.high_entity_count < len(state.high_entities_) {
+			high_index := state.high_entity_count
+			state.high_entity_count += 1
+
+			high = &state.high_entities_[high_index]
 			// NOTE(viktor): Map the entity into camera space
-			diff := tilemap_difference(state.world.tilemap, dormant.p, state.camera_p)
+			diff := tilemap_difference(state.world.tilemap, low.p, state.camera_p)
 
 			high^ = {}
 			high.p = diff
+
+			high.low_index = low_index
+			low.high_entity_index = high_index
+		} else {
+			unreachable()
 		}
+	} else {
+		high = &state.high_entities_[low.high_entity_index]
 	}
-	state.entity_residency[entity_index] = residence
+	return high
 }
 
-init_player :: proc(state: ^GameState, index: EntityIndex) {
-	player := get_entity(state, index, .Dormant)
+make_entity_low_frequency :: #force_inline proc(state: ^GameState, low_index: LowIndex) {
+	low  := &state.low_entities[low_index]
+	high_index := low.high_entity_index
+	if high_index != 0 {
+		last_index := state.high_entity_count-1
+		if high_index != last_index {
+			last := &state.high_entities_[last_index]
+			del  := &state.high_entities_[high_index]
+			del^ = last^
+			low_of_last := state.low_entities[last.low_index]
+			low_of_last.high_entity_index = high_index
+		}
+		state.high_entity_count -= 1
+		low.high_entity_index = 0
+	}
+}
 
-	player.dormant.p = {
+add_low_entity :: proc(state: ^GameState, type: EntityType) -> LowIndex #no_bounds_check {
+	low_index := state.low_entity_count
+	state.low_entity_count += 1
+	assert(state.low_entity_count < len(state.low_entities))
+	
+	state.low_entities[low_index]  = { type = type }
+
+	return low_index
+}
+
+add_wall :: proc(state: ^GameState, position: TilemapPosition) -> (LowIndex, ^LowEntity) {
+	index := add_low_entity(state, .Wall)
+	wall := get_low_entity(state, index)
+
+	wall.p = position
+	wall.size = state.world.tilemap.tile_size_in_meters
+	wall.collides = true
+
+	return index, wall
+}
+
+add_player :: proc(state: ^GameState) -> LowIndex {
+	index := add_low_entity(state, .Hero)
+	player := get_low_entity(state, index)
+
+	player.p = {
 		chunk_x = 0,
 		chunk_y = 0,
 		tile_x = 5,
 		tile_y = 5,
 		offset_ = 0.25,
 	}
-	player.dormant.size = {0.6, 0.4}
-	player.dormant.collides = true
+	player.size = {0.6, 0.4}
+	player.collides = true
 
-	change_entity_residence(state, index, .High)
+	make_entity_high_frequency(state, index)
 
-	if get_entity(state, state.camera_following_index, .Nonexistent).residence == .Nonexistent {
+	if state.camera_following_index == 0 {
 		state.camera_following_index = index
+	}
+	return index
+}
+
+offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offset: v2, camera_bounds: Rectangle) {
+	for entity_index: EntityIndex = 1; entity_index < state.high_entity_count; {
+		high := &state.high_entities_[entity_index]
+
+		high.p.xy += offset
+		if !is_in_rectangle(camera_bounds, high.p.xy) {
+			make_entity_low_frequency(state, high.low_index)
+		} else {
+			entity_index += 1
+		}
+	}
+}
+ 
+set_camera :: proc(state: ^GameState, new_camera_p: TilemapPosition) {
+	tilemap := state.world.tilemap
+	d_camera_p := tilemap_difference(tilemap, new_camera_p, state.camera_p)
+	state.camera_p = map_into_tilespace(tilemap, new_camera_p)
+	
+	// TODO(viktor): these numbers where picked at random
+	tilespan := [2]u32{17*3, 9*3}
+	camera_bounds := rect_center_half_dim(0, state.world.tilemap.tile_size_in_meters * vec_cast(f32, tilespan))
+
+	entity_offset_for_frame := -d_camera_p.xy
+	offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
+	
+	min_tile := state.camera_p.position.xy-tilespan/2 
+	max_tile := state.camera_p.position.xy+tilespan/2
+
+	for low_index in 1..< state.low_entity_count {
+		low := state.low_entities[low_index]
+		if low.high_entity_index == 0 {
+			if true || (low.p.position.z == state.camera_p.position.z && 
+				low.p.position.x >= min_tile.x &&
+				low.p.position.x <= max_tile.x &&
+				low.p.position.y >= min_tile.y &&
+				low.p.position.y <= max_tile.y) {
+				make_entity_high_frequency(state, low_index)
+			}
+		}
 	}
 }
 
@@ -544,18 +661,23 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 
 	old_player_p := player.high.p
 
-	t_remaining: f32 = 1
 	for iteration in 0..<4 {
-		if t_remaining <= 0 do break
+		desired_p := player.high.p.xy + player_delta
 
 		t_min: f32 = 1
 		wall_normal: v2
-		hit_entity_index: EntityIndex
-		for entity_index in 1..<state.entity_count {
-			test_entity := get_entity(state, entity_index, .High)
-			if test_entity.high != player.high {
-				if test_entity.dormant.collides {
-					diameter := player.dormant.size + test_entity.dormant.size
+		hit_high_entity_index: EntityIndex
+
+		for test_high_entity_index in 1..<state.high_entity_count {
+			if test_high_entity_index != player.low.high_entity_index {
+
+				test_entity: Entity
+				test_entity.high = &state.high_entities_[test_high_entity_index]
+				test_entity.low_index = test_entity.high.low_index
+				test_entity.low = &state.low_entities[test_entity.low_index]
+
+				if test_entity.low.collides {
+					diameter := player.low.size + test_entity.low.size
 					min_corner := -0.5 * diameter
 					max_corner :=  0.5 * diameter
 
@@ -578,19 +700,19 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 
 					if test_wall(min_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
 						wall_normal = {-1,  0}
-						hit_entity_index = entity_index
+						hit_high_entity_index = test_high_entity_index
 					}
 					if test_wall(max_corner.x, player_delta.x, player_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
 						wall_normal = { 1,  0}
-						hit_entity_index = entity_index
+						hit_high_entity_index = test_high_entity_index
 					}
 					if test_wall(min_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
 						wall_normal = { 0, -1}
-						hit_entity_index = entity_index
+						hit_high_entity_index = test_high_entity_index
 					}
 					if test_wall(max_corner.y, player_delta.y, player_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
 						wall_normal = { 0,  1}
-						hit_entity_index = entity_index
+						hit_high_entity_index = test_high_entity_index
 					}
 				}
 			}
@@ -598,13 +720,14 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 
 		player.high.p.xy += t_min * player_delta
 
-		if hit_entity_index != 0 {
+		if hit_high_entity_index != 0 {
 			player.high.dp.xy = project(player.high.dp.xy, wall_normal)
+			player_delta = desired_p - player.high.p.xy
 			player_delta = project(player_delta, wall_normal)
-			t_remaining -= t_min * t_remaining
 
-			hit_entity := get_entity(state, hit_entity_index, .Dormant)
-			player.high.p.z += cast(f32) hit_entity.dormant.d_tile_z
+			hit_high_entity := state.high_entities_[hit_high_entity_index]
+			hit_low_entity := state.low_entities[hit_high_entity.low_index]
+			player.low.p.position.z += cast(u32) hit_low_entity.d_tile_z
 		} else {
 			break
 		}
@@ -616,7 +739,7 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 		player.high.facing_index = 1
 	}
 	
-	player.dormant.p = map_into_tilespace(state.world.tilemap, state.camera_p, player.high.p)
+	player.low.p = map_into_tilespace(state.world.tilemap, state.camera_p, player.high.p)
 }
 
 
@@ -644,8 +767,10 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position: v2, c_alpha: f32 = 1) {
     rounded_position := round(position)
     
-    left, right := rounded_position.x, rounded_position.x + bitmap.width
-    top, bottom := rounded_position.y, rounded_position.y + bitmap.height
+    left   := rounded_position.x
+    top	   := rounded_position.y
+	right  := left + bitmap.width
+	bottom := top + bitmap.height
 
 	src_left: i32
 	src_top : i32
@@ -685,10 +810,9 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position:
 }
 
 
-draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor){
+draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor, c_alpha: f32 = 1){
     rounded_position := round(position)
     rounded_size     := round(size)
-    offscreen_color  := game_color_to_buffer_color(color)
 
     left, right := rounded_position.x, rounded_position.x + rounded_size.x
     top, bottom := rounded_position.y, rounded_position.y + rounded_size.y
@@ -700,8 +824,13 @@ draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, colo
 
     for y in top..<bottom {
         for x in left..<right {
-            pixel := &buffer.memory[y*buffer.width + x]
-            pixel^ = offscreen_color
+            dst := &buffer.memory[y*buffer.width + x]
+			src := color * 255
+			a := c_alpha
+
+			dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, a)
+			dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, a)
+			dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, a)
         }
     }
 }

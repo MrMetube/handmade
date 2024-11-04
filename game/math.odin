@@ -45,3 +45,25 @@ normalize :: #force_inline proc(vec: $T/[$N]$E) -> T where N >= 1 && N <= 4 && i
 }
 
 
+
+
+Rectangle :: struct{ min, max: v2 }
+
+rect_min_dim :: #force_inline proc(min, dim: v2) -> Rectangle {
+	return { min, min + dim }
+}
+
+rect_center_dim :: #force_inline proc(center, dim: v2) -> Rectangle {
+	return { center - dim * 0.5, center + dim * 0.5 }
+}
+
+rect_center_half_dim :: #force_inline proc(center, half_dim: v2) -> Rectangle {
+	return { center - half_dim, center + half_dim }
+}
+
+is_in_rectangle :: #force_inline proc(rec: Rectangle, point: v2) -> b32 {
+	return point.x >= rec.min.x && point.y >= rec.min.y && point.x < rec.max.x && point.y < rec.max.y
+}
+
+
+
