@@ -4,24 +4,63 @@ import "base:intrinsics"
 import "core:math"
 import "core:simd"
 
+U8_MIN  :: 0
+U16_MIN :: 0
+U32_MIN :: 0
+U64_MIN :: 0
+
+U8_MAX  :: ~u8(0)
+U16_MAX :: ~u16(0)
+U32_MAX :: ~u32(0)
+U64_MAX :: ~u64(0)
+
+I8_MIN  : i8: -1 <<  7
+I16_MIN :i16: -1 << 15
+I32_MIN :i32: -1 << 31
+I64_MIN :i64: -1 << 63
+
+I8_MAX  : i8: 1 <<  7 - 1
+I16_MAX :i16: 1 << 15 - 1
+I32_MAX :i32: 1 << 31 - 1
+I64_MAX :i64: 1 << 63 - 1
+
+
 swap :: proc(a, b: ^$T) {
 	b^, a^ = a^, b^
 }
 
-vec_cast :: proc { cast_vec, cast_vec_2 }
 
-cast_vec_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T {
+
+vec_cast :: proc { 
+	cast_vec_2, cast_vec_3, cast_vec_4,
+	cast_vec_v2, cast_vec_v3, cast_vec_v4,
+}
+
+cast_vec_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
 	return {cast(T) x, cast(T) y}
 }
 
-cast_vec :: #force_inline proc($T: typeid, value: [$N]$E) -> [N]T where N >= 1, N <= 4, intrinsics.type_is_numeric(E), intrinsics.type_is_numeric(T) {
-	// TODO check if this gets optimized to have no loop
-	result : [N]T = ---
-	#no_bounds_check {
-		for _, i in value do result[i] = cast(T) value[i]
-	}
-	return result
+cast_vec_3 :: #force_inline proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
+	return {cast(T) x, cast(T) y, cast(T) z}
 }
+
+cast_vec_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
+	return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
+}
+
+cast_vec_v2 :: #force_inline proc($T: typeid, v:[2]$E) -> [2]T where T != E {
+	return cast_vec_2(T, v.x, v.y)
+}
+
+cast_vec_v3 :: #force_inline proc($T: typeid, v:[3]$E) -> [3]T where T != E {
+	return cast_vec_3(T, v.x, v.y, v.z)
+}
+
+cast_vec_v4 :: #force_inline proc($T: typeid, v:[4]$E) -> [4]T where T != E {
+	return cast_vec_4(T, v.x, v.y, v.z, v.w)
+}
+
+
 
 min_vec :: proc { min_vec_2, min_vec_3}
 max_vec :: proc { max_vec_2, max_vec_3}
@@ -53,64 +92,64 @@ abs_vec_3 :: #force_inline proc(a: [3]$E) -> [3]E where intrinsics.type_is_numer
 
 
 
-in_bounds :: proc {
-	in_bounds_array_2d,
-	in_bounds_array_3d,
-	in_bounds_slice_2d,
-	in_bounds_slice_3d,
-	in_bounds_array_2,
-	in_bounds_array_3,
-	in_bounds_slice_2,
-	in_bounds_slice_3,
-}
+// in_bounds :: proc {
+// 	in_bounds_array_2d,
+// 	in_bounds_array_3d,
+// 	in_bounds_slice_2d,
+// 	in_bounds_slice_3d,
+// 	in_bounds_array_2,
+// 	in_bounds_array_3,
+// 	in_bounds_slice_2,
+// 	in_bounds_slice_3,
+// }
 
-in_bounds_array_2d :: #force_inline proc(arrays: [][$N]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
-	return in_bounds_array_2(arrays, index.x, index.y)
-}
+// in_bounds_array_2d :: #force_inline proc(arrays: [][$N]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
+// 	return in_bounds_array_2(arrays, index.x, index.y)
+// }
 
-in_bounds_slice_2d :: #force_inline proc(slices: [][]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
-	return in_bounds_slice_2(slices, index.x, index.y)
-}
+// in_bounds_slice_2d :: #force_inline proc(slices: [][]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
+// 	return in_bounds_slice_2(slices, index.x, index.y)
+// }
 
-in_bounds_array_2 :: #force_inline proc(arrays: [][$N]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
-	when intrinsics.type_is_unsigned(I) {
-		return x < cast(I) len(arrays[0]) && y < cast(I) len(arrays)
-	} else {
-		return x >= 0 && x < cast(I) len(arrays[0]) && y >= 0 && y < cast(I) len(arrays)
-	}
-}
+// in_bounds_array_2 :: #force_inline proc(arrays: [][$N]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
+// 	when intrinsics.type_is_unsigned(I) {
+// 		return x < cast(I) len(arrays[0]) && y < cast(I) len(arrays)
+// 	} else {
+// 		return x >= 0 && x < cast(I) len(arrays[0]) && y >= 0 && y < cast(I) len(arrays)
+// 	}
+// }
 
-in_bounds_slice_2 :: #force_inline proc(slices: [][]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
-	when intrinsics.type_is_unsigned(I) {
-		return x < cast(I) len(slices[0]) && y < cast(I) len(slices)
-	} else {
-		return x >= 0 && x < cast(I) len(slices[0]) && y >= 0 && y < cast(I) len(slices)
-	}
-}
+// in_bounds_slice_2 :: #force_inline proc(slices: [][]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
+// 	when intrinsics.type_is_unsigned(I) {
+// 		return x < cast(I) len(slices[0]) && y < cast(I) len(slices)
+// 	} else {
+// 		return x >= 0 && x < cast(I) len(slices[0]) && y >= 0 && y < cast(I) len(slices)
+// 	}
+// }
 
-in_bounds_array_3d :: #force_inline proc(arrays: [][$N][$M]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
-	return in_bounds_array_3(arrays, index.x, index.y, index.z)
-}
+// in_bounds_array_3d :: #force_inline proc(arrays: [][$N][$M]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
+// 	return in_bounds_array_3(arrays, index.x, index.y, index.z)
+// }
 
-in_bounds_slice_3d :: #force_inline proc(slices: [][][]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
-	return in_bounds_slice_3(slices, index.x, index.y, index.z)
-}
+// in_bounds_slice_3d :: #force_inline proc(slices: [][][]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
+// 	return in_bounds_slice_3(slices, index.x, index.y, index.z)
+// }
 
-in_bounds_array_3 :: #force_inline proc(arrays: [][$N][$M]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
-	when intrinsics.type_is_unsigned(I) {
-		return x < cast(I) len(arrays[0][0]) && y < cast(I) len(arrays[0]) && z < cast(I) len(arrays)
-	} else {
-		return x >= 0 && x < cast(I) len(arrays[0][0]) && y >= 0 && y < cast(I) len(arrays[0]) && z >= 0 && z < cast(I) len(arrays)
-	}
-}
+// in_bounds_array_3 :: #force_inline proc(arrays: [][$N][$M]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
+// 	when intrinsics.type_is_unsigned(I) {
+// 		return x < cast(I) len(arrays[0][0]) && y < cast(I) len(arrays[0]) && z < cast(I) len(arrays)
+// 	} else {
+// 		return x >= 0 && x < cast(I) len(arrays[0][0]) && y >= 0 && y < cast(I) len(arrays[0]) && z >= 0 && z < cast(I) len(arrays)
+// 	}
+// }
 
-in_bounds_slice_3 :: #force_inline proc(slices: [][][]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
-	when intrinsics.type_is_unsigned(I) {
-		return x < cast(I) len(slices[0][0]) && y < cast(I) len(slices[0]) && z < cast(I) len(slices)
-	} else {
-		return x >= 0 && x < cast(I) len(slices[0][0]) && y >= 0 && y < cast(I) len(slices[0]) && z >= 0 && z < cast(I) len(slices)
-	}
-}
+// in_bounds_slice_3 :: #force_inline proc(slices: [][][]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
+// 	when intrinsics.type_is_unsigned(I) {
+// 		return x < cast(I) len(slices[0][0]) && y < cast(I) len(slices[0]) && z < cast(I) len(slices)
+// 	} else {
+// 		return x >= 0 && x < cast(I) len(slices[0][0]) && y >= 0 && y < cast(I) len(slices[0]) && z >= 0 && z < cast(I) len(slices)
+// 	}
+// }
 
 
 // TODO convert all of these to platform-efficient versions
@@ -154,7 +193,7 @@ round_f32 :: #force_inline proc(f: f32) -> i32 {
 round_f32s :: #force_inline proc(fs: [$N]f32) -> [N]i32 where N > 1 {
 	fs := fs
 	for &e in fs do e = math.round(e) 
-	return cast_vec(i32, fs)
+	return vec_cast(i32, fs)
 }
 
 
@@ -164,11 +203,11 @@ floor :: proc {
 }
 
 floor_f32 :: #force_inline proc(f: f32) -> (i:i32) {
-	return floor_f32_simd([1]f32{f})[0]
+	return cast(i32) math.floor(f)
 }
 
 floor_f32_simd :: #force_inline proc(fs: [$N]f32) -> [N]i32 {
-	return cast_vec(i32, simd.to_array(simd.floor(simd.from_array(fs))))
+	return vec_cast(i32, simd.to_array(simd.floor(simd.from_array(fs))))
 }
 
 ceil :: proc {
@@ -177,11 +216,11 @@ ceil :: proc {
 }
 
 ceil_f32 :: #force_inline proc(f: f32) -> (i:i32) {
-	return ceil_f32_simd([1]f32{f})[0]
+	return cast(i32) math.ceil(f)
 }
 
 ceil_f32_simd :: #force_inline proc(fs: [$N]f32) -> [N]i32 {
-	return cast_vec(i32, simd.to_array(simd.ceil(simd.from_array(fs))))
+	return vec_cast(i32, simd.to_array(simd.ceil(simd.from_array(fs))))
 }
 
 
@@ -197,7 +236,7 @@ truncate_f32 :: #force_inline proc(f: f32) -> i32 {
 }
 
 truncate_f32s :: #force_inline proc(fs: [$N]f32) -> [N]i32 where N > 1 {
-	return cast_vec(i32, fs)
+	return vec_cast(i32, fs)
 }
 
 

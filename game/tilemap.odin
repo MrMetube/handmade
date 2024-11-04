@@ -9,23 +9,27 @@ CHUNK_BITS :: 32 - TILE_BITS
 CHUNK_SIZE :: 1 << TILE_BITS
 
 Tile :: u32
-Chunk :: [CHUNK_SIZE][CHUNK_SIZE]Tile
+Chunk :: struct {
+	tile_chunk: [3]i32,
+	tiles: []Tile,
+
+	next_in_hash: ^Chunk,
+}
 
 Tilemap :: struct {
 	tile_size_in_meters: f32,
-	chunks_size: [3]u32,
-	chunks: []^Chunk,
+	chunk_hash: [4096]Chunk,
 }
 
 TilemapPosition :: struct {
 	using _chunk_tile_union : struct #raw_union {
-		position: [3]u32,
+		position: [3]i32,
 		using _components : bit_field [3]u32 {
 			tile_x:  u32 | TILE_BITS,
-			chunk_x: u32 | CHUNK_BITS,
+			chunk_x: i32 | CHUNK_BITS,
 			tile_y:  u32 | TILE_BITS,
-			chunk_y: u32 | CHUNK_BITS,
-			chunk_z: u32 | 32,
+			chunk_y: i32 | CHUNK_BITS,
+			chunk_z: i32 | 32,
 		}
 	},
 	
@@ -41,7 +45,7 @@ map_into_tilespace :: proc(tilemap: ^Tilemap, center: TilemapPosition, offset: v
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
     rounded_offset := round(result.offset_ / tilemap.tile_size_in_meters)
-	result.position.xy  = vec_cast(u32, vec_cast(i32, result.position.xy) + rounded_offset)
+	result.position.xy  = result.position.xy + rounded_offset
 	result.offset_ -= vec_cast(f32, rounded_offset) * tilemap.tile_size_in_meters
 
 	assert(result.offset_.x >= -0.5 * tilemap.tile_size_in_meters)
@@ -79,51 +83,13 @@ are_on_same_tile :: #force_inline proc(a, b: TilemapPosition) -> b32 {
 	return a.position == b.position
 }
 
-set_tile_value :: proc(arena: ^Arena, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {
-	chunk_ptr := get_chunk_ref(tilemap, point)
-	// TODO on demand tilechunk creatton
-	chunk: ^Chunk
-	if chunk_ptr == nil || chunk_ptr^ == nil {
-		chunk = push_struct(arena, Chunk)
-		tilemap.chunks[
-			point.chunk_z * tilemap.chunks_size.y * tilemap.chunks_size.x + 
-			point.chunk_y * tilemap.chunks_size.x + 
-			point.chunk_x] = chunk
-		for &row in chunk {
-			for &tile in row {
-				tile = 1
-			}
-		}
-	} else{
-		assert(chunk_ptr^ != nil)
-		chunk = chunk_ptr^
+set_tile_value :: proc(arena: ^Arena= nil, tilemap: ^Tilemap, point: TilemapPosition, value: Tile) {
+	chunk := get_chunk(tilemap, point, arena)
+	assert(chunk.tiles != nil)
+
+	if point.tile_x < CHUNK_SIZE && point.tile_y < CHUNK_SIZE {
+		chunk.tiles[point.tile_y * CHUNK_SIZE + point.tile_x] = value
 	}
-
-	#no_bounds_check if in_bounds(chunk[:], point.tile_x, point.tile_y) {
-		chunk[point.tile_y][point.tile_x] = value
-	}
-}
-
-
-get_chunk_ref :: proc {
-	get_chunk_ref_pos,
-	get_chunk_ref_2,
-}
-
-get_chunk_ref_pos :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> ^^Chunk {
-	return get_chunk_ref(tilemap, point.chunk_x, point.chunk_y, point.chunk_z)
-}
-get_chunk_ref_2 :: proc(tilemap: ^Tilemap, chunk_x, chunk_y, chunk_z: u32) -> ^^Chunk {
-	#no_bounds_check if  
-		0 <= chunk_x && chunk_x <= tilemap.chunks_size.x && 
-		0 <= chunk_y && chunk_y <= tilemap.chunks_size.y &&
-		0 <= chunk_z && chunk_z <= tilemap.chunks_size.z {
-		return &tilemap.chunks[
-			chunk_z * tilemap.chunks_size.y * tilemap.chunks_size.x + 
-			chunk_y * tilemap.chunks_size.x + 
-			chunk_x]
-	}
-	return nil
 }
 
 
@@ -132,13 +98,52 @@ get_chunk :: proc {
 	get_chunk_2,
 }
 
-get_chunk_pos :: proc(tilemap: ^Tilemap, point: TilemapPosition) -> ^Chunk {
-	value := get_chunk_ref_pos(tilemap, point)
-	return value != nil ? value^ : nil
+get_chunk_pos :: proc(tilemap: ^Tilemap, point: TilemapPosition, arena: ^Arena = nil) -> ^Chunk {
+	return get_chunk(tilemap, point.chunk_x, point.chunk_y, point.chunk_z, arena)
 }
-get_chunk_2 :: proc(tilemap: ^Tilemap, chunk_x, chunk_y, chunk_z: u32) -> ^Chunk {
-	value := get_chunk_ref_2(tilemap, chunk_x, chunk_y, chunk_z)
-	return value != nil ? value^ : nil
+get_chunk_2 :: proc(tilemap: ^Tilemap, chunk_x, chunk_y, chunk_z: i32, arena: ^Arena = nil) -> ^Chunk {
+	CHUNK_SAFE_MARGIN :: 256
+
+	assert(chunk_x > I32_MIN + CHUNK_SAFE_MARGIN)
+	assert(chunk_x < I32_MAX - CHUNK_SAFE_MARGIN)
+	assert(chunk_y > I32_MIN + CHUNK_SAFE_MARGIN)
+	assert(chunk_y < I32_MAX - CHUNK_SAFE_MARGIN)
+	assert(chunk_z > I32_MIN + CHUNK_SAFE_MARGIN)
+	assert(chunk_z < I32_MAX - CHUNK_SAFE_MARGIN)
+
+	// TODO(viktor): BETTER HASH FUNCTION !!
+	hash_value := 19*chunk_x + 7*chunk_y + 3*chunk_z
+	hash_slot := hash_value & (len(tilemap.chunk_hash)-1)
+
+	assert(hash_slot < len(tilemap.chunk_hash))
+
+	chunk := &tilemap.chunk_hash[hash_slot]
+	for chunk != nil {
+		if chunk_x == chunk.tile_chunk.x && chunk_y == chunk.tile_chunk.y && chunk_z == chunk.tile_chunk.z {
+			break
+		}
+		
+		if arena != nil && chunk.tile_chunk.x != EMPTY_CHUNK_HASH_TILE_X && chunk.next_in_hash == nil {
+			chunk.next_in_hash = push_struct(arena, Chunk)
+			chunk.tile_chunk.x = EMPTY_CHUNK_HASH_TILE_X
+			chunk = chunk.next_in_hash
+		}
+
+		if arena != nil && chunk.tile_chunk.x == EMPTY_CHUNK_HASH_TILE_X {
+			chunk.tiles = push_slice(arena, Tile, CHUNK_SIZE*CHUNK_SIZE)
+
+			chunk.tile_chunk = {chunk_x, chunk_y, chunk_z}
+			chunk.next_in_hash = nil
+
+			for &tile in chunk.tiles {
+				tile = 1
+			}
+
+			break
+		}
+	}
+
+	return chunk
 }
 
 get_tile_value :: proc {
@@ -147,7 +152,7 @@ get_tile_value :: proc {
 	get_tile_value_checked_tilemap_position,
 }
 
-get_tile_value_checked_tile :: proc(tilemap: ^Tilemap, x,y,z: u32) -> (tile: Tile) {
+get_tile_value_checked_tile :: proc(tilemap: ^Tilemap, x,y,z: i32) -> (tile: Tile) {
 	return get_tile_value_checked_tilemap_position(tilemap, { position = {x, y, z} })
 }
 
@@ -157,8 +162,19 @@ get_tile_value_checked_tilemap_position :: proc(tilemap: ^Tilemap, point: Tilema
 }
 
 get_tile_value_unchecked :: proc(chunk: ^Chunk, tile_x, tile_y: u32) -> (tile: Tile) {
-	if chunk != nil && in_bounds(chunk[:], tile_x, tile_y) {
-		tile = chunk[tile_y][tile_x]
+	if chunk != nil && tile_x < CHUNK_SIZE && tile_y < CHUNK_SIZE {
+		tile = chunk.tiles[tile_y * CHUNK_SIZE + tile_x]
 	}
 	return tile
+}
+
+@(private="file")
+EMPTY_CHUNK_HASH_TILE_X :: I32_MIN
+
+
+init_tilemap :: proc(tilemap: ^Tilemap, tile_size_in_meters: f32) {
+	tilemap.tile_size_in_meters = tile_size_in_meters
+	for &chunk in tilemap.chunk_hash {
+		chunk.tile_chunk.x = EMPTY_CHUNK_HASH_TILE_X
+	}
 }

@@ -102,8 +102,8 @@ init_arena :: proc(arena: ^Arena, storage: []u8) {
     arena.storage = storage
 }
 
-push_slice :: proc(arena: ^Arena, $T: typeid, len: u64) -> []T {
-    data := cast([^]T) push_size(arena, cast(u64) size_of(T) * len)
+push_slice :: proc(arena: ^Arena, $Element: typeid, len: u64) -> []Element {
+    data := cast([^]Element) push_size(arena, cast(u64) size_of(Element) * len)
     return data[:len]
 }
 
@@ -149,21 +149,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
         tilemap := state.world.tilemap
 
-        tilemap.tile_size_in_meters = 1
-        tilemap.chunks_size = {128, 128, 128}
-        tilemap.chunks = push_slice(
-            &state.world_arena, 
-            ^Chunk, 
-            cast(u64)(tilemap.chunks_size.x * tilemap.chunks_size.y * tilemap.chunks_size.z)
-        )
-        
+        init_tilemap(tilemap, 1)
 
         door_left, door_right: b32
         door_top, door_bottom: b32
         stair_up, stair_down: b32
 
-        tiles_per_screen := [2]u32{17, 9}
-        screen_row, screen_col, tile_z : u32
+        tiles_per_screen := [2]i32{17, 9}
+
+		screen_base: [3]i32
+        screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         for screen_index in u32(0) ..< 2 {
             // TODO: random number generator
             random_choice : u32
@@ -243,18 +238,21 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             } else if random_choice == 1 {
                 screen_row += 1
             } else {
-                tile_z = tile_z == 1 ? 0 : 1
+                tile_z = tile_z == screen_base.z+1 ? screen_base.z : screen_base.z+1
             }
         }
 
 		
 		new_camera_p := TilemapPosition{
-            chunk_x = 0,
-            chunk_y = 0,
-            tile_x = 17/2,
-            tile_y = 9/2,
+            position = {
+				screen_base.x * tiles_per_screen.x,
+				screen_base.y * tiles_per_screen.y,
+				screen_base.z,
+			},
             offset_ = 0,
         }
+		new_camera_p.tile_x = cast(u32) tiles_per_screen.x/2
+		new_camera_p.tile_y = cast(u32) tiles_per_screen.y/2
 		set_camera(state, new_camera_p)
     }
     
@@ -349,39 +347,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-// when false {
-// 	tile_size := vec_cast(f32, state.tile_size_in_pixels, state.tile_size_in_pixels)
-//     for row in i32(-10)..=10 {
-//         for col in i32(-20)..=20 {
-//             position := vec_cast(u32, (vec_cast(i32, state.camera_p.position) + {col, row, 0}))
-            
-//             tile := TilemapPosition{position = position}
-//             tile_value := get_tile_value(tilemap, tile)
-
-//             if tile_value != 0 {
-//                 color := Gray
-//                 if tile_value == 4 {
-//                     color = Blue
-//                 }
-//                 if tile_value == 5 {
-//                     color = Orange
-//                 }
-//                 if tile_value == 2 {
-//                     color = White
-//                 }
-
-//                 position := screen_center + 
-// 					vec_cast(f32, col,-row) * tile_size + 
-// 					{-1, 1} * state.camera_p.offset_ * state.meters_to_pixels +
-// 					{-0.5, 0.5} * tile_size
-//                 if color != Gray {
-// 					draw_rectangle(buffer, position, tile_size, color)
-// 				}
-//             }
-//         }
-//     }
-// }
-
 	for entity_index in 1..<state.high_entity_count {
 		high_entity := &state.high_entities_[entity_index]
 		low_entity  := &state.low_entities[high_entity.low_index]
@@ -392,6 +357,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 		switch low_entity.type {
 		case .Nil:
+			unreachable()
 		case .Hero:
 			player_bitmap := state.player[high_entity.facing_index]
 
@@ -531,7 +497,7 @@ make_entity_low_frequency :: #force_inline proc(state: ^GameState, low_index: Lo
 			last := &state.high_entities_[last_index]
 			del  := &state.high_entities_[high_index]
 			del^ = last^
-			low_of_last := state.low_entities[last.low_index]
+			low_of_last := &state.low_entities[last.low_index]
 			low_of_last.high_entity_index = high_index
 		}
 		state.high_entity_count -= 1
@@ -564,13 +530,7 @@ add_player :: proc(state: ^GameState) -> LowIndex {
 	index := add_low_entity(state, .Hero)
 	player := get_low_entity(state, index)
 
-	player.p = {
-		chunk_x = 0,
-		chunk_y = 0,
-		tile_x = 5,
-		tile_y = 5,
-		offset_ = 0.25,
-	}
+	player.p = state.camera_p
 	player.size = {0.6, 0.4}
 	player.collides = true
 
@@ -601,7 +561,7 @@ set_camera :: proc(state: ^GameState, new_camera_p: TilemapPosition) {
 	state.camera_p = map_into_tilespace(tilemap, new_camera_p)
 	
 	// TODO(viktor): these numbers where picked at random
-	tilespan := [2]u32{17*3, 9*3}
+	tilespan := [2]i32{17*3, 9*3}
 	camera_bounds := rect_center_half_dim(0, state.world.tilemap.tile_size_in_meters * vec_cast(f32, tilespan))
 
 	entity_offset_for_frame := -d_camera_p.xy
@@ -727,7 +687,7 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 
 			hit_high_entity := state.high_entities_[hit_high_entity_index]
 			hit_low_entity := state.low_entities[hit_high_entity.low_index]
-			player.low.p.position.z += cast(u32) hit_low_entity.d_tile_z
+			player.low.p.position.z += hit_low_entity.d_tile_z
 		} else {
 			break
 		}
