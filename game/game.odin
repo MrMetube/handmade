@@ -143,13 +143,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 		nil_entity := add_low_entity(state, .Nil)
 		state.high_entity_count = 1
 
-        state.world = World{
-            tilemap = push_struct(&state.world_arena, Tilemap)
-        }
+        state.world = push_struct(&state.world_arena, World)
 
-        tilemap := state.world.tilemap
+        world := state.world
 
-        init_tilemap(tilemap, 1)
+        init_world(world, 1)
 
         door_left, door_right: b32
         door_top, door_bottom: b32
@@ -185,10 +183,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
             for tile_y in 0..< tiles_per_screen.y {
                 for tile_x in 0 ..< tiles_per_screen.x {
-                    abstile := TilemapPosition{
-                        position = {
-                            screen_col * tiles_per_screen.x + tile_x,
-                            screen_row * tiles_per_screen.y + tile_y,
+                    abstile := WorldPosition{
+                        tile = {
+                            tile_x + screen_col * tiles_per_screen.x,
+                            tile_y + screen_row * tiles_per_screen.y,
                             tile_z,
                         }
                     }
@@ -214,7 +212,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     if tile_y == tiles_per_screen.y-1 && (!door_top    || tile_x != tiles_per_screen.x / 2) {
                         value = 2
                     }
-                    set_tile_value(&state.world_arena, tilemap, abstile, value)
 					
 					if value == 2 do add_wall(state, abstile)
                 }
@@ -243,16 +240,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         }
 
 		
-		new_camera_p := TilemapPosition{
-            position = {
+		new_camera_p := WorldPosition{
+            tile = {
 				screen_base.x * tiles_per_screen.x,
 				screen_base.y * tiles_per_screen.y,
 				screen_base.z,
 			},
             offset_ = 0,
         }
-		new_camera_p.tile_x = cast(u32) tiles_per_screen.x/2
-		new_camera_p.tile_y = cast(u32) tiles_per_screen.y/2
+		new_camera_p.tile.x += tiles_per_screen.x/2
+		new_camera_p.tile.y += tiles_per_screen.y/2
 		set_camera(state, new_camera_p)
     }
     
@@ -261,8 +258,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- ---------------------- ----------------------
 	
 	state.tile_size_in_pixels = 60
-	tilemap := state.world.tilemap
-    state.meters_to_pixels = f32(state.tile_size_in_pixels) / tilemap.tile_size_in_meters
+	world := state.world
+    state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
 
     for controller, controller_index in input.controllers {
 		low_index := state.player_index_for_controller[controller_index]
@@ -309,19 +306,19 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	if entity := get_high_entity(state, state.camera_following_index); entity.high != nil {
 		new_camera_p := state.camera_p
 
-		new_camera_p.position.z = entity.low.p.position.z
+		new_camera_p.tile.z = entity.low.p.tile.z
 		offset := entity.high.p
 		// TODO: isinrectangle
-		if offset.x < -9 * tilemap.tile_size_in_meters {
+		if offset.x < -9 * world.tile_size_in_meters {
 			new_camera_p.offset_.x -= 17
 		}
-		if offset.x > 9 * tilemap.tile_size_in_meters {
+		if offset.x > 9 * world.tile_size_in_meters {
 			new_camera_p.offset_.x += 17
 		}
-		if offset.y < -5 * tilemap.tile_size_in_meters {
+		if offset.y < -5 * world.tile_size_in_meters {
 			new_camera_p.offset_.y -= 9
 		}
-		if offset.y > 5 * tilemap.tile_size_in_meters {
+		if offset.y > 5 * world.tile_size_in_meters {
 			new_camera_p.offset_.y += 9
 		}
 		
@@ -405,7 +402,7 @@ Entity :: struct {
 LowEntity :: struct {
 	type: EntityType,
 
-	p: TilemapPosition,
+	p: WorldPosition,
 	size: v2,
 		
 	// NOTE(viktor): This is for "stairs"
@@ -413,6 +410,11 @@ LowEntity :: struct {
 	collides: b32,
 
 	high_entity_index: EntityIndex,
+}
+
+LowEntityReference :: struct {
+	chunk: ^Chunk,
+	index_in_chunk: u32,
 }
 
 HighEntity :: struct {
@@ -428,16 +430,16 @@ GameState :: struct {
     world_arena: Arena,
 	// TODO(viktor): should we allow split-screen?
 	camera_following_index: LowIndex,
-    camera_p : TilemapPosition,
+    camera_p : WorldPosition,
 	player_index_for_controller: [len(GameInput{}.controllers)]LowIndex,
 	
 	low_entity_count: LowIndex,
-	low_entities: [4096]LowEntity,
+	low_entities: [100_000]LowEntity,
 
 	high_entity_count: EntityIndex,
 	high_entities_: [256]HighEntity,
     
-	world: World,
+	world: ^World,
 
     backdrop: LoadedBitmap,
     player: [2]LoadedBitmap,
@@ -445,6 +447,13 @@ GameState :: struct {
 	tile_size_in_pixels :u32,
 	meters_to_pixels: f32,
 }
+
+LoadedBitmap :: struct {
+    pixels : []Color,
+    width, height: i32,
+}
+
+Color :: [4]u8
 
 get_low_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: ^LowEntity) #no_bounds_check {
 	assert(low_index > 0 && low_index <= state.low_entity_count)
@@ -472,7 +481,7 @@ make_entity_high_frequency :: #force_inline proc(state: ^GameState, low_index: L
 
 			high = &state.high_entities_[high_index]
 			// NOTE(viktor): Map the entity into camera space
-			diff := tilemap_difference(state.world.tilemap, low.p, state.camera_p)
+			diff := world_difference(state.world, low.p, state.camera_p)
 
 			high^ = {}
 			high.p = diff
@@ -515,12 +524,12 @@ add_low_entity :: proc(state: ^GameState, type: EntityType) -> LowIndex #no_boun
 	return low_index
 }
 
-add_wall :: proc(state: ^GameState, position: TilemapPosition) -> (LowIndex, ^LowEntity) {
+add_wall :: proc(state: ^GameState, position: WorldPosition) -> (LowIndex, ^LowEntity) {
 	index := add_low_entity(state, .Wall)
 	wall := get_low_entity(state, index)
 
 	wall.p = position
-	wall.size = state.world.tilemap.tile_size_in_meters
+	wall.size = state.world.tile_size_in_meters
 	wall.collides = true
 
 	return index, wall
@@ -555,29 +564,29 @@ offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offs
 	}
 }
  
-set_camera :: proc(state: ^GameState, new_camera_p: TilemapPosition) {
-	tilemap := state.world.tilemap
-	d_camera_p := tilemap_difference(tilemap, new_camera_p, state.camera_p)
-	state.camera_p = map_into_tilespace(tilemap, new_camera_p)
+set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
+	world := state.world
+	d_camera_p := world_difference(world, new_camera_p, state.camera_p)
+	state.camera_p = map_into_worldspace(world, new_camera_p)
 	
 	// TODO(viktor): these numbers where picked at random
 	tilespan := [2]i32{17*3, 9*3}
-	camera_bounds := rect_center_half_dim(0, state.world.tilemap.tile_size_in_meters * vec_cast(f32, tilespan))
+	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
 
 	entity_offset_for_frame := -d_camera_p.xy
 	offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
 	
-	min_tile := state.camera_p.position.xy-tilespan/2 
-	max_tile := state.camera_p.position.xy+tilespan/2
-
+	min_tile := state.camera_p.tile.xy-tilespan/2 
+	max_tile := state.camera_p.tile.xy+tilespan/2
+	// TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
 	for low_index in 1..< state.low_entity_count {
 		low := state.low_entities[low_index]
 		if low.high_entity_index == 0 {
-			if true || (low.p.position.z == state.camera_p.position.z && 
-				low.p.position.x >= min_tile.x &&
-				low.p.position.x <= max_tile.x &&
-				low.p.position.y >= min_tile.y &&
-				low.p.position.y <= max_tile.y) {
+			if (low.p.tile.z == state.camera_p.tile.z && 
+				low.p.tile.x >= min_tile.x &&
+				low.p.tile.x <= max_tile.x &&
+				low.p.tile.y >= min_tile.y &&
+				low.p.tile.y <= max_tile.y) {
 				make_entity_high_frequency(state, low_index)
 			}
 		}
@@ -616,7 +625,7 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 	assert(max_tile.x - min_tile.x < 32)
 	assert(max_tile.y - min_tile.y < 32) 
 
-	abs_tile_z := player.high.p.position.z
+	abs_tile_z := player.high.p.tile.z
 	*/
 
 	old_player_p := player.high.p
@@ -687,7 +696,7 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 
 			hit_high_entity := state.high_entities_[hit_high_entity_index]
 			hit_low_entity := state.low_entities[hit_high_entity.low_index]
-			player.low.p.position.z += hit_low_entity.d_tile_z
+			player.low.p.tile.z += hit_low_entity.d_tile_z
 		} else {
 			break
 		}
@@ -699,21 +708,10 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 		player.high.facing_index = 1
 	}
 	
-	player.low.p = map_into_tilespace(state.world.tilemap, state.camera_p, player.high.p)
+	player.low.p = map_into_worldspace(state.world, state.camera_p, player.high.p)
 }
 
 
-
-World :: struct {
-    tilemap: ^Tilemap
-}
-
-LoadedBitmap :: struct {
-    pixels : []Color,
-    width, height: i32,
-}
-
-Color :: [4]u8
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.

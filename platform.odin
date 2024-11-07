@@ -329,11 +329,12 @@ main :: proc() {
 	{
 		base_address := cast(rawptr) cast(uintptr) util.terabytes(1) when INTERNAL else 0
 
-		permanent_storage_size := util.megabytes(u64(64))
-		transient_storage_size := util.megabytes(u64(256))
+		permanent_storage_size := util.megabytes(u64(256))
+		transient_storage_size := util.gigabytes(u64(1))
 		total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
 
 		storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+		// TODO(viktor): why?
 		assert(total_size < util.gigabytes(uint(4)))
 		state.game_memory_block = storage_ptr[:total_size]
 
