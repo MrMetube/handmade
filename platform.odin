@@ -350,7 +350,6 @@ main :: proc() {
 			buffer.memory_map = win.CreateFileMappingW(buffer.filehandle, nil, win.PAGE_READWRITE, size_high, size_low, nil)
 
 			buffer_storage_ptr := cast([^]u8) win.MapViewOfFile(buffer.memory_map, win.FILE_MAP_ALL_ACCESS, 0, 0, total_size)
-			error := win.GetLastError()
 			if buffer_storage_ptr != nil {
 				buffer.memory_block = buffer_storage_ptr[:total_size]
 			} else {

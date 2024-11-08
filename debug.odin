@@ -58,7 +58,6 @@ when INTERNAL {
 			return false // TODO Logging
 		}
 
-		file_size : win.LARGE_INTEGER
 		bytes_written: win.DWORD
 		if !win.WriteFile(handle, raw_data(memory), cast(u32) len(memory), &bytes_written, nil) {
 			return false // TODO Logging

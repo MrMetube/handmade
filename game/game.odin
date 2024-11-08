@@ -117,6 +117,8 @@ push_size :: proc(arena: ^Arena, size: u64) -> ^u8 {
     return result
 }
 
+free_block :: proc(arena: ^Arena, )
+
 
 // timing
 @(export)
@@ -157,7 +159,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 		screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
-        for screen_index in u32(0) ..< 2 {
+        for room_count in u32(0) ..< 200 {
             // TODO: random number generator
             random_choice : u32
             if true || stair_down || stair_up {
@@ -183,14 +185,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
             for tile_y in 0..< tiles_per_screen.y {
                 for tile_x in 0 ..< tiles_per_screen.x {
-                    abstile := WorldPosition{
-                        tile = {
-                            tile_x + screen_col * tiles_per_screen.x,
-                            tile_y + screen_row * tiles_per_screen.y,
-                            tile_z,
-                        }
-                    }
-                    
                     value: u32 = 3
                     if tile_x == 0                    && (!door_left  || tile_y != tiles_per_screen.y / 2) {
                         value = 2 
@@ -213,7 +207,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                         value = 2
                     }
 					
-					if value == 2 do add_wall(state, abstile)
+					if value == 2 do add_wall(state, 
+						tile_x + screen_col * tiles_per_screen.x,
+						tile_y + screen_row * tiles_per_screen.y,
+						tile_z,
+					)
                 }
             }
             
@@ -240,16 +238,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         }
 
 		
-		new_camera_p := WorldPosition{
-            tile = {
-				screen_base.x * tiles_per_screen.x,
-				screen_base.y * tiles_per_screen.y,
-				screen_base.z,
-			},
-            offset_ = 0,
-        }
-		new_camera_p.tile.x += tiles_per_screen.x/2
-		new_camera_p.tile.y += tiles_per_screen.y/2
+		new_camera_p := chunk_position_from_tile_positon(
+			world,
+			screen_base.x * tiles_per_screen.x,
+			screen_base.y * tiles_per_screen.y,
+			screen_base.z,
+		)
+		// new_camera_p.chunk.x += tiles_per_screen.x/2
+		// new_camera_p.chunk.y += tiles_per_screen.y/2
 		set_camera(state, new_camera_p)
     }
     
@@ -306,7 +302,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	if entity := get_high_entity(state, state.camera_following_index); entity.high != nil {
 		new_camera_p := state.camera_p
 
-		new_camera_p.tile.z = entity.low.p.tile.z
+		new_camera_p.chunk.z = entity.low.p.chunk.z
 		offset := entity.high.p
 		// TODO: isinrectangle
 		if offset.x < -9 * world.tile_size_in_meters {
@@ -524,11 +520,11 @@ add_low_entity :: proc(state: ^GameState, type: EntityType) -> LowIndex #no_boun
 	return low_index
 }
 
-add_wall :: proc(state: ^GameState, position: WorldPosition) -> (LowIndex, ^LowEntity) {
+add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (LowIndex, ^LowEntity) {
 	index := add_low_entity(state, .Wall)
-	wall := get_low_entity(state, index)
+	wall  := get_low_entity(state, index)
 
-	wall.p = position
+	wall.p = chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
 	wall.size = state.world.tile_size_in_meters
 	wall.collides = true
 
@@ -570,27 +566,28 @@ set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
 	state.camera_p = map_into_worldspace(world, new_camera_p)
 	
 	// TODO(viktor): these numbers where picked at random
-	tilespan := [2]i32{17*3, 9*3}
+	tilespan := [2]i32{17*1, 9*1}
 	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
 
 	entity_offset_for_frame := -d_camera_p.xy
 	offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
-	
-	min_tile := state.camera_p.tile.xy-tilespan/2 
-	max_tile := state.camera_p.tile.xy+tilespan/2
+when false {
+	min_tile := state.camera_p.chunk.xy-tilespan/2 
+	max_tile := state.camera_p.chunk.xy+tilespan/2
 	// TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
 	for low_index in 1..< state.low_entity_count {
 		low := state.low_entities[low_index]
 		if low.high_entity_index == 0 {
-			if (low.p.tile.z == state.camera_p.tile.z && 
-				low.p.tile.x >= min_tile.x &&
-				low.p.tile.x <= max_tile.x &&
-				low.p.tile.y >= min_tile.y &&
-				low.p.tile.y <= max_tile.y) {
+			if (low.p.chunk.z == state.camera_p.chunk.z && 
+				low.p.chunk.x >= min_tile.x &&
+				low.p.chunk.x <= max_tile.x &&
+				low.p.chunk.y >= min_tile.y &&
+				low.p.chunk.y <= max_tile.y) {
 				make_entity_high_frequency(state, low_index)
 			}
 		}
 	}
+}
 }
 
 move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
@@ -611,25 +608,6 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 	player_delta := 0.5*ddp * square(dt) + player.high.dp.xy * dt
 	player.high.dp.xy = ddp * dt + player.high.dp.xy
 	
-	new_player_p := player.high.p.xy + player_delta
-
-
-	/* 
-	min_tile := min_vec(player.high.p, new_player_p)
-	max_tile := max_vec(player.high.p, new_player_p)
-
-	entity_tile_size := ceil(player.dormant.size / tilemap.tile_size_in_meters)
-	min_tile = vec_cast(u32, vec_cast(i32, min_tile) - entity_tile_size)
-	max_tile = vec_cast(u32, vec_cast(i32, max_tile) + entity_tile_size)
-
-	assert(max_tile.x - min_tile.x < 32)
-	assert(max_tile.y - min_tile.y < 32) 
-
-	abs_tile_z := player.high.p.tile.z
-	*/
-
-	old_player_p := player.high.p
-
 	for iteration in 0..<4 {
 		desired_p := player.high.p.xy + player_delta
 
@@ -696,7 +674,7 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 
 			hit_high_entity := state.high_entities_[hit_high_entity_index]
 			hit_low_entity := state.low_entities[hit_high_entity.low_index]
-			player.low.p.tile.z += hit_low_entity.d_tile_z
+			player.low.p.chunk.z += hit_low_entity.d_tile_z
 		} else {
 			break
 		}
