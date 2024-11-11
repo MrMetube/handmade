@@ -55,7 +55,7 @@ GameInputController :: struct {
         using _buttons_enum : struct {
             stick_up , stick_down , stick_left , stick_right ,
             button_up, button_down, button_left, button_right,
-             dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
+            dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
 
             start, back,
             shoulder_left, shoulder_right,
@@ -95,7 +95,7 @@ GameMemory :: struct {
 
 Arena :: struct {
     storage: []u8,
-    used: u64 // TODO: if I use a slice a can never get more than 4 Gb of memory
+    used: u64 // TODO: if I use a slice of u8, it can never get more than 4 Gb of memory
 }
 
 init_arena :: proc(arena: ^Arena, storage: []u8) {
@@ -117,9 +117,6 @@ push_size :: proc(arena: ^Arena, size: u64) -> ^u8 {
     return result
 }
 
-free_block :: proc(arena: ^Arena, )
-
-
 // timing
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer, input: GameInput){
@@ -131,9 +128,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
-		defer { 
-			memory.is_initialized = true
-		}
+		defer memory.is_initialized = true
 
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
@@ -142,14 +137,17 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.player[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierRight.bmp")
         state.player[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/SoldierLeft.bmp")
 		
-		nil_entity := add_low_entity(state, .Nil)
-		state.high_entity_count = 1
-
         state.world = push_struct(&state.world_arena, World)
+
+		nil_entity := add_low_entity(state, .Nil, nil)
+		state.high_entity_count = 1
 
         world := state.world
 
         init_world(world, 1)
+
+		state.tile_size_in_pixels = 60
+		state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
 
         door_left, door_right: b32
         door_top, door_bottom: b32
@@ -159,10 +157,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 		screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
-        for room_count in u32(0) ..< 200 {
+        for room_count in u32(0) ..< 1 {
             // TODO: random number generator
             random_choice : u32
-            if true || stair_down || stair_up {
+            if stair_down || stair_up {
                 random_choice = random_number[random_number_index] % 2
             } else {
                 random_choice = random_number[random_number_index] % 3
@@ -240,12 +238,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 		
 		new_camera_p := chunk_position_from_tile_positon(
 			world,
-			screen_base.x * tiles_per_screen.x,
-			screen_base.y * tiles_per_screen.y,
+			screen_base.x * tiles_per_screen.x + tiles_per_screen.x/2,
+			screen_base.y * tiles_per_screen.y + tiles_per_screen.y/2,
 			screen_base.z,
 		)
-		// new_camera_p.chunk.x += tiles_per_screen.x/2
-		// new_camera_p.chunk.y += tiles_per_screen.y/2
 		set_camera(state, new_camera_p)
     }
     
@@ -253,9 +249,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Input
     // ---------------------- ---------------------- ----------------------
 	
-	state.tile_size_in_pixels = 60
 	world := state.world
-    state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
 
     for controller, controller_index in input.controllers {
 		low_index := state.player_index_for_controller[controller_index]
@@ -301,10 +295,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 	if entity := get_high_entity(state, state.camera_following_index); entity.high != nil {
 		new_camera_p := state.camera_p
-
+	when !true {
 		new_camera_p.chunk.z = entity.low.p.chunk.z
 		offset := entity.high.p
-		// TODO: isinrectangle
+
 		if offset.x < -9 * world.tile_size_in_meters {
 			new_camera_p.offset_.x -= 17
 		}
@@ -317,7 +311,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 		if offset.y > 5 * world.tile_size_in_meters {
 			new_camera_p.offset_.y += 9
 		}
-		
+	} else {
+		new_camera_p = entity.low.p
+	}
 		set_camera(state, new_camera_p)
 	}
     
@@ -330,9 +326,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
     draw_bitmap(buffer, state.backdrop, 0)
 
-
-    Gray   :: GameColor{0.5,0.5,0.5}
     White  :: GameColor{1,1,1}
+    Gray   :: GameColor{0.5,0.5,0.5}
     Black  :: GameColor{0,0,0}
     Blue   :: GameColor{0.08, 0.49, 0.72}
     Orange :: GameColor{1, 0.71, 0.2}
@@ -350,7 +345,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 		switch low_entity.type {
 		case .Nil:
-			unreachable()
 		case .Hero:
 			player_bitmap := state.player[high_entity.facing_index]
 
@@ -390,7 +384,7 @@ EntityIndex :: u32
 LowIndex :: distinct EntityIndex
 
 Entity :: struct {
-	low_index: LowIndex, // TODO(viktor): is this duplicate information? 
+	low_index: LowIndex,
 	low: ^LowEntity,
 	high: ^HighEntity,
 }
@@ -468,27 +462,39 @@ get_high_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) ->
 	return entity
 }
 
-make_entity_high_frequency :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
-	low  := &state.low_entities[low_index]
-	if low.high_entity_index == 0 {
-		if state.high_entity_count < len(state.high_entities_) {
-			high_index := state.high_entity_count
-			state.high_entity_count += 1
+get_camera_space_p :: #force_inline proc(state: ^GameState, low: ^LowEntity) -> v3 {
+	diff := world_difference(state.world, low.p, state.camera_p)
+	return diff
+}
 
-			high = &state.high_entities_[high_index]
-			// NOTE(viktor): Map the entity into camera space
-			diff := world_difference(state.world, low.p, state.camera_p)
+make_entity_high_frequency :: proc { make_entity_high_frequency_set_p, make_entity_high_frequency_calc_p }
 
-			high^ = {}
-			high.p = diff
+make_entity_high_frequency_set_p :: #force_inline proc(state: ^GameState, low: ^LowEntity, low_index: LowIndex, camera_space_p: v3) -> (high: ^HighEntity) {
+	assert(low.high_entity_index == 0)
+	
+	if state.high_entity_count < len(state.high_entities_) {
+		high_index := state.high_entity_count
+		state.high_entity_count += 1
 
-			high.low_index = low_index
-			low.high_entity_index = high_index
-		} else {
-			unreachable()
-		}
+		high = &state.high_entities_[high_index]
+		high^ = {}
+
+		high.p = camera_space_p
+		high.low_index = low_index
+		low.high_entity_index = high_index
 	} else {
-		high = &state.high_entities_[low.high_entity_index]
+		unreachable()
+	}
+	
+	return high
+}
+make_entity_high_frequency_calc_p :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
+	low_entity  := &state.low_entities[low_index]
+	if low_entity.high_entity_index == 0 {
+		camera_space_p := get_camera_space_p(state, low_entity)
+		high = make_entity_high_frequency_set_p(state, low_entity, low_index, camera_space_p)
+	} else {
+		high = &state.high_entities_[low_entity.high_entity_index]
 	}
 	return high
 }
@@ -510,32 +516,37 @@ make_entity_low_frequency :: #force_inline proc(state: ^GameState, low_index: Lo
 	}
 }
 
-add_low_entity :: proc(state: ^GameState, type: EntityType) -> LowIndex #no_bounds_check {
+add_low_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> LowIndex #no_bounds_check {
 	low_index := state.low_entity_count
 	state.low_entity_count += 1
 	assert(state.low_entity_count < len(state.low_entities))
 	
 	state.low_entities[low_index]  = { type = type }
 
+	if p != nil {
+		state.low_entities[low_index].p =  p^
+		change_entity_location(&state.world_arena, state.world, low_index, p^)
+	}
+	
 	return low_index
 }
 
-add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (LowIndex, ^LowEntity) {
-	index := add_low_entity(state, .Wall)
+add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> LowIndex {
+	p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+
+	index := add_low_entity(state, .Wall, &p)
 	wall  := get_low_entity(state, index)
 
-	wall.p = chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
 	wall.size = state.world.tile_size_in_meters
 	wall.collides = true
 
-	return index, wall
+	return index
 }
 
 add_player :: proc(state: ^GameState) -> LowIndex {
-	index := add_low_entity(state, .Hero)
+	index := add_low_entity(state, .Hero, &state.camera_p)
 	player := get_low_entity(state, index)
 
-	player.p = state.camera_p
 	player.size = {0.6, 0.4}
 	player.collides = true
 
@@ -545,6 +556,15 @@ add_player :: proc(state: ^GameState) -> LowIndex {
 		state.camera_following_index = index
 	}
 	return index
+}
+
+validate_entity_pairs :: #force_inline proc(state: ^GameState) -> bool {
+	valid := true
+	for high_index in 1..<state.high_entity_count {
+		high := &state.high_entities_[high_index]
+		valid &= state.low_entities[high.low_index].high_entity_index == high_index
+	}
+	return valid
 }
 
 offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offset: v2, camera_bounds: Rectangle) {
@@ -562,32 +582,46 @@ offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offs
  
 set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
 	world := state.world
+
+	assert(validate_entity_pairs(state))
+
 	d_camera_p := world_difference(world, new_camera_p, state.camera_p)
 	state.camera_p = map_into_worldspace(world, new_camera_p)
 	
 	// TODO(viktor): these numbers where picked at random
-	tilespan := [2]i32{17*1, 9*1}
+	tilespan := [2]i32{17, 9} * 1
 	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
 
 	entity_offset_for_frame := -d_camera_p.xy
 	offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
-when false {
-	min_tile := state.camera_p.chunk.xy-tilespan/2 
-	max_tile := state.camera_p.chunk.xy+tilespan/2
+
+	assert(validate_entity_pairs(state))
+
+	map_into_worldspace(world, new_camera_p, camera_bounds.min)
+
+	min_chunk := state.camera_p.chunk.xy-tilespan/2 
+	max_chunk := state.camera_p.chunk.xy+tilespan/2
 	// TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
-	for low_index in 1..< state.low_entity_count {
-		low := state.low_entities[low_index]
-		if low.high_entity_index == 0 {
-			if (low.p.chunk.z == state.camera_p.chunk.z && 
-				low.p.chunk.x >= min_tile.x &&
-				low.p.chunk.x <= max_tile.x &&
-				low.p.chunk.y >= min_tile.y &&
-				low.p.chunk.y <= max_tile.y) {
-				make_entity_high_frequency(state, low_index)
+	for chunk_y in min_chunk.y ..= max_chunk.y {
+		for chunk_x in min_chunk.x ..= max_chunk.x {
+			chunk := get_chunk(nil, world, chunk_x, chunk_y, new_camera_p.chunk.z)
+			if chunk != nil {
+				for block := &chunk.first_block; block != nil; block = block.next {
+					for entity_index in 0..< block.entity_count {
+						low_index := block.indices[entity_index]
+						low := &state.low_entities[low_index]
+						if low.high_entity_index == 0 {
+							camera_space_p := get_camera_space_p(state, low)
+							if is_in_rectangle(camera_bounds, camera_space_p.xy) {
+								make_entity_high_frequency(state, low, low_index, camera_space_p)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
-}
+	assert(validate_entity_pairs(state))
 }
 
 move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
@@ -686,7 +720,10 @@ move_player :: proc(state: ^GameState, player: Entity, ddp: v2, dt: f32) {
 		player.high.facing_index = 1
 	}
 	
-	player.low.p = map_into_worldspace(state.world, state.camera_p, player.high.p)
+	new_p := map_into_worldspace(state.world, state.camera_p, player.high.p.xy)
+	// TODO(viktor): bundle these together as the location update
+	change_entity_location(&state.world_arena, state.world, player.low_index, new_p, &player.low.p)
+	player.low.p = new_p
 }
 
 

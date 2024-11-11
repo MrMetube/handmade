@@ -11,7 +11,7 @@ WorldPosition :: struct {
 
 // TODO(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
 WorldEntityBlock :: struct {
-	entity_count: u32,
+	entity_count: LowIndex,
 	indices: [16]LowIndex,
 	next: ^WorldEntityBlock,
 }
@@ -35,8 +35,8 @@ World :: struct {
 	first_free: ^WorldEntityBlock
 }
 
-change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, old_p, new_p: ^WorldPosition) {
-	if old_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
+change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, new_p: WorldPosition,  old_p: ^WorldPosition = nil) {
+	if old_p != nil && are_in_same_chunk(world, old_p^, new_p) {
 		// NOTE(viktor): leave entity where it is
 	} else {
 		if old_p != nil {
@@ -68,7 +68,7 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
 			}
 		}
 		// NOTE(viktor): Insert the entity into its new block
-		chunk := get_chunk(arena, world, new_p^)
+		chunk := get_chunk(arena, world, new_p)
 		assert(chunk != nil)
 		
 		block := &chunk.first_block
@@ -91,9 +91,9 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
 	}
 }
 
-map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = 0) -> WorldPosition {
+map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v2 = 0) -> WorldPosition {
 	result := center
-	result.offset_ += offset.xy
+	result.offset_ += offset
 	// NOTE: the world is assumed to be toroidal topology
 	// if you leave on one end you end up the other end
     rounded_offset := round(result.offset_ / world.chunk_size_in_meters)
@@ -106,9 +106,9 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = 0
 }
 
 world_difference :: #force_inline proc(world: ^World, a, b: WorldPosition) -> v3 {
-	position_delta := vec_cast(f32, a.chunk.xy) - vec_cast(f32, b.chunk.xy)
-	offset_delta   := a.offset_ - b.offset_
-	total_delta    := (position_delta * world.chunk_size_in_meters + offset_delta)
+	chunk_delta  := vec_cast(f32, a.chunk.xy) - vec_cast(f32, b.chunk.xy)
+	offset_delta := a.offset_ - b.offset_
+	total_delta  := (chunk_delta * world.chunk_size_in_meters + offset_delta)
 	return {total_delta.x, total_delta.y, cast(f32) (a.chunk.z - b.chunk.z)}
 }
 
@@ -127,7 +127,7 @@ chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, ti
 	result: WorldPosition
 	result.chunk.x = tile_x / TILES_PER_CHUNK
 	result.chunk.y = tile_y / TILES_PER_CHUNK
-	result.chunk.z = tile_z / TILES_PER_CHUNK
+	result.chunk.z = tile_z
 
 	result.offset_.x = cast(f32) (tile_x - result.chunk.x * TILES_PER_CHUNK) * world.tile_size_in_meters
 	result.offset_.y = cast(f32) (tile_y - result.chunk.y * TILES_PER_CHUNK) * world.tile_size_in_meters
@@ -142,7 +142,7 @@ get_chunk :: proc {
 
 // TODO(viktor): arena as allocator, maybe on the context?
 get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
-	return get_chunk(arena, world, point.chunk.x, point.chunk.y, point.chunk.z)
+	return get_chunk_3(arena, world, point.chunk.x, point.chunk.y, point.chunk.z)
 }
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_z: i32) -> ^Chunk {
 	CHUNK_SAFE_MARGIN :: 256
@@ -161,23 +161,26 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
 	assert(hash_slot < len(world.chunk_hash))
 
     world_chunk := &world.chunk_hash[hash_slot]
-	for world_chunk != nil {
+	for {
 		if chunk_x == world_chunk.chunk.x && chunk_y == world_chunk.chunk.y && chunk_z == world_chunk.chunk.z {
 			break
 		}
 		
-		if arena != nil && world_chunk.chunk.x != EMPTY_CHUNK_HASH_TILE_X && world_chunk.next_in_hash == nil {
+		if arena != nil && world_chunk.chunk.x != UNINITIALIZED_CHUNK && world_chunk.next_in_hash == nil {
 			world_chunk.next_in_hash = push_struct(arena, Chunk)
-			world_chunk.chunk.x = EMPTY_CHUNK_HASH_TILE_X
 			world_chunk = world_chunk.next_in_hash
+			world_chunk.chunk.x = UNINITIALIZED_CHUNK
 		}
 
-		if arena != nil && world_chunk.chunk.x == EMPTY_CHUNK_HASH_TILE_X {
+		if arena != nil && world_chunk.chunk.x == UNINITIALIZED_CHUNK {
 			world_chunk.chunk = {chunk_x, chunk_y, chunk_z}
 			world_chunk.next_in_hash = nil
 
 			break
 		}
+
+		world_chunk = world_chunk.next_in_hash
+		if world_chunk == nil do break
 	}
 
 	return world_chunk
@@ -189,10 +192,10 @@ init_world :: proc(world: ^World, tile_size_in_meters: f32) {
 	world.first_free = nil
 
 	for &chunk_block in world.chunk_hash {
-		chunk_block.chunk.x = EMPTY_CHUNK_HASH_TILE_X
+		chunk_block.chunk.x = UNINITIALIZED_CHUNK
 		chunk_block.first_block.entity_count = 0
 	}
 }
 
 @(private="file")
-EMPTY_CHUNK_HASH_TILE_X :: I32_MIN
+UNINITIALIZED_CHUNK :: I32_MIN
