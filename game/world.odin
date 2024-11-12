@@ -120,6 +120,7 @@ is_canonical :: #force_inline proc(world: ^World, offset: v2) -> b32 {
 are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b32 {
 	assert(auto_cast is_canonical(world, a.offset_))
 	assert(auto_cast is_canonical(world, b.offset_))
+
 	return a.chunk == b.chunk
 }
 
@@ -129,8 +130,13 @@ chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, ti
 	result.chunk.y = tile_y / TILES_PER_CHUNK
 	result.chunk.z = tile_z
 
-	result.offset_.x = cast(f32) (tile_x - result.chunk.x * TILES_PER_CHUNK) * world.tile_size_in_meters
-	result.offset_.y = cast(f32) (tile_y - result.chunk.y * TILES_PER_CHUNK) * world.tile_size_in_meters
+	if tile_x < 0 do result.chunk.x -= 1
+	if tile_y < 0 do result.chunk.y -= 1
+	if tile_z < 0 do result.chunk.z -= 1
+
+	result.offset_ = world.tile_size_in_meters * vec_cast(f32, [2]i32{tile_x, tile_y} - TILES_PER_CHUNK/2 - result.chunk.xy * TILES_PER_CHUNK)
+
+	assert(auto_cast is_canonical(world, result.offset_))
 
 	return result
 }
