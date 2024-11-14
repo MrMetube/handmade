@@ -31,7 +31,7 @@ GameSoundBuffer :: struct {
     samples_per_second : u32,
 }
 
-GameColor :: [3]f32
+GameColor :: [4]f32
 
 GameOffscreenBuffer :: struct {
     memory : []OffscreenBufferColor,
@@ -127,6 +127,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
+
     if !memory.is_initialized {
 		defer memory.is_initialized = true
 
@@ -139,7 +140,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.player[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
         state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
         state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
+
+		state.monster[0].focus = {0, -1}
+		state.monster[1].focus = {21, -1}
 		
+		state.shadow.focus = {0, 10}
+
         state.world = push_struct(&state.world_arena, World)
 
 		add_low_entity(state, .Nil, nil)
@@ -169,7 +175,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 random_choice = random_number[random_number_index] % 3
             }
             random_number_index += 1
-            
+
             created_stair: b32
             if random_choice == 0 {
                 door_right = true
@@ -188,10 +194,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 for tile_x in 0 ..< tiles_per_screen.x {
                     value: u32 = 3
                     if tile_x == 0                    && (!door_left  || tile_y != tiles_per_screen.y / 2) {
-                        value = 2 
+                        value = 2
                     }
                     if tile_x == tiles_per_screen.x-1 && (!door_right || tile_y != tiles_per_screen.y / 2) {
-                        value = 2 
+                        value = 2
                     }
 
                     if stair_up && tile_x == tiles_per_screen.x / 2 && tile_y == tiles_per_screen.y / 2 {
@@ -200,22 +206,22 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     if stair_down && tile_x == tiles_per_screen.x / 2 && tile_y == tiles_per_screen.y / 2 {
                         value = 5
                     }
-                    
+
                     if tile_y == 0                    && (!door_bottom || tile_x != tiles_per_screen.x / 2) {
                         value = 2
                     }
                     if tile_y == tiles_per_screen.y-1 && (!door_top    || tile_x != tiles_per_screen.x / 2) {
                         value = 2
                     }
-					
-					if value == 2 do add_wall(state, 
+
+					if value == 2 do add_wall(state,
 						tile_x + screen_col * tiles_per_screen.x,
 						tile_y + screen_row * tiles_per_screen.y,
 						tile_z,
 					)
                 }
             }
-            
+
             door_left   = door_right
             door_bottom = door_top
 
@@ -238,7 +244,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             }
         }
 
-		
+
 		new_camera_p := chunk_position_from_tile_positon(
 			world,
 			screen_base.x * tiles_per_screen.x + tiles_per_screen.x/2,
@@ -253,11 +259,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 		set_camera(state, new_camera_p)
     }
-    
+
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Input
     // ---------------------- ---------------------- ----------------------
-	
+
 	world := state.world
 
     for controller, controller_index in input.controllers {
@@ -297,7 +303,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 			move_entity(state, controlling_entity, ddp, input.delta_time)
 		}
     }
-    
+
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Update
     // ---------------------- ---------------------- ----------------------
@@ -325,25 +331,26 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	}
 		set_camera(state, new_camera_p)
 	}
-    
+
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Render
     // ---------------------- ---------------------- ----------------------
 
+
+    White  :: GameColor{1,1,1, 1}
+    Gray   :: GameColor{0.5,0.5,0.5, 1}
+    Black  :: GameColor{0,0,0, 1}
+    Blue   :: GameColor{0.08, 0.49, 0.72, 1}
+    Orange :: GameColor{1, 0.71, 0.2, 1}
+    Green  :: GameColor{0, 0.59, 0.28, 1}
+	Red    :: GameColor{1, 0.09, 0.24, 1}
+
     // NOTE: Clear the screen
-    draw_rectangle(buffer, {0,0}, vec_cast(f32, buffer.width, buffer.height), {1, 0.09, 0.24})
-
-    draw_bitmap(buffer, state.backdrop, 0)
-
-    White  :: GameColor{1,1,1}
-    Gray   :: GameColor{0.5,0.5,0.5}
-    Black  :: GameColor{0,0,0}
-    Blue   :: GameColor{0.08, 0.49, 0.72}
-    Orange :: GameColor{1, 0.71, 0.2}
-    Green  :: GameColor{0, 0.59, 0.28}
-	Red    :: GameColor{1, 0.09, 0.24}
+    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), Red)
 
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+    draw_bitmap(buffer, state.backdrop, screen_center)
+
 	for entity_index in 1..<state.high_entity_count {
 		high := &state.high_entities_[entity_index]
 		low  := &state.low_entities[high.low_index]
@@ -352,8 +359,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 		entity := Entity{ high.low_index, low, high }
 
-		position := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size )
-		z :=  -state.meters_to_pixels * high.p.z
+		z := high.p.z
 		size := state.meters_to_pixels * low.size
 
 
@@ -362,78 +368,112 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 		if(shadow_alpha < 0) {
 			shadow_alpha = 0.0;
 		}
-		
-		piece_group: EntityVisiblePieceGroup
-	
-		push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: LoadedBitmap, offset: v2, alpha: f32 = 1) {
+
+		piece_group := EntityVisiblePieceGroup { state = state }
+
+		push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size, offset: v2, color: GameColor) {
 			assert(group.count < len(group.pieces))
 			piece := &group.pieces[group.count]
 			group.count += 1
 
 			piece.bitmap = bitmap
-			piece.offset = offset
-			piece.alpha = alpha
+			piece.offset = {offset.x, -offset.y} * group.state.meters_to_pixels
+			piece.size   = size * group.state.meters_to_pixels
+			piece.color  = color
 		}
 
-		shadow_focus  := [2][2]f32{{-4, 15}, {2, 15}}
+		push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v2, alpha: f32 = 1) {
+			push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
+		}
+
+		push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, size, offset:v2, color: GameColor) {
+			push_piece(group, nil, size, offset, color)
+		}
+
 		switch low.type {
 		case .Nil: // NOTE(viktor): nothing
 		case .Wall:
+			position := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size )
+			// TODO(viktor): wall asset
 			draw_rectangle(buffer, position, size, White)
 
 		case .Hero:
-			push_piece(&piece_group, state.shadow, shadow_focus[high.facing_index], shadow_alpha)
-			push_piece(&piece_group, state.player[high.facing_index], v2{0,z})
-		
+			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+			push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z})
+
+			if entity.low.hit_point_max > 1 {
+				health_size: v2 = 0.1
+				spacing_between: f32 = health_size.x * 1.5
+				health_x := -0.5 * (cast(f32) entity.low.hit_point_max - 1) * spacing_between + entity.low.size.x/2
+				for index in 0..<low.hit_point_max {
+					hit_point := low.hit_points[index]
+					color := hit_point.filled_amount == 0 ? Gray : Red
+					push_rectangle(&piece_group, health_size, {health_x, -0.6}, color)
+					health_x += spacing_between
+				}
+			}
+
 		case .Familiar:
 			entity.high.t_bob += dt
 			if entity.high.t_bob > TAU {
 				entity.high.t_bob -= TAU
 			}
-			
-			z += (sin(entity.high.t_bob*5) -2) * state.meters_to_pixels * 0.1
+			hz :: 4
+			coeff := sin(entity.high.t_bob * hz)
+			z += (coeff) * 0.3 + 0.3
+
 			update_familiar(state, entity, dt)
-			push_piece(&piece_group, state.shadow, shadow_focus[high.facing_index], shadow_alpha/2)
-			player_bitmap := state.player[high.facing_index]
-			push_piece(&piece_group, player_bitmap, v2{0,z}, 0.5)
+			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha/2 * (coeff+1))
+			push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z}, 0.5)
 
 		case .Monster:
 			update_monster(state, entity, dt)
-			monster_focus := [2][2]f32{{-14,0},{10,0}}
-			// TODO(viktor): focus as part of LoadedBitmap
-			focus := monster_focus[high.facing_index]
-			monster := state.monster[high.facing_index]
-			push_piece(&piece_group, state.shadow, shadow_focus[high.facing_index], shadow_alpha)
-			push_piece(&piece_group, monster, focus + {0,z})
+
+			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+			push_bitmap(&piece_group, &state.monster[1], 0)
 		}
-		
+
 		ddz : f32 = -9.8;
 		high.p.z = 0.5 * ddz * square(dt) + high.dp.z * dt + high.p.z;
 		high.dp.z = ddz * dt + high.dp.z;
 
-		if(high.p.z < 0) {
+		if high.p.z < 0 {
 			high.p.z = 0;
 			high.dp.z = 0;
 		}
-		
+
+		// TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
 		for index in 0..<piece_group.count {
+			center := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size)
 			piece := piece_group.pieces[index]
-			bitmap_position := position + v2{-0.5, -1} * ({cast(f32) piece.bitmap.width, cast(f32) piece.bitmap.height} - low.size * state.meters_to_pixels)
-			// draw_rectangle(buffer, position + {0,z}, size, Green) // Bounds-
-			draw_bitmap(buffer, piece.bitmap, bitmap_position + piece.offset, piece.alpha)
+			center += piece.offset
+			if piece.bitmap != nil {
+				center.x -= (cast(f32) piece.bitmap.width/2  - entity.low.size.x * state.meters_to_pixels)
+				center.y -=(cast(f32) piece.bitmap.height/2 -  entity.low.size.y * state.meters_to_pixels)
+				draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
+			} else {
+				draw_rectangle(buffer, center, piece.size, piece.color)
+			}
 		}
 	}
 }
 
+// TODO(viktor): This is dumb, this should just be part of
+// the renderer pushbuffer - add correction of coordinates
+// in there and be done with it.
+
 EntityVisiblePieceGroup :: struct {
+	state: ^GameState,
 	count: u32,
 	pieces: [8]EntityVisiblePiece,
 }
 
 EntityVisiblePiece :: struct {
-	bitmap: LoadedBitmap,
+	bitmap: ^LoadedBitmap,
 	offset: v2,
-	alpha: f32,
+
+	color: GameColor,
+	size: v2,
 }
 
 EntityType :: enum u32 {
@@ -449,15 +489,24 @@ Entity :: struct {
 	high: ^HighEntity,
 }
 
+HIT_POINT_PART_COUNT :: 4
+HitPoint :: struct {
+	flags: u8,
+	filled_amount: u8,
+}
+
 LowEntity :: struct {
 	type: EntityType,
 
 	p: WorldPosition,
 	size: v2,
-		
+
 	// NOTE(viktor): This is for "stairs"
 	d_tile_z: i32,
 	collides: b32,
+
+	hit_point_max: u32,
+	hit_points: [16]HitPoint,
 
 	high_entity_index: EntityIndex,
 }
@@ -469,7 +518,7 @@ LowEntityReference :: struct {
 
 HighEntity :: struct {
 	// NOTE(viktor): this already relative to the camera
-	p, dp: v3, 
+	p, dp: v3,
 
 	facing_index: i32,
 
@@ -484,13 +533,13 @@ GameState :: struct {
 	camera_following_index: LowIndex,
     camera_p : WorldPosition,
 	player_index_for_controller: [len(GameInput{}.controllers)]LowIndex,
-	
+
 	low_entity_count: LowIndex,
 	low_entities: [100_000]LowEntity,
 
 	high_entity_count: EntityIndex,
 	high_entities_: [256]HighEntity,
-    
+
 	world: ^World,
 
     backdrop: LoadedBitmap,
@@ -505,6 +554,7 @@ GameState :: struct {
 LoadedBitmap :: struct {
     pixels : []Color,
     width, height: i32,
+	focus: [2]i32,
 }
 
 Color :: [4]u8
@@ -512,7 +562,7 @@ Color :: [4]u8
 get_low_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: ^LowEntity) #no_bounds_check {
 	assert(low_index > 0 && low_index <= state.low_entity_count)
 	entity = &state.low_entities[low_index]
-	
+
 	return entity
 }
 
@@ -535,7 +585,7 @@ make_entity_high_frequency :: proc { make_entity_high_frequency_set_p, make_enti
 
 make_entity_high_frequency_set_p :: #force_inline proc(state: ^GameState, low: ^LowEntity, low_index: LowIndex, camera_space_p: v3) -> (high: ^HighEntity) {
 	assert(low.high_entity_index == 0)
-	
+
 	if state.high_entity_count < len(state.high_entities_) {
 		high_index := state.high_entity_count
 		state.high_entity_count += 1
@@ -549,7 +599,7 @@ make_entity_high_frequency_set_p :: #force_inline proc(state: ^GameState, low: ^
 	} else {
 		unreachable()
 	}
-	
+
 	return high
 }
 make_entity_high_frequency_calc_p :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
@@ -591,7 +641,7 @@ add_low_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -
 		entity.p =  p^
 		change_entity_location(&state.world_arena, state.world, index, p^)
 	}
-	
+
 	return index, entity
 }
 
@@ -627,8 +677,12 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowI
 add_player :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
 	index, entity = add_low_entity(state, .Hero, &state.camera_p)
 
-	entity.size = {0.6, 0.4}
+	entity.size = {0.75, 0.4}
 	entity.collides = true
+	entity.hit_point_max = 3
+	entity.hit_points[0] = { filled_amount = HIT_POINT_PART_COUNT }
+	entity.hit_points[1] = entity.hit_points[0]
+	entity.hit_points[2] = entity.hit_points[0]
 
 	make_entity_high_frequency(state, index)
 
@@ -646,7 +700,7 @@ validate_entity_pairs :: #force_inline proc(state: ^GameState) -> bool {
 		high := &state.high_entities_[high_index]
 		valid &= state.low_entities[high.low_index].high_entity_index == high_index
 	}
-	
+
 	return valid
 }
 
@@ -662,7 +716,7 @@ offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offs
 		}
 	}
 }
- 
+
 set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
 	world := state.world
 
@@ -670,7 +724,7 @@ set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
 
 	d_camera_p := world_difference(world, new_camera_p, state.camera_p)
 	state.camera_p = map_into_worldspace(world, new_camera_p)
-	
+
 	// TODO(viktor): these numbers where picked at random
 	tilespan := [2]i32{17, 9} * 1
 	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
@@ -682,7 +736,7 @@ set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
 
 	map_into_worldspace(world, new_camera_p, camera_bounds.min)
 
-	min_chunk := state.camera_p.chunk.xy-tilespan/2 
+	min_chunk := state.camera_p.chunk.xy-tilespan/2
 	max_chunk := state.camera_p.chunk.xy+tilespan/2
 	// TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
 	for chunk_y in min_chunk.y ..= max_chunk.y {
@@ -721,13 +775,13 @@ entity_from_high_index :: #force_inline proc(state:^GameState, index: EntityInde
 }
 
 update_monster :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
-	
+
 }
 
 
 update_familiar :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
 	closest_hero: Entity
-	closest_hero_dsq := square(3) // NOTE(viktor): 10m maximum search
+	closest_hero_dsq := square(6) // NOTE(viktor): 10m maximum search
 	for entity_index in 1..<state.high_entity_count {
 		test := entity_from_high_index(state, entity_index)
 		if test.low.type == .Hero {
@@ -738,15 +792,15 @@ update_familiar :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) 
 			}
 		}
 	}
-	
+
 	ddp: v2
-	if closest_hero.high != nil && closest_hero_dsq > 0 {
+	if closest_hero.high != nil && closest_hero_dsq > 1 {
 		mpss: f32 = 0.5
 		ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.high.p.xy - entity.high.p.xy)
 	}
 	move_entity(state, entity, ddp, dt)
 }
-		
+
 move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
 	ddp := ddp
 	ddp_length_squared := length_squared(ddp)
@@ -764,7 +818,7 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
 
 	entity_delta := 0.5*ddp * square(dt) + entity.high.dp.xy * dt
 	entity.high.dp.xy = ddp * dt + entity.high.dp.xy
-	
+
 	for iteration in 0..<4 {
 		desired_p := entity.high.p.xy + entity_delta
 
@@ -786,7 +840,7 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
 					max_corner :=  0.5 * diameter
 
 					rel := entity.high.p - test_entity.high.p
-					
+
 					test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
 						EPSILON :: 0.01
 						if entity_delta_x != 0 {
@@ -842,7 +896,7 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
 	} else {
 		entity.high.facing_index = 1
 	}
-	
+
 	new_p := map_into_worldspace(state.world, state.camera_p, entity.high.p.xy)
 	// TODO(viktor): bundle these together as the location update
 	change_entity_location(&state.world_arena, state.world, entity.low_index, new_p, &entity.low.p)
@@ -860,13 +914,13 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 }
 
 
-draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position: v2, c_alpha: f32 = 1) {
-    rounded_position := round(position)
-    
-    left   := rounded_position.x
-    top	   := rounded_position.y
+draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1) {
+    rounded_center := round(center) + bitmap.focus
+
+    left   := rounded_center.x - bitmap.width / 2
+    top	   := rounded_center.y - bitmap.height / 2
 	right  := left + bitmap.width
-	bottom := top + bitmap.height
+	bottom := top  + bitmap.height
 
 	src_left: i32
 	src_top : i32
@@ -901,12 +955,12 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, position:
         }
         // TODO: advance by the pitch instead of assuming its the same as the width
         dest_row += buffer.width
-        src_row  -= bitmap.width 
+        src_row  -= bitmap.width
     }
 }
 
 
-draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor, c_alpha: f32 = 1){
+draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor){
     rounded_position := round(position)
     rounded_size     := round(size)
 
@@ -922,11 +976,10 @@ draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, colo
         for x in left..<right {
             dst := &buffer.memory[y*buffer.width + x]
 			src := color * 255
-			a := c_alpha
 
-			dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, a)
-			dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, a)
-			dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, a)
+			dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, color.a)
+			dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, color.a)
+			dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, color.a)
         }
     }
 }
@@ -966,7 +1019,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
     // NOTE: If you are using this generically for some reason,
     // please remember that BMP files CAN GO IN EITHER DIRECTION and
     // the height will be negative for top-down.
-    // (Also, there can be compression, etc., etc ... DON'T think this 
+    // (Also, there can be compression, etc., etc ... DON'T think this
     // a complete implementation)
 	// NOTE: pixels listed bottom up
     if len(contents) > 0 {
@@ -993,7 +1046,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         for y in 0..<header.height {
             for x in 0..<header.width {
                 raw_pixel := &raw_pixels[y * header.width + x]
-				/* TODO: check what the shifts and "C" where actually 
+				/* TODO: check what the shifts and "C" where actually
 				raw_pixel^ = (rotate_left(raw_pixel^ & red_mask, red_shift) |
 				              rotate_left(raw_pixel^ & green_mask, green_shift) |
 				              rotate_left(raw_pixel^ & blue_mask, blue_shift) |
@@ -1010,7 +1063,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         }
 
 		pixels := ( cast([^]Color) &contents[header.bitmap_offset] )[:header.width * header.height]
-        return {pixels, header.width, header.height}
+        return {pixels, header.width, header.height, {}}
     }
     return {}
 }
