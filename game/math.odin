@@ -30,8 +30,14 @@ v2 :: [2]f32
 v3 :: [3]f32
 v4 :: [4]f32
 
-dot :: #force_inline proc(a, b: v2) -> f32 {
+dot :: proc { dot2, dot3}
+
+dot2 :: #force_inline proc(a, b: v2) -> f32 {
     return a.x * b.x + a.y * b.y
+}
+
+dot3 :: #force_inline proc(a, b: v3) -> f32 {
+    return a.x * b.x + a.y * b.y + a.z * b.z
 }
 
 reflect :: #force_inline proc(v, axis:v2) -> v2 {
@@ -59,7 +65,7 @@ length :: #force_inline proc(vec: $T/[$N]$E) -> (length:f32) where N >= 1 && N <
 }
 
 length_squared :: #force_inline proc(vec: $T/[$N]$E) -> f32 where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
-    return dot(vec,vec)
+    return dot(vec, vec)
 }
 
 normalize :: #force_inline proc(vec: $T/[$N]$E) -> T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {

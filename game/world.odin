@@ -58,7 +58,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
     assert(auto_cast (old_p == nil || is_valid(old_p^)))
     assert(auto_cast (new_p == nil || is_valid(new_p^)))
     
-    if old_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
+    if old_p != nil && new_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
         // NOTE(viktor): leave entity where it is
     } else {
         if old_p != nil {

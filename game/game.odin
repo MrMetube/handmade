@@ -318,14 +318,25 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 d_sword =  {1, 0}
             }
             if d_sword.x != 0 || d_sword.y != 0 {
-                sword := force_entity_into_high(state, controlling_entity.low.sword_index)
-                if sword.low != nil && !is_valid(sword.low.p) {
+                sword_low := get_low_entity(state, controlling_entity.low.sword_index)
+                if sword_low != nil && !is_valid(sword_low.p) {
                     sword_p := controlling_entity.low.p
-                    change_entity_location(&state.world_arena, state.world, sword.low_index, sword.low, &sword_p)
+                    change_entity_location(&state.world_arena, state.world, controlling_entity.low.sword_index, sword_low, &sword_p)
+                    
+                    sword_low.distance_remaining = 5
+
+                    sword := force_entity_into_high(state, controlling_entity.low.sword_index)
+                    sword.high.dp.xy = 5 * d_sword
                 }
+
             }
 
-            move_entity(state, controlling_entity, ddp, input.delta_time)
+            move_spec := default_move_spec()
+            move_spec.normalize_accelaration = true
+            move_spec.drag = 8
+            move_spec.speed = 50
+
+            move_entity(state, controlling_entity, ddp, move_spec, input.delta_time)
         }
     }
 
@@ -439,6 +450,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             draw_rectangle(buffer, position, size, White)
 
         case .Sword:
+            update_sword(state, entity, input.delta_time)
+
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
             push_bitmap(&piece_group, &state.sword, 0)
 
@@ -643,6 +656,7 @@ make_entity_high_frequency_set_p :: #force_inline proc(state: ^GameState, low: ^
 
     return high
 }
+
 make_entity_high_frequency_calc_p :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
     low_entity  := &state.low_entities[low_index]
     if low_entity.high_entity_index == 0 {
@@ -688,7 +702,7 @@ init_hitpoints :: proc(entity: ^LowEntity, count: u32) {
 
     entity.hit_point_max = count
     for i in 0..<count {
-        entity.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
+        entity.hit_points[i] = { filled_am.ount = HIT_POINT_PART_COUNT }
     }
 }
 
@@ -766,12 +780,13 @@ validate_entity_pairs :: #force_inline proc(state: ^GameState) -> bool {
 offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offset: v2, camera_bounds: Rectangle) {
     for entity_index: EntityIndex = 1; entity_index < state.high_entity_count; {
         high := &state.high_entities_[entity_index]
+		low  := &state.low_entities[high.low_index]
 
         high.p.xy += offset
-        if !is_in_rectangle(camera_bounds, high.p.xy) {
-            make_entity_low_frequency(state, high.low_index)
-        } else {
+        if is_valid(low.p) && is_in_rectangle(camera_bounds, high.p.xy) {
             entity_index += 1
+        } else {
+            make_entity_low_frequency(state, high.low_index)
         }
     }
 }
@@ -837,6 +852,21 @@ update_monster :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
 
 }
 
+update_sword :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
+    move_spec := default_move_spec()
+    move_spec.normalize_accelaration = false
+    move_spec.drag = 0
+    move_spec.speed = 0
+
+    old_p := entity.high.p
+    move_entity(state, entity, 0, move_spec, dt)
+    distance_traveled := length(entity.high.p - old_p)
+    
+    entity.low.distance_remaining -= distance_traveled
+    if entity.low.distance_remaining < 0 {
+        change_entity_location(&state.world_arena, state.world, entity.low_index, entity.low, nil, &entity.low.p)
+    }
+}
 
 update_familiar :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
     closest_hero: Entity
@@ -857,23 +887,39 @@ update_familiar :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) 
         mpss: f32 = 0.5
         ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.high.p.xy - entity.high.p.xy)
     }
-    move_entity(state, entity, ddp, dt)
+
+    move_spec := default_move_spec()
+    move_spec.normalize_accelaration = true
+    move_spec.drag = 8
+    move_spec.speed = 50
+    move_entity(state, entity, ddp, move_spec, dt)
 }
 
-move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
-    ddp := ddp
-    ddp_length_squared := length_squared(ddp)
+MoveSpec :: struct {
+    normalize_accelaration: b32,
+    drag: f32,
+    speed: f32,
+}
 
-    if ddp_length_squared > 1 {
-        ddp *= 1 / square_root(ddp_length_squared)
+default_move_spec :: #force_inline proc() -> MoveSpec {
+    return { false, 1, 0}
+}
+
+move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
+    ddp := ddp
+    
+    if move_spec.normalize_accelaration {
+        ddp_length_squared := length_squared(ddp)
+
+        if ddp_length_squared > 1 {
+            ddp *= 1 / square_root(ddp_length_squared)
+        }
     }
 
-    entity_speed_in_mpss: f32 : 50
-    speed := entity_speed_in_mpss
-    ddp *= speed
+    ddp *= move_spec.speed
 
     // TODO(viktor): ODE here
-    ddp += -8 * entity.high.dp.xy
+    ddp += -move_spec.drag * entity.high.dp.xy
 
     entity_delta := 0.5*ddp * square(dt) + entity.high.dp.xy * dt
     entity.high.dp.xy = ddp * dt + entity.high.dp.xy
@@ -884,52 +930,54 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
         t_min: f32 = 1
         wall_normal: v2
         hit_high_entity_index: EntityIndex
+        
+        if entity.low.collides {
+            for test_high_entity_index in 1..<state.high_entity_count {
+                if test_high_entity_index != entity.low.high_entity_index {
 
-        for test_high_entity_index in 1..<state.high_entity_count {
-            if test_high_entity_index != entity.low.high_entity_index {
+                    test_entity: Entity
+                    test_entity.high = &state.high_entities_[test_high_entity_index]
+                    test_entity.low_index = test_entity.high.low_index
+                    test_entity.low = &state.low_entities[test_entity.low_index]
 
-                test_entity: Entity
-                test_entity.high = &state.high_entities_[test_high_entity_index]
-                test_entity.low_index = test_entity.high.low_index
-                test_entity.low = &state.low_entities[test_entity.low_index]
+                    if test_entity.low.collides {
+                        diameter := entity.low.size + test_entity.low.size
+                        min_corner := -0.5 * diameter
+                        max_corner :=  0.5 * diameter
 
-                if test_entity.low.collides {
-                    diameter := entity.low.size + test_entity.low.size
-                    min_corner := -0.5 * diameter
-                    max_corner :=  0.5 * diameter
+                        rel := entity.high.p - test_entity.high.p
 
-                    rel := entity.high.p - test_entity.high.p
-
-                    test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
-                        EPSILON :: 0.01
-                        if entity_delta_x != 0 {
-                            t_result := (wall_x - rel_x) / entity_delta_x
-                            y := rel_y + t_result * entity_delta_y
-                            if 0 <= t_result && t_result < t_min^ {
-                                if y >= min_y && y <= max_y {
-                                    t_min^ = max(0, t_result-EPSILON)
-                                    collided = true
+                        test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
+                            EPSILON :: 0.01
+                            if entity_delta_x != 0 {
+                                t_result := (wall_x - rel_x) / entity_delta_x
+                                y := rel_y + t_result * entity_delta_y
+                                if 0 <= t_result && t_result < t_min^ {
+                                    if y >= min_y && y <= max_y {
+                                        t_min^ = max(0, t_result-EPSILON)
+                                        collided = true
+                                    }
                                 }
                             }
+                            return collided
                         }
-                        return collided
-                    }
 
-                    if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                        wall_normal = {-1,  0}
-                        hit_high_entity_index = test_high_entity_index
-                    }
-                    if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                        wall_normal = { 1,  0}
-                        hit_high_entity_index = test_high_entity_index
-                    }
-                    if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                        wall_normal = { 0, -1}
-                        hit_high_entity_index = test_high_entity_index
-                    }
-                    if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                        wall_normal = { 0,  1}
-                        hit_high_entity_index = test_high_entity_index
+                        if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+                            wall_normal = {-1,  0}
+                            hit_high_entity_index = test_high_entity_index
+                        }
+                        if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+                            wall_normal = { 1,  0}
+                            hit_high_entity_index = test_high_entity_index
+                        }
+                        if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+                            wall_normal = { 0, -1}
+                            hit_high_entity_index = test_high_entity_index
+                        }
+                        if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+                            wall_normal = { 0,  1}
+                            hit_high_entity_index = test_high_entity_index
+                        }
                     }
                 }
             }
