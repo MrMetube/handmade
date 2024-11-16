@@ -6,23 +6,23 @@ XInputGetState : ProcXInputGetState = XInputGetStateStub
 XInputSetState : ProcXInputSetState = XInputSetStateStub
 
 init_xInput :: proc() {
-	assert(XInputGetState == XInputGetStateStub, "xInput has already been initialized")
+    assert(XInputGetState == XInputGetStateStub, "xInput has already been initialized")
 
-	xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
-	if xInput_lib == nil {
-		// TODO Diagnostics
-		xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("XInput9_1_0.dll"))
-	}
-	if xInput_lib == nil {
-		// TODO Diagnostics
-		xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))
-	}
-	if (xInput_lib != nil) {
-		XInputGetState = cast(ProcXInputGetState) win.GetProcAddress(xInput_lib, "XInputGetState")
-		XInputSetState = cast(ProcXInputSetState) win.GetProcAddress(xInput_lib, "XInputSetState")
-	} else {
-		// TODO Diagnostics
-	}
+    xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
+    if xInput_lib == nil {
+        // TODO Diagnostics
+        xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("XInput9_1_0.dll"))
+    }
+    if xInput_lib == nil {
+        // TODO Diagnostics
+        xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))
+    }
+    if (xInput_lib != nil) {
+        XInputGetState = cast(ProcXInputGetState) win.GetProcAddress(xInput_lib, "XInputGetState")
+        XInputSetState = cast(ProcXInputSetState) win.GetProcAddress(xInput_lib, "XInputSetState")
+    } else {
+        // TODO Diagnostics
+    }
 }
 
 XINPUT_STATE  :: struct {
@@ -58,11 +58,11 @@ ProcXInputSetState :: #type proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIB
 
 @(private="file")
 XInputGetStateStub : ProcXInputGetState = proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD { 
-	return ERROR_DEVICE_NOT_CONNECTED
+    return ERROR_DEVICE_NOT_CONNECTED
 }
 @(private="file")
 XInputSetStateStub : ProcXInputSetState = proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD { 
-	return ERROR_DEVICE_NOT_CONNECTED
+    return ERROR_DEVICE_NOT_CONNECTED
 }
 
 ERROR_DEVICE_NOT_CONNECTED :: 0x048F

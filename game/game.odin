@@ -127,40 +127,40 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
-		defer memory.is_initialized = true
+        defer memory.is_initialized = true
 
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.backdrop   = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
-		state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
+        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
         state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
         state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
         state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
         state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
-		state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
+        state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
 
         state.player[0].focus = {8, 0}
         state.player[1].focus = {-4, 0}
 
-		state.monster[0].focus = {0, -1}
-		state.monster[1].focus = {21, -1}
-		
-		state.shadow.focus = {0, 10}
+        state.monster[0].focus = {0, -1}
+        state.monster[1].focus = {21, -1}
+        
+        state.shadow.focus = {0, 10}
 
-		state.sword.focus = {16, 16}
+        state.sword.focus = {16, 16}
 
         state.world = push_struct(&state.world_arena, World)
 
-		add_low_entity(state, .Nil, nil)
-		state.high_entity_count = 1
+        add_low_entity(state, .Nil, nil)
+        state.high_entity_count = 1
 
         world := state.world
 
         init_world(world, 1)
 
-		state.tile_size_in_pixels = 60
-		state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
+        state.tile_size_in_pixels = 60
+        state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
 
         door_left, door_right: b32
         door_top, door_bottom: b32
@@ -168,7 +168,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
         tiles_per_screen := [2]i32{17, 9}
 
-		screen_base: [3]i32
+        screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         for room_count in u32(0) ..< 200 {
             // TODO: random number generator
@@ -218,11 +218,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                         value = 2
                     }
 
-					if value == 2 do add_wall(state,
-						tile_x + screen_col * tiles_per_screen.x,
-						tile_y + screen_row * tiles_per_screen.y,
-						tile_z,
-					)
+                    if value == 2 do add_wall(state,
+                        tile_x + screen_col * tiles_per_screen.x,
+                        tile_y + screen_row * tiles_per_screen.y,
+                        tile_z,
+                    )
                 }
             }
 
@@ -230,7 +230,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             door_bottom = door_top
 
             if created_stair {
-				swap(&stair_up, &stair_down)
+                swap(&stair_up, &stair_down)
             } else {
                 stair_up   = false
                 stair_down = false
@@ -249,113 +249,113 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         }
 
 
-		new_camera_p := chunk_position_from_tile_positon(
-			world,
-			screen_base.x * tiles_per_screen.x + tiles_per_screen.x/2,
-			screen_base.y * tiles_per_screen.y + tiles_per_screen.y/2,
-			screen_base.z,
-		)
+        new_camera_p := chunk_position_from_tile_positon(
+            world,
+            screen_base.x * tiles_per_screen.x + tiles_per_screen.x/2,
+            screen_base.y * tiles_per_screen.y + tiles_per_screen.y/2,
+            screen_base.z,
+        )
 
-		monster_p := new_camera_p.chunk + {10,5,0}
-		familiar_p := new_camera_p.chunk + {5,5,0}
-		add_monster(state, monster_p.x, monster_p.y, monster_p.z)
-		add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
+        monster_p := new_camera_p.chunk + {10,5,0}
+        familiar_p := new_camera_p.chunk + {5,5,0}
+        add_monster(state, monster_p.x, monster_p.y, monster_p.z)
+        add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
 
-		set_camera(state, new_camera_p)
+        set_camera(state, new_camera_p)
     }
 
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Input
     // ---------------------- ---------------------- ----------------------
 
-	world := state.world
+    world := state.world
 
     for controller, controller_index in input.controllers {
-		low_index := state.player_index_for_controller[controller_index]
-		if low_index == 0 {
-			if controller.start.ended_down {
-				entity_index, _ := add_player(state)
-				state.player_index_for_controller[controller_index] = entity_index
-			}
-		} else {
-			controlling_entity := force_entity_into_high(state, low_index)
+        low_index := state.player_index_for_controller[controller_index]
+        if low_index == 0 {
+            if controller.start.ended_down {
+                entity_index, _ := add_player(state)
+                state.player_index_for_controller[controller_index] = entity_index
+            }
+        } else {
+            controlling_entity := force_entity_into_high(state, low_index)
 
-			ddp: v2
-			if controller.is_analog {
-				// NOTE(viktor): Use analog movement tuning
-				ddp = controller.stick_average
-			} else {
-				// NOTE(viktor): Use digital movement tuning
-				if controller.stick_left.ended_down {
-					ddp.x -= 1
-				}
-				if controller.stick_right.ended_down {
-					ddp.x += 1
-				}
-				if controller.stick_up.ended_down {
-					ddp.y += 1
-				}
-				if controller.stick_down.ended_down {
-					ddp.y -= 1
-				}
-			}
+            ddp: v2
+            if controller.is_analog {
+                // NOTE(viktor): Use analog movement tuning
+                ddp = controller.stick_average
+            } else {
+                // NOTE(viktor): Use digital movement tuning
+                if controller.stick_left.ended_down {
+                    ddp.x -= 1
+                }
+                if controller.stick_right.ended_down {
+                    ddp.x += 1
+                }
+                if controller.stick_up.ended_down {
+                    ddp.y += 1
+                }
+                if controller.stick_down.ended_down {
+                    ddp.y -= 1
+                }
+            }
 
-			if controller.start.ended_down {
-				controlling_entity.high.dp.z += 2
-			}
+            if controller.start.ended_down {
+                controlling_entity.high.dp.z += 2
+            }
 
-			d_sword: v2
-			if controller.button_up.ended_down {
-				d_sword =  {0, 1}
-			}
-			if controller.button_down.ended_down {
-				d_sword = -{0, 1}
-			}
-			if controller.button_left.ended_down {
-				d_sword = -{1, 0}
-			}
-			if controller.button_right.ended_down {
-				d_sword =  {1, 0}
-			}
-			if d_sword.x != 0 || d_sword.y != 0 {
-				sword := force_entity_into_high(state, controlling_entity.low.sword_index)
-				if sword.low != nil && !is_valid(sword.low.p) {
-					sword_p := controlling_entity.low.p
-					change_entity_location(&state.world_arena, state.world, sword.low_index, sword.low, &sword_p)
-				}
-			}
+            d_sword: v2
+            if controller.button_up.ended_down {
+                d_sword =  {0, 1}
+            }
+            if controller.button_down.ended_down {
+                d_sword = -{0, 1}
+            }
+            if controller.button_left.ended_down {
+                d_sword = -{1, 0}
+            }
+            if controller.button_right.ended_down {
+                d_sword =  {1, 0}
+            }
+            if d_sword.x != 0 || d_sword.y != 0 {
+                sword := force_entity_into_high(state, controlling_entity.low.sword_index)
+                if sword.low != nil && !is_valid(sword.low.p) {
+                    sword_p := controlling_entity.low.p
+                    change_entity_location(&state.world_arena, state.world, sword.low_index, sword.low, &sword_p)
+                }
+            }
 
-			move_entity(state, controlling_entity, ddp, input.delta_time)
-		}
+            move_entity(state, controlling_entity, ddp, input.delta_time)
+        }
     }
 
-	// ---------------------- ---------------------- ----------------------
-	// ---------------------- Update
-	// ---------------------- ---------------------- ----------------------
-	
-	if entity := force_entity_into_high(state, state.camera_following_index); entity.high != nil {
-		new_camera_p := state.camera_p
-	when !true {
-		new_camera_p.chunk.z = entity.low.p.chunk.z
-		offset := entity.high.p
+    // ---------------------- ---------------------- ----------------------
+    // ---------------------- Update
+    // ---------------------- ---------------------- ----------------------
+    
+    if entity := force_entity_into_high(state, state.camera_following_index); entity.high != nil {
+        new_camera_p := state.camera_p
+    when !true {
+        new_camera_p.chunk.z = entity.low.p.chunk.z
+        offset := entity.high.p
 
-		if offset.x < -9 * world.tile_size_in_meters {
-			new_camera_p.offset_.x -= 17
-		}
-		if offset.x > 9 * world.tile_size_in_meters {
-			new_camera_p.offset_.x += 17
-		}
-		if offset.y < -5 * world.tile_size_in_meters {
-			new_camera_p.offset_.y -= 9
-		}
-		if offset.y > 5 * world.tile_size_in_meters {
-			new_camera_p.offset_.y += 9
-		}
-	} else {
-		new_camera_p = entity.low.p
-	}
-		set_camera(state, new_camera_p)
-	}
+        if offset.x < -9 * world.tile_size_in_meters {
+            new_camera_p.offset_.x -= 17
+        }
+        if offset.x > 9 * world.tile_size_in_meters {
+            new_camera_p.offset_.x += 17
+        }
+        if offset.y < -5 * world.tile_size_in_meters {
+            new_camera_p.offset_.y -= 9
+        }
+        if offset.y > 5 * world.tile_size_in_meters {
+            new_camera_p.offset_.y += 9
+        }
+    } else {
+        new_camera_p = entity.low.p
+    }
+        set_camera(state, new_camera_p)
+    }
 
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Render
@@ -368,7 +368,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     Blue   :: GameColor{0.08, 0.49, 0.72, 1}
     Orange :: GameColor{1, 0.71, 0.2, 1}
     Green  :: GameColor{0, 0.59, 0.28, 1}
-	Red    :: GameColor{1, 0.09, 0.24, 1}
+    Red    :: GameColor{1, 0.09, 0.24, 1}
 
     // NOTE: Clear the screen
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), Red)
@@ -376,123 +376,123 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     draw_bitmap(buffer, state.backdrop, screen_center)
 
-	for entity_index in 1..<state.high_entity_count {
-		high := &state.high_entities_[entity_index]
-		low  := &state.low_entities[high.low_index]
+    for entity_index in 1..<state.high_entity_count {
+        high := &state.high_entities_[entity_index]
+        low  := &state.low_entities[high.low_index]
 
-		dt := input.delta_time;
+        dt := input.delta_time;
 
-		entity := Entity{ high.low_index, low, high }
+        entity := Entity{ high.low_index, low, high }
 
-		z := high.p.z
-		size := state.meters_to_pixels * low.size
+        z := high.p.z
+        size := state.meters_to_pixels * low.size
 
 
-		// TODO(viktor): this is incorrect, should be computed after update
-		shadow_alpha := 1 - 0.5 * high.p.z;
-		if(shadow_alpha < 0) {
-			shadow_alpha = 0.0;
-		}
+        // TODO(viktor): this is incorrect, should be computed after update
+        shadow_alpha := 1 - 0.5 * high.p.z;
+        if(shadow_alpha < 0) {
+            shadow_alpha = 0.0;
+        }
 
-		piece_group := EntityVisiblePieceGroup { state = state }
+        piece_group := EntityVisiblePieceGroup { state = state }
 
-		push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size, offset: v2, color: GameColor) {
-			assert(group.count < len(group.pieces))
-			piece := &group.pieces[group.count]
-			group.count += 1
+        push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size, offset: v2, color: GameColor) {
+            assert(group.count < len(group.pieces))
+            piece := &group.pieces[group.count]
+            group.count += 1
 
-			piece.bitmap = bitmap
-			piece.offset = {offset.x, -offset.y} * group.state.meters_to_pixels
-			piece.size   = size * group.state.meters_to_pixels
-			piece.color  = color
-		}
+            piece.bitmap = bitmap
+            piece.offset = {offset.x, -offset.y} * group.state.meters_to_pixels
+            piece.size   = size * group.state.meters_to_pixels
+            piece.color  = color
+        }
 
-		push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v2, alpha: f32 = 1) {
-			push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
-		}
+        push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v2, alpha: f32 = 1) {
+            push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
+        }
 
-		push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, size, offset:v2, color: GameColor) {
-			push_piece(group, nil, size, offset, color)
-		}
+        push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, size, offset:v2, color: GameColor) {
+            push_piece(group, nil, size, offset, color)
+        }
 
-		draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, low: ^LowEntity, offset_y: f32) {
-			if low.hit_point_max > 1 {
-				health_size: v2 = 0.1
-				spacing_between: f32 = health_size.x * 1.5
-				health_x := -0.5 * (cast(f32) low.hit_point_max - 1) * spacing_between + low.size.x/2
+        draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, low: ^LowEntity, offset_y: f32) {
+            if low.hit_point_max > 1 {
+                health_size: v2 = 0.1
+                spacing_between: f32 = health_size.x * 1.5
+                health_x := -0.5 * (cast(f32) low.hit_point_max - 1) * spacing_between + low.size.x/2
 
-				for index in 0..<low.hit_point_max {
-					hit_point := low.hit_points[index]
-					color := hit_point.filled_amount == 0 ? Gray : Red
-					push_rectangle(group, health_size, {health_x, -offset_y}, color)
-					health_x += spacing_between
-				}
-			}
+                for index in 0..<low.hit_point_max {
+                    hit_point := low.hit_points[index]
+                    color := hit_point.filled_amount == 0 ? Gray : Red
+                    push_rectangle(group, health_size, {health_x, -offset_y}, color)
+                    health_x += spacing_between
+                }
+            }
 
-		}
+        }
 
-		switch low.type {
-		case .Nil: // NOTE(viktor): nothing
-		case .Wall:
-			position := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size )
-			// TODO(viktor): wall asset
-			draw_rectangle(buffer, position, size, White)
+        switch low.type {
+        case .Nil: // NOTE(viktor): nothing
+        case .Wall:
+            position := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size )
+            // TODO(viktor): wall asset
+            draw_rectangle(buffer, position, size, White)
 
-		case .Sword:
-			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-			push_bitmap(&piece_group, &state.sword, 0)
+        case .Sword:
+            push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+            push_bitmap(&piece_group, &state.sword, 0)
 
-		case .Hero:
-			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-			push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z})
-			draw_hitpoints(&piece_group, entity.low, 0.5)
+        case .Hero:
+            push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+            push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z})
+            draw_hitpoints(&piece_group, entity.low, 0.5)
 
-		case .Familiar:
-			entity.high.t_bob += dt
-			if entity.high.t_bob > TAU {
-				entity.high.t_bob -= TAU
-			}
-			hz :: 4
-			coeff := sin(entity.high.t_bob * hz)
-			z += (coeff) * 0.3 + 0.3
-			// TODO(viktor): shadow is inverted
+        case .Familiar:
+            entity.high.t_bob += dt
+            if entity.high.t_bob > TAU {
+                entity.high.t_bob -= TAU
+            }
+            hz :: 4
+            coeff := sin(entity.high.t_bob * hz)
+            z += (coeff) * 0.3 + 0.3
+            // TODO(viktor): shadow is inverted
 
-			update_familiar(state, entity, dt)
-			push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
-			push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z}, 0.5)
+            update_familiar(state, entity, dt)
+            push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
+            push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z}, 0.5)
 
-		case .Monster:
-			update_monster(state, entity, dt)
+        case .Monster:
+            update_monster(state, entity, dt)
 
-			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-			push_bitmap(&piece_group, &state.monster[1], 0)
+            push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+            push_bitmap(&piece_group, &state.monster[1], 0)
 
-			draw_hitpoints(&piece_group, entity.low, 0.8)
-		}
+            draw_hitpoints(&piece_group, entity.low, 0.8)
+        }
 
-		ddz : f32 = -9.8;
-		high.p.z = 0.5 * ddz * square(dt) + high.dp.z * dt + high.p.z;
-		high.dp.z = ddz * dt + high.dp.z;
+        ddz : f32 = -9.8;
+        high.p.z = 0.5 * ddz * square(dt) + high.dp.z * dt + high.p.z;
+        high.dp.z = ddz * dt + high.dp.z;
 
-		if high.p.z < 0 {
-			high.p.z = 0;
-			high.dp.z = 0;
-		}
+        if high.p.z < 0 {
+            high.p.z = 0;
+            high.dp.z = 0;
+        }
 
-		// TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
-		for index in 0..<piece_group.count {
-			center := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size)
-			piece := piece_group.pieces[index]
-			center += piece.offset
-			if piece.bitmap != nil {
-				center.x -= (cast(f32) piece.bitmap.width/2  - entity.low.size.x * state.meters_to_pixels)
-				center.y -=(cast(f32) piece.bitmap.height/2 -  entity.low.size.y * state.meters_to_pixels)
-				draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
-			} else {
-				draw_rectangle(buffer, center, piece.size, piece.color)
-			}
-		}
-	}
+        // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
+        for index in 0..<piece_group.count {
+            center := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size)
+            piece := piece_group.pieces[index]
+            center += piece.offset
+            if piece.bitmap != nil {
+                center.x -= (cast(f32) piece.bitmap.width/2  - entity.low.size.x * state.meters_to_pixels)
+                center.y -=(cast(f32) piece.bitmap.height/2 -  entity.low.size.y * state.meters_to_pixels)
+                draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
+            } else {
+                draw_rectangle(buffer, center, piece.size, piece.color)
+            }
+        }
+    }
 }
 
 // TODO(viktor): This is dumb, this should just be part of
@@ -500,337 +500,337 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 // in there and be done with it.
 
 EntityVisiblePieceGroup :: struct {
-	state: ^GameState,
-	count: u32,
-	pieces: [8]EntityVisiblePiece,
+    state: ^GameState,
+    count: u32,
+    pieces: [8]EntityVisiblePiece,
 }
 
 EntityVisiblePiece :: struct {
-	bitmap: ^LoadedBitmap,
-	offset: v2,
+    bitmap: ^LoadedBitmap,
+    offset: v2,
 
-	color: GameColor,
-	size: v2,
+    color: GameColor,
+    size: v2,
 }
 
 EntityType :: enum u32 {
-	Nil, Hero, Wall, Familiar, Monster, Sword
+    Nil, Hero, Wall, Familiar, Monster, Sword
 }
 
 EntityIndex :: u32
 LowIndex :: distinct EntityIndex
 
 Entity :: struct {
-	low_index: LowIndex,
-	low: ^LowEntity,
-	high: ^HighEntity,
+    low_index: LowIndex,
+    low: ^LowEntity,
+    high: ^HighEntity,
 }
 
 HIT_POINT_PART_COUNT :: 4
 HitPoint :: struct {
-	flags: u8,
-	filled_amount: u8,
+    flags: u8,
+    filled_amount: u8,
 }
 
 LowEntity :: struct {
-	type: EntityType,
+    type: EntityType,
 
-	p: WorldPosition,
-	size: v2,
+    p: WorldPosition,
+    size: v2,
 
-	// NOTE(viktor): This is for "stairs"
-	d_tile_z: i32,
-	collides: b32,
+    // NOTE(viktor): This is for "stairs"
+    d_tile_z: i32,
+    collides: b32,
 
-	hit_point_max: u32,
-	hit_points: [16]HitPoint,
+    hit_point_max: u32,
+    hit_points: [16]HitPoint,
 
-	high_entity_index: EntityIndex,
+    high_entity_index: EntityIndex,
 
-	sword_index: LowIndex,
-	distance_remaining: f32,
+    sword_index: LowIndex,
+    distance_remaining: f32,
 }
 
 LowEntityReference :: struct {
-	chunk: ^Chunk,
-	index_in_chunk: u32,
+    chunk: ^Chunk,
+    index_in_chunk: u32,
 }
 
 HighEntity :: struct {
-	// NOTE(viktor): this already relative to the camera
-	p, dp: v3,
+    // NOTE(viktor): this already relative to the camera
+    p, dp: v3,
 
-	facing_index: i32,
+    facing_index: i32,
 
-	low_index: LowIndex,
+    low_index: LowIndex,
 
-	t_bob:f32,
+    t_bob:f32,
 }
 
 GameState :: struct {
     world_arena: Arena,
-	// TODO(viktor): should we allow split-screen?
-	camera_following_index: LowIndex,
+    // TODO(viktor): should we allow split-screen?
+    camera_following_index: LowIndex,
     camera_p : WorldPosition,
-	player_index_for_controller: [len(GameInput{}.controllers)]LowIndex,
+    player_index_for_controller: [len(GameInput{}.controllers)]LowIndex,
 
-	low_entity_count: LowIndex,
-	low_entities: [100_000]LowEntity,
+    low_entity_count: LowIndex,
+    low_entities: [100_000]LowEntity,
 
-	high_entity_count: EntityIndex,
-	high_entities_: [256]HighEntity,
+    high_entity_count: EntityIndex,
+    high_entities_: [256]HighEntity,
 
-	world: ^World,
+    world: ^World,
 
     backdrop: LoadedBitmap,
     shadow: LoadedBitmap,
     player: [2]LoadedBitmap,
     monster: [2]LoadedBitmap,
-	sword: LoadedBitmap,
+    sword: LoadedBitmap,
 
-	tile_size_in_pixels :u32,
-	meters_to_pixels: f32,
+    tile_size_in_pixels :u32,
+    meters_to_pixels: f32,
 }
 
 LoadedBitmap :: struct {
     pixels : []Color,
     width, height: i32,
-	focus: [2]i32,
+    focus: [2]i32,
 }
 
 Color :: [4]u8
 
 get_low_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: ^LowEntity) #no_bounds_check {
-	assert(low_index > 0 && low_index <= state.low_entity_count)
-	entity = &state.low_entities[low_index]
+    assert(low_index > 0 && low_index <= state.low_entity_count)
+    entity = &state.low_entities[low_index]
 
-	return entity
+    return entity
 }
 
 force_entity_into_high :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: Entity) #no_bounds_check {
-	if low_index > 0 && low_index <= state.low_entity_count {
-		entity.high = make_entity_high_frequency(state, low_index)
-		entity.low_index = low_index
-		entity.low = &state.low_entities[entity.low_index]
-	}
+    if low_index > 0 && low_index <= state.low_entity_count {
+        entity.high = make_entity_high_frequency(state, low_index)
+        entity.low_index = low_index
+        entity.low = &state.low_entities[entity.low_index]
+    }
 
-	return entity
+    return entity
 }
 
 get_camera_space_p :: #force_inline proc(state: ^GameState, low: ^LowEntity) -> v3 {
-	diff := world_difference(state.world, low.p, state.camera_p)
-	return diff
+    diff := world_difference(state.world, low.p, state.camera_p)
+    return diff
 }
 
 make_entity_high_frequency :: proc { make_entity_high_frequency_set_p, make_entity_high_frequency_calc_p }
 
 make_entity_high_frequency_set_p :: #force_inline proc(state: ^GameState, low: ^LowEntity, low_index: LowIndex, camera_space_p: v3) -> (high: ^HighEntity) {
-	assert(low.high_entity_index == 0)
+    assert(low.high_entity_index == 0)
 
-	if state.high_entity_count < len(state.high_entities_) {
-		high_index := state.high_entity_count
-		state.high_entity_count += 1
+    if state.high_entity_count < len(state.high_entities_) {
+        high_index := state.high_entity_count
+        state.high_entity_count += 1
 
-		high = &state.high_entities_[high_index]
-		high^ = {}
+        high = &state.high_entities_[high_index]
+        high^ = {}
 
-		high.p = camera_space_p
-		high.low_index = low_index
-		low.high_entity_index = high_index
-	} else {
-		unreachable()
-	}
+        high.p = camera_space_p
+        high.low_index = low_index
+        low.high_entity_index = high_index
+    } else {
+        unreachable()
+    }
 
-	return high
+    return high
 }
 make_entity_high_frequency_calc_p :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
-	low_entity  := &state.low_entities[low_index]
-	if low_entity.high_entity_index == 0 {
-		camera_space_p := get_camera_space_p(state, low_entity)
-		high = make_entity_high_frequency_set_p(state, low_entity, low_index, camera_space_p)
-	} else {
-		high = &state.high_entities_[low_entity.high_entity_index]
-	}
-	return high
+    low_entity  := &state.low_entities[low_index]
+    if low_entity.high_entity_index == 0 {
+        camera_space_p := get_camera_space_p(state, low_entity)
+        high = make_entity_high_frequency_set_p(state, low_entity, low_index, camera_space_p)
+    } else {
+        high = &state.high_entities_[low_entity.high_entity_index]
+    }
+    return high
 }
 
 make_entity_low_frequency :: #force_inline proc(state: ^GameState, low_index: LowIndex) {
-	low  := &state.low_entities[low_index]
-	high_index := low.high_entity_index
-	if high_index != 0 {
-		last_index := state.high_entity_count-1
-		if high_index != last_index {
-			last := &state.high_entities_[last_index]
-			del  := &state.high_entities_[high_index]
-			del^ = last^
-			low_of_last := &state.low_entities[last.low_index]
-			low_of_last.high_entity_index = high_index
-		}
-		state.high_entity_count -= 1
-		low.high_entity_index = 0
-	}
+    low  := &state.low_entities[low_index]
+    high_index := low.high_entity_index
+    if high_index != 0 {
+        last_index := state.high_entity_count-1
+        if high_index != last_index {
+            last := &state.high_entities_[last_index]
+            del  := &state.high_entities_[high_index]
+            del^ = last^
+            low_of_last := &state.low_entities[last.low_index]
+            low_of_last.high_entity_index = high_index
+        }
+        state.high_entity_count -= 1
+        low.high_entity_index = 0
+    }
 } 
 
 add_low_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> (index: LowIndex, low: ^LowEntity) #no_bounds_check {
-	index = state.low_entity_count
-	state.low_entity_count += 1
-	assert(state.low_entity_count < len(state.low_entities))
-	low = &state.low_entities[index]
-	low^ = { type = type }
+    index = state.low_entity_count
+    state.low_entity_count += 1
+    assert(state.low_entity_count < len(state.low_entities))
+    low = &state.low_entities[index]
+    low^ = { type = type }
 
-	change_entity_location(&state.world_arena, state.world, index, low, p)
+    change_entity_location(&state.world_arena, state.world, index, low, p)
 
-	return index, low
+    return index, low
 }
 
 init_hitpoints :: proc(entity: ^LowEntity, count: u32) {
-	assert(count < len(entity.hit_points))
+    assert(count < len(entity.hit_points))
 
-	entity.hit_point_max = count
-	for i in 0..<count {
-		entity.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
-	}
+    entity.hit_point_max = count
+    for i in 0..<count {
+        entity.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
+    }
 }
 
 add_sword :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
-	index, entity = add_low_entity(state, .Sword, nil)
+    index, entity = add_low_entity(state, .Sword, nil)
 
-	entity.size = {0.5, 1}
-	entity.collides = false
+    entity.size = {0.5, 1}
+    entity.collides = false
 
-	return index, entity
+    return index, entity
 }
 
 add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowIndex, entity: ^LowEntity) {
-	p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-	index, entity = add_low_entity(state, .Monster, &p)
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_low_entity(state, .Monster, &p)
 
-	entity.size = 0.75
-	entity.collides = true
+    entity.size = 0.75
+    entity.collides = true
 
-	init_hitpoints(entity, 3)
+    init_hitpoints(entity, 3)
 
-	return index, entity
+    return index, entity
 }
 
 add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowIndex, entity: ^LowEntity) {
-	p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-	index, entity = add_low_entity(state, .Familiar, &p)
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_low_entity(state, .Familiar, &p)
 
-	entity.size = 0.5
+    entity.size = 0.5
 
-	return index, entity
+    return index, entity
 }
 
 add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowIndex, entity: ^LowEntity) {
-	p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-	index, entity = add_low_entity(state, .Wall, &p)
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_low_entity(state, .Wall, &p)
 
-	entity.size = state.world.tile_size_in_meters
-	entity.collides = true
+    entity.size = state.world.tile_size_in_meters
+    entity.collides = true
 
-	return index, entity
+    return index, entity
 }
 
 add_player :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
-	index, entity = add_low_entity(state, .Hero, &state.camera_p)
+    index, entity = add_low_entity(state, .Hero, &state.camera_p)
 
-	entity.size = {0.75, 0.4}
-	entity.collides = true
+    entity.size = {0.75, 0.4}
+    entity.collides = true
 
-	init_hitpoints(entity, 3)
+    init_hitpoints(entity, 3)
 
-	sword_index, sword := add_sword(state)
-	entity.sword_index = sword_index
+    sword_index, sword := add_sword(state)
+    entity.sword_index = sword_index
 
-	make_entity_high_frequency(state, index)
+    make_entity_high_frequency(state, index)
 
-	if state.camera_following_index == 0 {
-		state.camera_following_index = index
-	}
+    if state.camera_following_index == 0 {
+        state.camera_following_index = index
+    }
 
-	return index, entity
+    return index, entity
 }
 
 validate_entity_pairs :: #force_inline proc(state: ^GameState) -> bool {
-	valid := true
+    valid := true
 
-	for high_index in 1..<state.high_entity_count {
-		high := &state.high_entities_[high_index]
-		valid &= state.low_entities[high.low_index].high_entity_index == high_index
-	}
+    for high_index in 1..<state.high_entity_count {
+        high := &state.high_entities_[high_index]
+        valid &= state.low_entities[high.low_index].high_entity_index == high_index
+    }
 
-	return valid
+    return valid
 }
 
 offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offset: v2, camera_bounds: Rectangle) {
-	for entity_index: EntityIndex = 1; entity_index < state.high_entity_count; {
-		high := &state.high_entities_[entity_index]
+    for entity_index: EntityIndex = 1; entity_index < state.high_entity_count; {
+        high := &state.high_entities_[entity_index]
 
-		high.p.xy += offset
-		if !is_in_rectangle(camera_bounds, high.p.xy) {
-			make_entity_low_frequency(state, high.low_index)
-		} else {
-			entity_index += 1
-		}
-	}
+        high.p.xy += offset
+        if !is_in_rectangle(camera_bounds, high.p.xy) {
+            make_entity_low_frequency(state, high.low_index)
+        } else {
+            entity_index += 1
+        }
+    }
 }
 
 set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
-	world := state.world
+    world := state.world
 
-	assert(validate_entity_pairs(state))
+    assert(validate_entity_pairs(state))
 
-	d_camera_p := world_difference(world, new_camera_p, state.camera_p)
-	state.camera_p = map_into_worldspace(world, new_camera_p)
+    d_camera_p := world_difference(world, new_camera_p, state.camera_p)
+    state.camera_p = map_into_worldspace(world, new_camera_p)
 
-	// TODO(viktor): these numbers where picked at random
-	tilespan := [2]i32{17, 9} * 1
-	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
+    // TODO(viktor): these numbers where picked at random
+    tilespan := [2]i32{17, 9} * 1
+    camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
 
-	entity_offset_for_frame := -d_camera_p.xy
-	offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
+    entity_offset_for_frame := -d_camera_p.xy
+    offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
 
-	assert(validate_entity_pairs(state))
+    assert(validate_entity_pairs(state))
 
-	map_into_worldspace(world, new_camera_p, camera_bounds.min)
+    map_into_worldspace(world, new_camera_p, camera_bounds.min)
 
-	min_chunk := state.camera_p.chunk.xy-tilespan/2
-	max_chunk := state.camera_p.chunk.xy+tilespan/2
-	// TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
-	for chunk_y in min_chunk.y ..= max_chunk.y {
-		for chunk_x in min_chunk.x ..= max_chunk.x {
-			chunk := get_chunk(nil, world, chunk_x, chunk_y, new_camera_p.chunk.z)
-			if chunk != nil {
-				for block := &chunk.first_block; block != nil; block = block.next {
-					for entity_index in 0..< block.entity_count {
-						low_index := block.indices[entity_index]
-						low := &state.low_entities[low_index]
-						if low.high_entity_index == 0 {
-							camera_space_p := get_camera_space_p(state, low)
-							if is_in_rectangle(camera_bounds, camera_space_p.xy) {
-								make_entity_high_frequency(state, low, low_index, camera_space_p)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	assert(validate_entity_pairs(state))
+    min_chunk := state.camera_p.chunk.xy-tilespan/2
+    max_chunk := state.camera_p.chunk.xy+tilespan/2
+    // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
+    for chunk_y in min_chunk.y ..= max_chunk.y {
+        for chunk_x in min_chunk.x ..= max_chunk.x {
+            chunk := get_chunk(nil, world, chunk_x, chunk_y, new_camera_p.chunk.z)
+            if chunk != nil {
+                for block := &chunk.first_block; block != nil; block = block.next {
+                    for entity_index in 0..< block.entity_count {
+                        low_index := block.indices[entity_index]
+                        low := &state.low_entities[low_index]
+                        if low.high_entity_index == 0 {
+                            camera_space_p := get_camera_space_p(state, low)
+                            if is_in_rectangle(camera_bounds, camera_space_p.xy) {
+                                make_entity_high_frequency(state, low, low_index, camera_space_p)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert(validate_entity_pairs(state))
 }
 
 
 entity_from_high_index :: #force_inline proc(state:^GameState, index: EntityIndex) -> (result: Entity) {
-	if index != 0 {
-		assert(index < state.high_entity_count)
+    if index != 0 {
+        assert(index < state.high_entity_count)
 
-		result.high = &state.high_entities_[index]
-		result.low_index = result.high.low_index
-		result.low = &state.low_entities[result.low_index]
-	}
+        result.high = &state.high_entities_[index]
+        result.low_index = result.high.low_index
+        result.low = &state.low_entities[result.low_index]
+    }
 
-	return result
+    return result
 }
 
 update_monster :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
@@ -839,126 +839,126 @@ update_monster :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
 
 
 update_familiar :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
-	closest_hero: Entity
-	closest_hero_dsq := square(6) // NOTE(viktor): 10m maximum search
-	for entity_index in 1..<state.high_entity_count {
-		test := entity_from_high_index(state, entity_index)
-		if test.low.type == .Hero {
-			dsq := length_squared(test.high.p.xy - entity.high.p.xy)
-			if dsq < closest_hero_dsq {
-				closest_hero_dsq = dsq
-				closest_hero = test
-			}
-		}
-	}
+    closest_hero: Entity
+    closest_hero_dsq := square(6) // NOTE(viktor): 10m maximum search
+    for entity_index in 1..<state.high_entity_count {
+        test := entity_from_high_index(state, entity_index)
+        if test.low.type == .Hero {
+            dsq := length_squared(test.high.p.xy - entity.high.p.xy)
+            if dsq < closest_hero_dsq {
+                closest_hero_dsq = dsq
+                closest_hero = test
+            }
+        }
+    }
 
-	ddp: v2
-	if closest_hero.high != nil && closest_hero_dsq > 1 {
-		mpss: f32 = 0.5
-		ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.high.p.xy - entity.high.p.xy)
-	}
-	move_entity(state, entity, ddp, dt)
+    ddp: v2
+    if closest_hero.high != nil && closest_hero_dsq > 1 {
+        mpss: f32 = 0.5
+        ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.high.p.xy - entity.high.p.xy)
+    }
+    move_entity(state, entity, ddp, dt)
 }
 
 move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
-	ddp := ddp
-	ddp_length_squared := length_squared(ddp)
+    ddp := ddp
+    ddp_length_squared := length_squared(ddp)
 
-	if ddp_length_squared > 1 {
-		ddp *= 1 / square_root(ddp_length_squared)
-	}
+    if ddp_length_squared > 1 {
+        ddp *= 1 / square_root(ddp_length_squared)
+    }
 
-	entity_speed_in_mpss: f32 : 50
-	speed := entity_speed_in_mpss
-	ddp *= speed
+    entity_speed_in_mpss: f32 : 50
+    speed := entity_speed_in_mpss
+    ddp *= speed
 
-	// TODO(viktor): ODE here
-	ddp += -8 * entity.high.dp.xy
+    // TODO(viktor): ODE here
+    ddp += -8 * entity.high.dp.xy
 
-	entity_delta := 0.5*ddp * square(dt) + entity.high.dp.xy * dt
-	entity.high.dp.xy = ddp * dt + entity.high.dp.xy
+    entity_delta := 0.5*ddp * square(dt) + entity.high.dp.xy * dt
+    entity.high.dp.xy = ddp * dt + entity.high.dp.xy
 
-	for iteration in 0..<4 {
-		desired_p := entity.high.p.xy + entity_delta
+    for iteration in 0..<4 {
+        desired_p := entity.high.p.xy + entity_delta
 
-		t_min: f32 = 1
-		wall_normal: v2
-		hit_high_entity_index: EntityIndex
+        t_min: f32 = 1
+        wall_normal: v2
+        hit_high_entity_index: EntityIndex
 
-		for test_high_entity_index in 1..<state.high_entity_count {
-			if test_high_entity_index != entity.low.high_entity_index {
+        for test_high_entity_index in 1..<state.high_entity_count {
+            if test_high_entity_index != entity.low.high_entity_index {
 
-				test_entity: Entity
-				test_entity.high = &state.high_entities_[test_high_entity_index]
-				test_entity.low_index = test_entity.high.low_index
-				test_entity.low = &state.low_entities[test_entity.low_index]
+                test_entity: Entity
+                test_entity.high = &state.high_entities_[test_high_entity_index]
+                test_entity.low_index = test_entity.high.low_index
+                test_entity.low = &state.low_entities[test_entity.low_index]
 
-				if test_entity.low.collides {
-					diameter := entity.low.size + test_entity.low.size
-					min_corner := -0.5 * diameter
-					max_corner :=  0.5 * diameter
+                if test_entity.low.collides {
+                    diameter := entity.low.size + test_entity.low.size
+                    min_corner := -0.5 * diameter
+                    max_corner :=  0.5 * diameter
 
-					rel := entity.high.p - test_entity.high.p
+                    rel := entity.high.p - test_entity.high.p
 
-					test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
-						EPSILON :: 0.01
-						if entity_delta_x != 0 {
-							t_result := (wall_x - rel_x) / entity_delta_x
-							y := rel_y + t_result * entity_delta_y
-							if 0 <= t_result && t_result < t_min^ {
-								if y >= min_y && y <= max_y {
-									t_min^ = max(0, t_result-EPSILON)
-									collided = true
-								}
-							}
-						}
-						return collided
-					}
+                    test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
+                        EPSILON :: 0.01
+                        if entity_delta_x != 0 {
+                            t_result := (wall_x - rel_x) / entity_delta_x
+                            y := rel_y + t_result * entity_delta_y
+                            if 0 <= t_result && t_result < t_min^ {
+                                if y >= min_y && y <= max_y {
+                                    t_min^ = max(0, t_result-EPSILON)
+                                    collided = true
+                                }
+                            }
+                        }
+                        return collided
+                    }
 
-					if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-						wall_normal = {-1,  0}
-						hit_high_entity_index = test_high_entity_index
-					}
-					if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-						wall_normal = { 1,  0}
-						hit_high_entity_index = test_high_entity_index
-					}
-					if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-						wall_normal = { 0, -1}
-						hit_high_entity_index = test_high_entity_index
-					}
-					if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-						wall_normal = { 0,  1}
-						hit_high_entity_index = test_high_entity_index
-					}
-				}
-			}
-		}
+                    if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+                        wall_normal = {-1,  0}
+                        hit_high_entity_index = test_high_entity_index
+                    }
+                    if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+                        wall_normal = { 1,  0}
+                        hit_high_entity_index = test_high_entity_index
+                    }
+                    if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+                        wall_normal = { 0, -1}
+                        hit_high_entity_index = test_high_entity_index
+                    }
+                    if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+                        wall_normal = { 0,  1}
+                        hit_high_entity_index = test_high_entity_index
+                    }
+                }
+            }
+        }
 
-		entity.high.p.xy += t_min * entity_delta
+        entity.high.p.xy += t_min * entity_delta
 
-		if hit_high_entity_index != 0 {
-			entity.high.dp.xy = project(entity.high.dp.xy, wall_normal)
-			entity_delta = desired_p - entity.high.p.xy
-			entity_delta = project(entity_delta, wall_normal)
+        if hit_high_entity_index != 0 {
+            entity.high.dp.xy = project(entity.high.dp.xy, wall_normal)
+            entity_delta = desired_p - entity.high.p.xy
+            entity_delta = project(entity_delta, wall_normal)
 
-			hit_high_entity := state.high_entities_[hit_high_entity_index]
-			hit_low_entity := state.low_entities[hit_high_entity.low_index]
-			entity.low.p.chunk.z += hit_low_entity.d_tile_z
-		} else {
-			break
-		}
-	}
+            hit_high_entity := state.high_entities_[hit_high_entity_index]
+            hit_low_entity := state.low_entities[hit_high_entity.low_index]
+            entity.low.p.chunk.z += hit_low_entity.d_tile_z
+        } else {
+            break
+        }
+    }
 
-	if entity.high.dp.x < 0  {
-		entity.high.facing_index = 0
-	} else {
-		entity.high.facing_index = 1
-	}
+    if entity.high.dp.x < 0  {
+        entity.high.facing_index = 0
+    } else {
+        entity.high.facing_index = 1
+    }
 
-	new_p := map_into_worldspace(state.world, state.camera_p, entity.high.p.xy)
-	// TODO(viktor): bundle these together as the location update
-	change_entity_location(&state.world_arena, state.world, entity.low_index, entity.low, &new_p, &entity.low.p)
+    new_p := map_into_worldspace(state.world, state.camera_p, entity.high.p.xy)
+    // TODO(viktor): bundle these together as the location update
+    change_entity_location(&state.world_arena, state.world, entity.low_index, entity.low, &new_p, &entity.low.p)
 }
 
 
@@ -977,36 +977,36 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v
 
     left   := rounded_center.x - bitmap.width / 2
     top	   := rounded_center.y - bitmap.height / 2
-	right  := left + bitmap.width
-	bottom := top  + bitmap.height
+    right  := left + bitmap.width
+    bottom := top  + bitmap.height
 
-	src_left: i32
-	src_top : i32
-	if left < 0 {
-		src_left = -left
-		left = 0
-	}
-	if top < 0 {
-		src_top = -top
-		top = 0
-	}
+    src_left: i32
+    src_top : i32
+    if left < 0 {
+        src_left = -left
+        left = 0
+    }
+    if top < 0 {
+        src_top = -top
+        top = 0
+    }
     bottom = min(bottom, buffer.height)
     right  = min(right,  buffer.width)
 
     src_row  := bitmap.width * (bitmap.height-1)
-	src_row  += -bitmap.width * src_top + src_left
+    src_row  += -bitmap.width * src_top + src_left
     dest_row := left + top * buffer.width
     for y in top..< bottom  {
         src_index, dest_index := src_row, dest_row
         for x in left..< right  {
-			src := vec_cast(f32, bitmap.pixels[src_index])
-			dst := &buffer.memory[dest_index]
-			a := src.a / 255
-			a *= c_alpha
+            src := vec_cast(f32, bitmap.pixels[src_index])
+            dst := &buffer.memory[dest_index]
+            a := src.a / 255
+            a *= c_alpha
 
-			dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, a)
-			dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, a)
-			dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, a)
+            dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, a)
+            dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, a)
+            dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, a)
 
             src_index  += 1
             dest_index += 1
@@ -1033,11 +1033,11 @@ draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, colo
     for y in top..<bottom {
         for x in left..<right {
             dst := &buffer.memory[y*buffer.width + x]
-			src := color * 255
+            src := color * 255
 
-			dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, color.a)
-			dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, color.a)
-			dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, color.a)
+            dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, color.a)
+            dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, color.a)
+            dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, color.a)
         }
     }
 }
@@ -1079,48 +1079,48 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
     // the height will be negative for top-down.
     // (Also, there can be compression, etc., etc ... DON'T think this
     // a complete implementation)
-	// NOTE: pixels listed bottom up
+    // NOTE: pixels listed bottom up
     if len(contents) > 0 {
         header := cast(^BMPHeader) &contents[0]
 
-		assert(header.bits_per_pixel == 32)
-		assert(header.compression == 3)
+        assert(header.bits_per_pixel == 32)
+        assert(header.compression == 3)
 
-		red_mask   := header.red_mask
-		green_mask := header.green_mask
-		blue_mask  := header.blue_mask
-		alpha_mask := ~(red_mask | green_mask | blue_mask)
+        red_mask   := header.red_mask
+        green_mask := header.green_mask
+        blue_mask  := header.blue_mask
+        alpha_mask := ~(red_mask | green_mask | blue_mask)
 
-		red_scan   := intrinsics.count_leading_zeros(red_mask)
+        red_scan   := intrinsics.count_leading_zeros(red_mask)
         green_scan := intrinsics.count_leading_zeros(green_mask)
         blue_scan  := intrinsics.count_leading_zeros(blue_mask)
         alpha_scan := intrinsics.count_leading_zeros(alpha_mask)
-		assert(red_scan   != 32)
-		assert(green_scan != 32)
-		assert(blue_scan  != 32)
-		assert(alpha_scan != 32)
+        assert(red_scan   != 32)
+        assert(green_scan != 32)
+        assert(blue_scan  != 32)
+        assert(alpha_scan != 32)
 
         raw_pixels := ( cast([^]u32) &contents[header.bitmap_offset] )[:header.width * header.height]
         for y in 0..<header.height {
             for x in 0..<header.width {
                 raw_pixel := &raw_pixels[y * header.width + x]
-				/* TODO: check what the shifts and "C" where actually
-				raw_pixel^ = (rotate_left(raw_pixel^ & red_mask, red_shift) |
-				              rotate_left(raw_pixel^ & green_mask, green_shift) |
-				              rotate_left(raw_pixel^ & blue_mask, blue_shift) |
-				              rotate_left(raw_pixel^ & alpha_mask, alpha_shift))
-				 */
-				a := (raw_pixel^ >> alpha_scan) & 0xFF
-				r := (raw_pixel^ >> red_scan  ) & 0xFF
-				g := (raw_pixel^ >> green_scan) & 0xFF
-				b := (raw_pixel^ >> blue_scan ) & 0xFF
+                /* TODO: check what the shifts and "C" where actually
+                raw_pixel^ = (rotate_left(raw_pixel^ & red_mask, red_shift) |
+                              rotate_left(raw_pixel^ & green_mask, green_shift) |
+                              rotate_left(raw_pixel^ & blue_mask, blue_shift) |
+                              rotate_left(raw_pixel^ & alpha_mask, alpha_shift))
+                 */
+                a := (raw_pixel^ >> alpha_scan) & 0xFF
+                r := (raw_pixel^ >> red_scan  ) & 0xFF
+                g := (raw_pixel^ >> green_scan) & 0xFF
+                b := (raw_pixel^ >> blue_scan ) & 0xFF
 
-				// // TODO: what?
-				raw_pixel^ = (b << 24) | (a << 16) | (r << 8) | g
+                // // TODO: what?
+                raw_pixel^ = (b << 24) | (a << 16) | (r << 8) | g
             }
         }
 
-		pixels := ( cast([^]Color) &contents[header.bitmap_offset] )[:header.width * header.height]
+        pixels := ( cast([^]Color) &contents[header.bitmap_offset] )[:header.width * header.height]
         return {pixels, header.width, header.height, {}}
     }
     return {}
