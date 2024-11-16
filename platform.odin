@@ -1057,9 +1057,8 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
 				case win.VK_ESCAPE:
 					RUNNING = false
 					process_win_keyboard_message(&keyboard_controller.back          , is_down)
-				case win.VK_X:
-					process_win_keyboard_message(&keyboard_controller.start         , is_down)
 				case win.VK_SPACE:
+					process_win_keyboard_message(&keyboard_controller.start         , is_down)
 				case win.VK_L:
 					if is_down {
 						if state.input_replay_index != 0 {

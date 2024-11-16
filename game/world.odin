@@ -35,8 +35,30 @@ World :: struct {
 	first_free: ^WorldEntityBlock
 }
 
-change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, new_p: WorldPosition,  old_p: ^WorldPosition = nil) {
-	if old_p != nil && are_in_same_chunk(world, old_p^, new_p) {
+null_position :: #force_inline proc() -> (result:WorldPosition) {
+	result.chunk.x = UNINITIALIZED_CHUNK
+	return result
+}
+
+is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
+	return p.chunk.x != UNINITIALIZED_CHUNK
+}
+
+change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, low: ^LowEntity, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+	change_entity_location_raw(arena, world, index, new_p, old_p)
+	if new_p != nil {
+		low.p = new_p^
+	} else {
+		low.p = null_position()
+	}
+}
+
+change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+	// TODO(viktor): if the entity moves  into the camera bounds, shoulds this force the entity into the high set immediatly?
+	assert(auto_cast (old_p == nil || is_valid(old_p^)))
+	assert(auto_cast (new_p == nil || is_valid(new_p^)))
+
+	if old_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
 		// NOTE(viktor): leave entity where it is
 	} else {
 		if old_p != nil {
@@ -67,27 +89,30 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
 				}
 			}
 		}
-		// NOTE(viktor): Insert the entity into its new block
-		chunk := get_chunk(arena, world, new_p)
-		assert(chunk != nil)
-		
-		block := &chunk.first_block
-		if block.entity_count == len(block.indices) {
-			// NOTE(viktor): We're out of room, get a new block!
-			old_block := world.first_free
-			if old_block != nil {
-				world.first_free = old_block.next
-			} else {
-				old_block = push_struct(arena, WorldEntityBlock)
-			}
-			old_block^ = block^
-			block.next = old_block
-			block.entity_count = 0
-		}
-		assert(block.entity_count < len(block.indices))
 
-		block.indices[block.entity_count] = index
-		block.entity_count += 1
+		if new_p != nil {
+			// NOTE(viktor): Insert the entity into its new block
+			chunk := get_chunk(arena, world, new_p^)
+			assert(chunk != nil)
+			
+			block := &chunk.first_block
+			if block.entity_count == len(block.indices) {
+				// NOTE(viktor): We're out of room, get a new block!
+				old_block := world.first_free
+				if old_block != nil {
+					world.first_free = old_block.next
+				} else {
+					old_block = push_struct(arena, WorldEntityBlock)
+				}
+				old_block^ = block^
+				block.next = old_block
+				block.entity_count = 0
+			}
+			assert(block.entity_count < len(block.indices))
+
+			block.indices[block.entity_count] = index
+			block.entity_count += 1
+		}
 	}
 }
 

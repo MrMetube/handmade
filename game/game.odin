@@ -121,30 +121,34 @@ push_size :: proc(arena: ^Arena, size: u64) -> ^u8 {
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer, input: GameInput){
     assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
-
     state := cast(^GameState) raw_data(memory.permanent_storage)
 
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
-
     if !memory.is_initialized {
 		defer memory.is_initialized = true
 
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.backdrop  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
-		state.shadow    = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
-        state.player[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
-        state.player[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
+        state.backdrop   = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
+		state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
+        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
         state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
         state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
+		state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
+
+        state.player[0].focus = {8, 0}
+        state.player[1].focus = {-4, 0}
 
 		state.monster[0].focus = {0, -1}
 		state.monster[1].focus = {21, -1}
 		
 		state.shadow.focus = {0, 10}
+
+		state.sword.focus = {16, 16}
 
         state.world = push_struct(&state.world_arena, World)
 
@@ -294,9 +298,30 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 				if controller.stick_down.ended_down {
 					ddp.y -= 1
 				}
+			}
 
-				if controller.button_up.ended_down {
-					controlling_entity.high.dp.z += 2
+			if controller.start.ended_down {
+				controlling_entity.high.dp.z += 2
+			}
+
+			d_sword: v2
+			if controller.button_up.ended_down {
+				d_sword =  {0, 1}
+			}
+			if controller.button_down.ended_down {
+				d_sword = -{0, 1}
+			}
+			if controller.button_left.ended_down {
+				d_sword = -{1, 0}
+			}
+			if controller.button_right.ended_down {
+				d_sword =  {1, 0}
+			}
+			if d_sword.x != 0 || d_sword.y != 0 {
+				sword := force_entity_into_high(state, controlling_entity.low.sword_index)
+				if sword.low != nil && !is_valid(sword.low.p) {
+					sword_p := controlling_entity.low.p
+					change_entity_location(&state.world_arena, state.world, sword.low_index, sword.low, &sword_p)
 				}
 			}
 
@@ -304,10 +329,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 		}
     }
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Update
-    // ---------------------- ---------------------- ----------------------
-
+	// ---------------------- ---------------------- ----------------------
+	// ---------------------- Update
+	// ---------------------- ---------------------- ----------------------
+	
 	if entity := force_entity_into_high(state, state.camera_following_index); entity.high != nil {
 		new_camera_p := state.camera_p
 	when !true {
@@ -390,6 +415,22 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 			push_piece(group, nil, size, offset, color)
 		}
 
+		draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, low: ^LowEntity, offset_y: f32) {
+			if low.hit_point_max > 1 {
+				health_size: v2 = 0.1
+				spacing_between: f32 = health_size.x * 1.5
+				health_x := -0.5 * (cast(f32) low.hit_point_max - 1) * spacing_between + low.size.x/2
+
+				for index in 0..<low.hit_point_max {
+					hit_point := low.hit_points[index]
+					color := hit_point.filled_amount == 0 ? Gray : Red
+					push_rectangle(group, health_size, {health_x, -offset_y}, color)
+					health_x += spacing_between
+				}
+			}
+
+		}
+
 		switch low.type {
 		case .Nil: // NOTE(viktor): nothing
 		case .Wall:
@@ -397,21 +438,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 			// TODO(viktor): wall asset
 			draw_rectangle(buffer, position, size, White)
 
+		case .Sword:
+			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+			push_bitmap(&piece_group, &state.sword, 0)
+
 		case .Hero:
 			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
 			push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z})
-
-			if entity.low.hit_point_max > 1 {
-				health_size: v2 = 0.1
-				spacing_between: f32 = health_size.x * 1.5
-				health_x := -0.5 * (cast(f32) entity.low.hit_point_max - 1) * spacing_between + entity.low.size.x/2
-				for index in 0..<low.hit_point_max {
-					hit_point := low.hit_points[index]
-					color := hit_point.filled_amount == 0 ? Gray : Red
-					push_rectangle(&piece_group, health_size, {health_x, -0.6}, color)
-					health_x += spacing_between
-				}
-			}
+			draw_hitpoints(&piece_group, entity.low, 0.5)
 
 		case .Familiar:
 			entity.high.t_bob += dt
@@ -421,9 +455,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 			hz :: 4
 			coeff := sin(entity.high.t_bob * hz)
 			z += (coeff) * 0.3 + 0.3
+			// TODO(viktor): shadow is inverted
 
 			update_familiar(state, entity, dt)
-			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha/2 * (coeff+1))
+			push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
 			push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z}, 0.5)
 
 		case .Monster:
@@ -431,6 +466,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
 			push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
 			push_bitmap(&piece_group, &state.monster[1], 0)
+
+			draw_hitpoints(&piece_group, entity.low, 0.8)
 		}
 
 		ddz : f32 = -9.8;
@@ -477,7 +514,7 @@ EntityVisiblePiece :: struct {
 }
 
 EntityType :: enum u32 {
-	Nil, Hero, Wall, Familiar, Monster
+	Nil, Hero, Wall, Familiar, Monster, Sword
 }
 
 EntityIndex :: u32
@@ -509,6 +546,9 @@ LowEntity :: struct {
 	hit_points: [16]HitPoint,
 
 	high_entity_index: EntityIndex,
+
+	sword_index: LowIndex,
+	distance_remaining: f32,
 }
 
 LowEntityReference :: struct {
@@ -546,6 +586,7 @@ GameState :: struct {
     shadow: LoadedBitmap,
     player: [2]LoadedBitmap,
     monster: [2]LoadedBitmap,
+	sword: LoadedBitmap,
 
 	tile_size_in_pixels :u32,
 	meters_to_pixels: f32,
@@ -628,19 +669,34 @@ make_entity_low_frequency :: #force_inline proc(state: ^GameState, low_index: Lo
 		state.high_entity_count -= 1
 		low.high_entity_index = 0
 	}
-}
+} 
 
-add_low_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> (index: LowIndex, entity: ^LowEntity) #no_bounds_check {
+add_low_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> (index: LowIndex, low: ^LowEntity) #no_bounds_check {
 	index = state.low_entity_count
 	state.low_entity_count += 1
 	assert(state.low_entity_count < len(state.low_entities))
-	entity = &state.low_entities[index]
-	entity^ = { type = type }
+	low = &state.low_entities[index]
+	low^ = { type = type }
 
-	if p != nil {
-		entity.p =  p^
-		change_entity_location(&state.world_arena, state.world, index, p^)
+	change_entity_location(&state.world_arena, state.world, index, low, p)
+
+	return index, low
+}
+
+init_hitpoints :: proc(entity: ^LowEntity, count: u32) {
+	assert(count < len(entity.hit_points))
+
+	entity.hit_point_max = count
+	for i in 0..<count {
+		entity.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
 	}
+}
+
+add_sword :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
+	index, entity = add_low_entity(state, .Sword, nil)
+
+	entity.size = {0.5, 1}
+	entity.collides = false
 
 	return index, entity
 }
@@ -651,6 +707,8 @@ add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: L
 
 	entity.size = 0.75
 	entity.collides = true
+
+	init_hitpoints(entity, 3)
 
 	return index, entity
 }
@@ -679,10 +737,11 @@ add_player :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
 
 	entity.size = {0.75, 0.4}
 	entity.collides = true
-	entity.hit_point_max = 3
-	entity.hit_points[0] = { filled_amount = HIT_POINT_PART_COUNT }
-	entity.hit_points[1] = entity.hit_points[0]
-	entity.hit_points[2] = entity.hit_points[0]
+
+	init_hitpoints(entity, 3)
+
+	sword_index, sword := add_sword(state)
+	entity.sword_index = sword_index
 
 	make_entity_high_frequency(state, index)
 
@@ -899,8 +958,7 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, dt: f32) {
 
 	new_p := map_into_worldspace(state.world, state.camera_p, entity.high.p.xy)
 	// TODO(viktor): bundle these together as the location update
-	change_entity_location(&state.world_arena, state.world, entity.low_index, new_p, &entity.low.p)
-	entity.low.p = new_p
+	change_entity_location(&state.world_arena, state.world, entity.low_index, entity.low, &new_p, &entity.low.p)
 }
 
 
@@ -961,8 +1019,8 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v
 
 
 draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor){
-    rounded_position := round(position)
-    rounded_size     := round(size)
+    rounded_position := floor(position)
+    rounded_size     := floor(size)
 
     left, right := rounded_position.x, rounded_position.x + rounded_size.x
     top, bottom := rounded_position.y, rounded_position.y + rounded_size.y
