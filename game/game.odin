@@ -261,7 +261,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         add_monster(state, monster_p.x, monster_p.y, monster_p.z)
         add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
 
-        set_camera(state, new_camera_p)
+        sim_camera_region(state, new_camera_p)
     }
 
     // ---------------------- ---------------------- ----------------------
@@ -271,14 +271,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     world := state.world
 
     for controller, controller_index in input.controllers {
-        low_index := state.player_index_for_controller[controller_index]
-        if low_index == 0 {
+        storage_index := state.player_index_for_controller[controller_index]
+        if storage_index == 0 {
             if controller.start.ended_down {
                 entity_index, _ := add_player(state)
                 state.player_index_for_controller[controller_index] = entity_index
             }
         } else {
-            controlling_entity := force_entity_into_high(state, low_index)
+            controlling_entity := force_entity_into_high(state, storage_index)
 
             ddp: v2
             if controller.is_analog {
@@ -344,29 +344,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Update
     // ---------------------- ---------------------- ----------------------
     
-    if entity := force_entity_into_high(state, state.camera_following_index); entity.high != nil {
-        new_camera_p := state.camera_p
-    when !true {
-        new_camera_p.chunk.z = entity.low.p.chunk.z
-        offset := entity.high.p
+	// TODO(viktor): these numbers where picked at random
+	tilespan := [2]i32{17, 9} * 1
+	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
 
-        if offset.x < -9 * world.tile_size_in_meters {
-            new_camera_p.offset_.x -= 17
-        }
-        if offset.x > 9 * world.tile_size_in_meters {
-            new_camera_p.offset_.x += 17
-        }
-        if offset.y < -5 * world.tile_size_in_meters {
-            new_camera_p.offset_.y -= 9
-        }
-        if offset.y > 5 * world.tile_size_in_meters {
-            new_camera_p.offset_.y += 9
-        }
-    } else {
-        new_camera_p = entity.low.p
-    }
-        set_camera(state, new_camera_p)
-    }
+	camera_sim_region := begin_sim(state.transient_arena, world, state.camera_p, camera_bounds)
 
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Render
@@ -387,20 +369,17 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     draw_bitmap(buffer, state.backdrop, screen_center)
 
-    for entity_index in 1..<state.high_entity_count {
-        high := &state.high_entities_[entity_index]
-        low  := &state.low_entities[high.low_index]
+    for &entity in camera_sim_region.entities {
+		stored := state.stored_entities[entity.storage_index]
 
         dt := input.delta_time;
 
-        entity := Entity{ high.low_index, low, high }
-
-        z := high.p.z
-        size := state.meters_to_pixels * low.size
+		z := entity.p.z
+        size := state.meters_to_pixels * stored.size
 
 
         // TODO(viktor): this is incorrect, should be computed after update
-        shadow_alpha := 1 - 0.5 * high.p.z;
+        shadow_alpha := 1 - 0.5 * entity.p.z;
         if(shadow_alpha < 0) {
             shadow_alpha = 0.0;
         }
@@ -426,14 +405,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             push_piece(group, nil, size, offset, color)
         }
 
-        draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, low: ^LowEntity, offset_y: f32) {
-            if low.hit_point_max > 1 {
+        draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, stored: ^StoredEntity, offset_y: f32) {
+            if stored.hit_point_max > 1 {
                 health_size: v2 = 0.1
                 spacing_between: f32 = health_size.x * 1.5
-                health_x := -0.5 * (cast(f32) low.hit_point_max - 1) * spacing_between + low.size.x/2
+                health_x := -0.5 * (cast(f32) stored.hit_point_max - 1) * spacing_between + stored.size.x/2
 
-                for index in 0..<low.hit_point_max {
-                    hit_point := low.hit_points[index]
+                for index in 0..<stored.hit_point_max {
+                    hit_point := stored.hit_points[index]
                     color := hit_point.filled_amount == 0 ? Gray : Red
                     push_rectangle(group, health_size, {health_x, -offset_y}, color)
                     health_x += spacing_between
@@ -442,70 +421,72 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
         }
 
-        switch low.type {
+        switch stored.type {
         case .Nil: // NOTE(viktor): nothing
         case .Wall:
-            position := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size )
+            position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * stored.size )
             // TODO(viktor): wall asset
             draw_rectangle(buffer, position, size, White)
 
         case .Sword:
-            update_sword(state, entity, input.delta_time)
+            update_sword(state, stored, entity, input.delta_time)
 
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
             push_bitmap(&piece_group, &state.sword, 0)
 
         case .Hero:
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-            push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z})
-            draw_hitpoints(&piece_group, entity.low, 0.5)
+            push_bitmap(&piece_group, &state.player[stored.facing_index], v2{0,z})
+            draw_hitpoints(&piece_group, &stored, 0.5)
 
         case .Familiar:
-            entity.high.t_bob += dt
-            if entity.high.t_bob > TAU {
-                entity.high.t_bob -= TAU
+            stored.t_bob += dt
+            if stored.t_bob > TAU {
+                stored.t_bob -= TAU
             }
             hz :: 4
-            coeff := sin(entity.high.t_bob * hz)
+            coeff := sin(stored.t_bob * hz)
             z += (coeff) * 0.3 + 0.3
             // TODO(viktor): shadow is inverted
 
-            update_familiar(state, entity, dt)
+            update_familiar(state, stored, entity, dt)
             push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
-            push_bitmap(&piece_group, &state.player[high.facing_index], v2{0,z}, 0.5)
+            push_bitmap(&piece_group, &state.player[stored.facing_index], v2{0,z}, 0.5)
 
         case .Monster:
-            update_monster(state, entity, dt)
+            update_monster(state, stored, entity, dt)
 
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
             push_bitmap(&piece_group, &state.monster[1], 0)
 
-            draw_hitpoints(&piece_group, entity.low, 0.8)
+            draw_hitpoints(&piece_group, &stored, 0.8)
         }
 
         ddz : f32 = -9.8;
-        high.p.z = 0.5 * ddz * square(dt) + high.dp.z * dt + high.p.z;
-        high.dp.z = ddz * dt + high.dp.z;
+        entity.p.z = 0.5 * ddz * square(dt) + stored.dp.z * dt + entity.p.z;
+        stored.dp.z = ddz * dt + stored.dp.z;
 
-        if high.p.z < 0 {
-            high.p.z = 0;
-            high.dp.z = 0;
+        if entity.p.z < 0 {
+            entity.p.z = 0;
+            stored.dp.z = 0;
         }
 
         // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
         for index in 0..<piece_group.count {
-            center := screen_center + state.meters_to_pixels * (high.p.xy * {1,-1} - 0.5 * low.size)
+            center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * stored.size)
             piece := piece_group.pieces[index]
             center += piece.offset
             if piece.bitmap != nil {
-                center.x -= (cast(f32) piece.bitmap.width/2  - entity.low.size.x * state.meters_to_pixels)
-                center.y -=(cast(f32) piece.bitmap.height/2 -  entity.low.size.y * state.meters_to_pixels)
+                center.x -= (cast(f32) piece.bitmap.width/2  - stored.size.x * state.meters_to_pixels)
+                center.y -=(cast(f32) piece.bitmap.height/2 -  stored.size.y * state.meters_to_pixels)
                 draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
             } else {
                 draw_rectangle(buffer, center, piece.size, piece.color)
             }
         }
     }
+
+	end_sim(camera_sim_region, state)
 }
 
 // TODO(viktor): This is dumb, this should just be part of
@@ -526,29 +507,25 @@ EntityVisiblePiece :: struct {
     size: v2,
 }
 
-EntityType :: enum u32 {
-    Nil, Hero, Wall, Familiar, Monster, Sword
-}
-
-EntityIndex :: u32
-LowIndex :: distinct EntityIndex
-
-Entity :: struct {
-    low_index: LowIndex,
-    low: ^LowEntity,
-    high: ^HighEntity,
-}
-
 HIT_POINT_PART_COUNT :: 4
 HitPoint :: struct {
     flags: u8,
     filled_amount: u8,
 }
 
-LowEntity :: struct {
+EntityType :: enum u32 {
+    Nil, Hero, Wall, Familiar, Monster, Sword
+}
+
+EntityIndex :: u32
+StorageIndex :: distinct EntityIndex
+
+StoredEntity :: struct {
     type: EntityType,
 
     p: WorldPosition,
+	dp: v3,
+
     size: v2,
 
     // NOTE(viktor): This is for "stairs"
@@ -558,40 +535,22 @@ LowEntity :: struct {
     hit_point_max: u32,
     hit_points: [16]HitPoint,
 
-    high_entity_index: EntityIndex,
-
-    sword_index: LowIndex,
+    sword_index: StorageIndex,
     distance_remaining: f32,
-}
 
-LowEntityReference :: struct {
-    chunk: ^Chunk,
-    index_in_chunk: u32,
-}
-
-HighEntity :: struct {
-    // NOTE(viktor): this already relative to the camera
-    p, dp: v3,
-
-    facing_index: i32,
-
-    low_index: LowIndex,
-
-    t_bob:f32,
+	facing_index: i32,
+	t_bob:f32,
 }
 
 GameState :: struct {
     world_arena: Arena,
     // TODO(viktor): should we allow split-screen?
-    camera_following_index: LowIndex,
+    camera_following_index: StorageIndex,
     camera_p : WorldPosition,
-    player_index_for_controller: [len(GameInput{}.controllers)]LowIndex,
+    player_index_for_controller: [len(GameInput{}.controllers)]StorageIndex,
 
-    low_entity_count: LowIndex,
-    low_entities: [100_000]LowEntity,
-
-    high_entity_count: EntityIndex,
-    high_entities_: [256]HighEntity,
+    stored_entity_count: StorageIndex,
+    stored_entities: [100_000]StoredEntity,
 
     world: ^World,
 
@@ -613,101 +572,29 @@ LoadedBitmap :: struct {
 
 Color :: [4]u8
 
-get_low_entity :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: ^LowEntity) #no_bounds_check {
-    assert(low_index > 0 && low_index <= state.low_entity_count)
-    entity = &state.low_entities[low_index]
+add_stored_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+    index = state.stored_entity_count
+    state.stored_entity_count += 1
+    assert(state.stored_entity_count < len(state.stored_entities))
+    stored = &state.stored_entities[index]
+    stored^ = { type = type }
 
-    return entity
+    change_entity_location(&state.world_arena, state.world, index, stored, p)
+
+    return index, stored
 }
 
-force_entity_into_high :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (entity: Entity) #no_bounds_check {
-    if low_index > 0 && low_index <= state.low_entity_count {
-        entity.high = make_entity_high_frequency(state, low_index)
-        entity.low_index = low_index
-        entity.low = &state.low_entities[entity.low_index]
-    }
-
-    return entity
-}
-
-get_camera_space_p :: #force_inline proc(state: ^GameState, low: ^LowEntity) -> v3 {
-    diff := world_difference(state.world, low.p, state.camera_p)
-    return diff
-}
-
-make_entity_high_frequency :: proc { make_entity_high_frequency_set_p, make_entity_high_frequency_calc_p }
-
-make_entity_high_frequency_set_p :: #force_inline proc(state: ^GameState, low: ^LowEntity, low_index: LowIndex, camera_space_p: v3) -> (high: ^HighEntity) {
-    assert(low.high_entity_index == 0)
-
-    if state.high_entity_count < len(state.high_entities_) {
-        high_index := state.high_entity_count
-        state.high_entity_count += 1
-
-        high = &state.high_entities_[high_index]
-        high^ = {}
-
-        high.p = camera_space_p
-        high.low_index = low_index
-        low.high_entity_index = high_index
-    } else {
-        unreachable()
-    }
-
-    return high
-}
-
-make_entity_high_frequency_calc_p :: #force_inline proc(state: ^GameState, low_index: LowIndex) -> (high: ^HighEntity) {
-    low_entity  := &state.low_entities[low_index]
-    if low_entity.high_entity_index == 0 {
-        camera_space_p := get_camera_space_p(state, low_entity)
-        high = make_entity_high_frequency_set_p(state, low_entity, low_index, camera_space_p)
-    } else {
-        high = &state.high_entities_[low_entity.high_entity_index]
-    }
-    return high
-}
-
-make_entity_low_frequency :: #force_inline proc(state: ^GameState, low_index: LowIndex) {
-    low  := &state.low_entities[low_index]
-    high_index := low.high_entity_index
-    if high_index != 0 {
-        last_index := state.high_entity_count-1
-        if high_index != last_index {
-            last := &state.high_entities_[last_index]
-            del  := &state.high_entities_[high_index]
-            del^ = last^
-            low_of_last := &state.low_entities[last.low_index]
-            low_of_last.high_entity_index = high_index
-        }
-        state.high_entity_count -= 1
-        low.high_entity_index = 0
-    }
-} 
-
-add_low_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> (index: LowIndex, low: ^LowEntity) #no_bounds_check {
-    index = state.low_entity_count
-    state.low_entity_count += 1
-    assert(state.low_entity_count < len(state.low_entities))
-    low = &state.low_entities[index]
-    low^ = { type = type }
-
-    change_entity_location(&state.world_arena, state.world, index, low, p)
-
-    return index, low
-}
-
-init_hitpoints :: proc(entity: ^LowEntity, count: u32) {
+init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     assert(count < len(entity.hit_points))
 
     entity.hit_point_max = count
     for i in 0..<count {
-        entity.hit_points[i] = { filled_am.ount = HIT_POINT_PART_COUNT }
+        entity.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
     }
 }
 
-add_sword :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
-    index, entity = add_low_entity(state, .Sword, nil)
+add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_stored_entity(state, .Sword, nil)
 
     entity.size = {0.5, 1}
     entity.collides = false
@@ -715,9 +602,9 @@ add_sword :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
     return index, entity
 }
 
-add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowIndex, entity: ^LowEntity) {
+add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_low_entity(state, .Monster, &p)
+    index, entity = add_stored_entity(state, .Monster, &p)
 
     entity.size = 0.75
     entity.collides = true
@@ -727,18 +614,18 @@ add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: L
     return index, entity
 }
 
-add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowIndex, entity: ^LowEntity) {
+add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_low_entity(state, .Familiar, &p)
+    index, entity = add_stored_entity(state, .Familiar, &p)
 
     entity.size = 0.5
 
     return index, entity
 }
 
-add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowIndex, entity: ^LowEntity) {
+add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_low_entity(state, .Wall, &p)
+    index, entity = add_stored_entity(state, .Wall, &p)
 
     entity.size = state.world.tile_size_in_meters
     entity.collides = true
@@ -746,8 +633,8 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: LowI
     return index, entity
 }
 
-add_player :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
-    index, entity = add_low_entity(state, .Hero, &state.camera_p)
+add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_stored_entity(state, .Hero, &state.camera_p)
 
     entity.size = {0.75, 0.4}
     entity.collides = true
@@ -766,93 +653,27 @@ add_player :: proc(state: ^GameState) -> (index: LowIndex, entity: ^LowEntity) {
     return index, entity
 }
 
-validate_entity_pairs :: #force_inline proc(state: ^GameState) -> bool {
-    valid := true
-
-    for high_index in 1..<state.high_entity_count {
-        high := &state.high_entities_[high_index]
-        valid &= state.low_entities[high.low_index].high_entity_index == high_index
-    }
-
-    return valid
+sim_camera_region :: proc(state: ^GameState) {
+    
 }
-
-offset_and_check_frequency_by_area :: #force_inline proc(state: ^GameState, offset: v2, camera_bounds: Rectangle) {
-    for entity_index: EntityIndex = 1; entity_index < state.high_entity_count; {
-        high := &state.high_entities_[entity_index]
-		low  := &state.low_entities[high.low_index]
-
-        high.p.xy += offset
-        if is_valid(low.p) && is_in_rectangle(camera_bounds, high.p.xy) {
-            entity_index += 1
-        } else {
-            make_entity_low_frequency(state, high.low_index)
-        }
-    }
-}
-
-set_camera :: proc(state: ^GameState, new_camera_p: WorldPosition) {
-    world := state.world
-
-    assert(validate_entity_pairs(state))
-
-    d_camera_p := world_difference(world, new_camera_p, state.camera_p)
-    state.camera_p = map_into_worldspace(world, new_camera_p)
-
-    // TODO(viktor): these numbers where picked at random
-    tilespan := [2]i32{17, 9} * 1
-    camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
-
-    entity_offset_for_frame := -d_camera_p.xy
-    offset_and_check_frequency_by_area(state, entity_offset_for_frame, camera_bounds)
-
-    assert(validate_entity_pairs(state))
-
-    map_into_worldspace(world, new_camera_p, camera_bounds.min)
-
-    min_chunk := state.camera_p.chunk.xy-tilespan/2
-    max_chunk := state.camera_p.chunk.xy+tilespan/2
-    // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
-    for chunk_y in min_chunk.y ..= max_chunk.y {
-        for chunk_x in min_chunk.x ..= max_chunk.x {
-            chunk := get_chunk(nil, world, chunk_x, chunk_y, new_camera_p.chunk.z)
-            if chunk != nil {
-                for block := &chunk.first_block; block != nil; block = block.next {
-                    for entity_index in 0..< block.entity_count {
-                        low_index := block.indices[entity_index]
-                        low := &state.low_entities[low_index]
-                        if low.high_entity_index == 0 {
-                            camera_space_p := get_camera_space_p(state, low)
-                            if is_in_rectangle(camera_bounds, camera_space_p.xy) {
-                                make_entity_high_frequency(state, low, low_index, camera_space_p)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    assert(validate_entity_pairs(state))
-}
-
 
 entity_from_high_index :: #force_inline proc(state:^GameState, index: EntityIndex) -> (result: Entity) {
     if index != 0 {
         assert(index < state.high_entity_count)
 
         result.high = &state.high_entities_[index]
-        result.low_index = result.high.low_index
-        result.low = &state.low_entities[result.low_index]
+        result.storage_index = result.high.storage_index
+        result.stored = &state.stored_entities[result.storage_index]
     }
 
     return result
 }
 
-update_monster :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
+update_monster :: #force_inline proc(state:^GameState, stored: StoredEntity, entity: SimEntity, dt:f32) {
 
 }
 
-update_sword :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
+update_sword :: #force_inline proc(state:^GameState, stored: StoredEntity, entity: SimEntity, dt:f32) {
     move_spec := default_move_spec()
     move_spec.normalize_accelaration = false
     move_spec.drag = 0
@@ -862,18 +683,18 @@ update_sword :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
     move_entity(state, entity, 0, move_spec, dt)
     distance_traveled := length(entity.high.p - old_p)
     
-    entity.low.distance_remaining -= distance_traveled
-    if entity.low.distance_remaining < 0 {
-        change_entity_location(&state.world_arena, state.world, entity.low_index, entity.low, nil, &entity.low.p)
+    entity.stored.distance_remaining -= distance_traveled
+    if entity.stored.distance_remaining < 0 {
+        change_entity_location(&state.world_arena, state.world, entity.storage_index, entity.stored, nil, &entity.stored.p)
     }
 }
 
-update_familiar :: #force_inline proc(state:^GameState, entity: Entity, dt:f32) {
+update_familiar :: #force_inline proc(state:^GameState, stored: StoredEntity, entity: SimEntity, dt:f32) {
     closest_hero: Entity
     closest_hero_dsq := square(6) // NOTE(viktor): 10m maximum search
     for entity_index in 1..<state.high_entity_count {
         test := entity_from_high_index(state, entity_index)
-        if test.low.type == .Hero {
+        if test.stored.type == .Hero {
             dsq := length_squared(test.high.p.xy - entity.high.p.xy)
             if dsq < closest_hero_dsq {
                 closest_hero_dsq = dsq
@@ -931,17 +752,17 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, move_spec: MoveS
         wall_normal: v2
         hit_high_entity_index: EntityIndex
         
-        if entity.low.collides {
+        if entity.stored.collides {
             for test_high_entity_index in 1..<state.high_entity_count {
-                if test_high_entity_index != entity.low.high_entity_index {
+                if test_high_entity_index != entity.stored.high_entity_index {
 
                     test_entity: Entity
                     test_entity.high = &state.high_entities_[test_high_entity_index]
-                    test_entity.low_index = test_entity.high.low_index
-                    test_entity.low = &state.low_entities[test_entity.low_index]
+                    test_entity.storage_index = test_entity.high.storage_index
+                    test_entity.stored = &state.stored_entities[test_entity.storage_index]
 
-                    if test_entity.low.collides {
-                        diameter := entity.low.size + test_entity.low.size
+                    if test_entity.stored.collides {
+                        diameter := entity.stored.size + test_entity.stored.size
                         min_corner := -0.5 * diameter
                         max_corner :=  0.5 * diameter
 
@@ -991,8 +812,8 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, move_spec: MoveS
             entity_delta = project(entity_delta, wall_normal)
 
             hit_high_entity := state.high_entities_[hit_high_entity_index]
-            hit_low_entity := state.low_entities[hit_high_entity.low_index]
-            entity.low.p.chunk.z += hit_low_entity.d_tile_z
+            hit_stored_entity := state.stored_entities[hit_high_entity.storage_index]
+            entity.stored.p.chunk.z += hit_stored_entity.d_tile_z
         } else {
             break
         }
@@ -1006,7 +827,7 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, move_spec: MoveS
 
     new_p := map_into_worldspace(state.world, state.camera_p, entity.high.p.xy)
     // TODO(viktor): bundle these together as the location update
-    change_entity_location(&state.world_arena, state.world, entity.low_index, entity.low, &new_p, &entity.low.p)
+    change_entity_location(&state.world_arena, state.world, entity.storage_index, entity.stored, &new_p, &entity.stored.p)
 }
 
 

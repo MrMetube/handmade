@@ -11,8 +11,8 @@ WorldPosition :: struct {
 
 // TODO(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
 WorldEntityBlock :: struct {
-    entity_count: LowIndex,
-    indices: [16]LowIndex,
+    entity_count: StorageIndex,
+    indices: [16]StorageIndex,
     next: ^WorldEntityBlock,
 }
 
@@ -44,7 +44,7 @@ is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
     return p.chunk.x != UNINITIALIZED_CHUNK
 }
 
-change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, low: ^LowEntity, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, low: ^StoredEntity, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     change_entity_location_raw(arena, world, index, new_p, old_p)
     if new_p != nil {
         low.p = new_p^
@@ -53,7 +53,7 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
     }
 }
 
-change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: LowIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     // TODO(viktor): if the entity moves  into the camera bounds, shoulds this force the entity into the high set immediatly?
     assert(auto_cast (old_p == nil || is_valid(old_p^)))
     assert(auto_cast (new_p == nil || is_valid(new_p^)))
