@@ -153,10 +153,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.world = push_struct(&state.world_arena, World)
 
         add_low_entity(state, .Nil, nil)
-        state.high_entity_count = 1
 
         world := state.world
-
         init_world(world, 1)
 
         state.tile_size_in_pixels = 60
@@ -261,7 +259,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         add_monster(state, monster_p.x, monster_p.y, monster_p.z)
         add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
 
-        sim_camera_region(state, new_camera_p)
+        sim_camera_region(state)
     }
 
     // ---------------------- ---------------------- ----------------------
@@ -323,7 +321,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     sword_p := controlling_entity.low.p
                     change_entity_location(&state.world_arena, state.world, controlling_entity.low.sword_index, sword_low, &sword_p)
                     
-                    sword_low.distance_remaining = 5
+                    sword_low.sim.distance_remaining = 5
 
                     sword := force_entity_into_high(state, controlling_entity.low.sword_index)
                     sword.high.dp.xy = 5 * d_sword
@@ -348,7 +346,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	tilespan := [2]i32{17, 9} * 1
 	camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * vec_cast(f32, tilespan))
 
-	camera_sim_region := begin_sim(state.transient_arena, world, state.camera_p, camera_bounds)
+	camera_sim_region := begin_sim(state.transient_arena, state, world, state.camera_p, camera_bounds)
 
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Render
@@ -375,7 +373,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         dt := input.delta_time;
 
 		z := entity.p.z
-        size := state.meters_to_pixels * stored.size
+        size := state.meters_to_pixels * stored.sim.size
 
 
         // TODO(viktor): this is incorrect, should be computed after update
@@ -406,13 +404,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         }
 
         draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, stored: ^StoredEntity, offset_y: f32) {
-            if stored.hit_point_max > 1 {
+            if stored.sim.hit_point_max > 1 {
                 health_size: v2 = 0.1
                 spacing_between: f32 = health_size.x * 1.5
-                health_x := -0.5 * (cast(f32) stored.hit_point_max - 1) * spacing_between + stored.size.x/2
+                health_x := -0.5 * (cast(f32) stored.sim.hit_point_max - 1) * spacing_between + stored.sim.size.x/2
 
-                for index in 0..<stored.hit_point_max {
-                    hit_point := stored.hit_points[index]
+                for index in 0..<stored.sim.hit_point_max {
+                    hit_point := stored.sim.hit_points[index]
                     color := hit_point.filled_amount == 0 ? Gray : Red
                     push_rectangle(group, health_size, {health_x, -offset_y}, color)
                     health_x += spacing_between
@@ -421,40 +419,40 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
         }
 
-        switch stored.type {
+        switch stored.sim.type {
         case .Nil: // NOTE(viktor): nothing
         case .Wall:
-            position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * stored.size )
+            position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * stored.sim.size )
             // TODO(viktor): wall asset
             draw_rectangle(buffer, position, size, White)
 
         case .Sword:
-            update_sword(state, stored, entity, input.delta_time)
+            update_sword(state, &stored, entity, input.delta_time)
 
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
             push_bitmap(&piece_group, &state.sword, 0)
 
         case .Hero:
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-            push_bitmap(&piece_group, &state.player[stored.facing_index], v2{0,z})
+            push_bitmap(&piece_group, &state.player[stored.sim.facing_index], v2{0,z})
             draw_hitpoints(&piece_group, &stored, 0.5)
 
         case .Familiar:
-            stored.t_bob += dt
-            if stored.t_bob > TAU {
-                stored.t_bob -= TAU
+            stored.sim.t_bob += dt
+            if stored.sim.t_bob > TAU {
+                stored.sim.t_bob -= TAU
             }
             hz :: 4
-            coeff := sin(stored.t_bob * hz)
+            coeff := sin(stored.sim.t_bob * hz)
             z += (coeff) * 0.3 + 0.3
             // TODO(viktor): shadow is inverted
 
-            update_familiar(state, stored, entity, dt)
+            update_familiar(state, &stored, entity, dt)
             push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
-            push_bitmap(&piece_group, &state.player[stored.facing_index], v2{0,z}, 0.5)
+            push_bitmap(&piece_group, &state.player[stored.sim.facing_index], v2{0,z}, 0.5)
 
         case .Monster:
-            update_monster(state, stored, entity, dt)
+            update_monster(state, &stored, entity, dt)
 
             push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
             push_bitmap(&piece_group, &state.monster[1], 0)
@@ -463,22 +461,22 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         }
 
         ddz : f32 = -9.8;
-        entity.p.z = 0.5 * ddz * square(dt) + stored.dp.z * dt + entity.p.z;
-        stored.dp.z = ddz * dt + stored.dp.z;
+        entity.p.z = 0.5 * ddz * square(dt) + stored.sim.dp.z * dt + entity.p.z;
+        stored.sim.dp.z = ddz * dt + stored.sim.dp.z;
 
         if entity.p.z < 0 {
             entity.p.z = 0;
-            stored.dp.z = 0;
+            stored.sim.dp.z = 0;
         }
 
         // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
         for index in 0..<piece_group.count {
-            center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * stored.size)
+            center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * stored.sim.size)
             piece := piece_group.pieces[index]
             center += piece.offset
             if piece.bitmap != nil {
-                center.x -= (cast(f32) piece.bitmap.width/2  - stored.size.x * state.meters_to_pixels)
-                center.y -=(cast(f32) piece.bitmap.height/2 -  stored.size.y * state.meters_to_pixels)
+                center.x -= (cast(f32) piece.bitmap.width/2  - stored.sim.size.x * state.meters_to_pixels)
+                center.y -=(cast(f32) piece.bitmap.height/2 -  stored.sim.size.y * state.meters_to_pixels)
                 draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
             } else {
                 draw_rectangle(buffer, center, piece.size, piece.color)
@@ -489,11 +487,21 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 	end_sim(camera_sim_region, state)
 }
 
-// TODO(viktor): This is dumb, this should just be part of
-// the renderer pushbuffer - add correction of coordinates
-// in there and be done with it.
+EntityType :: enum u32 {
+    Nil, Hero, Wall, Familiar, Monster, Sword
+}
+
+HIT_POINT_PART_COUNT :: 4
+HitPoint :: struct {
+    flags: u8,
+    filled_amount: u8,
+}
 
 EntityVisiblePieceGroup :: struct {
+	// TODO(viktor): This is dumb, this should just be part of
+	// the renderer pushbuffer - add correction of coordinates
+	// in there and be done with it.
+
     state: ^GameState,
     count: u32,
     pieces: [8]EntityVisiblePiece,
@@ -507,39 +515,12 @@ EntityVisiblePiece :: struct {
     size: v2,
 }
 
-HIT_POINT_PART_COUNT :: 4
-HitPoint :: struct {
-    flags: u8,
-    filled_amount: u8,
-}
-
-EntityType :: enum u32 {
-    Nil, Hero, Wall, Familiar, Monster, Sword
-}
-
 EntityIndex :: u32
 StorageIndex :: distinct EntityIndex
 
 StoredEntity :: struct {
-    type: EntityType,
-
-    p: WorldPosition,
-	dp: v3,
-
-    size: v2,
-
-    // NOTE(viktor): This is for "stairs"
-    d_tile_z: i32,
-    collides: b32,
-
-    hit_point_max: u32,
-    hit_points: [16]HitPoint,
-
-    sword_index: StorageIndex,
-    distance_remaining: f32,
-
-	facing_index: i32,
-	t_bob:f32,
+	sim: SimEntity,
+	p: WorldPosition,
 }
 
 GameState :: struct {
@@ -572,12 +553,20 @@ LoadedBitmap :: struct {
 
 Color :: [4]u8
 
+get_low_entity :: #force_inline proc(state: ^GameState, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
+    if storage_index > 0 && storage_index <= state.stored_entity_count {
+		entity = &state.stored_entities[storage_index]
+	}
+
+    return entity
+}
+
 add_stored_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
     index = state.stored_entity_count
     state.stored_entity_count += 1
     assert(state.stored_entity_count < len(state.stored_entities))
     stored = &state.stored_entities[index]
-    stored^ = { type = type }
+    stored.sim = { type = type }
 
     change_entity_location(&state.world_arena, state.world, index, stored, p)
 
@@ -585,19 +574,19 @@ add_stored_entity :: proc(state: ^GameState, type: EntityType, p: ^WorldPosition
 }
 
 init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
-    assert(count < len(entity.hit_points))
+    assert(count < len(entity.sim.hit_points))
 
-    entity.hit_point_max = count
+    entity.sim.hit_point_max = count
     for i in 0..<count {
-        entity.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
+        entity.sim.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
     }
 }
 
 add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_stored_entity(state, .Sword, nil)
 
-    entity.size = {0.5, 1}
-    entity.collides = false
+    entity.sim.size = {0.5, 1}
+    entity.sim.collides = false
 
     return index, entity
 }
@@ -606,8 +595,8 @@ add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: S
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
     index, entity = add_stored_entity(state, .Monster, &p)
 
-    entity.size = 0.75
-    entity.collides = true
+    entity.sim.size = 0.75
+    entity.sim.collides = true
 
     init_hitpoints(entity, 3)
 
@@ -618,7 +607,7 @@ add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: 
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
     index, entity = add_stored_entity(state, .Familiar, &p)
 
-    entity.size = 0.5
+    entity.sim.size = 0.5
 
     return index, entity
 }
@@ -627,8 +616,8 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
     index, entity = add_stored_entity(state, .Wall, &p)
 
-    entity.size = state.world.tile_size_in_meters
-    entity.collides = true
+    entity.sim.size = state.world.tile_size_in_meters
+    entity.sim.collides = true
 
     return index, entity
 }
@@ -636,13 +625,13 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
 add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_stored_entity(state, .Hero, &state.camera_p)
 
-    entity.size = {0.75, 0.4}
-    entity.collides = true
+    entity.sim.size = {0.75, 0.4}
+    entity.sim.collides = true
 
     init_hitpoints(entity, 3)
 
     sword_index, sword := add_sword(state)
-    entity.sword_index = sword_index
+    entity.sim.sword = sword_index
 
     make_entity_high_frequency(state, index)
 
@@ -657,45 +646,33 @@ sim_camera_region :: proc(state: ^GameState) {
     
 }
 
-entity_from_high_index :: #force_inline proc(state:^GameState, index: EntityIndex) -> (result: Entity) {
-    if index != 0 {
-        assert(index < state.high_entity_count)
-
-        result.high = &state.high_entities_[index]
-        result.storage_index = result.high.storage_index
-        result.stored = &state.stored_entities[result.storage_index]
-    }
-
-    return result
-}
-
-update_monster :: #force_inline proc(state:^GameState, stored: StoredEntity, entity: SimEntity, dt:f32) {
+update_monster :: #force_inline proc(state:^GameState, stored: ^StoredEntity, entity: SimEntity, dt:f32) {
 
 }
 
-update_sword :: #force_inline proc(state:^GameState, stored: StoredEntity, entity: SimEntity, dt:f32) {
+update_sword :: #force_inline proc(state:^GameState, stored: ^StoredEntity, entity: SimEntity, dt:f32) {
     move_spec := default_move_spec()
     move_spec.normalize_accelaration = false
     move_spec.drag = 0
     move_spec.speed = 0
 
-    old_p := entity.high.p
+    old_p := entity.p
     move_entity(state, entity, 0, move_spec, dt)
-    distance_traveled := length(entity.high.p - old_p)
+    distance_traveled := length(entity.p - old_p)
     
-    entity.stored.distance_remaining -= distance_traveled
-    if entity.stored.distance_remaining < 0 {
-        change_entity_location(&state.world_arena, state.world, entity.storage_index, entity.stored, nil, &entity.stored.p)
+    stored.sim.distance_remaining -= distance_traveled
+    if stored.sim.distance_remaining < 0 {
+        change_entity_location(&state.world_arena, state.world, entity.storage_index, stored, nil, &stored.p)
     }
 }
 
-update_familiar :: #force_inline proc(state:^GameState, stored: StoredEntity, entity: SimEntity, dt:f32) {
+update_familiar :: #force_inline proc(state:^GameState, stored: ^StoredEntity, entity: SimEntity, dt:f32) {
     closest_hero: Entity
-    closest_hero_dsq := square(6) // NOTE(viktor): 10m maximum search
+    closest_hero_dsq := square(10)
     for entity_index in 1..<state.high_entity_count {
         test := entity_from_high_index(state, entity_index)
-        if test.stored.type == .Hero {
-            dsq := length_squared(test.high.p.xy - entity.high.p.xy)
+        if test.stored.sim.type == .Hero {
+            dsq := length_squared(test.high.p.xy - entity.p.xy)
             if dsq < closest_hero_dsq {
                 closest_hero_dsq = dsq
                 closest_hero = test
@@ -706,7 +683,7 @@ update_familiar :: #force_inline proc(state:^GameState, stored: StoredEntity, en
     ddp: v2
     if closest_hero.high != nil && closest_hero_dsq > 1 {
         mpss: f32 = 0.5
-        ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.high.p.xy - entity.high.p.xy)
+        ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.high.p.xy - entity.p.xy)
     }
 
     move_spec := default_move_spec()
@@ -716,122 +693,6 @@ update_familiar :: #force_inline proc(state:^GameState, stored: StoredEntity, en
     move_entity(state, entity, ddp, move_spec, dt)
 }
 
-MoveSpec :: struct {
-    normalize_accelaration: b32,
-    drag: f32,
-    speed: f32,
-}
-
-default_move_spec :: #force_inline proc() -> MoveSpec {
-    return { false, 1, 0}
-}
-
-move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
-    ddp := ddp
-    
-    if move_spec.normalize_accelaration {
-        ddp_length_squared := length_squared(ddp)
-
-        if ddp_length_squared > 1 {
-            ddp *= 1 / square_root(ddp_length_squared)
-        }
-    }
-
-    ddp *= move_spec.speed
-
-    // TODO(viktor): ODE here
-    ddp += -move_spec.drag * entity.high.dp.xy
-
-    entity_delta := 0.5*ddp * square(dt) + entity.high.dp.xy * dt
-    entity.high.dp.xy = ddp * dt + entity.high.dp.xy
-
-    for iteration in 0..<4 {
-        desired_p := entity.high.p.xy + entity_delta
-
-        t_min: f32 = 1
-        wall_normal: v2
-        hit_high_entity_index: EntityIndex
-        
-        if entity.stored.collides {
-            for test_high_entity_index in 1..<state.high_entity_count {
-                if test_high_entity_index != entity.stored.high_entity_index {
-
-                    test_entity: Entity
-                    test_entity.high = &state.high_entities_[test_high_entity_index]
-                    test_entity.storage_index = test_entity.high.storage_index
-                    test_entity.stored = &state.stored_entities[test_entity.storage_index]
-
-                    if test_entity.stored.collides {
-                        diameter := entity.stored.size + test_entity.stored.size
-                        min_corner := -0.5 * diameter
-                        max_corner :=  0.5 * diameter
-
-                        rel := entity.high.p - test_entity.high.p
-
-                        test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
-                            EPSILON :: 0.01
-                            if entity_delta_x != 0 {
-                                t_result := (wall_x - rel_x) / entity_delta_x
-                                y := rel_y + t_result * entity_delta_y
-                                if 0 <= t_result && t_result < t_min^ {
-                                    if y >= min_y && y <= max_y {
-                                        t_min^ = max(0, t_result-EPSILON)
-                                        collided = true
-                                    }
-                                }
-                            }
-                            return collided
-                        }
-
-                        if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                            wall_normal = {-1,  0}
-                            hit_high_entity_index = test_high_entity_index
-                        }
-                        if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                            wall_normal = { 1,  0}
-                            hit_high_entity_index = test_high_entity_index
-                        }
-                        if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                            wall_normal = { 0, -1}
-                            hit_high_entity_index = test_high_entity_index
-                        }
-                        if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                            wall_normal = { 0,  1}
-                            hit_high_entity_index = test_high_entity_index
-                        }
-                    }
-                }
-            }
-        }
-
-        entity.high.p.xy += t_min * entity_delta
-
-        if hit_high_entity_index != 0 {
-            entity.high.dp.xy = project(entity.high.dp.xy, wall_normal)
-            entity_delta = desired_p - entity.high.p.xy
-            entity_delta = project(entity_delta, wall_normal)
-
-            hit_high_entity := state.high_entities_[hit_high_entity_index]
-            hit_stored_entity := state.stored_entities[hit_high_entity.storage_index]
-            entity.stored.p.chunk.z += hit_stored_entity.d_tile_z
-        } else {
-            break
-        }
-    }
-
-    if entity.high.dp.x < 0  {
-        entity.high.facing_index = 0
-    } else {
-        entity.high.facing_index = 1
-    }
-
-    new_p := map_into_worldspace(state.world, state.camera_p, entity.high.p.xy)
-    // TODO(viktor): bundle these together as the location update
-    change_entity_location(&state.world_arena, state.world, entity.storage_index, entity.stored, &new_p, &entity.stored.p)
-}
-
-
-
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
@@ -839,7 +700,6 @@ move_entity :: proc(state: ^GameState, entity: Entity, ddp: v2, move_spec: MoveS
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
     // TODO: Allow sample offsets here for more robust platform options
 }
-
 
 draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1) {
     rounded_center := round(center) + bitmap.focus
