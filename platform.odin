@@ -136,8 +136,7 @@ GameMemory :: struct {
     debug: DEBUG_code
 }
 
-GameState :: struct {
-}
+GameState :: struct {}
 
 // TODO: Copypaste END
 
@@ -668,7 +667,7 @@ main :: proc() {
                 mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
                 ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
                 frames_per_second     := 1000 / ms_per_frame
-                // fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
+                fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
             }
 
             last_cycle_count = end_cycle_count

@@ -1,6 +1,6 @@
 package game
 
-SimEntity :: struct {
+Entity :: struct {
 	storage_index: StorageIndex,
 
 	type: EntityType,
@@ -27,12 +27,12 @@ SimEntity :: struct {
 }
 
 EntityReference :: struct #raw_union {
-	ptr: ^SimEntity,
+	ptr: ^Entity,
 	index: StorageIndex,
 }
 
 SimEntityHash :: struct {
-	ptr: ^SimEntity,
+	ptr: ^Entity,
 	index: StorageIndex,
 }
 
@@ -43,7 +43,7 @@ SimRegion :: struct {
 	bounds: Rectangle,
 
 	entity_count: EntityIndex,
-    entities: []SimEntity,
+    entities: []Entity,
 
 	// TODO(viktor): Do I really want a hash for this?
 	// NOTE(viktor): Must be a power of two
@@ -54,7 +54,8 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 	// TODO(viktor): make storedEntities part of world
 	region = push_struct(sim_arena, SimRegion)
 	MAX_ENTITY_COUNT :: 4096
-	region.entities = push_slice(sim_arena, SimEntity, MAX_ENTITY_COUNT)
+	region.entities = push_slice(sim_arena, Entity, MAX_ENTITY_COUNT)
+	zero_struct(&region.sim_entity_hash)
 
 	region.world = world
 	region.origin = origin
@@ -127,9 +128,11 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^SimEntityHash) {
 	assert(storage_index != 0)
 
-	hash := storage_index
-	for offset in StorageIndex(0)..<len(region.sim_entity_hash) {
-		entry := &region.sim_entity_hash[(hash + offset) & (len(region.sim_entity_hash)-1)]
+	hash := cast(u32) storage_index
+	for offset in u32(0)..<len(region.sim_entity_hash) {
+		hash_mask: u32 = len(region.sim_entity_hash)-1
+		hash_index := (hash + offset) & hash_mask
+		entry := &region.sim_entity_hash[hash_index]
 		if entry.index == 0 || entry.index == storage_index {
 			result = entry
 			break
@@ -138,15 +141,16 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
 	return result
 }
 
-map_storage_index_to_entity :: proc(region: ^SimRegion, storage_index: StorageIndex, entity: ^SimEntity) {
+map_storage_index_to_entity :: proc(region: ^SimRegion, storage_index: StorageIndex, entity: ^Entity) {
 	entry := get_hash_from_index(region, storage_index)
+	assert(entry != nil)
 	assert(entry.index == 0 || entry.index == storage_index)
 
 	entry.index = storage_index
 	entry.ptr = entity
 }
 
-get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^SimEntity) {
+get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^Entity) {
 	entry := get_hash_from_index(region, storage_index)
 	result = entry.ptr
 	return result
@@ -171,27 +175,25 @@ store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
 
 add_entity :: proc { add_entity_new, add_entity_from_world_entity }
 
-add_entity_new :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, copy: ^StoredEntity) -> (entity: ^SimEntity) {
+add_entity_new :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, copy: ^StoredEntity) -> (entity: ^Entity) {
 	assert(storage_index != 0)
-	if region.entity_count < auto_cast len(region.entities) {
-		entity = &region.entities[region.entity_count]
-		region.entity_count += 1
-		map_storage_index_to_entity(region, storage_index, entity)
-		if copy != nil {
-			// TODO(viktor): this should really be a decompression not a copy
-			entity^ = copy.sim
-			load_entity_reference(state, region, &entity.sword)
-		}
-		entity.storage_index = storage_index
-	} else {
-		unreachable()
+
+	entity = &region.entities[region.entity_count]
+	region.entity_count += 1
+	map_storage_index_to_entity(region, storage_index, entity)
+	if copy != nil {
+		// TODO(viktor): this should really be a decompression not a copy
+		entity^ = copy.sim
+		load_entity_reference(state, region, &entity.sword)
 	}
+	entity.storage_index = storage_index
+	
 	return entity
 }
 
-add_entity_from_world_entity :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v2) -> (dest: ^SimEntity) {
+add_entity_from_world_entity :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v2) -> (dest: ^Entity) {
 	assert(source != nil)
-	dest = add_entity(state, region, storage_index, source)
+	dest = add_entity_new(state, region, storage_index, source)
 
 	if dest != nil {
 		if sim_p != nil {
@@ -219,7 +221,7 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
     return { false, 1, 0}
 }
 
-move_entity :: proc(region: ^SimRegion, entity: ^SimEntity, ddp: v2, move_spec: MoveSpec, dt: f32) {
+move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
     ddp := ddp
     
     if move_spec.normalize_accelaration {
@@ -243,7 +245,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^SimEntity, ddp: v2, move_spec: 
 
         t_min: f32 = 1
         wall_normal: v2
-        hit: ^SimEntity
+        hit: ^Entity
         
         if entity.collides {
 			// TODO(viktor): spatial partition here

@@ -44,12 +44,12 @@ is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
     return p.chunk.x != UNINITIALIZED_CHUNK
 }
 
-change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, low: ^StoredEntity, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     change_entity_location_raw(arena, world, index, new_p, old_p)
     if new_p != nil {
-        low.p = new_p^
+        stored.p = new_p^
     } else {
-        low.p = null_position()
+        stored.p = null_position()
     }
 }
 
@@ -138,8 +138,9 @@ world_difference :: #force_inline proc(world: ^World, a, b: WorldPosition) -> v3
 }
 
 is_canonical :: #force_inline proc(world: ^World, offset: v2) -> b32 {
-    return offset.x >= -0.5 * world.chunk_size_in_meters && offset.x <= 0.5 * world.chunk_size_in_meters &&
-    offset.y >= -0.5 * world.chunk_size_in_meters && offset.y <= 0.5 * world.chunk_size_in_meters
+	epsilon: f32 = 0.0001
+    return offset.x >= -(0.5 * world.chunk_size_in_meters + epsilon) && offset.x <= (0.5 * world.chunk_size_in_meters + epsilon) &&
+		   offset.y >= -(0.5 * world.chunk_size_in_meters + epsilon) && offset.y <= (0.5 * world.chunk_size_in_meters + epsilon)
 }
 
 are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b32 {
