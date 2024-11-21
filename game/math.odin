@@ -91,7 +91,7 @@ rect_center_half_dim :: #force_inline proc(center, half_dim: v2) -> Rectangle {
 }
 
 is_in_rectangle :: #force_inline proc(rec: Rectangle, point: v2) -> b32 {
-    return point.x >= rec.min.x && point.y >= rec.min.y && point.x < rec.max.x && point.y < rec.max.y
+    return rec.min.x < point.x && point.x < rec.max.x && rec.min.y < point.y && point.y < rec.max.y
 }
 
 

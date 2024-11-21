@@ -3,8 +3,6 @@ package main
 import "core:fmt"
 import win "core:sys/windows"
 
-import "util"
-
 when INTERNAL {
 
     DEBUG_code :: struct {
@@ -34,7 +32,7 @@ when INTERNAL {
             return nil // TODO Logging
         }
         
-        file_size_32 := util.safe_truncate_u64(cast(u64) file_size)
+        file_size_32 := safe_truncate_u64(cast(u64) file_size)
         result_ptr := cast([^]u8) win.VirtualAlloc(nil, cast(uint) file_size_32, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         if result_ptr == nil {
             return nil // TODO Logging

@@ -5,8 +5,6 @@ import "base:runtime"
 
 import "core:fmt"
 import win "core:sys/windows"
-import "util"
-
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
     - Fullscreen support
@@ -326,15 +324,15 @@ main :: proc() {
 
     game_memory : GameMemory
     {
-        base_address := cast(rawptr) cast(uintptr) util.terabytes(1) when INTERNAL else 0
+        base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
 
-        permanent_storage_size := util.megabytes(u64(256))
-        transient_storage_size := util.gigabytes(u64(1))
+        permanent_storage_size := megabytes(u64(256))
+        transient_storage_size := gigabytes(u64(1))
         total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
 
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-        // TODO(viktor): why?
-        assert(total_size < util.gigabytes(uint(4)))
+        // TODO(viktor): why limit ourselves?
+        assert(total_size < gigabytes(uint(4)))
         state.game_memory_block = storage_ptr[:total_size]
 
         // TODO(viktor): TransientStorage needs to be broken up
@@ -615,7 +613,7 @@ main :: proc() {
                 sound_is_valid = false
             }
 
-            util.swap(&old_input, &new_input)
+            swap(&old_input, &new_input)
         }
 
         // ---------------------- ---------------------- ----------------------
@@ -667,7 +665,7 @@ main :: proc() {
                 mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
                 ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
                 frames_per_second     := 1000 / ms_per_frame
-                fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
+                // fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
             }
 
             last_cycle_count = end_cycle_count

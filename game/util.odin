@@ -4,32 +4,9 @@ import "base:intrinsics"
 import "core:math"
 import "core:simd"
 
-U8_MIN  :: 0
-U16_MIN :: 0
-U32_MIN :: 0
-U64_MIN :: 0
-
-U8_MAX  :: ~u8(0)
-U16_MAX :: ~u16(0)
-U32_MAX :: ~u32(0)
-U64_MAX :: ~u64(0)
-
-I8_MIN  : i8: -1 <<  7
-I16_MIN :i16: -1 << 15
-I32_MIN :i32: -1 << 31
-I64_MIN :i64: -1 << 63
-
-I8_MAX  : i8: 1 <<  7 - 1
-I16_MAX :i16: 1 << 15 - 1
-I32_MAX :i32: 1 << 31 - 1
-I64_MAX :i64: 1 << 63 - 1
-
-
 swap :: proc(a, b: ^$T) {
     b^, a^ = a^, b^
 }
-
-
 
 vec_cast :: proc { 
     cast_vec_2, cast_vec_3, cast_vec_4,
@@ -187,6 +164,8 @@ round :: proc {
 }
 
 round_f32 :: #force_inline proc(f: f32) -> i32 {
+    // TODO(viktor): 
+    if f < 0 do return cast(i32) -math.round(-f)
     return cast(i32) math.round(f)
 }
 

@@ -1,22 +1,44 @@
 package game
 
+EntityFlag :: enum {
+    Collides,
+    Nonspatial,
+
+    Simulated,
+}
+EntityFlags :: bit_set[EntityFlag]
+
 update_monster :: #force_inline proc(region:^SimRegion, entity: ^Entity, dt:f32) {
 
 }
 
-update_sword :: #force_inline proc(region:^SimRegion, entity: ^Entity, dt:f32) {
-    move_spec := default_move_spec()
-    move_spec.normalize_accelaration = false
-    move_spec.drag = 0
-    move_spec.speed = 0
+make_entity_nonspatial :: #force_inline proc(entity: ^Entity) {
+    entity.flags += {.Nonspatial}
+    entity.p = INVALID_P
+}
 
-    old_p := entity.p
-    move_entity(region, entity, 0, move_spec, dt)
-    distance_traveled := length(entity.p - old_p)
-    
-    entity.distance_remaining -= distance_traveled
-    if entity.distance_remaining < 0 {
-		unimplemented("Need to make entities be able to not be there anymore")
+make_entity_spatial :: #force_inline proc(entity: ^Entity, p, dp: v3) {
+    entity.flags -= {.Nonspatial}
+    entity.p = p
+    entity.dp = dp
+}
+
+update_sword :: #force_inline proc(region:^SimRegion, entity: ^Entity, dt:f32) {
+    if .Nonspatial not_in entity.flags {
+        move_spec := default_move_spec()
+        move_spec.normalize_accelaration = false
+        move_spec.drag = 0
+        move_spec.speed = 0
+
+        old_p := entity.p
+        move_entity(region, entity, 0, move_spec, dt)
+        distance_traveled := length(entity.p - old_p)
+        
+        // TODO(viktor): need to handle that this can overuse the remaining distance in a frame
+        entity.distance_remaining -= distance_traveled
+        if entity.distance_remaining < 0 {
+                entity.flags += { .Nonspatial }3
+        }
     }
 }
 

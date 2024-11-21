@@ -1,18 +1,19 @@
 package game
 
+import "core:fmt"
+
 Entity :: struct {
 	storage_index: StorageIndex,
-
+    
 	type: EntityType,
+    flags: EntityFlags,
 
-    p: v3,
-	dp: v3,
+    p, dp: v3,
 
     size: v2,
 
     // NOTE(viktor): This is for "stairs"
     d_tile_z: i32,
-    collides: b32,
 
     hit_point_max: u32,
     hit_points: [16]HitPoint,
@@ -54,8 +55,8 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 	// TODO(viktor): make storedEntities part of world
 	region = push_struct(sim_arena, SimRegion)
 	MAX_ENTITY_COUNT :: 4096
+	zero_struct(region)
 	region.entities = push_slice(sim_arena, Entity, MAX_ENTITY_COUNT)
-	zero_struct(&region.sim_entity_hash)
 
 	region.world = world
 	region.origin = origin
@@ -64,6 +65,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(world, region.origin, region.bounds.max)
     // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
+    // TODO(viktor): entities get visually duplicated when crossing the edge of the sim_region, fix it
     for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
         for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
             chunk := get_chunk(nil, world, chunk_x, chunk_y, region.origin.chunk.z)
@@ -72,12 +74,13 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
                     for entity_index in 0..< block.entity_count {
                         storage_index := block.indices[entity_index]
 						stored := &state.stored_entities[storage_index]
-
-						sim_space_p := get_sim_space_p(region, stored)
-						if is_in_rectangle(region.bounds, sim_space_p.xy) {
-							// TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
-							add_entity(state, region, storage_index, stored, &sim_space_p)
-						}
+                        if .Nonspatial not_in stored.sim.flags {
+                            sim_space_p := get_sim_space_p(region, stored).xy
+                            if is_in_rectangle(region.bounds, sim_space_p.xy) {
+                                // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
+                                add_entity(state, region, storage_index, stored, &sim_space_p)
+                            }
+                        }
                     }
                 }
             }
@@ -91,15 +94,20 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 	// TODO(viktor): make storedEntities part of world
 	for entity_index in 0..<region.entity_count {
 		entity := region.entities[entity_index]
-		stored := state.stored_entities[entity.storage_index]
-		stored.sim = entity
-		store_entity_reference(&stored.sim.sword)
-		// TODO(viktor): Save state back to stored entity
+        assert(entity.storage_index != 0)
+		stored := &state.stored_entities[entity.storage_index]
 
-		new_p := map_into_worldspace(state.world, region.origin, entity.p.xy)
-		change_entity_location(&state.world_arena, region.world, entity.storage_index, &stored, &new_p, &stored.p)
+        assert(.Simulated in entity.flags)
+		stored.sim = entity
+        stored.sim.flags -= {.Simulated}
+        assert(.Simulated not_in stored.sim.flags)
+
+		store_entity_reference(&stored.sim.sword)
+		// TODO(viktor): Save state back to stored entity, once high entities do state decompression
+
+		new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p.xy)
+		change_entity_location(&state.world_arena, region.world, entity.storage_index, stored, new_p)
 		
-		// TODO(viktor): should this be written to anywhere=
 		if entity.storage_index == state.camera_following_index {
 			new_camera_p := state.camera_p
 			when false {
@@ -121,6 +129,7 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 			} else {
 				new_camera_p = stored.p
 			}
+			state.camera_p = new_camera_p
 		}
 	}
 }
@@ -132,6 +141,7 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
 	for offset in u32(0)..<len(region.sim_entity_hash) {
 		hash_mask: u32 = len(region.sim_entity_hash)-1
 		hash_index := (hash + offset) & hash_mask
+
 		entry := &region.sim_entity_hash[hash_index]
 		if entry.index == 0 || entry.index == storage_index {
 			result = entry
@@ -139,15 +149,6 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
 		}
 	}
 	return result
-}
-
-map_storage_index_to_entity :: proc(region: ^SimRegion, storage_index: StorageIndex, entity: ^Entity) {
-	entry := get_hash_from_index(region, storage_index)
-	assert(entry != nil)
-	assert(entry.index == 0 || entry.index == storage_index)
-
-	entry.index = storage_index
-	entry.ptr = entity
 }
 
 get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^Entity) {
@@ -161,7 +162,7 @@ load_entity_reference :: #force_inline proc(state: ^GameState, region: ^SimRegio
 		entry := get_hash_from_index(region, ref.index)
 		if entry.ptr == nil {
 			entry.index = ref.index
-			entry.ptr = add_entity(state, region, ref.index, get_low_entity(state, ref.index))
+			entry.ptr = add_entity(state, region, ref.index, get_low_entity(state, ref.index), nil)
 		}
 		ref.ptr = entry.ptr
 	}
@@ -173,42 +174,59 @@ store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
 	}
 }
 
-add_entity :: proc { add_entity_new, add_entity_from_world_entity }
-
-add_entity_new :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, copy: ^StoredEntity) -> (entity: ^Entity) {
-	assert(storage_index != 0)
-
-	entity = &region.entities[region.entity_count]
-	region.entity_count += 1
-	map_storage_index_to_entity(region, storage_index, entity)
-	if copy != nil {
-		// TODO(viktor): this should really be a decompression not a copy
-		entity^ = copy.sim
-		load_entity_reference(state, region, &entity.sword)
-	}
-	entity.storage_index = storage_index
-	
-	return entity
-}
-
-add_entity_from_world_entity :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v2) -> (dest: ^Entity) {
-	assert(source != nil)
-	dest = add_entity_new(state, region, storage_index, source)
+add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v2) -> (dest: ^Entity) {
+	dest = add_entity_raw(state, region, storage_index, source)
 
 	if dest != nil {
 		if sim_p != nil {
 			dest.p.xy = sim_p^
 		} else {
-			dest.p.xy = get_sim_space_p(region, source)
+			dest.p = get_sim_space_p(region, source)
 		}
 	}
 
 	return dest
 }
 
-get_sim_space_p :: #force_inline proc(region: ^SimRegion, stored: ^StoredEntity) -> v2 {
-    diff := world_difference(region.world, stored.p, region.origin) 
-    return diff.xy
+add_entity_raw :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity) -> (entity: ^Entity) {
+	assert(storage_index != 0)
+        
+    entry := get_hash_from_index(region, storage_index)
+    if entry.ptr == nil {
+        entity = &region.entities[region.entity_count]
+        region.entity_count += 1
+        
+        assert(entry.index == 0 || entry.index == storage_index)
+        entry.index = storage_index
+        entry.ptr = entity
+
+        if source != nil {
+            // TODO(viktor): this should really be a decompression not a copy
+            entity^ = source.sim
+
+            load_entity_reference(state, region, &entity.sword)
+
+            assert(.Simulated not_in entity.flags)
+            entity.flags += { .Simulated }
+            entity.storage_index = storage_index
+        }
+    }
+	
+    assert(entity == nil || .Simulated in entity.flags)
+	return entity
+}
+
+INVALID_P :: v3{100_000, 100_000, 100_000}
+
+get_sim_space_p :: #force_inline proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v3) {
+    // TODO(viktor): Do we want to set this to signaling NAN in 
+    // debug mode to make sure nobody ever uses the position of
+    // a nonspatial entity?
+    result = INVALID_P
+    if .Nonspatial not_in stored.sim.flags {
+        result = world_difference(region.world, stored.p, region.origin)
+    }
+    return result
 }
 
 MoveSpec :: struct {
@@ -222,6 +240,8 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
 }
 
 move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
+    assert(.Nonspatial not_in entity.flags)
+
     ddp := ddp
     
     if move_spec.normalize_accelaration {
@@ -247,13 +267,13 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: Mov
         wall_normal: v2
         hit: ^Entity
         
-        if entity.collides {
+        if .Collides in entity.flags && .Nonspatial not_in entity.flags {
 			// TODO(viktor): spatial partition here
             for test_entity_index in 0..<region.entity_count {
 				test_entity := &region.entities[test_entity_index]
 
                 if entity != test_entity {
-                    if test_entity.collides {
+                    if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
                         diameter := entity.size + test_entity.size
                         min_corner := -0.5 * diameter
                         max_corner :=  0.5 * diameter

@@ -44,16 +44,28 @@ is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
     return p.chunk.x != UNINITIALIZED_CHUNK
 }
 
-change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p_init: WorldPosition) {
+    new_p, old_p : ^WorldPosition
+    if is_valid(new_p_init) {
+        new_p_init := new_p_init
+        new_p = &new_p_init
+    }
+    if .Nonspatial not_in stored.sim.flags && is_valid(stored.p) {
+        old_p = &stored.p
+    }
+    
     change_entity_location_raw(arena, world, index, new_p, old_p)
-    if new_p != nil {
+
+    if new_p != nil && is_valid(new_p^) {
         stored.p = new_p^
+        stored.sim.flags -= { .Nonspatial }
     } else {
         stored.p = null_position()
+        stored.sim.flags += { .Nonspatial }
     }
 }
 
-change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     // TODO(viktor): if the entity moves  into the camera bounds, shoulds this force the entity into the high set immediatly?
     assert(auto_cast (old_p == nil || is_valid(old_p^)))
     assert(auto_cast (new_p == nil || is_valid(new_p^)))
@@ -69,7 +81,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
                 first_block := &chunk.first_block
                 outer: for block := first_block; block != nil; block = block.next {
                     for i in 0..<block.entity_count {
-                        if block.indices[i] == index {
+                        if block.indices[i] == storage_index {
                             first_block.entity_count -= 1
                             block.indices[i] = first_block.indices[first_block.entity_count]
                             
@@ -89,7 +101,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
                 }
             }
         }
-        
+
         if new_p != nil {
             // NOTE(viktor): Insert the entity into its new block
             chunk := get_chunk(arena, world, new_p^)
@@ -110,7 +122,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
             }
             assert(block.entity_count < len(block.indices))
             
-            block.indices[block.entity_count] = index
+            block.indices[block.entity_count] = storage_index
             block.entity_count += 1
         }
     }
@@ -121,7 +133,7 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v2 = 0
     result.offset_ += offset
     // NOTE: the world is assumed to be toroidal topology
     // if you leave on one end you end up the other end
-    rounded_offset := round(result.offset_ / world.chunk_size_in_meters)
+    rounded_offset  := round(result.offset_ / world.chunk_size_in_meters)
     result.chunk.xy  = result.chunk.xy + rounded_offset
     result.offset_ -= vec_cast(f32, rounded_offset) * world.chunk_size_in_meters
     
@@ -139,8 +151,9 @@ world_difference :: #force_inline proc(world: ^World, a, b: WorldPosition) -> v3
 
 is_canonical :: #force_inline proc(world: ^World, offset: v2) -> b32 {
 	epsilon: f32 = 0.0001
-    return offset.x >= -(0.5 * world.chunk_size_in_meters + epsilon) && offset.x <= (0.5 * world.chunk_size_in_meters + epsilon) &&
-		   offset.y >= -(0.5 * world.chunk_size_in_meters + epsilon) && offset.y <= (0.5 * world.chunk_size_in_meters + epsilon)
+    half_size := 0.5 * world.chunk_size_in_meters
+    return -(half_size + epsilon) <= offset.x && offset.x <= (half_size + epsilon) &&
+		   -(half_size + epsilon) <= offset.y && offset.y <= (half_size + epsilon)
 }
 
 are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b32 {
@@ -179,12 +192,12 @@ get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) 
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_z: i32) -> ^Chunk {
     CHUNK_SAFE_MARGIN :: 256
     
-    assert(chunk_x > I32_MIN + CHUNK_SAFE_MARGIN)
-    assert(chunk_x < I32_MAX - CHUNK_SAFE_MARGIN)
-    assert(chunk_y > I32_MIN + CHUNK_SAFE_MARGIN)
-    assert(chunk_y < I32_MAX - CHUNK_SAFE_MARGIN)
-    assert(chunk_z > I32_MIN + CHUNK_SAFE_MARGIN)
-    assert(chunk_z < I32_MAX - CHUNK_SAFE_MARGIN)
+    assert(chunk_x > min(i32) + CHUNK_SAFE_MARGIN)
+    assert(chunk_x < max(i32) - CHUNK_SAFE_MARGIN)
+    assert(chunk_y > min(i32) + CHUNK_SAFE_MARGIN)
+    assert(chunk_y < max(i32) - CHUNK_SAFE_MARGIN)
+    assert(chunk_z > min(i32) + CHUNK_SAFE_MARGIN)
+    assert(chunk_z < max(i32) - CHUNK_SAFE_MARGIN)
     
     // TODO(viktor): BETTER HASH FUNCTION !!
     hash_value := 19*chunk_x + 7*chunk_y + 3*chunk_z
@@ -230,4 +243,4 @@ init_world :: proc(world: ^World, tile_size_in_meters: f32) {
 }
 
 @(private="file")
-UNINITIALIZED_CHUNK :: I32_MIN
+UNINITIALIZED_CHUNK :: min(i32)
