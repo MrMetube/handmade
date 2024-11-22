@@ -3,7 +3,9 @@ package game
 import "core:fmt"
 
 Entity :: struct {
+    // NOTE(viktor): these are only for the sim region
 	storage_index: StorageIndex,
+    updatable: b32,
     
 	type: EntityType,
     flags: EntityFlags,
@@ -42,6 +44,7 @@ SimRegion :: struct {
 
 	origin: WorldPosition, 
 	bounds: Rectangle,
+	updatable_bounds: Rectangle,
 
 	entity_count: EntityIndex,
     entities: []Entity,
@@ -58,9 +61,14 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 	zero_struct(region)
 	region.entities = push_slice(sim_arena, Entity, MAX_ENTITY_COUNT)
 
+    // TODO(viktor): IMPORTANT(viktor) Calculate this eventually from the maximum value
+    // of all entities radius plus their speed!
+    update_safety_margin :: 1
+
 	region.world = world
 	region.origin = origin
-	region.bounds = bounds
+	region.updatable_bounds = bounds
+	region.bounds = rect_add(bounds, update_safety_margin)
 
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(world, region.origin, region.bounds.max)
@@ -76,7 +84,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 						stored := &state.stored_entities[storage_index]
                         if .Nonspatial not_in stored.sim.flags {
                             sim_space_p := get_sim_space_p(region, stored).xy
-                            if is_in_rectangle(region.bounds, sim_space_p.xy) {
+                            if is_in_rectangle(region.bounds, sim_space_p) {
                                 // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
                                 add_entity(state, region, storage_index, stored, &sim_space_p)
                             }
@@ -109,8 +117,9 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 		change_entity_location(&state.world_arena, region.world, entity.storage_index, stored, new_p)
 		
 		if entity.storage_index == state.camera_following_index {
-			new_camera_p := state.camera_p
-			when false {
+            new_camera_p: WorldPosition
+            when false {
+                new_camera_p = state.camera_p
 				new_camera_p.chunk.z = entity.low.p.chunk.z
 				offset := entity.high.p
 
@@ -129,7 +138,7 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 			} else {
 				new_camera_p = stored.p
 			}
-			state.camera_p = new_camera_p
+            state.camera_p = new_camera_p
 		}
 	}
 }
@@ -162,7 +171,9 @@ load_entity_reference :: #force_inline proc(state: ^GameState, region: ^SimRegio
 		entry := get_hash_from_index(region, ref.index)
 		if entry.ptr == nil {
 			entry.index = ref.index
-			entry.ptr = add_entity(state, region, ref.index, get_low_entity(state, ref.index), nil)
+            entity := get_low_entity(state, ref.index)
+            p := get_sim_space_p(region, entity).xy
+			entry.ptr = add_entity(state, region, ref.index, entity, &p)
 		}
 		ref.ptr = entry.ptr
 	}
@@ -180,6 +191,7 @@ add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_
 	if dest != nil {
 		if sim_p != nil {
 			dest.p.xy = sim_p^
+            dest.updatable = is_in_rectangle(region.updatable_bounds, dest.p.xy)
 		} else {
 			dest.p = get_sim_space_p(region, source)
 		}
@@ -208,8 +220,9 @@ add_entity_raw :: proc(state: ^GameState, region: ^SimRegion, storage_index: Sto
 
             assert(.Simulated not_in entity.flags)
             entity.flags += { .Simulated }
-            entity.storage_index = storage_index
         }
+        entity.storage_index = storage_index
+        entity.updatable = false
     }
 	
     assert(entity == nil || .Simulated in entity.flags)
@@ -259,6 +272,16 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: Mov
 
     entity_delta := 0.5*ddp * square(dt) + entity.dp.xy * dt
     entity.dp.xy = ddp * dt + entity.dp.xy
+
+    ddz : f32 = -9.8;
+    entity.p.z = 0.5 * ddz * square(dt) + entity.dp.z * dt + entity.p.z;
+    entity.dp.z = ddz * dt + entity.dp.z;
+
+    if entity.p.z < 0 {
+        entity.p.z = 0;
+        entity.dp.z = 0;
+    }
+
 
     for iteration in 0..<4 {
         desired_p := entity.p.xy + entity_delta

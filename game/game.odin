@@ -354,7 +354,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), Red) // NOTE: Clear the screen
 
     // TODO(viktor): these numbers where picked at random
-    tilespan := [2]f32{17, 9}
+    tilespan := [2]f32{17, 9} * 2
     camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * tilespan)
     
     sim_arena: Arena
@@ -366,108 +366,143 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     draw_bitmap(buffer, state.backdrop, screen_center)
 
     for &entity in camera_sim_region.entities {
-        dt := input.delta_time;
+        if entity.updatable {
+            // TODO(viktor):  move this out into entity.odin
+            dt := input.delta_time;
 
-        z := entity.p.z
-        size := state.meters_to_pixels * entity.size
+            z := entity.p.z
+            size := state.meters_to_pixels * entity.size
 
-        // TODO(viktor): this is incorrect, should be computed after update
-        shadow_alpha := 1 - 0.5 * entity.p.z;
-        if(shadow_alpha < 0) {
-            shadow_alpha = 0.0;
-        }
+            // TODO(viktor): this is incorrect, should be computed after update
+            shadow_alpha := 1 - 0.5 * entity.p.z;
+            if(shadow_alpha < 0) {
+                shadow_alpha = 0.0;
+            }
+            
+            piece_group := EntityVisiblePieceGroup { state = state }
+        
+            ddp: v2
+            move_spec := default_move_spec()
 
-        piece_group := EntityVisiblePieceGroup { state = state }
+            switch entity.type {
+            case .Nil: // NOTE(viktor): nothing
+            case .Wall:
+                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size )
+                // TODO(viktor): wall asset
+                draw_rectangle(buffer, position, size, White)
 
-        switch entity.type {
-        case .Nil: // NOTE(viktor): nothing
-        case .Wall:
-            position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size )
-            // TODO(viktor): wall asset
-            draw_rectangle(buffer, position, size, White)
+            case .Sword:
+                move_spec.normalize_accelaration = false
+                move_spec.drag = 0
+                move_spec.speed = 0
 
-        case .Sword:
-            update_sword(camera_sim_region, &entity, input.delta_time)
+                // TODO(viktor): Add the ability in the collision routines
+                // to understand a movement limit for an entity, and then 
+                // update this routine to use that to know when to kill 
+                // the sword.
+                old_p := entity.p
+                
+                distance_traveled := length(entity.p - old_p)
 
-            push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-            push_bitmap(&piece_group, &state.sword, 0)
+                entity.distance_remaining -= distance_traveled
+                if entity.distance_remaining < 0 {
+                    entity.flags += { .Nonspatial }
+                }
 
-        case .Hero:
-            for &con_hero in state.controlled_heroes {
-                if con_hero.storage_index == entity.storage_index {
-                    if con_hero.dz != 0 {
-                        entity.dp.z = con_hero.dz
-                    }
+                push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+                push_bitmap(&piece_group, &state.sword, 0)
 
-                    move_spec := default_move_spec()
-                    move_spec.normalize_accelaration = true
-                    move_spec.drag = 8
-                    move_spec.speed = 50
-
-                    move_entity(camera_sim_region, &entity, con_hero.ddp, move_spec, input.delta_time)
-
-                    push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-                    push_bitmap(&piece_group, &state.player[entity.facing_index], v2{0,z})
-                    draw_hitpoints(&piece_group, &entity, 0.5)
-
-                    if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
-                        sword := entity.sword.ptr
-                        if sword != nil && .Nonspatial in sword.flags {
-                            dp: v3
-                            dp.xy = 5 * con_hero.dsword
-                            sword.distance_remaining = 5
-                            make_entity_spatial(sword, entity.p, dp)
+            case .Hero:
+                for &con_hero in state.controlled_heroes {
+                    if con_hero.storage_index == entity.storage_index {
+                        if con_hero.dz != 0 {
+                            entity.dp.z = con_hero.dz
                         }
 
+                        move_spec.normalize_accelaration = true
+                        move_spec.drag = 8
+                        move_spec.speed = 50
+                        ddp = con_hero.ddp
+
+
+                        push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+                        push_bitmap(&piece_group, &state.player[entity.facing_index], v2{0,z})
+                        draw_hitpoints(&piece_group, &entity, 0.5)
+
+                        if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
+                            sword := entity.sword.ptr
+                            if sword != nil && .Nonspatial in sword.flags {
+                                dp: v3
+                                dp.xy = 5 * con_hero.dsword
+                                sword.distance_remaining = 5
+                                make_entity_spatial(sword, entity.p, dp)
+                            }
+
+                        }
+
+                        break
                     }
-
-                    break
                 }
+
+            case .Familiar:
+                entity.t_bob += dt
+                if entity.t_bob > TAU {
+                    entity.t_bob -= TAU
+                }
+                hz :: 4
+                coeff := sin(entity.t_bob * hz)
+                z += (coeff) * 0.3 + 0.3
+
+                closest_hero: ^Entity
+                closest_hero_dsq := square(10)
+
+                // TODO(viktor): make spatial queries easy for things
+                for test_entity_index in 0..<camera_sim_region.entity_count {
+                    test := &camera_sim_region.entities[test_entity_index]
+                    if test.type == .Hero {
+                        dsq := length_squared(test.p.xy - entity.p.xy)
+                        if dsq < closest_hero_dsq {
+                            closest_hero_dsq = dsq
+                            closest_hero = test
+                        }
+                    }
+                }
+
+                if closest_hero != nil && closest_hero_dsq > 1 {
+                    mpss: f32 = 0.5
+                    ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p.xy - entity.p.xy)
+                }
+
+                move_spec.normalize_accelaration = true
+                move_spec.drag = 8
+                move_spec.speed = 50
+
+                push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
+                push_bitmap(&piece_group, &state.player[entity.facing_index], v2{0,z}, 0.5)
+
+            case .Monster:
+                push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+                push_bitmap(&piece_group, &state.monster[1], 0)
+
+                draw_hitpoints(&piece_group, &entity, 0.8)
+            }
+            
+            if (ddp.x != 0 || ddp.y != 0 || entity.dp.x != 0 || entity.dp.y != 0) && .Nonspatial not_in entity.flags {
+                move_entity(camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
-        case .Familiar:
-            entity.t_bob += dt
-            if entity.t_bob > TAU {
-                entity.t_bob -= TAU
-            }
-            hz :: 4
-            coeff := sin(entity.t_bob * hz)
-            z += (coeff) * 0.3 + 0.3
-            // TODO(viktor): shadow is inverted
-
-            update_familiar(camera_sim_region, &entity, dt)
-            push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
-            push_bitmap(&piece_group, &state.player[entity.facing_index], v2{0,z}, 0.5)
-
-        case .Monster:
-            update_monster(camera_sim_region, &entity, dt)
-
-            push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-            push_bitmap(&piece_group, &state.monster[1], 0)
-
-            draw_hitpoints(&piece_group, &entity, 0.8)
-        }
-
-        ddz : f32 = -9.8;
-        entity.p.z = 0.5 * ddz * square(dt) + entity.dp.z * dt + entity.p.z;
-        entity.dp.z = ddz * dt + entity.dp.z;
-
-        if entity.p.z < 0 {
-            entity.p.z = 0;
-            entity.dp.z = 0;
-        }
-
-        // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
-        for index in 0..<piece_group.count {
-            center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size)
-            piece := piece_group.pieces[index]
-            center += piece.offset
-            if piece.bitmap != nil {
-                center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels)
-                center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels)
-                draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
-            } else {
-                draw_rectangle(buffer, center, piece.size, piece.color)
+            // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
+            for index in 0..<piece_group.count {
+                center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size)
+                piece := piece_group.pieces[index]
+                center += piece.offset
+                if piece.bitmap != nil {
+                    center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels)
+                    center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels)
+                    draw_bitmap(buffer, piece.bitmap^, center, piece.color.a)
+                } else {
+                    draw_rectangle(buffer, center, piece.size, piece.color)
+                }
             }
         }
     }
