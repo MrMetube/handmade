@@ -113,6 +113,9 @@ init_arena :: #force_inline proc(arena: ^Arena, storage: []u8) {
     arena.storage = storage
 }
 
+// TODO(viktor): zero all pushed data by default and add nonzeroing version for all procs
+push :: proc { push_slice, push_struct, push_size }
+
 push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, len: u64) -> (result: []Element) {
     data := cast([^]Element) push_size(arena, cast(u64) size_of(Element) * len)
     result = data[:len]
@@ -128,10 +131,10 @@ push_size :: #force_inline proc(arena: ^Arena, size: u64) -> (result: [^]u8) {
     assert(arena.used + size < cast(u64)len(arena.storage))
     result = &arena.storage[arena.used]
     arena.used += size
-    // TODO(viktor): zero all pushed data by default and add nonzeroing version for all procs
-    // zero_slice(result[:size])
     return result
 }
+
+zero :: proc { zero_struct, zero_slice }
 
 zero_struct :: #force_inline proc(s: ^$T) {
     data := cast([^]u8) s
@@ -414,6 +417,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                                 dp: v3
                                 dp.xy = 5 * con_hero.dsword
                                 sword.distance_limit = 5
+                                add_collision_rule(state, entity.storage_index, sword.storage_index, false)
                                 make_entity_spatial(sword, entity.p, dp)
                             }
 
@@ -437,7 +441,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 distance_traveled := length(entity.p - old_p)
 
                 if entity.distance_limit == 0 {
-                    entity.flags += { .Nonspatial }
+                    clear_collision_rules(state, entity.storage_index)
+                    make_entity_nonspatial(&entity)
                 }
 
                 push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
@@ -487,7 +492,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             }
             
             if (ddp.x != 0 || ddp.y != 0 || entity.dp.x != 0 || entity.dp.y != 0) && .Nonspatial not_in entity.flags {
-                move_entity(camera_sim_region, &entity, ddp, move_spec, input.delta_time)
+                move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
             // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
@@ -557,6 +562,13 @@ ControlledHero :: struct {
     dz: f32,
 }
 
+PairwiseCollsionRule :: struct {
+    should_collide: b32,
+    index_a, index_b: StorageIndex,
+
+    next_in_hash: ^PairwiseCollsionRule
+}
+
 GameState :: struct {
     world_arena: Arena,
     // TODO(viktor): should we allow split-screen?
@@ -577,6 +589,10 @@ GameState :: struct {
 
     tile_size_in_pixels :u32,
     meters_to_pixels: f32,
+
+    // NOTE(viktor): must be a power of 2!
+    collision_rule_hash: [256]^PairwiseCollsionRule,
+    first_free_collision_rule: ^PairwiseCollsionRule,
 }
 
 LoadedBitmap :: struct {
@@ -673,6 +689,57 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
     }
 
     return index
+}
+
+add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide: b32) {
+    // TODO(viktor): collapse this with should_collide
+    a, b := a, b
+    if a > b do swap(&a, &b)
+    // TODO(viktor): BETTER HASH FUNCTION!!!
+    found: ^PairwiseCollsionRule
+    hash_bucket := a & (len(state.collision_rule_hash) - 1)
+    for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
+        if rule.index_a == a && rule.index_b == b {
+            found = rule
+            break
+        }
+    }
+
+    if found == nil {
+        found = state.first_free_collision_rule
+        if found != nil {
+            state.first_free_collision_rule = found.next_in_hash
+        } else {
+            found = push(&state.world_arena, PairwiseCollsionRule)
+        }
+        found.next_in_hash = state.collision_rule_hash[hash_bucket]
+        state.collision_rule_hash[hash_bucket] = found
+    }
+
+    if found != nil {
+        found.index_a = a
+        found.index_b = b
+        found.should_collide = should_collide
+    }
+}
+
+clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
+    // TODO(viktor): need to make a better datastructute that allows for 
+    // the removal of collision rules without searching the entire table
+    for hash_bucket in 0..<len(state.collision_rule_hash) {
+        for rule := &state.collision_rule_hash[hash_bucket]; rule^ != nil;  {
+            if rule^.index_a == storage_index || rule^.index_b == storage_index {
+                removed_rule := rule^
+
+                rule^ = (rule^).next_in_hash
+
+                removed_rule.next_in_hash = state.first_free_collision_rule
+                state.first_free_collision_rule = removed_rule
+            } else {
+                rule = &(rule^.next_in_hash)
+            }
+        }
+    }
 }
 
 push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size, offset: v2, color: GameColor) {

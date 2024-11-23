@@ -253,7 +253,7 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
     return { false, 1, 0}
 }
 
-move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
+move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
     assert(.Nonspatial not_in entity.flags)
 
     ddp := ddp
@@ -307,8 +307,8 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: Mov
                 // TODO(viktor): spatial partition here
                 for test_entity_index in 0..<region.entity_count {
                     test_entity := &region.entities[test_entity_index]
-
-                    if entity != test_entity {
+                
+                    if should_collide(state, entity, test_entity) {
                         if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
                             diameter := entity.size + test_entity.size
                             min_corner := -0.5 * diameter
@@ -356,29 +356,15 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: Mov
             distance_remaining -= t_min * entity_delta_length
             if hit != nil {
                 entity_delta = desired_p - entity.p.xy
-
-                if .Collides in entity.flags {
+                
+                stops_on_collision := handle_collision(entity, hit)
+    
+                if stops_on_collision {
                     entity.dp.xy = project(entity.dp.xy, wall_normal)
                     entity_delta = project(entity_delta, wall_normal)
                 } else {
-                    _ = 1
+                    add_collision_rule(state, entity.storage_index, hit.storage_index, false)
                 }
-                // TODO(viktor): IMPORTANT(viktor) Need our collision table here!
-
-                a := entity
-                b := hit
-                if a.type > b.type do swap(&a, &b)
-                handle_collision :: proc(a, b: ^Entity) {
-                    if a.type == .Monster && b.type == .Sword {
-                        a.hit_point_max -= 1
-                        make_entity_nonspatial(b)
-                    }
-                }
-
-                handle_collision(a, b)
-                
-                // TODO(viktor): stairs
-                // entity.p.chunk.z += hit_stored_entity.d_tile_z
             } else {
                 break
             }
@@ -396,4 +382,47 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: Mov
     } else {
         entity.facing_index = 1
     }
+}
+
+should_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
+    a, b := a, b
+    if a.storage_index > b.storage_index do swap(&a, &b)
+
+    if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
+        // TODO(viktor): property-based logic goes here
+        result = true
+    }
+     
+    // TODO(viktor): BETTER HASH FUNCTION!!!
+    hash_bucket := a.storage_index & (len(state.collision_rule_hash) - 1)
+    for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
+        if rule.index_a == a.storage_index && rule.index_b == b.storage_index {
+            result = rule.should_collide
+            break
+        }
+    }
+
+    return result
+}
+
+handle_collision :: proc(a, b: ^Entity) -> (stops_on_collision: b32) {
+    a, b := a, b
+    if a.type > b.type do swap(&a, &b)
+
+    if b.type == .Sword {
+        stops_on_collision = false
+    } else {
+        stops_on_collision = true
+    }
+
+    // TODO(viktor): stairs
+    // entity.p.chunk.z += hit_stored_entity.d_tile_z
+    
+    if a.type == .Monster && b.type == .Sword {
+        if a.hit_point_max > 0 {
+            a.hit_point_max -= 1
+        }
+    }
+
+    return stops_on_collision
 }
