@@ -14,6 +14,8 @@ Entity :: struct {
 
     size: v2,
 
+    distance_limit: f32,
+
     // NOTE(viktor): This is for "stairs"
     d_tile_z: i32,
 
@@ -21,7 +23,6 @@ Entity :: struct {
     hit_points: [16]HitPoint,
 
     sword: EntityReference,
-    distance_remaining: f32,
 
 	facing_index: i32,
 	t_bob:f32,
@@ -282,77 +283,115 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: Mov
         entity.dp.z = 0;
     }
 
+    distance_remaining := entity.distance_limit
+    if distance_remaining == 0 {
+        // TODO(viktor): Do we want to formalize this number?
+        distance_remaining = 1_000_000
+    }
 
     for iteration in 0..<4 {
-        desired_p := entity.p.xy + entity_delta
-
         t_min: f32 = 1
         wall_normal: v2
         hit: ^Entity
-        
-        if .Collides in entity.flags && .Nonspatial not_in entity.flags {
-			// TODO(viktor): spatial partition here
-            for test_entity_index in 0..<region.entity_count {
-				test_entity := &region.entities[test_entity_index]
 
-                if entity != test_entity {
-                    if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
-                        diameter := entity.size + test_entity.size
-                        min_corner := -0.5 * diameter
-                        max_corner :=  0.5 * diameter
+        entity_delta_length := length(entity_delta)
+        // TODO(viktor): What do we want to do for epsilons here?
+        if entity_delta_length > 0 {
+            if entity_delta_length > distance_remaining {
+                t_min = distance_remaining / entity_delta_length
+            }
 
-                        rel := entity.p - test_entity.p
+            desired_p := entity.p.xy + entity_delta
 
-                        test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
-                            EPSILON :: 0.01
-                            if entity_delta_x != 0 {
-                                t_result := (wall_x - rel_x) / entity_delta_x
-                                y := rel_y + t_result * entity_delta_y
-                                if 0 <= t_result && t_result < t_min^ {
-                                    if y >= min_y && y <= max_y {
-                                        t_min^ = max(0, t_result-EPSILON)
-                                        collided = true
+            if .Nonspatial not_in entity.flags {
+                // TODO(viktor): spatial partition here
+                for test_entity_index in 0..<region.entity_count {
+                    test_entity := &region.entities[test_entity_index]
+
+                    if entity != test_entity {
+                        if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
+                            diameter := entity.size + test_entity.size
+                            min_corner := -0.5 * diameter
+                            max_corner :=  0.5 * diameter
+
+                            rel := entity.p - test_entity.p
+
+                            test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
+                                EPSILON :: 0.01
+                                if entity_delta_x != 0 {
+                                    t_result := (wall_x - rel_x) / entity_delta_x
+                                    y := rel_y + t_result * entity_delta_y
+                                    if 0 <= t_result && t_result < t_min^ {
+                                        if y >= min_y && y <= max_y {
+                                            t_min^ = max(0, t_result-EPSILON)
+                                            collided = true
+                                        }
                                     }
                                 }
+                                return collided
                             }
-                            return collided
-                        }
 
-                        if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                            wall_normal = {-1,  0}
-                            hit = test_entity
-                        }
-                        if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                            wall_normal = { 1,  0}
-                            hit = test_entity
-                        }
-                        if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                            wall_normal = { 0, -1}
-                            hit = test_entity
-                        }
-                        if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                            wall_normal = { 0,  1}
-                            hit = test_entity
+                            if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+                                wall_normal = {-1,  0}
+                                hit = test_entity
+                            }
+                            if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
+                                wall_normal = { 1,  0}
+                                hit = test_entity
+                            }
+                            if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+                                wall_normal = { 0, -1}
+                                hit = test_entity
+                            }
+                            if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
+                                wall_normal = { 0,  1}
+                                hit = test_entity
+                            }
                         }
                     }
                 }
+            } 
+
+            entity.p.xy += t_min * entity_delta
+            distance_remaining -= t_min * entity_delta_length
+            if hit != nil {
+                entity_delta = desired_p - entity.p.xy
+
+                if .Collides in entity.flags {
+                    entity.dp.xy = project(entity.dp.xy, wall_normal)
+                    entity_delta = project(entity_delta, wall_normal)
+                } else {
+                    _ = 1
+                }
+                // TODO(viktor): IMPORTANT(viktor) Need our collision table here!
+
+                a := entity
+                b := hit
+                if a.type > b.type do swap(&a, &b)
+                handle_collision :: proc(a, b: ^Entity) {
+                    if a.type == .Monster && b.type == .Sword {
+                        a.hit_point_max -= 1
+                        make_entity_nonspatial(b)
+                    }
+                }
+
+                handle_collision(a, b)
+                
+                // TODO(viktor): stairs
+                // entity.p.chunk.z += hit_stored_entity.d_tile_z
+            } else {
+                break
             }
-        }
-
-        entity.p.xy += t_min * entity_delta
-
-        if hit != nil {
-            entity.dp.xy = project(entity.dp.xy, wall_normal)
-            entity_delta = desired_p - entity.p.xy
-            entity_delta = project(entity_delta, wall_normal)
-
-            // entity.p.chunk.z += hit_stored_entity.d_tile_z
         } else {
             break
         }
     }
 
-    if ddp.x < 0  {
+    if entity.distance_limit != 0 {
+        entity.distance_limit = distance_remaining
+    }
+
+    if entity.dp.x < 0  {
         entity.facing_index = 0
     } else {
         entity.facing_index = 1

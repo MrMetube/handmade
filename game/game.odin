@@ -391,27 +391,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 // TODO(viktor): wall asset
                 draw_rectangle(buffer, position, size, White)
 
-            case .Sword:
-                move_spec.normalize_accelaration = false
-                move_spec.drag = 0
-                move_spec.speed = 0
-
-                // TODO(viktor): Add the ability in the collision routines
-                // to understand a movement limit for an entity, and then 
-                // update this routine to use that to know when to kill 
-                // the sword.
-                old_p := entity.p
-                
-                distance_traveled := length(entity.p - old_p)
-
-                entity.distance_remaining -= distance_traveled
-                if entity.distance_remaining < 0 {
-                    entity.flags += { .Nonspatial }
-                }
-
-                push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-                push_bitmap(&piece_group, &state.sword, 0)
-
             case .Hero:
                 for &con_hero in state.controlled_heroes {
                     if con_hero.storage_index == entity.storage_index {
@@ -434,7 +413,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                             if sword != nil && .Nonspatial in sword.flags {
                                 dp: v3
                                 dp.xy = 5 * con_hero.dsword
-                                sword.distance_remaining = 5
+                                sword.distance_limit = 5
                                 make_entity_spatial(sword, entity.p, dp)
                             }
 
@@ -443,6 +422,26 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                         break
                     }
                 }
+
+            case .Sword:
+                move_spec.normalize_accelaration = false
+                move_spec.drag = 0
+                move_spec.speed = 0
+
+                // TODO(viktor): Add the ability in the collision routines
+                // to understand a movement limit for an entity, and then 
+                // update this routine to use that to know when to kill 
+                // the sword.
+                old_p := entity.p
+                
+                distance_traveled := length(entity.p - old_p)
+
+                if entity.distance_limit == 0 {
+                    entity.flags += { .Nonspatial }
+                }
+
+                push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
+                push_bitmap(&piece_group, &state.sword, 0)
 
             case .Familiar:
                 entity.t_bob += dt
