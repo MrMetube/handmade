@@ -6,6 +6,59 @@ import "base:intrinsics"
 
 INTERNAL :: #config(INTERNAL, true)
 
+/* 
+    TODO(viktor): 
+    ARCHITECTURE EXPLORATION
+    
+    - Collision detection
+      - Entry/Exit
+      - Whats the plan for robustness / shape definition ?
+    - Implement multiple sim regions per frame
+      - per-entity clocking
+      - sim region merging?  for multiple players?    
+    - Z ! 
+      - (clean up things by using v3)
+      - figure out how to go "up" and "down", and how is this rendered?
+    
+    - Debug code
+      - Logging
+      - Diagramming
+      - (a little gui) switches / sliders / etc
+  
+    - Audio
+      - Sound effects triggers
+      - Ambient sounds
+      - Music
+    - Asset streaming
+    
+    - Rudimentary worldgen (no quality just "what sorts of things" we do
+      - Map displays
+      - Placement of background things
+      - Connectivity?
+      - Non-overlapping?
+    - AI
+      - Rudimentary monstar behaviour
+      * Pathfinding
+      - AI "storage"
+    - Metagame / save game?
+      - how do you enter a "save slot"?
+      - persistent unlocks/etc.
+      - Do we allow saved games? Probably yes, just only for "pausing"
+      * continuous save for crash recovery?
+  
+    * Animation should probably lead into rendering
+      - Skeletal animation
+      - Particle systems
+
+    PRODUCTION
+    - Rendering
+
+    -> Game
+      - Entity system
+      - World generation
+ */ 
+
+
 // TODO: Copypasta from platform
 // TODO: Offscreenbuffer color and y-axis being down should not leak into the game layer
 OffscreenBufferColor :: struct{
@@ -726,6 +779,14 @@ add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide:
 clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
     // TODO(viktor): need to make a better datastructute that allows for 
     // the removal of collision rules without searching the entire table
+    // NOTE(viktor): One way to make removal easy would be to always
+    // add _both_ orders of the pairs of storage indices to the
+    // hash table, so no matter which position the entity is in,
+    // you can always find it. Then, when you do your first pass
+    // through for removal, you just remember the original top
+    // of the free list, and when you're done, do a pass through all
+    // the new things on the free list, and remove the reverse of
+    // those pairs.
     for hash_bucket in 0..<len(state.collision_rule_hash) {
         for rule := &state.collision_rule_hash[hash_bucket]; rule^ != nil;  {
             if rule^.index_a == storage_index || rule^.index_b == storage_index {
