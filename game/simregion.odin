@@ -16,9 +16,6 @@ Entity :: struct {
 
     distance_limit: f32,
 
-    // NOTE(viktor): This is for "stairs"
-    d_tile_z: i32,
-
     hit_point_max: u32,
     hit_points: [16]HitPoint,
 
@@ -44,8 +41,7 @@ SimRegion :: struct {
 	world: ^World,
 
 	origin: WorldPosition, 
-	bounds: Rectangle,
-	updatable_bounds: Rectangle,
+	bounds, updatable_bounds: Rectangle3,
 
 	entity_count: EntityIndex,
     entities: []Entity,
@@ -55,7 +51,7 @@ SimRegion :: struct {
 	sim_entity_hash: [4096]SimEntityHash,
 }
 
-begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle) -> (region: ^SimRegion) {
+begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3) -> (region: ^SimRegion) {
 	// TODO(viktor): make storedEntities part of world
 	region = push_struct(sim_arena, SimRegion)
 	MAX_ENTITY_COUNT :: 4096
@@ -65,14 +61,16 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     // TODO(viktor): IMPORTANT(viktor) Calculate this eventually from the maximum value
     // of all entities radius plus their speed!
     update_safety_margin :: 1
+    // TODO(viktor): what should this be?
+    update_safety_margin_z :: 1
 
 	region.world = world
 	region.origin = origin
 	region.updatable_bounds = bounds
-	region.bounds = rect_add(bounds, update_safety_margin)
+	region.bounds = rect_add(bounds, v3{update_safety_margin, update_safety_margin, update_safety_margin_z})
 
-    min_p := map_into_worldspace(world, region.origin, region.bounds.min)
-    max_p := map_into_worldspace(world, region.origin, region.bounds.max)
+    min_p := map_into_worldspace(world, region.origin, region.bounds.min )
+    max_p := map_into_worldspace(world, region.origin, region.bounds.max )
     // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
     // TODO(viktor): entities get visually duplicated when crossing the edge of the sim_region, fix it
     for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
@@ -84,7 +82,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
                         storage_index := block.indices[entity_index]
 						stored := &state.stored_entities[storage_index]
                         if .Nonspatial not_in stored.sim.flags {
-                            sim_space_p := get_sim_space_p(region, stored).xy
+                            sim_space_p := get_sim_space_p(region, stored)
                             if is_in_rectangle(region.bounds, sim_space_p) {
                                 // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
                                 add_entity(state, region, storage_index, stored, &sim_space_p)
@@ -114,7 +112,7 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 		store_entity_reference(&stored.sim.sword)
 		// TODO(viktor): Save state back to stored entity, once high entities do state decompression
 
-		new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p.xy)
+		new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p)
 		change_entity_location(&state.world_arena, region.world, entity.storage_index, stored, new_p)
 		
 		if entity.storage_index == state.camera_following_index {
@@ -173,7 +171,7 @@ load_entity_reference :: #force_inline proc(state: ^GameState, region: ^SimRegio
 		if entry.ptr == nil {
 			entry.index = ref.index
             entity := get_low_entity(state, ref.index)
-            p := get_sim_space_p(region, entity).xy
+            p := get_sim_space_p(region, entity)
 			entry.ptr = add_entity(state, region, ref.index, entity, &p)
 		}
 		ref.ptr = entry.ptr
@@ -186,13 +184,13 @@ store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
 	}
 }
 
-add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v2) -> (dest: ^Entity) {
+add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
 	dest = add_entity_raw(state, region, storage_index, source)
 
 	if dest != nil {
 		if sim_p != nil {
-			dest.p.xy = sim_p^
-            dest.updatable = is_in_rectangle(region.updatable_bounds, dest.p.xy)
+			dest.p = sim_p^
+            dest.updatable = is_in_rectangle(region.updatable_bounds, dest.p)
 		} else {
 			dest.p = get_sim_space_p(region, source)
 		}
@@ -253,7 +251,7 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
     return { false, 1, 0}
 }
 
-move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp: v2, move_spec: MoveSpec, dt: f32) {
+move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
     assert(.Nonspatial not_in entity.flags)
 
     ddp := ddp
@@ -269,19 +267,11 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
     ddp *= move_spec.speed
 
     // TODO(viktor): ODE here
-    ddp += -move_spec.drag * entity.dp.xy
+    ddp += -move_spec.drag * entity.dp
+    ddp.z += -9.8
 
-    entity_delta := 0.5*ddp * square(dt) + entity.dp.xy * dt
-    entity.dp.xy = ddp * dt + entity.dp.xy
-
-    ddz : f32 = -9.8;
-    entity.p.z = 0.5 * ddz * square(dt) + entity.dp.z * dt + entity.p.z;
-    entity.dp.z = ddz * dt + entity.dp.z;
-
-    if entity.p.z < 0 {
-        entity.p.z = 0;
-        entity.dp.z = 0;
-    }
+    entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
+    entity.dp = ddp * dt + entity.dp
 
     distance_remaining := entity.distance_limit
     if distance_remaining == 0 {
@@ -291,7 +281,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
 
     for iteration in 0..<4 {
         t_min: f32 = 1
-        wall_normal: v2
+        wall_normal: v3
         hit: ^Entity
 
         entity_delta_length := length(entity_delta)
@@ -301,7 +291,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                 t_min = distance_remaining / entity_delta_length
             }
 
-            desired_p := entity.p.xy + entity_delta
+            desired_p := entity.p + entity_delta
 
             if .Nonspatial not_in entity.flags {
                 // TODO(viktor): spatial partition here
@@ -310,9 +300,9 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                 
                     if should_collide(state, entity, test_entity) {
                         if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
-                            diameter := entity.size + test_entity.size
-                            min_corner := -0.5 * diameter
-                            max_corner :=  0.5 * diameter
+                            minkowski_diameter := V3(entity.size + test_entity.size, state.world.tile_depth_in_meters)
+                            min_corner := -0.5 * minkowski_diameter
+                            max_corner :=  0.5 * minkowski_diameter
 
                             rel := entity.p - test_entity.p
 
@@ -332,19 +322,19 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                             }
 
                             if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                                wall_normal = {-1,  0}
+                                wall_normal = {-1,  0, 0}
                                 hit = test_entity
                             }
                             if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
-                                wall_normal = { 1,  0}
+                                wall_normal = { 1,  0, 0}
                                 hit = test_entity
                             }
                             if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                                wall_normal = { 0, -1}
+                                wall_normal = { 0, -1, 0}
                                 hit = test_entity
                             }
                             if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
-                                wall_normal = { 0,  1}
+                                wall_normal = { 0,  1, 0}
                                 hit = test_entity
                             }
                         }
@@ -352,15 +342,15 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                 }
             } 
 
-            entity.p.xy += t_min * entity_delta
+            entity.p += t_min * entity_delta
             distance_remaining -= t_min * entity_delta_length
             if hit != nil {
-                entity_delta = desired_p - entity.p.xy
+                entity_delta = desired_p - entity.p
                 
                 stops_on_collision := handle_collision(entity, hit)
     
                 if stops_on_collision {
-                    entity.dp.xy = project(entity.dp.xy, wall_normal)
+                    entity.dp = project(entity.dp, wall_normal)
                     entity_delta = project(entity_delta, wall_normal)
                 } else {
                     add_collision_rule(state, entity.storage_index, hit.storage_index, false)
@@ -371,6 +361,11 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
         } else {
             break
         }
+    }
+    // TODO(viktor): this has to become real height handling, ground collision, etc.
+    if entity.p.z < 0 {
+        entity.p.z = 0;
+        entity.dp.z = 0;
     }
 
     if entity.distance_limit != 0 {

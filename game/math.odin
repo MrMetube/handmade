@@ -1,7 +1,22 @@
-package game 
+package game
 
 import "base:intrinsics"
 import "core:math"
+
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Types
+// ---------------------- ---------------------- ----------------------
+
+v2 :: [2]f32
+v3 :: [3]f32
+v4 :: [4]f32
+
+Rectangle2 :: struct{ min, max: v2 }
+Rectangle3 :: struct{ min, max: v3 }
+
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Constants
+// ---------------------- ---------------------- ----------------------
 
 TAU :: 6.28318530717958647692528676655900576
 PI  :: 3.14159265358979323846264338327950288
@@ -26,80 +41,138 @@ MAX_F16_PRECISION ::  4 // Maximum number of meaningful digits after the decimal
 RAD_PER_DEG :: TAU/360.0
 DEG_PER_RAD :: 360.0/TAU
 
-v2 :: [2]f32
-v3 :: [3]f32
-v4 :: [4]f32
-
-dot :: proc { dot2, dot3}
-
-dot2 :: #force_inline proc(a, b: v2) -> f32 {
-    return a.x * b.x + a.y * b.y
-}
-
-dot3 :: #force_inline proc(a, b: v3) -> f32 {
-    return a.x * b.x + a.y * b.y + a.z * b.z
-}
-
-reflect :: #force_inline proc(v, axis:v2) -> v2 {
-    return v - 2 * dot(v, axis) * axis
-} 
-
-project :: #force_inline proc(v, axis:v2) -> v2 {
-    return v - 1 * dot(v, axis) * axis
-}
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Scalar operations
+// ---------------------- ---------------------- ----------------------
 
 lerp :: #force_inline proc(a, b, t: f32) -> f32 {
     return (1-t) * a + t * b
 }
 
-square :: #force_inline proc(x: f32) -> f32 { 
+square :: #force_inline proc(x: f32) -> f32 {
     return x * x
 }
 
 square_root :: math.sqrt
 
-length :: #force_inline proc(vec: $T/[$N]$E) -> (length:f32) where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Vector operations
+// ---------------------- ---------------------- ----------------------
+
+// TODO(viktor): is this necessary?
+V3 :: proc { v3_x, v3_z }
+
+v3_x :: proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
+v3_z :: proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
+
+dot :: proc { dot2, dot3}
+dot2 :: #force_inline proc(a, b: v2) -> f32 {
+    return a.x * b.x + a.y * b.y
+}
+dot3 :: #force_inline proc(a, b: v3) -> f32 {
+    return a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+
+hadamard :: proc { hadamard_2, hadamard_3 }
+hadamard_2 :: #force_inline proc(a, b: v2) -> v2 {
+    return a * b
+}
+hadamard_3 :: #force_inline proc(a, b: v3) -> v3 {
+    return a * b
+}
+
+
+reflect :: #force_inline proc(v, axis:v2) -> v2 {
+    return v - 2 * dot(v, axis) * axis
+}
+
+project :: proc { project_2, project_3 }
+project_2 :: #force_inline proc(v, axis: v2) -> v2 {
+    return v - 1 * dot(v, axis) * axis
+}
+project_3 :: #force_inline proc(v, axis: v3) -> v3 {
+    return v - 1 * dot(v, axis) * axis
+}
+
+length :: proc { length_2, length_3 }
+length_2 :: #force_inline proc(vec: v2) -> (length:f32) {
+    length_squared := length_squared(vec)
+    length = math.sqrt(length_squared)
+    return length
+}
+length_3 :: #force_inline proc(vec: v3) -> (length:f32) {
     length_squared := length_squared(vec)
     length = math.sqrt(length_squared)
     return length
 }
 
-length_squared :: #force_inline proc(vec: $T/[$N]$E) -> f32 where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
+length_squared :: proc { length_squared_2, length_squared_3 }
+length_squared_2 :: #force_inline proc(vec: v2) -> f32 {
+    return dot(vec, vec)
+}
+length_squared_3 :: #force_inline proc(vec: v3) -> f32 {
     return dot(vec, vec)
 }
 
-normalize :: #force_inline proc(vec: $T/[$N]$E) -> T where N >= 1 && N <= 4 && intrinsics.type_is_numeric(E) {
+normalize :: proc { normalize_2, normalize_3 }
+
+normalize_2 :: #force_inline proc(vec: v2) -> v2 {
     length := length(vec)
     return vec / length
 }
 
+normalize_3 :: #force_inline proc(vec: v3) -> v3 {
+    length := length(vec)
+    return vec / length
+}
 
+// ---------------------- ---------------------- ----------------------
+// ---------------------- Rectangle operations
+// ---------------------- ---------------------- ----------------------
 
-
-Rectangle :: struct{ min, max: v2 }
-
-rect_min_dim :: #force_inline proc(min, dim: v2) -> Rectangle {
+rect_min_dim :: proc { rect_min_dim_2, rect_min_dim_3 }
+rect_min_dim_2 :: #force_inline proc(min, dim: v2) -> Rectangle2 {
+    return { min, min + dim }
+}
+rect_min_dim_3 :: #force_inline proc(min, dim: v3) -> Rectangle3 {
     return { min, min + dim }
 }
 
-rect_center_dim :: #force_inline proc(center, dim: v2) -> Rectangle {
+rect_center_dim :: proc { rect_center_dim_2, rect_center_dim_3 }
+rect_center_dim_2 :: #force_inline proc(center, dim: v2) -> Rectangle2 {
+    return { center - dim * 0.5, center + dim * 0.5 }
+}
+rect_center_dim_3 :: #force_inline proc(center, dim: v3) -> Rectangle3 {
     return { center - dim * 0.5, center + dim * 0.5 }
 }
 
-rect_center_half_dim :: #force_inline proc(center, half_dim: v2) -> Rectangle {
+rect_center_half_dim :: proc { rect_center_half_dim_2, rect_center_half_dim_3 }
+rect_center_half_dim_2 :: #force_inline proc(center, half_dim: v2) -> Rectangle2 {
+    return { center - half_dim, center + half_dim }
+}
+rect_center_half_dim_3 :: #force_inline proc(center, half_dim: v3) -> Rectangle3 {
     return { center - half_dim, center + half_dim }
 }
 
-rect_add :: #force_inline proc(rec: Rectangle, x: f32) -> (result: Rectangle) {
+rect_add :: proc { rect_add_2, rect_add_3 }
+rect_add_2 :: #force_inline proc(rec: Rectangle2, radius: v2) -> (result: Rectangle2) {
     result = rec
-    result.min -= x
-    result.max += x
+    result.min -= radius
+    result.max += radius
+    return result
+}
+rect_add_3 :: #force_inline proc(rec: Rectangle3, radius: v3) -> (result: Rectangle3) {
+    result = rec
+    result.min -= radius
+    result.max += radius
     return result
 }
 
-is_in_rectangle :: #force_inline proc(rec: Rectangle, point: v2) -> b32 {
+is_in_rectangle :: proc { is_in_rectangle_2, is_in_rectangle_3 }
+is_in_rectangle_2 :: #force_inline proc(rec: Rectangle2, point: v2) -> b32 {
     return rec.min.x < point.x && point.x < rec.max.x && rec.min.y < point.y && point.y < rec.max.y
 }
-
-
-
+is_in_rectangle_3 :: #force_inline proc(rec: Rectangle3, point: v3) -> b32 {
+    return rec.min.x < point.x && point.x < rec.max.x && rec.min.y < point.y && point.y < rec.max.y
+}
