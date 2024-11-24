@@ -5,6 +5,11 @@ import "core:fmt"
 TILES_PER_CHUNK :: 16
 
 WorldPosition :: struct {
+    // TODO(viktor): It seems like we have to store ChunkX/Y/Z with each
+    // entity because even though the sim region gather doesn't need it
+    // at first, and we could get by without it, but entity references pull
+    // in entities WITHOUT going through their world_chunk, and thus
+    // still need to know the ChunkX/Y/Z
     chunk: [3]i32,
     offset: v3,
 }

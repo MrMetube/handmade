@@ -12,7 +12,7 @@ Entity :: struct {
 
     p, dp: v3,
 
-    size: v2,
+    size: v3,
 
     distance_limit: f32,
 
@@ -22,8 +22,7 @@ Entity :: struct {
     sword: EntityReference,
 
 	facing_index: i32,
-	t_bob:f32,
-
+	t_bob: f32,
 	// TODO(viktor): generation index so we know how " to date" this entity is
 }
 
@@ -43,6 +42,9 @@ SimRegion :: struct {
 	origin: WorldPosition, 
 	bounds, updatable_bounds: Rectangle3,
 
+    max_entity_radius: f32,
+    max_entity_velocity: f32,
+
 	entity_count: EntityIndex,
     entities: []Entity,
 
@@ -51,23 +53,23 @@ SimRegion :: struct {
 	sim_entity_hash: [4096]SimEntityHash,
 }
 
-begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3) -> (region: ^SimRegion) {
+begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
 	// TODO(viktor): make storedEntities part of world
 	region = push_struct(sim_arena, SimRegion)
 	MAX_ENTITY_COUNT :: 4096
 	zero_struct(region)
 	region.entities = push_slice(sim_arena, Entity, MAX_ENTITY_COUNT)
 
-    // TODO(viktor): IMPORTANT(viktor) Calculate this eventually from the maximum value
-    // of all entities radius plus their speed!
-    update_safety_margin :: 1
-    // TODO(viktor): what should this be?
-    update_safety_margin_z :: 1
+    // TODO(viktor): Try to make these get enforced more rigorously
+    region.max_entity_radius   = 5
+    region.max_entity_velocity = 30
+    update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
+    UPDATE_SAFETY_MARGIN_Z :: 1 // TODO(viktor): what should this be?
 
 	region.world = world
 	region.origin = origin
-	region.updatable_bounds = bounds
-	region.bounds = rect_add(bounds, v3{update_safety_margin, update_safety_margin, update_safety_margin_z})
+	region.updatable_bounds = rectangle_add(bounds, update_safety_margin)
+	region.bounds = rectangle_add(bounds, v3{update_safety_margin, update_safety_margin, UPDATE_SAFETY_MARGIN_Z})
 
     min_p := map_into_worldspace(world, region.origin, region.bounds.min )
     max_p := map_into_worldspace(world, region.origin, region.bounds.max )
@@ -83,7 +85,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 						stored := &state.stored_entities[storage_index]
                         if .Nonspatial not_in stored.sim.flags {
                             sim_space_p := get_sim_space_p(region, stored)
-                            if is_in_rectangle(region.bounds, sim_space_p) {
+                            if entity_overlaps_rectangle(region.bounds, sim_space_p, stored.sim.size) {
                                 // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
                                 add_entity(state, region, storage_index, stored, &sim_space_p)
                             }
@@ -135,11 +137,18 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 					new_camera_p.offset_.y += 9
 				}
 			} else {
-				new_camera_p = stored.p
+				new_camera_p.chunk  = stored.p.chunk
+				new_camera_p.offset.xy = stored.p.offset.xy
 			}
             state.camera_p = new_camera_p
 		}
 	}
+}
+
+entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p, dim: v3) -> (result: b32) {
+    grown := rectangle_add(bounds, 0.5 * dim)
+    result = rectangle_contains(grown, p)
+    return result
 }
 
 get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^SimEntityHash) {
@@ -190,7 +199,7 @@ add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_
 	if dest != nil {
 		if sim_p != nil {
 			dest.p = sim_p^
-            dest.updatable = is_in_rectangle(region.updatable_bounds, dest.p)
+            dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.size)
 		} else {
 			dest.p = get_sim_space_p(region, source)
 		}
@@ -268,10 +277,13 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
 
     // TODO(viktor): ODE here
     ddp += -move_spec.drag * entity.dp
-    ddp.z += -9.8
+    GRAVITY :: -9.8
+    ddp.z += GRAVITY
 
     entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
     entity.dp = ddp * dt + entity.dp
+    // TODO(viktor): upgrade physical motion routines to handle capping the maximum velocity?
+    assert(length_squared(entity.dp) <= square(region.max_entity_velocity))
 
     distance_remaining := entity.distance_limit
     if distance_remaining == 0 {
@@ -300,7 +312,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                 
                     if should_collide(state, entity, test_entity) {
                         if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
-                            minkowski_diameter := V3(entity.size + test_entity.size, state.world.tile_depth_in_meters)
+                            minkowski_diameter := entity.size + test_entity.size
                             min_corner := -0.5 * minkowski_diameter
                             max_corner :=  0.5 * minkowski_diameter
 

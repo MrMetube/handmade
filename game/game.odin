@@ -9,16 +9,15 @@ INTERNAL :: #config(INTERNAL, true)
 /*
     TODO(viktor):
     ARCHITECTURE EXPLORATION
-
+    
+    - Z !
+      - figure out how to go "up" and "down", and how is this rendered?
     - Collision detection
       - Entry/Exit
       - Whats the plan for robustness / shape definition ?
     - Implement multiple sim regions per frame
       - per-entity clocking
       - sim region merging?  for multiple players?
-    - Z !
-      - (clean up things by using v3)
-      - figure out how to go "up" and "down", and how is this rendered?
 
     - Debug code
       - Logging
@@ -411,12 +410,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
-    camera_bounds := rect_center_half_dim(0, state.world.tile_size_in_meters * tilespan)
+    camera_bounds := rectangle_center_half_dim(0, state.world.tile_size_in_meters * tilespan)
 
     sim_arena: Arena
     init_arena(&sim_arena, memory.transient_storage)
 
-    camera_sim_region := begin_sim(&sim_arena, state, world, state.camera_p, camera_bounds)
+    camera_sim_region := begin_sim(&sim_arena, state, world, state.camera_p, camera_bounds, input.delta_time)
 
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     draw_bitmap(buffer, state.backdrop, screen_center)
@@ -443,9 +442,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size )
+                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
                 // TODO(viktor): wall asset
-                draw_rectangle(buffer, position, size, White)
+                draw_rectangle(buffer, position, size.xy, White)
 
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -542,7 +541,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
             // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
             for index in 0..<piece_group.count {
-                center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size)
+                center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy)
                 piece  := piece_group.pieces[index]
                 center += piece.offset
                 if piece.bitmap != nil {
@@ -681,7 +680,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
 add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_stored_entity(state, .Sword, null_position())
 
-    entity.sim.size = {0.5, 1}
+    entity.sim.size = {0.5, 1, state.world.tile_depth_in_meters}
 
     return index, entity
 }
@@ -721,7 +720,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
     entity: ^StoredEntity
     index, entity = add_stored_entity(state, .Hero, state.camera_p)
 
-    entity.sim.size = {0.75, 0.4}
+    entity.sim.size = {0.75, 0.4, state.world.tile_depth_in_meters}
     entity.sim.flags += {.Collides}
 
     init_hitpoints(entity, 3)
