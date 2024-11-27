@@ -131,20 +131,20 @@ rectangle_min_dim_3 :: #force_inline proc(min, dim: v3) -> Rectangle3 {
     return { min, min + dim }
 }
 
-rectangle_center_dim :: proc { rectangle_center_dim_2, rectangle_center_dim_3 }
-rectangle_center_dim_2 :: #force_inline proc(center, dim: v2) -> Rectangle2 {
-    return { center - dim * 0.5, center + dim * 0.5 }
+rectangle_center_diameter :: proc { rectangle_center_diameter_2, rectangle_center_diameter_3 }
+rectangle_center_diameter_2 :: #force_inline proc(center, diameter: v2) -> Rectangle2 {
+    return { center - diameter * 0.5, center + diameter * 0.5 }
 }
-rectangle_center_dim_3 :: #force_inline proc(center, dim: v3) -> Rectangle3 {
-    return { center - dim * 0.5, center + dim * 0.5 }
+rectangle_center_diameter_3 :: #force_inline proc(center, diameter: v3) -> Rectangle3 {
+    return { center - diameter * 0.5, center + diameter * 0.5 }
 }
 
-rectangle_center_half_dim :: proc { rectangle_center_half_dim_2, rectangle_center_half_dim_3 }
-rectangle_center_half_dim_2 :: #force_inline proc(center, half_dim: v2) -> Rectangle2 {
-    return { center - half_dim, center + half_dim }
+rectangle_center_half_diameter :: proc { rectangle_center_half_diameter_2, rectangle_center_half_diameter_3 }
+rectangle_center_half_diameter_2 :: #force_inline proc(center, half_diameter: v2) -> Rectangle2 {
+    return { center - half_diameter, center + half_diameter }
 }
-rectangle_center_half_dim_3 :: #force_inline proc(center, half_dim: v3) -> Rectangle3 {
-    return { center - half_dim, center + half_dim }
+rectangle_center_half_diameter_3 :: #force_inline proc(center, half_diameter: v3) -> Rectangle3 {
+    return { center - half_diameter, center + half_diameter }
 }
 
 rectangle_add :: proc { rectangle_add_2, rectangle_add_3 }
@@ -167,4 +167,26 @@ rectangle_contains_2 :: #force_inline proc(rec: Rectangle2, point: v2) -> b32 {
 }
 rectangle_contains_3 :: #force_inline proc(rec: Rectangle3, point: v3) -> b32 {
     return rec.min.x < point.x && point.x < rec.max.x && rec.min.y < point.y && point.y < rec.max.y && rec.min.z < point.z && point.z < rec.max.z
+}
+
+rectangle_intersect :: proc { rectangle_intersect_2, rectangle_intersect_3 }
+rectangle_intersect_2 :: #force_inline proc(a, b: Rectangle2) -> (result: b32) {
+    assert((b.max.x >= a.min.x && b.min.x <= a.max.x) == !(b.max.x < a.min.x || b.min.x > a.max.x))
+    assert((b.max.y >= a.min.y && b.min.y <= a.max.y) == !(b.max.y < a.min.y || b.min.y > a.max.y))
+    
+    result  = !(b.max.x < a.min.x || b.min.x > a.max.x)
+    result &= !(b.max.y < a.min.y || b.min.y > a.max.y)
+    
+    return result
+}
+rectangle_intersect_3 :: #force_inline proc(a, b: Rectangle3) -> (result: b32) {
+    assert((b.max.x >= a.min.x && b.min.x <= a.max.x) == !(b.max.x < a.min.x || b.min.x > a.max.x))
+    assert((b.max.y >= a.min.y && b.min.y <= a.max.y) == !(b.max.y < a.min.y || b.min.y > a.max.y))
+    assert((b.max.z >= a.min.z && b.min.z <= a.max.z) == !(b.max.z < a.min.z || b.min.z > a.max.z))
+
+    result  = !(b.max.x < a.min.x || b.min.x > a.max.x ||
+                b.max.y < a.min.y || b.min.y > a.max.y ||
+                b.max.z < a.min.z || b.min.z > a.max.z)
+    
+    return result
 }

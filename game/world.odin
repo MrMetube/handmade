@@ -86,10 +86,10 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
             if chunk != nil {
                 first_block := &chunk.first_block
                 outer: for block := first_block; block != nil; block = block.next {
-                    for i in 0..<block.entity_count {
-                        if block.indices[i] == storage_index {
+                    for &block_index in block.indices[:block.entity_count] {
+                        if block_index == storage_index {
                             first_block.entity_count -= 1
-                            block.indices[i] = first_block.indices[first_block.entity_count]
+                            block_index = first_block.indices[first_block.entity_count]
 
                             if first_block.entity_count == 0 {
                                 if first_block.next != nil {

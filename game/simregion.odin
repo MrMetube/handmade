@@ -61,6 +61,9 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 	region.entities = push_slice(sim_arena, Entity, MAX_ENTITY_COUNT)
 
     // TODO(viktor): Try to make these get enforced more rigorously
+    // TODO(viktor): Perhaps try using a dual system here where we support 
+    // entities larger than the max entity radius by adding them multiple 
+    // times to the spatial partition?
     region.max_entity_radius   = 5
     region.max_entity_velocity = 30
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
@@ -80,8 +83,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
             chunk := get_chunk(nil, world, chunk_x, chunk_y, region.origin.chunk.z)
             if chunk != nil {
                 for block := &chunk.first_block; block != nil; block = block.next {
-                    for entity_index in 0..< block.entity_count {
-                        storage_index := block.indices[entity_index]
+                    for storage_index in block.indices[:block.entity_count] {
 						stored := &state.stored_entities[storage_index]
                         if .Nonspatial not_in stored.sim.flags {
                             sim_space_p := get_sim_space_p(region, stored)
@@ -101,8 +103,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
 
 end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 	// TODO(viktor): make storedEntities part of world
-	for entity_index in 0..<region.entity_count {
-		entity := region.entities[entity_index]
+	for entity in region.entities[:region.entity_count] {
         assert(entity.storage_index != 0)
 		stored := &state.stored_entities[entity.storage_index]
 
@@ -290,6 +291,24 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
         // TODO(viktor): Do we want to formalize this number?
         distance_remaining = 1_000_000
     }
+    
+    overlapping_count: u32
+    overlapping_entities: [16]^Entity
+    { // NOTE(viktor): check for initial inclusion
+        entity_rect := rectangle_center_diameter(entity.p, entity.size)
+        // TODO(viktor): spatial partition here
+        for &test_entity in region.entities[:region.entity_count] {
+            if should_collide(state, entity, &test_entity) {
+                test_entity_rect := rectangle_center_diameter(test_entity.p, test_entity.size)
+                if rectangle_intersect(entity_rect, test_entity_rect) {
+                    /* if add_collision_rule(state, entity.storage_index, test_entity.storage_index, false) */ {
+                        overlapping_entities[overlapping_count] = &test_entity
+                        overlapping_count += 1
+                    }
+                }
+            }
+        }
+    }
 
     for iteration in 0..<4 {
         t_min: f32 = 1
@@ -307,10 +326,8 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
 
             if .Nonspatial not_in entity.flags {
                 // TODO(viktor): spatial partition here
-                for test_entity_index in 0..<region.entity_count {
-                    test_entity := &region.entities[test_entity_index]
-                
-                    if should_collide(state, entity, test_entity) {
+                for &test_entity in region.entities[:region.entity_count] {
+                    if should_collide(state, entity, &test_entity) {
                         if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
                             minkowski_diameter := entity.size + test_entity.size
                             min_corner := -0.5 * minkowski_diameter
@@ -335,19 +352,19 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
 
                             if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
                                 wall_normal = {-1,  0, 0}
-                                hit = test_entity
+                                hit = &test_entity
                             }
                             if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &t_min) {
                                 wall_normal = { 1,  0, 0}
-                                hit = test_entity
+                                hit = &test_entity
                             }
                             if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
                                 wall_normal = { 0, -1, 0}
-                                hit = test_entity
+                                hit = &test_entity
                             }
                             if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &t_min) {
                                 wall_normal = { 0,  1, 0}
-                                hit = test_entity
+                                hit = &test_entity
                             }
                         }
                     }
@@ -359,14 +376,31 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
             if hit != nil {
                 entity_delta = desired_p - entity.p
                 
-                stops_on_collision := handle_collision(entity, hit)
-    
+                overlap_index := overlapping_count
+                #reverse for overlapping_entity, index in overlapping_entities[:overlapping_count] {
+                    if hit == overlapping_entity {
+                        overlap_index = cast(u32) index
+                        break
+                    }
+                }
+                
+                was_overlapping: b32 = overlap_index != overlapping_count
+                add_to_overlapping, remove_from_overlapping: b32
+
+                stops_on_collision := handle_collision(state, entity, hit, was_overlapping)
                 if stops_on_collision {
-                    entity.dp = project(entity.dp, wall_normal)
+                    entity.dp    = project(entity.dp, wall_normal)
                     entity_delta = project(entity_delta, wall_normal)
                 } else {
-                    add_collision_rule(state, entity.storage_index, hit.storage_index, false)
+                    if was_overlapping {
+                        overlapping_entities[overlap_index] = overlapping_entities[overlapping_count]
+                        overlapping_count -= 1
+                    } else {
+                        overlapping_entities[overlapping_count] = hit
+                        overlapping_count += 1
+                    }
                 }
+
             } else {
                 break
             }
@@ -413,11 +447,12 @@ should_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
     return result
 }
 
-handle_collision :: proc(a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc(state: ^GameState, a, b: ^Entity, was_overlapping: b32) -> (stops_on_collision: b32) {
     a, b := a, b
     if a.type > b.type do swap(&a, &b)
 
     if b.type == .Sword {
+        add_collision_rule(state, a.storage_index, b.storage_index, false)
         stops_on_collision = false
     } else {
         stops_on_collision = true
@@ -430,6 +465,10 @@ handle_collision :: proc(a, b: ^Entity) -> (stops_on_collision: b32) {
         if a.hit_point_max > 0 {
             a.hit_point_max -= 1
         }
+    }
+
+    if a.type == .Hero && b.type == .Stairwell {
+        stops_on_collision = false
     }
 
     return stops_on_collision

@@ -13,12 +13,15 @@ INTERNAL :: #config(INTERNAL, true)
     - Z !
       - figure out how to go "up" and "down", and how is this rendered?
     - Collision detection
-      - Entry/Exit
+      - transient collision rules
+        - allow non-transient rules to override transient once
+        - Entry/Exit
       - Whats the plan for robustness / shape definition ?
     - Implement multiple sim regions per frame
       - per-entity clocking
       - sim region merging?  for multiple players?
-
+      - simple zoomed out view for testing
+      
     - Debug code
       - Logging
       - Diagramming
@@ -88,13 +91,14 @@ GameSoundBuffer :: struct {
 
 GameColor :: [4]f32
 
-White  :: GameColor{1,1,1, 1}
-Gray   :: GameColor{0.5,0.5,0.5, 1}
-Black  :: GameColor{0,0,0, 1}
-Blue   :: GameColor{0.08, 0.49, 0.72, 1}
-Orange :: GameColor{1, 0.71, 0.2, 1}
-Green  :: GameColor{0, 0.59, 0.28, 1}
-Red    :: GameColor{1, 0.09, 0.24, 1}
+White    :: GameColor{1,1,1, 1}
+Gray     :: GameColor{0.5,0.5,0.5, 1}
+Black    :: GameColor{0,0,0, 1}
+Blue     :: GameColor{0.08, 0.49, 0.72, 1}
+Orange   :: GameColor{1, 0.71, 0.2, 1}
+Green    :: GameColor{0, 0.59, 0.28, 1}
+Red      :: GameColor{1, 0.09, 0.24, 1}
+DarkGreen:: GameColor{0, 0.07, 0.0353, 1}
 
 GameOffscreenBuffer :: struct {
     memory : []OffscreenBufferColor,
@@ -223,6 +227,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
         state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
         state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
+        state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
+        state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
 
         state.player[0].focus = {8, 0}
         state.player[1].focus = {-4, 0}
@@ -275,36 +281,40 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     stair_up = true
                 }
             }
+            need_to_place_stair := created_stair
 
             for tile_y in 0..< tiles_per_screen.y {
                 for tile_x in 0 ..< tiles_per_screen.x {
-                    value: u32 = 3
+                    should_be_door: b32
                     if tile_x == 0                    && (!door_left  || tile_y != tiles_per_screen.y / 2) {
-                        value = 2
+                        should_be_door = true
                     }
                     if tile_x == tiles_per_screen.x-1 && (!door_right || tile_y != tiles_per_screen.y / 2) {
-                        value = 2
-                    }
-
-                    if stair_up && tile_x == tiles_per_screen.x / 2 && tile_y == tiles_per_screen.y / 2 {
-                        value = 4
-                    }
-                    if stair_down && tile_x == tiles_per_screen.x / 2 && tile_y == tiles_per_screen.y / 2 {
-                        value = 5
+                        should_be_door = true
                     }
 
                     if tile_y == 0                    && (!door_bottom || tile_x != tiles_per_screen.x / 2) {
-                        value = 2
+                        should_be_door = true
                     }
                     if tile_y == tiles_per_screen.y-1 && (!door_top    || tile_x != tiles_per_screen.x / 2) {
-                        value = 2
+                        should_be_door = true
                     }
 
-                    if value == 2 do add_wall(state,
-                        tile_x + screen_col * tiles_per_screen.x,
-                        tile_y + screen_row * tiles_per_screen.y,
-                        tile_z,
-                    )
+                    if should_be_door {
+                        add_wall(state,
+                            tile_x + screen_col * tiles_per_screen.x,
+                            tile_y + screen_row * tiles_per_screen.y,
+                            tile_z,
+                        ) 
+                    } else if need_to_place_stair {
+                        add_stairs(state, 
+                            tiles_per_screen.x / 2 + screen_col * tiles_per_screen.x,
+                            tiles_per_screen.y / 2 + screen_row * tiles_per_screen.y,
+                            stair_down ? tile_z-1 : tile_z
+                        )
+                        need_to_place_stair = false
+                    }
+
                 }
             }
 
@@ -406,11 +416,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
 
-    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), Red) // NOTE: Clear the screen
+    // NOTE: Clear the screen
+    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
 
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
-    camera_bounds := rectangle_center_half_dim(0, state.world.tile_size_in_meters * tilespan)
+    camera_bounds := rectangle_center_half_diameter(0, state.world.tile_size_in_meters * tilespan)
 
     sim_arena: Arena
     init_arena(&sim_arena, memory.transient_storage)
@@ -442,10 +453,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
-                // TODO(viktor): wall asset
-                draw_rectangle(buffer, position, size.xy, White)
+                push_bitmap(&piece_group, &state.wall, 0)
 
+            case .Stairwell: 
+                push_bitmap(&piece_group, &state.stair, 0)
+    
             case .Hero:
                 for &con_hero in state.controlled_heroes {
                     if con_hero.storage_index == entity.storage_index {
@@ -505,13 +517,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 closest_hero_dsq := square(10)
 
                 // TODO(viktor): make spatial queries easy for things
-                for test_entity_index in 0..<camera_sim_region.entity_count {
-                    test := &camera_sim_region.entities[test_entity_index]
+                for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
                     if test.type == .Hero {
                         dsq := length_squared(test.p.xy - entity.p.xy)
                         if dsq < closest_hero_dsq {
                             closest_hero_dsq = dsq
-                            closest_hero = test
+                            closest_hero = &test
                         }
                     }
                 }
@@ -540,9 +551,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             }
 
             // TODO(viktor): b4aff4a2ed416d607fef8cad47382e2d2e0eebfc between this commit and the next the rendering got offset by one pixel to the right
-            for index in 0..<piece_group.count {
+            for piece in piece_group.pieces[:piece_group.count] {
                 center := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy)
-                piece  := piece_group.pieces[index]
                 center += piece.offset
                 if piece.bitmap != nil {
                     center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels)
@@ -559,7 +569,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 }
 
 EntityType :: enum u32 {
-    Nil, Hero, Wall, Familiar, Monster, Sword
+    Nil, Hero, Wall, Familiar, Monster, Sword, Stairwell
 }
 
 HIT_POINT_PART_COUNT :: 4
@@ -606,8 +616,15 @@ ControlledHero :: struct {
     dz: f32,
 }
 
+PairwiseCollsionRuleFlag :: enum {
+    ShouldCollide,
+    Temporary,
+}
+
+PairwiseCollsionRuleFlags :: bit_set[PairwiseCollsionRuleFlag]
+
 PairwiseCollsionRule :: struct {
-    should_collide: b32,
+    flags: PairwiseCollsionRuleFlags,
     index_a, index_b: StorageIndex,
 
     next_in_hash: ^PairwiseCollsionRule
@@ -625,11 +642,8 @@ GameState :: struct {
 
     world: ^World,
 
-    backdrop: LoadedBitmap,
-    shadow: LoadedBitmap,
-    player: [2]LoadedBitmap,
-    monster: [2]LoadedBitmap,
-    sword: LoadedBitmap,
+    backdrop, wall, shadow, sword, stair: LoadedBitmap,
+    player, monster: [2]LoadedBitmap,
 
     tile_size_in_pixels: u32,
     meters_to_pixels: f32,
@@ -672,8 +686,8 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     assert(count < len(entity.sim.hit_points))
 
     entity.sim.hit_point_max = count
-    for i in 0..<count {
-        entity.sim.hit_points[i] = { filled_amount = HIT_POINT_PART_COUNT }
+    for &hit_point in entity.sim.hit_points[:count] {
+        hit_point = { filled_amount = HIT_POINT_PART_COUNT }
     }
 }
 
@@ -710,7 +724,27 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
     index, entity = add_stored_entity(state, .Wall, p)
 
-    entity.sim.size = state.world.tile_size_in_meters
+    entity.sim.size = {
+        state.world.tile_size_in_meters,
+        state.world.tile_size_in_meters,
+        0
+    }
+
+    entity.sim.flags += {.Collides}
+
+    return index, entity
+}
+
+add_stairs :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_stored_entity(state, .Stairwell, p)
+
+    entity.sim.size = {
+        state.world.tile_size_in_meters,
+        state.world.tile_size_in_meters,
+        state.world.tile_depth_in_meters
+    }
+
     entity.sim.flags += {.Collides}
 
     return index, entity
@@ -735,7 +769,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
     return index
 }
 
-add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide: b32) {
+add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, flags: PairwiseCollsionRuleFlags) {
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do swap(&a, &b)
@@ -763,7 +797,7 @@ add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide:
     if found != nil {
         found.index_a = a
         found.index_b = b
-        found.should_collide = should_collide
+        found.flags = flags
     }
 }
 
