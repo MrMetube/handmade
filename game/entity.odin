@@ -4,6 +4,7 @@ EntityFlag :: enum {
     Collides,
     Nonspatial,
     Moveable,
+    Grounded,
 
     Simulated,
 }

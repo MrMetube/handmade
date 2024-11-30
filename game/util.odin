@@ -164,7 +164,6 @@ round :: proc {
 }
 
 round_f32 :: #force_inline proc(f: f32) -> i32 {
-    // TODO(viktor): 
     if f < 0 do return cast(i32) -math.round(-f)
     return cast(i32) math.round(f)
 }

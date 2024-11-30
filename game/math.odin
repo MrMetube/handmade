@@ -53,15 +53,21 @@ square_root :: math.sqrt
 
 lerp :: proc { lerp_1, lerp_2, lerp_3 }
 lerp_1 :: #force_inline proc(a, b, t: f32) -> f32 {
-    return (1-t) * a + t * b
+    result := (1-t) * a + t * b
+
+    return result
 }
 
 lerp_2 :: #force_inline proc(a, b, t: v2) -> v2 {
-    return (1-t) * a + t * b
+    result := (1-t) * a + t * b
+    
+    return result
 }
 
 lerp_3 :: #force_inline proc(a, b, t: v3) -> v3 {
-    return (1-t) * a + t * b
+    result := (1-t) * a + t * b
+    
+    return result
 }
 
 safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
@@ -118,18 +124,18 @@ clamp :: #force_inline proc(value, min, max: f32) -> f32 {
 }
 
 clamp_01 :: proc { clamp_01_1, clamp_01_2, clamp_01_3 }
-clamp_01_1 :: #force_inline proc(value:f32) -> f32 {
-    result := clamp(value, 0, 1)
+clamp_01_1 :: #force_inline proc(value:f32) -> (result:f32) {
+    result = clamp(value, 0, 1)
 
     return result
 }
-clamp_01_2 :: #force_inline proc(value:v2) -> v2 {
-    result := v2{ clamp_01(value.x), clamp_01(value.y) }
+clamp_01_2 :: #force_inline proc(value:v2) -> (result:v2) {
+    result = v2{ clamp_01(value.x), clamp_01(value.y) }
     
     return result
 }
-clamp_01_3 :: #force_inline proc(value:v3) -> v3 {
-    result := v3{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
+clamp_01_3 :: #force_inline proc(value:v3) -> (result:v3) {
+    result = v3{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
     
     return result
 }
@@ -139,10 +145,9 @@ clamp_01_3 :: #force_inline proc(value:v3) -> v3 {
 // ---------------------- ---------------------- ----------------------
 
 // TODO(viktor): is this necessary?
-V3 :: proc { v3_x, v3_z }
-
-v3_x :: proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
-v3_z :: proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
+V3 :: proc { V3_x, V3_z }
+V3_x :: proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
+V3_z :: proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
 
 dot :: proc { dot2, dot3}
 dot2 :: #force_inline proc(a, b: v2) -> f32 {
