@@ -3,6 +3,7 @@ package game
 EntityFlag :: enum {
     Collides,
     Nonspatial,
+    Moveable,
 
     Simulated,
 }

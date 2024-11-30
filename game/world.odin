@@ -171,10 +171,10 @@ are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b
     return a.chunk == b.chunk
 }
 
-chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32) -> (result: WorldPosition) {
+chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
     offset := world.tile_size_in_meters * vec_cast(f32, tile_x, tile_y, tile_z)
     
-    result = map_into_worldspace(world, result, offset)
+    result = map_into_worldspace(world, result, offset + additional_offset)
     
     assert(auto_cast is_canonical(world, result.offset))
 

@@ -45,15 +45,94 @@ DEG_PER_RAD :: 360.0/TAU
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
-lerp :: #force_inline proc(a, b, t: f32) -> f32 {
-    return (1-t) * a + t * b
-}
-
 square :: #force_inline proc(x: f32) -> f32 {
     return x * x
 }
 
 square_root :: math.sqrt
+
+lerp :: proc { lerp_1, lerp_2, lerp_3 }
+lerp_1 :: #force_inline proc(a, b, t: f32) -> f32 {
+    return (1-t) * a + t * b
+}
+
+lerp_2 :: #force_inline proc(a, b, t: v2) -> v2 {
+    return (1-t) * a + t * b
+}
+
+lerp_3 :: #force_inline proc(a, b, t: v3) -> v3 {
+    return (1-t) * a + t * b
+}
+
+safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
+safe_ratio_n_1 :: #force_inline proc(numerator, divisor, n: f32) -> f32 {
+    ratio := n
+
+    if divisor != 0 {
+        ratio = numerator / divisor
+    }
+
+    return ratio
+}
+
+safe_ratio_n_2 :: #force_inline proc(numerator, divisor, n: v2) -> v2 {
+    ratio := n
+
+    if divisor != 0 {
+        ratio = numerator / divisor
+    }
+
+    return ratio
+}
+
+safe_ratio_n_3 :: #force_inline proc(numerator, divisor, n: v3) -> v3 {
+    ratio := n
+
+    if divisor != 0 {
+        ratio = numerator / divisor
+    }
+
+    return ratio
+}
+
+safe_ratio_0 :: proc { safe_ratio_0_1, safe_ratio_0_2, safe_ratio_0_3 }
+safe_ratio_0_1 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 0) }
+safe_ratio_0_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 0) }
+safe_ratio_0_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 0) }
+
+safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
+safe_ratio_1_1 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 1) }
+safe_ratio_1_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 1) }
+safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
+
+clamp :: #force_inline proc(value, min, max: f32) -> f32 {
+    result := value
+    
+    if result < min {
+        result = min
+    } else if result > max {
+        result = max
+    }
+
+    return result
+}
+
+clamp_01 :: proc { clamp_01_1, clamp_01_2, clamp_01_3 }
+clamp_01_1 :: #force_inline proc(value:f32) -> f32 {
+    result := clamp(value, 0, 1)
+
+    return result
+}
+clamp_01_2 :: #force_inline proc(value:v2) -> v2 {
+    result := v2{ clamp_01(value.x), clamp_01(value.y) }
+    
+    return result
+}
+clamp_01_3 :: #force_inline proc(value:v3) -> v3 {
+    result := v3{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
+    
+    return result
+}
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Vector operations
@@ -188,5 +267,17 @@ rectangle_intersect_3 :: #force_inline proc(a, b: Rectangle3) -> (result: b32) {
                 b.max.y < a.min.y || b.min.y > a.max.y ||
                 b.max.z < a.min.z || b.min.z > a.max.z)
     
+    return result
+}
+
+rectangle_get_barycentric :: proc { rectangle_get_barycentric_2, rectangle_get_barycentric_3 }
+rectangle_get_barycentric_2 :: #force_inline proc(rect: Rectangle2, p: v2) -> (result: v2) {
+    result = safe_ratio_0(p - rect.min, rect.max - rect.min)
+
+    return result
+}
+rectangle_get_barycentric_3 :: #force_inline proc(rect: Rectangle3, p: v3) -> (result: v3) {
+    result = safe_ratio_0(p - rect.min, rect.max - rect.min)
+
     return result
 }

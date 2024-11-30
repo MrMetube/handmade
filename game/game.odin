@@ -17,6 +17,7 @@ INTERNAL :: #config(INTERNAL, true)
         - allow non-transient rules to override transient once
         - Entry/Exit
       - Whats the plan for robustness / shape definition ?
+      - "Things pushing other things"
     - Implement multiple sim regions per frame
       - per-entity clocking
       - sim region merging?  for multiple players?
@@ -257,7 +258,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         tiles_per_screen := [2]i32{17, 9}
 
         screen_base: [3]i32
-        screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
+        screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z + 1
         for room_count in u32(0) ..< 200 {
             // TODO: random number generator
             random_choice : u32
@@ -421,7 +422,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
-    camera_bounds := rectangle_center_half_diameter(0, state.world.tile_size_in_meters * tilespan)
+    camera_bounds := rectangle_center_half_diameter(0, tilespan * {world.tile_size_in_meters, world.tile_size_in_meters, state.world.tile_depth_in_meters })
 
     sim_arena: Arena
     init_arena(&sim_arena, memory.transient_storage)
@@ -456,7 +457,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 push_bitmap(&piece_group, &state.wall, 0)
 
             case .Stairwell: 
-                push_bitmap(&piece_group, &state.stair, 0)
+                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
+                push_rectangle(&piece_group, entity.size.xy, {}, Blue)
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -546,7 +548,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 draw_hitpoints(&piece_group, &entity, 0.8)
             }
 
-            if (ddp.x != 0 || ddp.y != 0 || entity.dp.x != 0 || entity.dp.y != 0) && .Nonspatial not_in entity.flags {
+            if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
                 move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
@@ -621,10 +623,9 @@ PairwiseCollsionRuleFlag :: enum {
     Temporary,
 }
 
-PairwiseCollsionRuleFlags :: bit_set[PairwiseCollsionRuleFlag]
 
 PairwiseCollsionRule :: struct {
-    flags: PairwiseCollsionRuleFlags,
+    can_collide: b32,
     index_a, index_b: StorageIndex,
 
     next_in_hash: ^PairwiseCollsionRule
@@ -695,6 +696,7 @@ add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEnt
     index, entity = add_stored_entity(state, .Sword, null_position())
 
     entity.sim.size = {0.5, 1, state.world.tile_depth_in_meters}
+    entity.sim.flags += {.Moveable}
 
     return index, entity
 }
@@ -704,7 +706,7 @@ add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: S
     index, entity = add_stored_entity(state, .Monster, p)
 
     entity.sim.size = 0.75
-    entity.sim.flags += {.Collides}
+    entity.sim.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
 
@@ -716,6 +718,7 @@ add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: 
     index, entity = add_stored_entity(state, .Familiar, p)
 
     entity.sim.size = 0.5
+    entity.sim.flags += {.Moveable}
 
     return index, entity
 }
@@ -736,7 +739,7 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
 }
 
 add_stairs :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z, {0, 0, state.world.tile_depth_in_meters * 0.5})
     index, entity = add_stored_entity(state, .Stairwell, p)
 
     entity.sim.size = {
@@ -755,7 +758,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
     index, entity = add_stored_entity(state, .Hero, state.camera_p)
 
     entity.sim.size = {0.75, 0.4, state.world.tile_depth_in_meters}
-    entity.sim.flags += {.Collides}
+    entity.sim.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
 
@@ -769,7 +772,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
     return index
 }
 
-add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, flags: PairwiseCollsionRuleFlags) {
+add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide: b32) {
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do swap(&a, &b)
@@ -797,7 +800,7 @@ add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, flags: Pairwise
     if found != nil {
         found.index_a = a
         found.index_b = b
-        found.flags = flags
+        found.can_collide = should_collide
     }
 }
 
