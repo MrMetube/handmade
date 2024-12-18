@@ -137,8 +137,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
 map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {}) -> WorldPosition {
     result := center
     result.offset += offset
-    // NOTE: the world is assumed to be toroidal topology
-    // if you leave on one end you end up the other end
+
     rounded_offset  := round(result.offset / world.chunk_dim_meters)
     result.chunk  = result.chunk + rounded_offset
     result.offset -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
@@ -232,12 +231,12 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
     return world_chunk
 }
 
-init_world :: proc(world: ^World, tile_size_in_meters: f32) {
+init_world :: proc(world: ^World, tile_size_in_meters, tile_depth_in_meters: f32) {
     world.tile_size_in_meters  = tile_size_in_meters
-    world.tile_depth_in_meters  = tile_size_in_meters
+    world.tile_depth_in_meters = tile_size_in_meters
     world.chunk_dim_meters = { TILES_PER_CHUNK * tile_size_in_meters,
                                TILES_PER_CHUNK * tile_size_in_meters,
-                               tile_size_in_meters }
+                               world.tile_depth_in_meters }
 
     world.first_free = nil
     for &chunk_block in world.chunk_hash {

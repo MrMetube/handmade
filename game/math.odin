@@ -255,11 +255,8 @@ rectangle_contains_3 :: #force_inline proc(rec: Rectangle3, point: v3) -> b32 {
 
 rectangle_intersect :: proc { rectangle_intersect_2, rectangle_intersect_3 }
 rectangle_intersect_2 :: #force_inline proc(a, b: Rectangle2) -> (result: b32) {
-    assert((b.max.x >= a.min.x && b.min.x <= a.max.x) == !(b.max.x < a.min.x || b.min.x > a.max.x))
-    assert((b.max.y >= a.min.y && b.min.y <= a.max.y) == !(b.max.y < a.min.y || b.min.y > a.max.y))
-    
-    result  = !(b.max.x < a.min.x || b.min.x > a.max.x)
-    result &= !(b.max.y < a.min.y || b.min.y > a.max.y)
+    result  = !(b.max.x <= a.min.x || b.min.x >= a.max.x)
+    result &= !(b.max.y <= a.min.y || b.min.y >= a.max.y)
     
     return result
 }

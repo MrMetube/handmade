@@ -162,6 +162,7 @@ ThreadContext :: struct {
 }
 
 main :: proc() {
+    when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
     // ---------------------- ---------------------- ----------------------
@@ -181,6 +182,7 @@ main :: proc() {
         }
         state.exe_path = exe_path_and_name[:one_past_last_slash]
     }
+    
     // NOTE: Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
     desired_scheduler_ms :: 1
     sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
@@ -670,7 +672,7 @@ main :: proc() {
 
             last_cycle_count = end_cycle_count
             last_counter = end_counter
-            when  false && INTERNAL {
+            when false && INTERNAL {
                 #reverse for cursor, index in debug_last_time_markers {
                     if index < len(debug_last_time_markers)-1 do debug_last_time_markers[index+1] = cursor
                 }

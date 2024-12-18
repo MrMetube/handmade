@@ -321,29 +321,30 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
             if .Nonspatial not_in entity.flags {
                 // TODO(viktor): spatial partition here
                 for &test_entity in region.entities[:region.entity_count] {
-                    if can_collide(state, entity, &test_entity) /* && entity.p.z == test_entity.p.z */ {
-                        if .Collides in test_entity.flags && .Nonspatial not_in test_entity.flags {
-                            test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
-                                EPSILON :: 0.01
-                                if entity_delta_x != 0 {
-                                    t_result := (wall_x - rel_x) / entity_delta_x
-                                    y := rel_y + t_result * entity_delta_y
-                                    if 0 <= t_result && t_result < t_min^ {
-                                        if y >= min_y && y <= max_y {
-                                            t_min^ = max(0, t_result-EPSILON)
-                                            collided = true
-                                        }
+                    if can_collide(state, entity, &test_entity) {
+                        test_wall :: proc(wall_x, entity_delta_x, entity_delta_y, rel_x, rel_y, min_y, max_y: f32, t_min: ^f32) -> (collided: b32) {
+                            EPSILON :: 0.01
+                            if entity_delta_x != 0 {
+                                t_result := (wall_x - rel_x) / entity_delta_x
+                                y := rel_y + t_result * entity_delta_y
+                                if 0 <= t_result && t_result < t_min^ {
+                                    if y >= min_y && y <= max_y {
+                                        t_min^ = max(0, t_result-EPSILON)
+                                        collided = true
                                     }
                                 }
-                                return collided
                             }
-                            
-                            minkowski_diameter := entity.size + test_entity.size
-                            min_corner := -0.5 * minkowski_diameter
-                            max_corner :=  0.5 * minkowski_diameter
+                            return collided
+                        }
+                        
+                        minkowski_diameter := entity.size + test_entity.size
+                        min_corner := -0.5 * minkowski_diameter
+                        max_corner :=  0.5 * minkowski_diameter
 
-                            rel := entity.p - test_entity.p
+                        rel := entity.p - test_entity.p
 
+                        // TODO(viktor): do we want an close inclusion on the max_corner?
+                        if rel.z >= min_corner.z && rel.z < max_corner.z {
                             test_hit: b32
                             test_t_min := t_min
                             test_wall_normal : v3

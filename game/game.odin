@@ -11,6 +11,9 @@ INTERNAL :: #config(INTERNAL, true)
     ARCHITECTURE EXPLORATION
     
     - Z !
+      - debug drawing of Z levels and icnlusion of Z to make sure
+        that there are no bugs
+      - make sure flying things can go over walls
       - how is going "up" and "down" rendered?
     - Collision detection
       - Clean up predicate proliferation! Can we make a nice clean
@@ -32,6 +35,7 @@ INTERNAL :: #config(INTERNAL, true)
       - Logging
       - Diagramming
       - (a little gui) switches / sliders / etc
+      - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
 
     - Audio
       - Sound effects triggers
@@ -251,10 +255,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         add_stored_entity(state, .Nil, null_position())
 
         world := state.world
-        init_world(world, 1)
+        init_world(world, 1, 3)
 
         state.tile_size_in_pixels = 60
-        state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
+        state.meters_to_pixels = f32(state.tile_size_in_pixels) / v3{world.tile_size_in_meters, world.tile_size_in_meters, world.tile_depth_in_meters}
 
         door_left, door_right: b32
         door_top, door_bottom: b32
@@ -357,7 +361,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.camera_p = new_camera_p
 
         monster_p  := new_camera_p.chunk + {10,5,0}
-        familiar_p := new_camera_p.chunk + {5,5,0}
+        familiar_p := new_camera_p.chunk + {10,1,0}
         add_monster(state,  monster_p.x, monster_p.y, monster_p.z)
         add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
     }
@@ -372,7 +376,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         con_hero := &state.controlled_heroes[controller_index]
         if con_hero.storage_index == 0 {
             if controller.start.ended_down {
-                con_hero^ = { storage_index = add_player(state) }
+                player_index, _ := add_player(state)
+                con_hero^ = { storage_index = player_index }
             }
         } else {
             con_hero.dz     = {}
@@ -461,7 +466,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 push_bitmap(&piece_group, &state.wall, 0)
 
             case .Stairwell: 
-                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
+                position := screen_center + state.meters_to_pixels.xy * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
                 push_rectangle(&piece_group, entity.size.xy, 0, Blue * {1,1,1,0.5})
     
             case .Hero:
@@ -561,18 +566,18 @@ when false {
                 z_fudge := 1 + 0.05*entity.p.z
 
                 center := screen_center 
-                center.x += state.meters_to_pixels * z_fudge * (entity.p.x - 0.5 * entity.size.x) 
-                center.y -= state.meters_to_pixels * z_fudge * (entity.p.y - 0.5 * entity.size.y) 
-                center.y -= state.meters_to_pixels * entity.p.z
+                center.x += state.meters_to_pixels.x * z_fudge * (entity.p.x - 0.5 * entity.size.x) 
+                center.y -= state.meters_to_pixels.y * z_fudge * (entity.p.y - 0.5 * entity.size.y) 
+                center.y -= state.meters_to_pixels.z * entity.p.z
 
                 center += piece.offset
 
                 if piece.bitmap != nil {
-                    center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels)
-                    center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels)
+                    center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels.x)
+                    center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels.y)
                     draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a))
                 } else {
-                    center.y -= entity.size.y * state.meters_to_pixels
+                    center.y -= entity.size.y * state.meters_to_pixels.y
                     draw_rectangle(buffer, center, piece.size, piece.color)
                 }
             }
@@ -659,7 +664,7 @@ GameState :: struct {
     player, monster: [2]LoadedBitmap,
 
     tile_size_in_pixels: u32,
-    meters_to_pixels: f32,
+    meters_to_pixels: v3,
 
     // NOTE(viktor): must be a power of 2!
     collision_rule_hash: [256]^PairwiseCollsionRule,
@@ -695,6 +700,14 @@ add_stored_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition)
     return index, stored
 }
 
+add_grounded_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition, size: v3) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+    offset_p := map_into_worldspace(state.world, p, {0, 0, 0.5 * size.z})
+    index, stored = add_stored_entity(state, type, offset_p)
+    stored.sim.size = size
+
+    return index, stored
+}
+
 init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     assert(count < len(entity.sim.hit_points))
 
@@ -707,7 +720,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
 add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_stored_entity(state, .Sword, null_position())
 
-    entity.sim.size = {0.5, 1, state.world.tile_depth_in_meters}
+    entity.sim.size = {0.5, 1, 0.1}
     entity.sim.flags += {.Moveable}
 
     return index, entity
@@ -715,9 +728,8 @@ add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEnt
 
 add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_stored_entity(state, .Monster, p)
+    index, entity = add_grounded_entity(state, .Monster, p, {0.75, 0.75, 1.5})
 
-    entity.sim.size = 0.75
     entity.sim.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
@@ -737,13 +749,7 @@ add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: 
 
 add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_stored_entity(state, .Wall, p)
-
-    entity.sim.size = {
-        state.world.tile_size_in_meters,
-        state.world.tile_size_in_meters,
-        0
-    }
+    index, entity = add_grounded_entity(state, .Wall, p, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
 
     entity.sim.flags += {.Collides}
 
@@ -751,25 +757,21 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
 }
 
 add_stairs :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z, {0, 0, state.world.tile_depth_in_meters * 0.5})
-    index, entity = add_stored_entity(state, .Stairwell, p)
-
-    entity.sim.size = {
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_grounded_entity(state, .Stairwell, p, {
         state.world.tile_size_in_meters,
         state.world.tile_size_in_meters * 2,
         state.world.tile_depth_in_meters
-    }
+    })
 
     entity.sim.flags += {.Collides}
 
     return index, entity
 }
 
-add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
-    entity: ^StoredEntity
-    index, entity = add_stored_entity(state, .Hero, state.camera_p)
+add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(state, .Hero, state.camera_p, {0.75, 0.4, 1.2})
 
-    entity.sim.size = {0.75, 0.4, state.world.tile_depth_in_meters}
     entity.sim.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
@@ -781,7 +783,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex) {
         state.camera_following_index = index
     }
 
-    return index
+    return index, entity
 }
 
 add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide: b32) {
@@ -849,8 +851,8 @@ push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^Loade
     group.count += 1
 
     piece.bitmap = bitmap
-    piece.offset = {offset.x, -offset.y} * group.state.meters_to_pixels
-    piece.size   = size * group.state.meters_to_pixels
+    piece.offset = {offset.x, -offset.y} * group.state.meters_to_pixels.xy
+    piece.size   = size * group.state.meters_to_pixels.xy
     piece.color  = color
 }
 
