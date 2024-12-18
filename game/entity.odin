@@ -20,3 +20,9 @@ make_entity_spatial :: #force_inline proc(entity: ^Entity, p, dp: v3) {
     entity.p = p
     entity.dp = dp
 }
+
+get_entity_ground_point :: #force_inline proc(entity: ^Entity) -> (result: v3) {
+    result = entity.p - {0, 0, 0.5 * entity.size.z}
+
+    return result
+}

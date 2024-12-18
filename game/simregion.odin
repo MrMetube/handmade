@@ -24,6 +24,9 @@ Entity :: struct {
 	facing_index: i32,
 	t_bob: f32,
 	// TODO(viktor): generation index so we know how " to date" this entity is
+
+    // TODO(viktor): only for stairwells
+    walkable_height: f32,
 }
 
 EntityReference :: struct #raw_union {
@@ -399,7 +402,6 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
     }
 
     ground: f32
-    // ground := region.ground_level
     // TODO(viktor): handle collision percisly by moving it into the collision loop
     { // NOTE(viktor): handle events based on area overlapping
         entity_rect := rectangle_center_diameter(entity.p, entity.size)
@@ -414,6 +416,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
         }
     }
 
+    ground += entity.p.z - get_entity_ground_point(entity).z
     // TODO(viktor): this has to become real height handling, ground collision, etc.
     if (entity.p.z <= ground) || (.Grounded in entity.flags && entity.dp.z == 0) {
         entity.p.z = ground;
@@ -429,8 +432,10 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
 
     if entity.dp.x < 0  {
         entity.facing_index = 0
-    } else {
+    } else if entity.dp.x > 0 {
         entity.facing_index = 1
+    } else {
+        // NOTE(viktor): leave the facing direction what it was
     }
 }
 
@@ -456,14 +461,28 @@ can_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
     return result
 }
 
+get_stair_ground :: #force_inline proc(region: ^Entity, at_ground_point: v3) -> (result: f32) {
+    assert(region.type == .Stairwell)
+    
+    region_rect := rectangle_center_diameter(region.p, region.size)
+    bary := clamp_01(rectangle_get_barycentric(region_rect, at_ground_point))
+    result = region_rect.min.z + region.walkable_height * bary.y
+
+    return result
+}
+
+handle_overlap :: proc(state: ^GameState, mover, region: ^Entity, dt: f32, ground: ^f32) {
+    if region.type == .Stairwell {
+        ground^ = get_stair_ground(region, get_entity_ground_point(mover))
+    }
+}
+
 speculative_collide :: proc(mover, region: ^Entity) -> (result: b32 = true) {
     if region.type == .Stairwell {
-        region_rect := rectangle_center_diameter(region.p, region.size)
-        bary := clamp_01(rectangle_get_barycentric(region_rect, mover.p))
-        ground := lerp(region_rect.min.z, region_rect.max.z, bary.y)
+        mover_ground_point := get_entity_ground_point(mover)
+        ground := get_stair_ground(region, mover_ground_point)
         step_height :: 0.1
-        result = (abs(mover.p.z - ground) > step_height) ||
-                    (bary.y > 0.1 && bary.y < 0.9)
+        result = (abs(mover_ground_point.z - ground) > step_height) //  || (bary.y > 0.1 && bary.y < 0.9)
     }
 
     return result
@@ -497,12 +516,4 @@ can_overlap :: proc(state:^GameState, mover, region: ^Entity) -> (result: b32) {
     }
     
     return result
-}
-
-handle_overlap :: proc(state: ^GameState, mover, region: ^Entity, dt: f32, ground: ^f32) {
-    if region.type == .Stairwell {
-        region_rect := rectangle_center_diameter(region.p, region.size)
-        bary := clamp_01(rectangle_get_barycentric(region_rect, mover.p))
-        ground^ = lerp(region_rect.min.z, region_rect.max.z, bary.y)
-    }
 }

@@ -11,8 +11,10 @@ INTERNAL :: #config(INTERNAL, true)
     ARCHITECTURE EXPLORATION
     
     - Z !
-      - debug drawing of Z levels and icnlusion of Z to make sure
+      - debug drawing of Z levels and inclusion of Z to make sure
         that there are no bugs
+      - Concept of ground in the collision loop so it can handle 
+        collisions coming onto and off of stairs, for example
       - make sure flying things can go over walls
       - how is going "up" and "down" rendered?
     - Collision detection
@@ -258,7 +260,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         init_world(world, 1, 3)
 
         state.tile_size_in_pixels = 60
-        state.meters_to_pixels = f32(state.tile_size_in_pixels) / v3{world.tile_size_in_meters, world.tile_size_in_meters, world.tile_depth_in_meters}
+        state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
 
         door_left, door_right: b32
         door_top, door_bottom: b32
@@ -466,8 +468,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 push_bitmap(&piece_group, &state.wall, 0)
 
             case .Stairwell: 
-                position := screen_center + state.meters_to_pixels.xy * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
-                push_rectangle(&piece_group, entity.size.xy, 0, Blue * {1,1,1,0.5})
+                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
+                push_rectangle(&piece_group, entity.size.xy, 0,             Blue * {1,1,1,0.5})
+                push_rectangle(&piece_group, entity.size.xy, {0, 0, entity.size.z}, Blue * {1,1,0.6,0.5})
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -549,7 +552,7 @@ when false {
                 z := (coeff) * 0.3 + 0.3
 
                 push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
-                push_bitmap(&piece_group, &state.player[entity.facing_index], {0,z}, 0.5)
+                push_bitmap(&piece_group, &state.player[entity.facing_index], {0, z, 0}, 0.5)
 
             case .Monster:
                 push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
@@ -562,22 +565,24 @@ when false {
                 move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
+            base_p := get_entity_ground_point(&entity)
+
             for piece in piece_group.pieces[:piece_group.count] {
-                z_fudge := 1 + 0.05*entity.p.z
+                z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
 
                 center := screen_center 
-                center.x += state.meters_to_pixels.x * z_fudge * (entity.p.x - 0.5 * entity.size.x) 
-                center.y -= state.meters_to_pixels.y * z_fudge * (entity.p.y - 0.5 * entity.size.y) 
-                center.y -= state.meters_to_pixels.z * entity.p.z
+                center.x += state.meters_to_pixels * z_fudge * (base_p.x - 0.5 * entity.size.x) 
+                center.y -= state.meters_to_pixels * z_fudge * (base_p.y - 0.5 * entity.size.y) 
+                center.y -= state.meters_to_pixels / state.world.tile_depth_in_meters * base_p.z 
 
-                center += piece.offset
+                center += piece.offset.xy
 
                 if piece.bitmap != nil {
-                    center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels.x)
-                    center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels.y)
+                    center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels)
+                    center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels)
                     draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a))
                 } else {
-                    center.y -= entity.size.y * state.meters_to_pixels.y
+                    center.y -= entity.size.y * state.meters_to_pixels
                     draw_rectangle(buffer, center, piece.size, piece.color)
                 }
             }
@@ -609,7 +614,7 @@ EntityVisiblePieceGroup :: struct {
 
 EntityVisiblePiece :: struct {
     bitmap: ^LoadedBitmap,
-    offset: v2,
+    offset: v3,
 
     color: GameColor,
     size: v2,
@@ -664,7 +669,7 @@ GameState :: struct {
     player, monster: [2]LoadedBitmap,
 
     tile_size_in_pixels: u32,
-    meters_to_pixels: v3,
+    meters_to_pixels: f32,
 
     // NOTE(viktor): must be a power of 2!
     collision_rule_hash: [256]^PairwiseCollsionRule,
@@ -761,10 +766,11 @@ add_stairs :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: St
     index, entity = add_grounded_entity(state, .Stairwell, p, {
         state.world.tile_size_in_meters,
         state.world.tile_size_in_meters * 2,
-        state.world.tile_depth_in_meters
+        state.world.tile_depth_in_meters + 0.1
     })
 
     entity.sim.flags += {.Collides}
+    entity.sim.walkable_height = state.world.tile_depth_in_meters
 
     return index, entity
 }
@@ -845,22 +851,23 @@ clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
     }
 }
 
-push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size, offset: v2, color: GameColor) {
+push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size: v2, offset: v3, color: GameColor) {
     assert(group.count < len(group.pieces))
     piece := &group.pieces[group.count]
     group.count += 1
 
     piece.bitmap = bitmap
-    piece.offset = {offset.x, -offset.y} * group.state.meters_to_pixels.xy
-    piece.size   = size * group.state.meters_to_pixels.xy
+    piece.offset.xy = {offset.x, -offset.y} * group.state.meters_to_pixels
+    piece.offset.z = offset.z
+    piece.size   = size * group.state.meters_to_pixels
     piece.color  = color
 }
 
-push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v2, alpha: f32 = 1) {
+push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v3, alpha: f32 = 1) {
     push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
 }
 
-push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, size, offset:v2, color: GameColor) {
+push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, size: v2, offset:v3, color: GameColor) {
     push_piece(group, nil, size, offset, color)
 }
 
@@ -873,7 +880,7 @@ draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_
         for index in 0..<entity.hit_point_max {
             hit_point := entity.hit_points[index]
             color := hit_point.filled_amount == 0 ? Gray : Red
-            push_rectangle(group, health_size, {health_x, -offset_y}, color)
+            push_rectangle(group, health_size, {health_x, -offset_y, 0}, color)
             health_x += spacing_between
         }
     }

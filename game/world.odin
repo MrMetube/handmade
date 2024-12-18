@@ -233,7 +233,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
 
 init_world :: proc(world: ^World, tile_size_in_meters, tile_depth_in_meters: f32) {
     world.tile_size_in_meters  = tile_size_in_meters
-    world.tile_depth_in_meters = tile_size_in_meters
+    world.tile_depth_in_meters = tile_depth_in_meters
     world.chunk_dim_meters = { TILES_PER_CHUNK * tile_size_in_meters,
                                TILES_PER_CHUNK * tile_size_in_meters,
                                world.tile_depth_in_meters }
