@@ -12,7 +12,7 @@ Entity :: struct {
 
     p, dp: v3,
 
-    size: v3,
+    collision: ^EntityCollisionVolumeGroup,
 
     distance_limit: f32,
 
@@ -26,7 +26,21 @@ Entity :: struct {
 	// TODO(viktor): generation index so we know how " to date" this entity is
 
     // TODO(viktor): only for stairwells
+    walkable_dim: v2,
     walkable_height: f32,
+}
+
+EntityCollisionVolumeGroup :: struct {
+    total_volume: EntityCollisionVolume,
+    // TODO(viktor): volumes is always expected to be non-empty if the entity
+    // has any volume... in the future, this could be compressed if necessary
+    // that the length can be 0 if the total_volume should be used as the only
+    // collision volume for the entity.
+    volumes: []EntityCollisionVolume,
+}
+
+EntityCollisionVolume :: struct {
+    dim, offset: v3
 }
 
 EntityReference :: struct #raw_union {
@@ -93,7 +107,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
                             stored := &state.stored_entities[storage_index]
                             if .Nonspatial not_in stored.sim.flags {
                                 sim_space_p := get_sim_space_p(region, stored)
-                                if entity_overlaps_rectangle(region.bounds, sim_space_p, stored.sim.size) {
+                                if entity_overlaps_rectangle(region.bounds, sim_space_p, stored.sim.collision.total_volume) {
                                     // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
                                     add_entity(state, region, storage_index, stored, &sim_space_p)
                                 }
@@ -153,9 +167,9 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
 	}
 }
 
-entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p, dim: v3) -> (result: b32) {
-    grown := rectangle_add(bounds, 0.5 * dim)
-    result = rectangle_contains(grown, p)
+entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volume: EntityCollisionVolume) -> (result: b32) {
+    grown := rectangle_add(bounds, 0.5 * volume.dim)
+    result = rectangle_contains(grown, p + volume.offset)
     return result
 }
 
@@ -207,7 +221,7 @@ add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_
 	if dest != nil {
 		if sim_p != nil {
 			dest.p = sim_p^
-            dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.size)
+            dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
 		} else {
 			dest.p = get_sim_space_p(region, source)
 		}
@@ -290,7 +304,9 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
     ddp *= move_spec.speed
 
     // TODO(viktor): ODE here
-    ddp += -move_spec.drag * entity.dp
+    drag := -move_spec.drag * entity.dp
+    drag.z = 0
+    ddp += drag
     if .Grounded not_in entity.flags {
         GRAVITY :: -9.8
         ddp.z += GRAVITY
@@ -339,45 +355,51 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                             }
                             return collided
                         }
-                        
-                        minkowski_diameter := entity.size + test_entity.size
-                        min_corner := -0.5 * minkowski_diameter
-                        max_corner :=  0.5 * minkowski_diameter
 
-                        rel := entity.p - test_entity.p
+                        for volume in entity.collision.volumes {
+                            for test_volume in test_entity.collision.volumes {
+                                minkowski_diameter := volume.dim + test_volume.dim
+                                min_corner := -0.5 * minkowski_diameter
+                                max_corner :=  0.5 * minkowski_diameter
 
-                        // TODO(viktor): do we want an close inclusion on the max_corner?
-                        if rel.z >= min_corner.z && rel.z < max_corner.z {
-                            test_hit: b32
-                            test_t_min := t_min
-                            test_wall_normal : v3
+                                rel := (entity.p + volume.offset) - (test_entity.p + test_volume.offset)
 
-                            if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &test_t_min) {
-                                test_wall_normal = {-1,  0, 0}
-                                test_hit = true
-                            }
-                            if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &test_t_min) {
-                                test_wall_normal = { 1,  0, 0}
-                                test_hit = true
-                            }
-                            if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &test_t_min) {
-                                test_wall_normal = { 0, -1, 0}
-                                test_hit = true
-                            }
-                            if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &test_t_min) {
-                                test_wall_normal = { 0,  1, 0}
-                                test_hit = true
-                            }
+                                // TODO(viktor): do we want an close inclusion on the max_corner?
+                                if rel.z >= min_corner.z && rel.z < max_corner.z {
+                                    test_hit: b32
+                                    test_t_min := t_min
+                                    test_wall_normal : v3
 
-                            if test_hit {
-                                test_p := entity.p + entity_delta * test_t_min
-                                if speculative_collide(entity, &test_entity) {
-                                    t_min = test_t_min
-                                    wall_normal = test_wall_normal
-                                    hit = &test_entity
+                                    if test_wall(min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &test_t_min) {
+                                        test_wall_normal = {-1,  0, 0}
+                                        test_hit = true
+                                    }
+                                    if test_wall(max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, &test_t_min) {
+                                        test_wall_normal = { 1,  0, 0}
+                                        test_hit = true
+                                    }
+                                    if test_wall(min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &test_t_min) {
+                                        test_wall_normal = { 0, -1, 0}
+                                        test_hit = true
+                                    }
+                                    if test_wall(max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, &test_t_min) {
+                                        test_wall_normal = { 0,  1, 0}
+                                        test_hit = true
+                                    }
+
+                                    if test_hit {
+                                        test_p := entity.p + entity_delta * test_t_min
+                                        if speculative_collide(entity, &test_entity) {
+                                            t_min = test_t_min
+                                            wall_normal = test_wall_normal
+                                            hit = &test_entity
+                                        }
+                                    }
                                 }
+
                             }
                         }
+
                     }
                 }
             } 
@@ -401,14 +423,15 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
         }
     }
 
+    // TODO(viktor): handle multivolumes
     ground: f32
     // TODO(viktor): handle collision percisly by moving it into the collision loop
     { // NOTE(viktor): handle events based on area overlapping
-        entity_rect := rectangle_center_diameter(entity.p, entity.size)
+        entity_rect := rectangle_center_diameter(entity.p + entity.collision.total_volume.offset, entity.collision.total_volume.dim)
         // TODO(viktor): spatial partition here
         for &test_entity in region.entities[:region.entity_count] {
             if can_overlap(state, entity, &test_entity) {
-                test_entity_rect := rectangle_center_diameter(test_entity.p, test_entity.size)
+                test_entity_rect := rectangle_center_diameter(test_entity.p + test_entity.collision.total_volume.offset, test_entity.collision.total_volume.dim)
                 if rectangle_intersect(entity_rect, test_entity_rect) {
                     handle_overlap(state, entity, &test_entity, dt, &ground)
                 }
@@ -464,9 +487,9 @@ can_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
 get_stair_ground :: #force_inline proc(region: ^Entity, at_ground_point: v3) -> (result: f32) {
     assert(region.type == .Stairwell)
     
-    region_rect := rectangle_center_diameter(region.p, region.size)
-    bary := clamp_01(rectangle_get_barycentric(region_rect, at_ground_point))
-    result = region_rect.min.z + region.walkable_height * bary.y
+    region_rect := rectangle_center_diameter(region.p.xy, region.walkable_dim)
+    bary := clamp_01(rectangle_get_barycentric(region_rect, at_ground_point.xy))
+    result = region.p.z + region.walkable_height * bary.y
 
     return result
 }

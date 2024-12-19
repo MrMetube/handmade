@@ -72,27 +72,6 @@ INTERNAL :: #config(INTERNAL, true)
       - World generation
 */
 
-
-// TODO: Copypasta from platform
-// TODO: Offscreenbuffer color and y-axis being down should not leak into the game layer
-OffscreenBufferColor :: struct{
-    b, g, r, pad: u8
-}
-
-// TODO: COPYPASTA from debug
-
-DEBUG_code :: struct {
-    read_entire_file  : proc_DEBUG_read_entire_file,
-    write_entire_file : proc_DEBUG_write_entire_file,
-    free_file_memory  : proc_DEBUG_free_file_memory,
-}
-
-proc_DEBUG_read_entire_file  :: #type proc(filename: string) -> (result: []u8)
-proc_DEBUG_write_entire_file :: #type proc(filename: string, memory: []u8) -> b32
-proc_DEBUG_free_file_memory  :: #type proc(memory: []u8)
-
-// TODO: Copypasta END
-
 Sample :: [2]i16
 
 // TODO: allow outputing vibration
@@ -161,7 +140,6 @@ GameInput :: struct {
 }
 #assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
 
-
 GameMemory :: struct {
     is_initialized: b32,
     // NOTE: REQUIRED to be cleared to zero at startup
@@ -169,52 +147,6 @@ GameMemory :: struct {
     transient_storage: []u8,
 
     debug: DEBUG_code
-}
-
-
-Arena :: struct {
-    storage: []u8,
-    used: u64 // TODO: if I use a slice of u8, it can never get more than 4 Gb of memory
-}
-
-init_arena :: #force_inline proc(arena: ^Arena, storage: []u8) {
-    arena.storage = storage
-}
-
-// TODO(viktor): zero all pushed data by default and add nonzeroing version for all procs
-push :: proc { push_slice, push_struct, push_size }
-
-push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, len: u64) -> (result: []Element) {
-    data := cast([^]Element) push_size(arena, cast(u64) size_of(Element) * len)
-    result = data[:len]
-    return result
-}
-
-push_struct :: #force_inline proc(arena: ^Arena, $T: typeid) -> (result: ^T) {
-    result = cast(^T) push_size(arena, cast(u64)size_of(T))
-    return result
-}
-
-push_size :: #force_inline proc(arena: ^Arena, size: u64) -> (result: [^]u8) {
-    assert(arena.used + size < cast(u64)len(arena.storage))
-    result = &arena.storage[arena.used]
-    arena.used += size
-    return result
-}
-
-zero :: proc { zero_struct, zero_slice }
-
-zero_struct :: #force_inline proc(s: ^$T) {
-    data := cast([^]u8) s
-    len  := size_of(T)
-    zero_slice(data[:len])
-}
-
-zero_slice :: #force_inline proc(memory: []$u8){
-    // TODO(viktor): check this guy for performance
-    for &Byte in memory {
-        Byte = 0
-    }
 }
 
 // timing
@@ -228,7 +160,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
         defer memory.is_initialized = true
-
+        
+        // TODO(viktor): lets start partitioning our memory space
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
@@ -257,10 +190,45 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         add_stored_entity(state, .Nil, null_position())
 
         world := state.world
-        init_world(world, 1, 3)
+        init_world(world, 1.5, 3)
 
         state.tile_size_in_pixels = 60
         state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
+
+        make_null_collision :: proc(state: ^GameState) -> (result: ^EntityCollisionVolumeGroup) {
+            result = push(&state.world_arena, EntityCollisionVolumeGroup)
+
+            result^ = {}
+            
+            return result
+        }
+
+        make_simple_grounded_collision :: proc(state: ^GameState, dim: v3) -> (result: ^EntityCollisionVolumeGroup) {
+            // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
+            result = push(&state.world_arena, EntityCollisionVolumeGroup)
+            result.volumes = push(&state.world_arena, EntityCollisionVolume, 1)
+            
+            result.total_volume = {
+                dim = dim, 
+                offset = {0, 0, 0.5*dim.z},
+            }
+            result.volumes[0] = result.total_volume
+
+            return result
+        }
+
+        state.null_collision     = make_null_collision(state)
+        state.wall_collision     = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
+        state.sword_collision    = make_simple_grounded_collision(state, {0.5, 1, 0.1})
+        state.stairs_collision   = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters * 2, state.world.tile_depth_in_meters + 0.1})
+        state.player_collision   = make_simple_grounded_collision(state, {0.75, 0.4, 1.2})
+        state.monstar_collision  = make_simple_grounded_collision(state, {0.75, 0.75, 1.5})
+        state.familiar_collision = make_simple_grounded_collision(state, {0.5, 0.5, 0.5})
+
+
+        //
+        // "world gen"
+        //
 
         door_left, door_right: b32
         door_top, door_bottom: b32
@@ -449,8 +417,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
 
-            size := state.meters_to_pixels * entity.size
-
             // TODO(viktor): this is incorrect, should be computed after update
             shadow_alpha := 1 - 0.5 * entity.p.z;
             if(shadow_alpha < 0) {
@@ -468,9 +434,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 push_bitmap(&piece_group, &state.wall, 0)
 
             case .Stairwell: 
-                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1} - 0.5 * entity.size.xy )
-                push_rectangle(&piece_group, entity.size.xy, 0,             Blue * {1,1,1,0.5})
-                push_rectangle(&piece_group, entity.size.xy, {0, 0, entity.size.z}, Blue * {1,1,0.6,0.5})
+                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1}/*  - 0.5 * entity.size.xy */ )
+                push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue * {1,1,1,0.5})
+                push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.5})
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -557,7 +523,7 @@ when false {
             case .Monster:
                 push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
                 push_bitmap(&piece_group, &state.monster[1], 0)
-
+                // TODO(viktor): fix the offsets 
                 draw_hitpoints(&piece_group, &entity, 1.6)
             }
 
@@ -570,19 +536,19 @@ when false {
             for piece in piece_group.pieces[:piece_group.count] {
                 z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
 
-                center := screen_center 
-                center.x += state.meters_to_pixels * z_fudge * (base_p.x - 0.5 * entity.size.x) 
-                center.y -= state.meters_to_pixels * z_fudge * (base_p.y - 0.5 * entity.size.y) 
+                center := screen_center
+                center.x += state.meters_to_pixels * z_fudge * (base_p.x/*  - 0.5 * entity.size.x */) 
+                center.y -= state.meters_to_pixels * z_fudge * (base_p.y/*  - 0.5 * entity.size.y */) 
                 center.y -= state.meters_to_pixels / state.world.tile_depth_in_meters * base_p.z 
 
                 center += piece.offset.xy
 
                 if piece.bitmap != nil {
-                    center.x -= (cast(f32) piece.bitmap.width/2  - entity.size.x * state.meters_to_pixels)
-                    center.y -=(cast(f32) piece.bitmap.height/2 -  entity.size.y * state.meters_to_pixels)
+                    center.x -= (cast(f32) piece.bitmap.width/2)
+                    center.y -= (cast(f32) piece.bitmap.height/2)
                     draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a))
                 } else {
-                    center.y -= entity.size.y * state.meters_to_pixels
+                    // center.y -= entity.size.y * state.meters_to_pixels
                     draw_rectangle(buffer, center, piece.size, piece.color)
                 }
             }
@@ -674,6 +640,14 @@ GameState :: struct {
     // NOTE(viktor): must be a power of 2!
     collision_rule_hash: [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
+
+    null_collision, 
+    sword_collision, 
+    stairs_collision, 
+    player_collision, 
+    monstar_collision, 
+    familiar_collision, 
+    wall_collision: ^EntityCollisionVolumeGroup
 }
 
 LoadedBitmap :: struct {
@@ -698,6 +672,8 @@ add_stored_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition)
     assert(state.stored_entity_count < len(state.stored_entities))
     stored = &state.stored_entities[index]
     stored.sim = { type = type }
+
+    stored.sim.collision = state.null_collision
     stored.p = null_position()
 
     change_entity_location(&state.world_arena, state.world, index, stored, p)
@@ -705,48 +681,17 @@ add_stored_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition)
     return index, stored
 }
 
-add_grounded_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition, size: v3) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    offset_p := map_into_worldspace(state.world, p, {0, 0, 0.5 * size.z})
-    index, stored = add_stored_entity(state, type, offset_p)
-    stored.sim.size = size
+add_grounded_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+    index, stored = add_stored_entity(state, type, p)
+    stored.sim.collision = collision
 
     return index, stored
 }
 
-init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
-    assert(count < len(entity.sim.hit_points))
-
-    entity.sim.hit_point_max = count
-    for &hit_point in entity.sim.hit_points[:count] {
-        hit_point = { filled_amount = HIT_POINT_PART_COUNT }
-    }
-}
-
 add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_stored_entity(state, .Sword, null_position())
-
-    entity.sim.size = {0.5, 1, 0.1}
-    entity.sim.flags += {.Moveable}
-
-    return index, entity
-}
-
-add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_grounded_entity(state, .Monster, p, {0.75, 0.75, 1.5})
-
-    entity.sim.flags += {.Collides, .Moveable}
-
-    init_hitpoints(entity, 3)
-
-    return index, entity
-}
-
-add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_stored_entity(state, .Familiar, p)
-
-    entity.sim.size = 0.5
+    
+    entity.sim.collision = state.sword_collision
     entity.sim.flags += {.Moveable}
 
     return index, entity
@@ -754,7 +699,7 @@ add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: 
 
 add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_grounded_entity(state, .Wall, p, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
+    index, entity = add_grounded_entity(state, .Wall, p, state.wall_collision)
 
     entity.sim.flags += {.Collides}
 
@@ -763,20 +708,17 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
 
 add_stairs :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
-    index, entity = add_grounded_entity(state, .Stairwell, p, {
-        state.world.tile_size_in_meters,
-        state.world.tile_size_in_meters * 2,
-        state.world.tile_depth_in_meters + 0.1
-    })
+    index, entity = add_grounded_entity(state, .Stairwell, p, state.stairs_collision)
 
     entity.sim.flags += {.Collides}
     entity.sim.walkable_height = state.world.tile_depth_in_meters
+    entity.sim.walkable_dim    = entity.sim.collision.total_volume.dim.xy
 
     return index, entity
 }
 
 add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Hero, state.camera_p, {0.75, 0.4, 1.2})
+    index, entity = add_grounded_entity(state, .Hero, state.camera_p, state.player_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
 
@@ -790,6 +732,35 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEn
     }
 
     return index, entity
+}
+
+add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_grounded_entity(state, .Monster, p, state.monstar_collision)
+
+    entity.sim.flags += {.Collides, .Moveable}
+
+    init_hitpoints(entity, 3)
+
+    return index, entity
+}
+
+add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_grounded_entity(state, .Familiar, p, state.familiar_collision)
+
+    entity.sim.flags += {.Moveable}
+
+    return index, entity
+}
+
+init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
+    assert(count < len(entity.sim.hit_points))
+
+    entity.sim.hit_point_max = count
+    for &hit_point in entity.sim.hit_points[:count] {
+        hit_point = { filled_amount = HIT_POINT_PART_COUNT }
+    }
 }
 
 add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide: b32) {
@@ -875,7 +846,7 @@ draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_
     if entity.hit_point_max > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
-        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between + entity.size.x/2
+        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between/*  + entity.size.x/2 */
 
         for index in 0..<entity.hit_point_max {
             hit_point := entity.hit_points[index]

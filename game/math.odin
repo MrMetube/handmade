@@ -283,3 +283,10 @@ rectangle_get_barycentric_3 :: #force_inline proc(rect: Rectangle3, p: v3) -> (r
 
     return result
 }
+
+rectangle_xy :: #force_inline proc(rec: Rectangle3) -> (result: Rectangle2) {
+    result.min = rec.min.xy
+    result.max = rec.max.xy
+    
+    return result
+}
