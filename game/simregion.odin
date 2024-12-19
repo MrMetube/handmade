@@ -467,17 +467,19 @@ can_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
         a, b := a, b
         if a.storage_index > b.storage_index do swap(&a, &b)
 
-        if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
-            // TODO(viktor): property-based logic goes here
-            result = true
-        }
-            
-        // TODO(viktor): BETTER HASH FUNCTION!!!
-        hash_bucket := a.storage_index & (len(state.collision_rule_hash) - 1)
-        for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
-            if rule.index_a == a.storage_index && rule.index_b == b.storage_index {
-                result = rule.can_collide
-                break
+        if .Collides in a.flags && .Collides in b.flags {
+            if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
+                // TODO(viktor): property-based logic goes here
+                result = true
+            }
+                
+            // TODO(viktor): BETTER HASH FUNCTION!!!
+            hash_bucket := a.storage_index & (len(state.collision_rule_hash) - 1)
+            for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
+                if rule.index_a == a.storage_index && rule.index_b == b.storage_index {
+                    result = rule.can_collide
+                    break
+                }
             }
         }
     }

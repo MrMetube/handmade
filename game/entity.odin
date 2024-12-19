@@ -1,10 +1,12 @@
 package game
 
 EntityFlag :: enum {
+    // TODO(viktor): Collides and Grounded probably can be removed now/soon
     Collides,
     Nonspatial,
     Moveable,
     Grounded,
+    Traversable,
 
     Simulated,
 }

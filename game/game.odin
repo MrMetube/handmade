@@ -86,6 +86,7 @@ White    :: GameColor{1,1,1, 1}
 Gray     :: GameColor{0.5,0.5,0.5, 1}
 Black    :: GameColor{0,0,0, 1}
 Blue     :: GameColor{0.08, 0.49, 0.72, 1}
+Yellow   :: GameColor{0.71, 0.71, 0.09, 1}
 Orange   :: GameColor{1, 0.71, 0.2, 1}
 Green    :: GameColor{0, 0.59, 0.28, 1}
 Red      :: GameColor{1, 0.09, 0.24, 1}
@@ -148,6 +149,39 @@ GameMemory :: struct {
 
     debug: DEBUG_code
 }
+
+GameState :: struct {
+    world_arena: Arena,
+    // TODO(viktor): should we allow split-screen?
+    camera_following_index: StorageIndex,
+    camera_p : WorldPosition,
+    controlled_heroes: [len(GameInput{}.controllers)]ControlledHero,
+
+    stored_entity_count: StorageIndex,
+    stored_entities: [100_000]StoredEntity,
+
+    world: ^World,
+
+    backdrop, wall, shadow, sword, stair: LoadedBitmap,
+    player, monster: [2]LoadedBitmap,
+
+    tile_size_in_pixels: u32,
+    meters_to_pixels: f32,
+
+    collision_rule_hash: [256]^PairwiseCollsionRule,
+    first_free_collision_rule: ^PairwiseCollsionRule,
+
+    null_collision, 
+    sword_collision, 
+    stairs_collision, 
+    player_collision, 
+    monstar_collision, 
+    familiar_collision, 
+    standart_room_collision,
+    wall_collision: ^EntityCollisionVolumeGroup
+}
+// NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
+#assert( len(GameState{}.collision_rule_hash) & ( len(GameState{}.collision_rule_hash) - 1 ) == 0)
 
 // timing
 @(export)
@@ -217,24 +251,25 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             return result
         }
 
-        state.null_collision     = make_null_collision(state)
-        state.wall_collision     = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
-        state.sword_collision    = make_simple_grounded_collision(state, {0.5, 1, 0.1})
-        state.stairs_collision   = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters * 2, state.world.tile_depth_in_meters + 0.1})
-        state.player_collision   = make_simple_grounded_collision(state, {0.75, 0.4, 1.2})
-        state.monstar_collision  = make_simple_grounded_collision(state, {0.75, 0.75, 1.5})
-        state.familiar_collision = make_simple_grounded_collision(state, {0.5, 0.5, 0.5})
+        tiles_per_screen :: [2]i32{17, 9}
 
+        state.null_collision          = make_null_collision(state)
+        state.wall_collision          = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
+        state.sword_collision         = make_simple_grounded_collision(state, {0.5, 1, 0.1})
+        state.stairs_collision        = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters * 2, state.world.tile_depth_in_meters + 0.1})
+        state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1})
+        state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1})
+        state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 0.5})
+        state.standart_room_collision = make_simple_grounded_collision(state, {state.world.tile_size_in_meters * cast(f32) tiles_per_screen.x, state.world.tile_size_in_meters * cast(f32) tiles_per_screen.y, state.world.tile_depth_in_meters * 0.9})
 
         //
-        // "world gen"
+        // "World Gen"
         //
 
         door_left, door_right: b32
         door_top, door_bottom: b32
         stair_up, stair_down: b32
 
-        tiles_per_screen := [2]i32{17, 9}
 
         screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z + 1
@@ -262,6 +297,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                 }
             }
             need_to_place_stair := created_stair
+            
+            add_standart_room(state,
+                screen_col * tiles_per_screen.x + tiles_per_screen.x/2,
+                screen_row * tiles_per_screen.y + tiles_per_screen.y/2,
+                tile_z,
+            ) 
 
             for tile_y in 0..< tiles_per_screen.y {
                 for tile_x in 0 ..< tiles_per_screen.x {
@@ -432,11 +473,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
                 push_bitmap(&piece_group, &state.wall, 0)
-
-            case .Stairwell: 
-                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1}/*  - 0.5 * entity.size.xy */ )
-                push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue * {1,1,1,0.5})
-                push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.5})
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -525,6 +561,16 @@ when false {
                 push_bitmap(&piece_group, &state.monster[1], 0)
                 // TODO(viktor): fix the offsets 
                 draw_hitpoints(&piece_group, &entity, 1.6)
+            
+            case .Stairwell: 
+                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1}/*  - 0.5 * entity.size.xy */ )
+                push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue * {1,1,1,0.5})
+                push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.5})
+            
+            case .Space: 
+                for volume in entity.collision.volumes {
+                    push_rectangle_outline(&piece_group, volume.dim.xy, volume.offset, Yellow)
+                }
             }
 
             if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
@@ -548,8 +594,7 @@ when false {
                     center.y -= (cast(f32) piece.bitmap.height/2)
                     draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a))
                 } else {
-                    // center.y -= entity.size.y * state.meters_to_pixels
-                    draw_rectangle(buffer, center, piece.size, piece.color)
+                    draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
                 }
             }
         }
@@ -559,7 +604,11 @@ when false {
 }
 
 EntityType :: enum u32 {
-    Nil, Hero, Wall, Familiar, Monster, Sword, Stairwell
+    Nil, 
+    
+    Space,
+    
+    Hero, Wall, Familiar, Monster, Sword, Stairwell
 }
 
 HIT_POINT_PART_COUNT :: 4
@@ -583,7 +632,7 @@ EntityVisiblePiece :: struct {
     offset: v3,
 
     color: GameColor,
-    size: v2,
+    dim: v2,
 }
 
 EntityIndex :: u32
@@ -617,37 +666,6 @@ PairwiseCollsionRule :: struct {
     index_a, index_b: StorageIndex,
 
     next_in_hash: ^PairwiseCollsionRule
-}
-
-GameState :: struct {
-    world_arena: Arena,
-    // TODO(viktor): should we allow split-screen?
-    camera_following_index: StorageIndex,
-    camera_p : WorldPosition,
-    controlled_heroes: [len(GameInput{}.controllers)]ControlledHero,
-
-    stored_entity_count: StorageIndex,
-    stored_entities: [100_000]StoredEntity,
-
-    world: ^World,
-
-    backdrop, wall, shadow, sword, stair: LoadedBitmap,
-    player, monster: [2]LoadedBitmap,
-
-    tile_size_in_pixels: u32,
-    meters_to_pixels: f32,
-
-    // NOTE(viktor): must be a power of 2!
-    collision_rule_hash: [256]^PairwiseCollsionRule,
-    first_free_collision_rule: ^PairwiseCollsionRule,
-
-    null_collision, 
-    sword_collision, 
-    stairs_collision, 
-    player_collision, 
-    monstar_collision, 
-    familiar_collision, 
-    wall_collision: ^EntityCollisionVolumeGroup
 }
 
 LoadedBitmap :: struct {
@@ -754,6 +772,15 @@ add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: 
     return index, entity
 }
 
+add_standart_room :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
+    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+    index, entity = add_grounded_entity(state, .Space, p, state.standart_room_collision)
+
+    entity.sim.flags += {.Traversable}
+
+    return index, entity
+}
+
 init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     assert(count < len(entity.sim.hit_points))
 
@@ -822,24 +849,35 @@ clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
     }
 }
 
-push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, size: v2, offset: v3, color: GameColor) {
+push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, dim: v2, offset: v3, color: GameColor) {
     assert(group.count < len(group.pieces))
     piece := &group.pieces[group.count]
     group.count += 1
 
-    piece.bitmap = bitmap
+    piece.bitmap    = bitmap
     piece.offset.xy = {offset.x, -offset.y} * group.state.meters_to_pixels
-    piece.offset.z = offset.z
-    piece.size   = size * group.state.meters_to_pixels
-    piece.color  = color
+    piece.offset.z  = offset.z
+    piece.dim       = dim * group.state.meters_to_pixels
+    piece.color     = color
 }
 
 push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v3, alpha: f32 = 1) {
     push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
 }
 
-push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, size: v2, offset:v3, color: GameColor) {
-    push_piece(group, nil, size, offset, color)
+push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
+    push_piece(group, nil, dim, offset, color)
+}
+
+push_rectangle_outline :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
+    thickness :: 0.4
+    // NOTE(viktor): Top and Bottom
+    push_piece(group, nil, {dim.x, thickness}, offset - {0, dim.y*0.5, 0}, color)
+    push_piece(group, nil, {dim.x, thickness}, offset - {0, dim.y*0.5, 0}, color)
+
+    // NOTE(viktor): Left and Right
+    push_piece(group, nil, {thickness, dim.y}, offset - {dim.x*0.5, 0, 0}, color)
+    push_piece(group, nil, {thickness, dim.y}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
 draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_y: f32) {
