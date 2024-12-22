@@ -2,6 +2,7 @@
 /.vs
 
 /build
+/assets/ground
 
 *.exe
 *.pdb

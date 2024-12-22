@@ -30,14 +30,14 @@ import win "core:sys/windows"
 
 INTERNAL :: #config(INTERNAL, true)
 // TODO(viktor): this is a global for now
-RUNNING : b32
+Running : b32
 
 GLOBAL_back_buffer : OffscreenBuffer
 GLOBAL_sound_buffer: ^IDirectSoundBuffer
 
 GLOBAL_perf_counter_frequency : win.LARGE_INTEGER
 
-GLOBAL_PAUSE := false
+GlobalPause := false
 
 GLOBAL_debug_show_cursor: b32
 GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
@@ -65,78 +65,6 @@ OffscreenBuffer :: struct {
     width  : i32,
     height : i32,
 }
-
-// TODO(viktor): Copypasta from game package
-
-Sample :: [2]i16
-
-GameSoundBuffer :: struct {
-    samples            : []Sample,
-    samples_per_second : u32,
-}
-
-GameOffscreenBuffer :: struct {
-    memory : []OffscreenBufferColor,
-    width  : i32,
-    height : i32,
-}
-
-GameInputButton :: struct {
-    half_transition_count: i32,
-    ended_down : b32,
-}
-
-GameInputController :: struct {
-    is_connected: b32,
-    is_analog: b32,
-
-    stick_average: [2]f32,
-    
-    using _buttons_array_and_enum : struct #raw_union {
-        buttons: [18]GameInputButton,
-        using _buttons_enum : struct {
-            stick_up , stick_down , stick_left , stick_right ,
-            button_up, button_down, button_left, button_right,
-             dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
-
-            start, back,
-            shoulder_left, shoulder_right,
-            thumb_left   , thumb_right : GameInputButton,
-        },
-    },
-}
-#assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
-
-GameInput :: struct {
-    seconds_to_advance_over_update: f32,
-
-    using _mouse_buttons_array_and_enum : struct #raw_union {
-        mouse_buttons: [5]GameInputButton,
-        using _buttons_enum : struct {
-            mouse_left,	mouse_right, mouse_middle, 
-            mouse_extra1, mouse_extra2 : GameInputButton,
-        },
-    },
-    mouse_position: [2]i32,
-    mouse_wheel: i32,
-
-    controllers: [5]GameInputController
-}
-#assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
-
-
-GameMemory :: struct {
-    is_initialized: b32,
-    // NOTE: REQUIRED to be cleared to zero at startup
-    permanent_storage: []u8,
-    transient_storage: []u8,
-
-    debug: DEBUG_code
-}
-
-GameState :: struct {}
-
-// TODO: Copypaste END
 
 State :: struct {
     exe_path : string,
@@ -192,7 +120,8 @@ main :: proc() {
     main_thread_context : ThreadContext
     main_thread_context.placeholder = 123
     context.user_ptr = &main_thread_context
-    RUNNING = true
+    
+    Running = true
 
 
 
@@ -258,8 +187,8 @@ main :: proc() {
         monitor_refresh_hz: u32 = 60
         when false {
             device_context := win.GetDC(window)
-            VREFRESH :: 116
-            refresh_rate := win.GetDeviceCaps(device_context, VREFRESH)
+            VRefresh :: 116
+            refresh_rate := win.GetDeviceCaps(device_context, VRefresh)
             if refresh_rate > 1 {
                 monitor_refresh_hz = cast(u32) refresh_rate
             }
@@ -383,7 +312,7 @@ main :: proc() {
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Game Loop
     // ---------------------- ---------------------- ----------------------
-    for RUNNING {
+    for Running {
         // TODO: if this is too slow the audio and the whole game will lag
         if get_last_write_time(game_dll_name) != game_dll_write_time {
             game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name, lock_name)
@@ -490,20 +419,20 @@ main :: proc() {
                     if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
                     if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
 
-                    THRESHOLD :: 0.5
-                    process_Xinput_button(&new_controller.stick_left , old_controller.stick_left , 1, new_controller.stick_average.x < -THRESHOLD ? 1 : 0)
-                    process_Xinput_button(&new_controller.stick_right, old_controller.stick_right, 1, new_controller.stick_average.x >  THRESHOLD ? 1 : 0)
-                    process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -THRESHOLD ? 1 : 0)
-                    process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  THRESHOLD ? 1 : 0)
+                    Threshold :: 0.5
+                    process_Xinput_button(&new_controller.stick_left , old_controller.stick_left , 1, new_controller.stick_average.x < -Threshold ? 1 : 0)
+                    process_Xinput_button(&new_controller.stick_right, old_controller.stick_right, 1, new_controller.stick_average.x >  Threshold ? 1 : 0)
+                    process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -Threshold ? 1 : 0)
+                    process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  Threshold ? 1 : 0)
 
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do RUNNING = false
+                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do Running = false
                 } else {
                     new_controller.is_connected = false
                 }
             }
         }
 
-        if GLOBAL_PAUSE do continue
+        if GlobalPause do continue
 
 
         // ---------------------- ---------------------- ----------------------
@@ -978,9 +907,9 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         context = runtime.default_context()
         assert(false, "keyboard-event came in through a non-dispatched event")
     case win.WM_CLOSE: // TODO: Handle this with a message to the user
-        RUNNING = false
+        Running = false
     case win.WM_DESTROY: // TODO: handle this as an error - recreate window?
-        RUNNING = false
+        Running = false
     case win.WM_ACTIVATEAPP:
         LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
         LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color.
@@ -1022,7 +951,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
     for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
         switch message.message {
         case win.WM_QUIT:
-            RUNNING = false
+            Running = false
         case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
             vk_code := message.wParam
 
@@ -1054,7 +983,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
                 case win.VK_RIGHT:
                     process_win_keyboard_message(&keyboard_controller.button_right  , is_down)
                 case win.VK_ESCAPE:
-                    RUNNING = false
+                    Running = false
                     process_win_keyboard_message(&keyboard_controller.back          , is_down)
                 case win.VK_SPACE:
                     process_win_keyboard_message(&keyboard_controller.start         , is_down)
@@ -1071,9 +1000,9 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
                         }
                     }
                 case win.VK_P:
-                    if is_down do GLOBAL_PAUSE = !GLOBAL_PAUSE
+                    if is_down do GlobalPause = !GlobalPause
                 case win.VK_F4:
-                    if is_down && alt_down do RUNNING = false
+                    if is_down && alt_down do Running = false
                 case win.VK_RETURN:
                     if is_down && alt_down do toggle_fullscreen(message.hwnd)
                     

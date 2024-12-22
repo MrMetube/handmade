@@ -2,7 +2,7 @@ package game
 
 import "core:fmt"
 
-TILES_PER_CHUNK :: 16
+TilesPerChunk :: 16
 
 WorldPosition :: struct {
     // TODO(viktor): It seems like we have to store ChunkX/Y/Z with each
@@ -42,12 +42,12 @@ World :: struct {
 }
 
 null_position :: #force_inline proc() -> (result:WorldPosition) {
-    result.chunk.x = UNINITIALIZED_CHUNK
+    result.chunk.x = UninitializedChunk
     return result
 }
 
 is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
-    return p.chunk.x != UNINITIALIZED_CHUNK
+    return p.chunk.x != UninitializedChunk
 }
 
 change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p_init: WorldPosition) {
@@ -190,14 +190,14 @@ get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) 
     return get_chunk_3(arena, world, point.chunk.x, point.chunk.y, point.chunk.z)
 }
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_z: i32) -> ^Chunk {
-    CHUNK_SAFE_MARGIN :: 256
+    ChunkSafeMargin :: 256
 
-    assert(chunk_x > min(i32) + CHUNK_SAFE_MARGIN)
-    assert(chunk_x < max(i32) - CHUNK_SAFE_MARGIN)
-    assert(chunk_y > min(i32) + CHUNK_SAFE_MARGIN)
-    assert(chunk_y < max(i32) - CHUNK_SAFE_MARGIN)
-    assert(chunk_z > min(i32) + CHUNK_SAFE_MARGIN)
-    assert(chunk_z < max(i32) - CHUNK_SAFE_MARGIN)
+    assert(chunk_x > min(i32) + ChunkSafeMargin)
+    assert(chunk_x < max(i32) - ChunkSafeMargin)
+    assert(chunk_y > min(i32) + ChunkSafeMargin)
+    assert(chunk_y < max(i32) - ChunkSafeMargin)
+    assert(chunk_z > min(i32) + ChunkSafeMargin)
+    assert(chunk_z < max(i32) - ChunkSafeMargin)
 
     // TODO(viktor): BETTER HASH FUNCTION !!
     hash_value := 19*chunk_x + 7*chunk_y + 3*chunk_z
@@ -211,13 +211,13 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
             break
         }
 
-        if arena != nil && world_chunk.chunk.x != UNINITIALIZED_CHUNK && world_chunk.next_in_hash == nil {
+        if arena != nil && world_chunk.chunk.x != UninitializedChunk && world_chunk.next_in_hash == nil {
             world_chunk.next_in_hash = push_struct(arena, Chunk)
             world_chunk = world_chunk.next_in_hash
-            world_chunk.chunk.x = UNINITIALIZED_CHUNK
+            world_chunk.chunk.x = UninitializedChunk
         }
 
-        if arena != nil && world_chunk.chunk.x == UNINITIALIZED_CHUNK {
+        if arena != nil && world_chunk.chunk.x == UninitializedChunk {
             world_chunk.chunk = {chunk_x, chunk_y, chunk_z}
             world_chunk.next_in_hash = nil
 
@@ -234,16 +234,16 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
 init_world :: proc(world: ^World, tile_size_in_meters, tile_depth_in_meters: f32) {
     world.tile_size_in_meters  = tile_size_in_meters
     world.tile_depth_in_meters = tile_depth_in_meters
-    world.chunk_dim_meters = { TILES_PER_CHUNK * tile_size_in_meters,
-                               TILES_PER_CHUNK * tile_size_in_meters,
+    world.chunk_dim_meters = { TilesPerChunk * tile_size_in_meters,
+                               TilesPerChunk * tile_size_in_meters,
                                world.tile_depth_in_meters }
 
     world.first_free = nil
     for &chunk_block in world.chunk_hash {
-        chunk_block.chunk.x = UNINITIALIZED_CHUNK
+        chunk_block.chunk.x = UninitializedChunk
         chunk_block.first_block.entity_count = 0
     }
 }
 
 @(private="file")
-UNINITIALIZED_CHUNK :: min(i32)
+UninitializedChunk :: min(i32)

@@ -75,9 +75,9 @@ SimRegion :: struct {
 begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
 	// TODO(viktor): make storedEntities part of world
 	region = push_struct(sim_arena, SimRegion)
-	MAX_ENTITY_COUNT :: 4096
+	MaxEntityCount :: 4096
 	zero_struct(region)
-	region.entities = push_slice(sim_arena, Entity, MAX_ENTITY_COUNT)
+	region.entities = push_slice(sim_arena, Entity, MaxEntityCount)
 
     // TODO(viktor): Try to make these get enforced more rigorously
     // TODO(viktor): Perhaps try using a dual system here where we support 
@@ -86,12 +86,12 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     region.max_entity_radius   = 5
     region.max_entity_velocity = 30
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
-    UPDATE_SAFETY_MARGIN_Z :: 1 // TODO(viktor): what should this be?
+    UpdateSafetyMarginZ :: 1 // TODO(viktor): what should this be?
 
 	region.world = world
 	region.origin = origin
 	region.updatable_bounds = rectangle_add(bounds, update_safety_margin)
-	region.bounds = rectangle_add(bounds, v3{update_safety_margin, update_safety_margin, UPDATE_SAFETY_MARGIN_Z})
+	region.bounds = rectangle_add(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
 
     min_p := map_into_worldspace(world, region.origin, region.bounds.min )
     max_p := map_into_worldspace(world, region.origin, region.bounds.max )
@@ -259,13 +259,13 @@ add_entity_raw :: proc(state: ^GameState, region: ^SimRegion, storage_index: Sto
 	return entity
 }
 
-INVALID_P :: v3{100_000, 100_000, 100_000}
+InvalidP :: v3{100_000, 100_000, 100_000}
 
 get_sim_space_p :: #force_inline proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v3) {
     // TODO(viktor): Do we want to set this to signaling NAN in 
     // debug mode to make sure nobody ever uses the position of
     // a nonspatial entity?
-    result = INVALID_P
+    result = InvalidP
     if .Nonspatial not_in stored.sim.flags {
         result = world_difference(region.world, stored.p, region.origin)
     }
@@ -282,13 +282,13 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
     return { false, 1, 0}
 }
 
-BREAK_HERE :: 1
 
 move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
     assert(.Nonspatial not_in entity.flags)
 
     if entity.type == .Hero {
-        _ = BREAK_HERE  
+        BreakHere :: 1
+        _ = BreakHere  
     } 
 
     ddp := ddp
@@ -308,8 +308,8 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
     drag.z = 0
     ddp += drag
     if .Grounded not_in entity.flags {
-        GRAVITY :: -9.8
-        ddp.z += GRAVITY
+        Gravity :: -9.8
+        ddp.z += Gravity
     }
 
     entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
@@ -342,8 +342,8 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                 for &test_entity in region.entities[:region.entity_count] {
                     
                     // TODO(viktor): Robustness!
-                    OVERLAP_EPSILON :: 0.001
-                    if .Traversable in test_entity.flags && entities_overlap(entity, &test_entity, OVERLAP_EPSILON) ||
+                    OverlapEpsilon :: 0.001
+                    if .Traversable in test_entity.flags && entities_overlap(entity, &test_entity, OverlapEpsilon) ||
                        can_collide(state, entity, &test_entity) {
                         
                         for volume in entity.collision.volumes {
@@ -368,8 +368,8 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                                         {max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, { 0,  1}},
                                     }
                                     
-                                    T_EPSILON :: 0.0001
-                                    #assert(T_EPSILON < OVERLAP_EPSILON)
+                                    TEpsilon :: 0.0001
+                                    #assert(TEpsilon < OverlapEpsilon)
                                     if .Traversable in test_entity.flags {
                                         test_t := t_max
                                         test_wall_normal: v2
@@ -383,7 +383,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                                                 
                                                 if t_result >= 0 && test_t < t_result {
                                                     if wall.min_y < y && y <= wall.max_y {
-                                                        test_t = max(0, t_result-T_EPSILON)
+                                                        test_t = max(0, t_result-TEpsilon)
                                                         collided = true
                                                     }
                                                 }
@@ -413,7 +413,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                                                 
                                                 if t_result >= 0 && test_t > t_result {
                                                     if wall.min_y < y && y <= wall.max_y {
-                                                        test_t = max(0, t_result-T_EPSILON)
+                                                        test_t = max(0, t_result-TEpsilon)
                                                         collided = true
                                                     }
                                                 }

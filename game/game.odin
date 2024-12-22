@@ -162,7 +162,9 @@ GameState :: struct {
 
     world: ^World,
 
-    backdrop, wall, shadow, sword, stair: LoadedBitmap,
+    grass: [8]LoadedBitmap,
+    
+    wall, shadow, sword, stair: LoadedBitmap,
     player, monster: [2]LoadedBitmap,
 
     tile_size_in_pixels: u32,
@@ -199,7 +201,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.backdrop   = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/forest_small.bmp")
         state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
         state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
         state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
@@ -208,6 +209,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
         state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
+        state.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
+        state.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
+        state.grass[2] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp")
+        state.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
+        state.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
+        state.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
+        state.grass[6]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")
+        state.grass[7]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
 
         state.player[0].focus = { 6, 28}
         state.player[1].focus = { -6, 28}
@@ -275,12 +284,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             // TODO: random number generator
             random_choice : u32
             if stair_down || stair_up {
-                random_choice = random_number[random_number_index] % 2
+                random_choice = random() % 2
             } else {
-                random_choice = random_number[random_number_index] % 3
+                random_choice = random() % 3
             }
-            random_number_index += 1
-
+            
             created_stair: b32
             if random_choice == 0 {
                 door_right = true
@@ -437,22 +445,34 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
-
+    
     // NOTE: Clear the screen
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
-
+    
+    { // Draw Test 
+        screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+        random_number_index = 140
+        for index in 0..<3 {
+            offset := (vec_cast(f32, random_number[random_number_index], random_number[random_number_index+1]) / MaxRandomValue) * 2 - 1
+            stamp := state.grass[random_number[random_number_index] % len(state.grass)]
+            random_number_index += 3
+            
+            radius := v2{8, 5}
+            p := screen_center + offset * radius * state.meters_to_pixels
+     
+            draw_bitmap(buffer, stamp, p)
+        }
+    }
+    
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
     camera_bounds := rectangle_center_half_diameter(0, tilespan * {world.tile_size_in_meters, world.tile_size_in_meters, state.world.tile_depth_in_meters })
-
+    
     sim_arena: Arena
     init_arena(&sim_arena, memory.transient_storage)
-
+    
     camera_sim_region := begin_sim(&sim_arena, state, world, state.camera_p, camera_bounds, input.delta_time)
-
-    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    draw_bitmap(buffer, state.backdrop, screen_center)
-
+    
     for &entity in camera_sim_region.entities {
         if entity.updatable {
             // TODO(viktor):  move this out into entity.odin
@@ -546,8 +566,8 @@ when false {
                 move_spec.speed = 50
 
                 entity.t_bob += dt
-                if entity.t_bob > TAU {
-                    entity.t_bob -= TAU
+                if entity.t_bob > Tau {
+                    entity.t_bob -= Tau
                 }
                 hz :: 4
                 coeff := sin(entity.t_bob * hz)
@@ -563,7 +583,6 @@ when false {
                 draw_hitpoints(&piece_group, &entity, 1.6)
             
             case .Stairwell: 
-                position := screen_center + state.meters_to_pixels * (entity.p.xy * {1,-1}/*  - 0.5 * entity.size.xy */ )
                 push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue * {1,1,1,0.5})
                 push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.5})
             
@@ -584,7 +603,7 @@ when false {
             for piece in piece_group.pieces[:piece_group.count] {
                 z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
 
-                center := screen_center
+                center := vec_cast(f32, buffer.width, buffer.height) * 0.5
                 center.x += state.meters_to_pixels * z_fudge * (base_p.x/*  - 0.5 * entity.size.x */) 
                 center.y -= state.meters_to_pixels * z_fudge * (base_p.y/*  - 0.5 * entity.size.y */) 
                 center.y -= state.meters_to_pixels / state.world.tile_depth_in_meters * base_p.z 
@@ -611,7 +630,7 @@ EntityType :: enum u32 {
     Hero, Wall, Familiar, Monster, Sword, Stairwell
 }
 
-HIT_POINT_PART_COUNT :: 4
+HitPointPartCount :: 4
 HitPoint :: struct {
     flags: u8,
     filled_amount: u8,
@@ -786,7 +805,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
 
     entity.sim.hit_point_max = count
     for &hit_point in entity.sim.hit_points[:count] {
-        hit_point = { filled_amount = HIT_POINT_PART_COUNT }
+        hit_point = { filled_amount = HitPointPartCount }
     }
 }
 
