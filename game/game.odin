@@ -207,17 +207,15 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
         state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
         state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
-        state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
+        // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
 
-        state.player[0].focus = {8, 0}
-        state.player[1].focus = {-4, 0}
+        state.player[0].focus = { 6, 28}
+        state.player[1].focus = { -6, 28}
 
-        state.monster[0].focus = {0, -1}
-        state.monster[1].focus = {21, -1}
+        state.monster[0].focus = { -13, 22}
+        state.monster[1].focus = { 16, 22}
 
-        state.shadow.focus = {0, 10}
-
-        state.sword.focus = {16, 16}
+        state.shadow.focus = { 0, -2}
 
         state.world = push_struct(&state.world_arena, World)
 
@@ -251,7 +249,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
             return result
         }
 
-        tiles_per_screen :: [2]i32{17, 9}
+        tiles_per_screen :: [2]i32{16, 8}
 
         state.null_collision          = make_null_collision(state)
         state.wall_collision          = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
@@ -322,11 +320,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     }
 
                     if should_be_door {
-                        add_wall(state,
-                            tile_x + screen_col * tiles_per_screen.x,
-                            tile_y + screen_row * tiles_per_screen.y,
-                            tile_z,
-                        ) 
+                        if room_count == 0 {
+                            add_wall(state,
+                                tile_x + screen_col * tiles_per_screen.x,
+                                tile_y + screen_row * tiles_per_screen.y,
+                                tile_z,
+                            ) 
+                        }
                     } else if need_to_place_stair {
                         add_stairs(state, 
                             5 + screen_col * tiles_per_screen.x,
@@ -569,7 +569,9 @@ when false {
             
             case .Space: 
                 for volume in entity.collision.volumes {
-                    push_rectangle_outline(&piece_group, volume.dim.xy, volume.offset, Yellow)
+                    // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
+                    fudge := world.tile_size_in_meters * v2{2, 0.5}
+                    push_rectangle_outline(&piece_group, volume.dim.xy + fudge, volume.offset, Yellow)
                 }
             }
 
@@ -590,8 +592,6 @@ when false {
                 center += piece.offset.xy
 
                 if piece.bitmap != nil {
-                    center.x -= (cast(f32) piece.bitmap.width/2)
-                    center.y -= (cast(f32) piece.bitmap.height/2)
                     draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a))
                 } else {
                     draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
@@ -776,7 +776,7 @@ add_standart_room :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (in
     p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
     index, entity = add_grounded_entity(state, .Space, p, state.standart_room_collision)
 
-    entity.sim.flags += {.Traversable}
+    entity.sim.flags += { .Traversable }
 
     return index, entity
 }
@@ -870,14 +870,14 @@ push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, o
 }
 
 push_rectangle_outline :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
-    thickness :: 0.4
+    thickness :: 0.1
     // NOTE(viktor): Top and Bottom
-    push_piece(group, nil, {dim.x, thickness}, offset - {0, dim.y*0.5, 0}, color)
-    push_piece(group, nil, {dim.x, thickness}, offset - {0, dim.y*0.5, 0}, color)
+    push_piece(group, nil, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color)
+    push_piece(group, nil, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color)
 
     // NOTE(viktor): Left and Right
-    push_piece(group, nil, {thickness, dim.y}, offset - {dim.x*0.5, 0, 0}, color)
-    push_piece(group, nil, {thickness, dim.y}, offset + {dim.x*0.5, 0, 0}, color)
+    push_piece(group, nil, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color)
+    push_piece(group, nil, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
 draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_y: f32) {
@@ -905,7 +905,7 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 }
 
 draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1) {
-    rounded_center := round(center) + bitmap.focus
+    rounded_center := round(center) + bitmap.focus * {1, -1}
 
     left   := rounded_center.x - bitmap.width / 2
     top	   := rounded_center.y - bitmap.height / 2
