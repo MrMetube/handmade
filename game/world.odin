@@ -120,7 +120,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
                 if old_block != nil {
                     world.first_free = old_block.next
                 } else {
-                    old_block = push_struct(arena, WorldEntityBlock)
+                    old_block = push(arena, WorldEntityBlock)
                 }
                 old_block^ = block^
                 block.next = old_block
@@ -212,7 +212,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
         }
 
         if arena != nil && world_chunk.chunk.x != UninitializedChunk && world_chunk.next_in_hash == nil {
-            world_chunk.next_in_hash = push_struct(arena, Chunk)
+            world_chunk.next_in_hash = push(arena, Chunk)
             world_chunk = world_chunk.next_in_hash
             world_chunk.chunk.x = UninitializedChunk
         }

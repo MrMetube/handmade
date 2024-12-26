@@ -94,7 +94,7 @@ Red      :: GameColor{1, 0.09, 0.24, 1}
 DarkGreen:: GameColor{0, 0.07, 0.0353, 1}
 
 LoadedBitmap :: struct {
-    pixels : []BufferColor,
+    memory : []BufferColor,
     width, height: i32, 
     
     start, pitch: i32,
@@ -154,6 +154,7 @@ GameMemory :: struct {
 
 GameState :: struct {
     world_arena: Arena,
+
     // TODO(viktor): should we allow split-screen?
     camera_following_index: StorageIndex,
     camera_p : WorldPosition,
@@ -170,9 +171,6 @@ GameState :: struct {
     
     shadow_focus: [2]i32,
     player_focus, monster_focus: [2][2]i32,
-    
-    ground_buffer: LoadedBitmap,
-    ground_buffer_p: WorldPosition,
 
     tile_size_in_pixels: u32,
     meters_to_pixels: f32,
@@ -189,21 +187,107 @@ GameState :: struct {
     standart_room_collision,
     wall_collision: ^EntityCollisionVolumeGroup
 }
+
+TransientState :: struct {
+    is_initialized: b32,
+    arena: Arena,
+    
+    ground_buffer_bitmap_template: LoadedBitmap,
+    ground_buffers: []GroundBuffer,
+}
+
+
+
+GroundBuffer :: struct {
+    // NOTE(viktor): An invalid position tells us that this ground buffer has not been filled
+    p: WorldPosition, // NOTE(viktor): this is the center of the bitmap
+    memory : []BufferColor,
+}
+
+EntityType :: enum u32 {
+    Nil, 
+    
+    Space,
+    
+    Hero, Wall, Familiar, Monster, Sword, Stairwell
+}
+
+HitPointPartCount :: 4
+HitPoint :: struct {
+    flags: u8,
+    filled_amount: u8,
+}
+
+EntityVisiblePieceGroup :: struct {
+    // TODO(viktor): This is dumb, this should just be part of
+    // the renderer pushbuffer - add correction of coordinates
+    // in there and be done with it.
+
+    state: ^GameState,
+    count: u32,
+    pieces: [8]EntityVisiblePiece,
+}
+
+EntityVisiblePiece :: struct {
+    bitmap: ^LoadedBitmap,
+    bitmap_focus: [2]i32,
+    offset: v3,
+
+    color: GameColor,
+    dim: v2,
+}
+
+EntityIndex :: u32
+StorageIndex :: distinct EntityIndex
+
+StoredEntity :: struct {
+    // TODO(viktor): its kind of busted that ps can be invalid  here
+    // AND we stored whether they would be invalid in the flags field...
+    // Can we do something better here?
+    sim: Entity,
+    p: WorldPosition,
+}
+
+ControlledHero :: struct {
+    storage_index: StorageIndex,
+
+    // NOTE(viktor): these are the controller requests for simulation
+    ddp: v3,
+    dsword: v2,
+    dz: f32,
+}
+
+PairwiseCollsionRuleFlag :: enum {
+    ShouldCollide,
+    Temporary,
+}
+
+
+PairwiseCollsionRule :: struct {
+    can_collide: b32,
+    index_a, index_b: StorageIndex,
+
+    next_in_hash: ^PairwiseCollsionRule
+}
+
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(GameState{}.collision_rule_hash) & ( len(GameState{}.collision_rule_hash) - 1 ) == 0)
 
 // timing
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
+    
+    // ---------------------- ---------------------- ----------------------
+    // ---------------------- Permanent Initialization
+    // ---------------------- ---------------------- ----------------------
     assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
     state := cast(^GameState) raw_data(memory.permanent_storage)
-
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Initialization
-    // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
         // TODO(viktor): lets start partitioning our memory space
+        // TODO(viktor): formalize the world arena and others being after the GameState in permanent storage
+        // initialize the permanent arena first and allocate the state out of it
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
+        
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")        
@@ -380,26 +464,28 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
         }
         
-        make_empty_bitmap :: proc(arena: ^Arena, dim: [2]f32) -> (result: LoadedBitmap) {
-            result = {
-                pixels = push_slice(arena, BufferColor, cast(u64) (dim.x * dim.y)),
-                width  = cast(i32) dim.x,
-                height = cast(i32) dim.y,
-                pitch  = cast(i32) dim.x,
-            }
-            zero_slice(result.pixels)
-            
-            return result
+        memory.is_initialized = true
+    }
+
+    // ---------------------- ---------------------- ----------------------
+    // ---------------------- Transient Initialization
+    // ---------------------- ---------------------- ----------------------
+    assert(size_of(TransientState) <= len(memory.transient_storage), "The GameState cannot fit inside the permanent memory")
+    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
+    if !tran_state.is_initialized {
+        init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
+        
+        tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 128)
+        for &ground_buffer in tran_state.ground_buffers {
+            ground_buffer.p = null_position()
+            tran_state.ground_buffer_bitmap_template = make_empty_bitmap(&tran_state.arena, 256, false)
+            ground_buffer.memory = tran_state.ground_buffer_bitmap_template.memory
         }
         
-        screen_dim := vec_cast(f32, buffer.width, buffer.height)
-        max_z_scale: f32 = 0.5
-        ground_overscan: f32 = 1.5
-        state.ground_buffer = make_empty_bitmap(&state.world_arena, screen_dim * ground_overscan)
-        state.ground_buffer_p = state.camera_p
-        draw_ground_chunk(state.ground_buffer, state, state.ground_buffer_p)
+        // TODO(viktor): this is just a test fill
+        fill_ground_chunk(tran_state, state, &tran_state.ground_buffers[0], state.camera_p)
         
-        memory.is_initialized = true
+        tran_state.is_initialized = true
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -464,7 +550,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- ---------------------- ----------------------
     
     draw_buffer := LoadedBitmap{
-        pixels = buffer.pixels,
+        memory = buffer.memory,
         width  = buffer.width,
         height = buffer.height,
         pitch  = buffer.pitch,
@@ -473,20 +559,24 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // NOTE: Clear the screen
     draw_rectangle(draw_buffer, 0, vec_cast(f32, draw_buffer.width, draw_buffer.height), DarkGreen) 
 
-    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    ground := screen_center
-    delta := world_difference(world, state.ground_buffer_p, state.camera_p)
-    ground += delta.xy * state.meters_to_pixels * {1,-1}
-    draw_bitmap(draw_buffer, state.ground_buffer, ground)
+    for ground_buffer in tran_state.ground_buffers {
+        if is_valid(ground_buffer.p) {
+            bitmap := tran_state.ground_buffer_bitmap_template
+            bitmap.memory = ground_buffer.memory
+            
+            center := vec_cast(f32, bitmap.width, bitmap.height) * 0.5
+            delta := world_difference(world, ground_buffer.p, state.camera_p)
+            ground := center + delta.xy * {1,-1} * state.meters_to_pixels
+            draw_bitmap(draw_buffer, bitmap, ground)
+        }
+    }
     
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
     camera_bounds := rectangle_center_half_diameter(0, tilespan * {world.tile_size_in_meters, world.tile_size_in_meters, state.world.tile_depth_in_meters })
     
-    sim_arena: Arena
-    init_arena(&sim_arena, memory.transient_storage)
-    
-    camera_sim_region := begin_sim(&sim_arena, state, world, state.camera_p, camera_bounds, input.delta_time)
+    sim_temp_mem := begin_temporary_memory(&tran_state.arena)
+    camera_sim_region := begin_sim(&tran_state.arena, state, world, state.camera_p, camera_bounds, input.delta_time)
     
     for &entity in camera_sim_region.entities {
         if entity.updatable {
@@ -635,81 +725,38 @@ when false {
     }
 
     end_sim(camera_sim_region, state)
-}
-
-EntityType :: enum u32 {
-    Nil, 
+    end_temporary_memory(sim_temp_mem)
     
-    Space,
+    check_arena(state.world_arena)
+    check_arena(tran_state.arena)
+}
+        
+make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
+    result = {
+        memory = push(arena, BufferColor, cast(u64) (dim.x * dim.y)),
+        width  = cast(i32) dim.x,
+        height = cast(i32) dim.y,
+        pitch  = cast(i32) dim.x,
+    }
+    if clear_to_zero {
+        zero_slice(result.memory)
+    }
     
-    Hero, Wall, Familiar, Monster, Sword, Stairwell
+    return result
 }
 
-HitPointPartCount :: 4
-HitPoint :: struct {
-    flags: u8,
-    filled_amount: u8,
-}
-
-EntityVisiblePieceGroup :: struct {
-    // TODO(viktor): This is dumb, this should just be part of
-    // the renderer pushbuffer - add correction of coordinates
-    // in there and be done with it.
-
-    state: ^GameState,
-    count: u32,
-    pieces: [8]EntityVisiblePiece,
-}
-
-EntityVisiblePiece :: struct {
-    bitmap: ^LoadedBitmap,
-    bitmap_focus: [2]i32,
-    offset: v3,
-
-    color: GameColor,
-    dim: v2,
-}
-
-EntityIndex :: u32
-StorageIndex :: distinct EntityIndex
-
-StoredEntity :: struct {
-    // TODO(viktor): its kind of busted that ps can be invalid  here
-    // AND we stored whether they would be invalid in the flags field...
-    // Can we do something better here?
-    sim: Entity,
-    p: WorldPosition,
-}
-
-ControlledHero :: struct {
-    storage_index: StorageIndex,
-
-    // NOTE(viktor): these are the controller requests for simulation
-    ddp: v3,
-    dsword: v2,
-    dz: f32,
-}
-
-PairwiseCollsionRuleFlag :: enum {
-    ShouldCollide,
-    Temporary,
-}
-
-
-PairwiseCollsionRule :: struct {
-    can_collide: b32,
-    index_a, index_b: StorageIndex,
-
-    next_in_hash: ^PairwiseCollsionRule
-}
-
-draw_ground_chunk :: proc(buffer: LoadedBitmap, state: ^GameState, p: WorldPosition){
+fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
+    buffer := tran_state.ground_buffer_bitmap_template
+    buffer.memory = ground_buffer.memory
+    
+    ground_buffer.p = p
+    
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), 0)
     
     buffer_dim := vec_cast(f32, buffer.width, buffer.height)
     // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
     series := random_seed(cast(u32) (133 * p.chunk.x + 593 * p.chunk.y + 329 * p.chunk.z))
-    for index in 0..<200 {
+    for index in 0..<20 {
         p := random_unilateral_2(&series, f32) * buffer_dim
         stamp := random_choice(&series, state.grass[:])^
         draw_bitmap(buffer, stamp, p)
@@ -973,8 +1020,8 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
         src_index, dest_index := src_row, dest_row
         
         for x in left..< right  {
-            src := bitmap.pixels[src_index]
-            dst := &buffer.pixels[dest_index]
+            src := bitmap.memory[src_index]
+            dst := &buffer.memory[dest_index]
             
             sa := cast(f32) src.a / 255 * c_alpha
             sr := cast(f32) src.r * c_alpha
@@ -1013,7 +1060,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: Game
 
     for y in top..<bottom {
         for x in left..<right {
-            dst := &buffer.pixels[y*buffer.width + x]
+            dst := &buffer.memory[y*buffer.width + x]
             src := color * 255
 
             dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
@@ -1110,7 +1157,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         }
 
         return {
-            pixels = pixels, 
+            memory = pixels, 
             width  = header.width, 
             height = header.height, 
             start  = header.width * (header.height-1),

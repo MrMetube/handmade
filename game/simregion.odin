@@ -74,13 +74,13 @@ SimRegion :: struct {
 
 begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     // TODO(viktor): make storedEntities part of world
-    region = push_struct(sim_arena, SimRegion)
+    region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
     
     // TODO(viktor): IMPORTANT(viktor):  DUPE Bug push_slice should have zeroed the memory
     zero(region.entities)
     zero(region)
-    region.entities = push_slice(sim_arena, Entity, MaxEntityCount)
+    region.entities = push(sim_arena, Entity, MaxEntityCount)
     
     // TODO(viktor): Try to make these get enforced more rigorously
     // TODO(viktor): Perhaps try using a dual system here where we support 
