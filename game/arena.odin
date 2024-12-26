@@ -33,14 +33,13 @@ push_size :: #force_inline proc(arena: ^Arena, size: u64) -> (result: [^]u8) {
 zero :: proc { zero_struct, zero_slice }
 
 zero_struct :: #force_inline proc(s: ^$T) {
-    data := cast([^]u8) s
-    len  := size_of(T)
-    zero_slice(data[:len])
+    s^ = {}
+    // TODO(viktor): zero all fields(ie. slices)?
 }
 
-zero_slice :: #force_inline proc(memory: []$u8){
+zero_slice :: #force_inline proc(data: []$T){
     // TODO(viktor): check this guy for performance
-    for &Byte in memory {
-        Byte = 0
+    for &entry in data {
+        entry = {}
     }
 }

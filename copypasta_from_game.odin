@@ -9,10 +9,11 @@ GameSoundBuffer :: struct {
     samples_per_second : u32,
 }
 
-GameOffscreenBuffer :: struct {
-    memory : []OffscreenBufferColor,
-    width  : i32,
-    height : i32,
+GameLoadedBitmap :: struct {
+    pixels : []OffscreenBufferColor,
+    width, height: i32, 
+    
+    start, pitch: i32,
 }
 
 GameInputButton :: struct {

@@ -4,27 +4,27 @@ import "core:fmt"
 
 Entity :: struct {
     // NOTE(viktor): these are only for the sim region
-	storage_index: StorageIndex,
+    storage_index: StorageIndex,
     updatable: b32,
     
-	type: EntityType,
+    type: EntityType,
     flags: EntityFlags,
-
+    
     p, dp: v3,
-
+    
     collision: ^EntityCollisionVolumeGroup,
-
+    
     distance_limit: f32,
-
+    
     hit_point_max: u32,
     hit_points: [16]HitPoint,
-
+    
     sword: EntityReference,
-
-	facing_index: i32,
-	t_bob: f32,
-	// TODO(viktor): generation index so we know how " to date" this entity is
-
+    
+    facing_index: i32,
+    t_bob: f32,
+    // TODO(viktor): generation index so we know how " to date" this entity is
+    
     // TODO(viktor): only for stairwells
     walkable_dim: v2,
     walkable_height: f32,
@@ -44,41 +44,44 @@ EntityCollisionVolume :: struct {
 }
 
 EntityReference :: struct #raw_union {
-	ptr: ^Entity,
-	index: StorageIndex,
+    ptr: ^Entity,
+    index: StorageIndex,
 }
 
 SimEntityHash :: struct {
-	ptr: ^Entity,
-	index: StorageIndex,
+    ptr: ^Entity,
+    index: StorageIndex,
 }
 
 SimRegion :: struct {
-	world: ^World,
-
-	origin: WorldPosition, 
-	bounds, updatable_bounds: Rectangle3,
-
+    world: ^World,
+    
+    origin: WorldPosition, 
+    bounds, updatable_bounds: Rectangle3,
+    
     max_entity_radius: f32,
     max_entity_velocity: f32,
-
-	entity_count: EntityIndex,
+    
+    entity_count: EntityIndex,
     entities: []Entity,
-
+    
     // ground_base_z: f32,
-
-	// TODO(viktor): Do I really want a hash for this?
-	// NOTE(viktor): Must be a power of two
-	sim_entity_hash: [4096]SimEntityHash,
+    
+    // TODO(viktor): Do I really want a hash for this?
+    // NOTE(viktor): Must be a power of two
+    sim_entity_hash: [4096]SimEntityHash,
 }
 
 begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
-	// TODO(viktor): make storedEntities part of world
-	region = push_struct(sim_arena, SimRegion)
-	MaxEntityCount :: 4096
-	zero_struct(region)
-	region.entities = push_slice(sim_arena, Entity, MaxEntityCount)
-
+    // TODO(viktor): make storedEntities part of world
+    region = push_struct(sim_arena, SimRegion)
+    MaxEntityCount :: 4096
+    
+    // TODO(viktor): IMPORTANT(viktor):  DUPE Bug push_slice should have zeroed the memory
+    zero(region.entities)
+    zero(region)
+    region.entities = push_slice(sim_arena, Entity, MaxEntityCount)
+    
     // TODO(viktor): Try to make these get enforced more rigorously
     // TODO(viktor): Perhaps try using a dual system here where we support 
     // entities larger than the max entity radius by adding them multiple 
@@ -87,16 +90,15 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     region.max_entity_velocity = 30
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
     UpdateSafetyMarginZ :: 1 // TODO(viktor): what should this be?
-
-	region.world = world
-	region.origin = origin
-	region.updatable_bounds = rectangle_add(bounds, update_safety_margin)
-	region.bounds = rectangle_add(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
-
+    
+    region.world = world
+    region.origin = origin
+    region.updatable_bounds = rectangle_add(bounds, update_safety_margin)
+    region.bounds = rectangle_add(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
+    
     min_p := map_into_worldspace(world, region.origin, region.bounds.min )
     max_p := map_into_worldspace(world, region.origin, region.bounds.max )
     // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
-    // TODO(viktor): entities get visually duplicated when crossing the edge of the sim_region, fix it
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
@@ -118,53 +120,53 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
             }
         }
     }
-
-	return region
+    
+    return region
 }
 
 end_sim :: proc(region: ^SimRegion, state: ^GameState) {
-	// TODO(viktor): make storedEntities part of world
-	for entity in region.entities[:region.entity_count] {
+    // TODO(viktor): make storedEntities part of world
+    for entity in region.entities[:region.entity_count] {
         assert(entity.storage_index != 0)
-		stored := &state.stored_entities[entity.storage_index]
-
+        stored := &state.stored_entities[entity.storage_index]
+        
         assert(.Simulated in entity.flags)
-		stored.sim = entity
+        stored.sim = entity
         stored.sim.flags -= {.Simulated}
         assert(.Simulated not_in stored.sim.flags)
-
-		store_entity_reference(&stored.sim.sword)
-		// TODO(viktor): Save state back to stored entity, once high entities do state decompression
-
-		new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p)
-		change_entity_location(&state.world_arena, region.world, entity.storage_index, stored, new_p)
-		
-		if entity.storage_index == state.camera_following_index {
+        
+        store_entity_reference(&stored.sim.sword)
+        // TODO(viktor): Save state back to stored entity, once high entities do state decompression
+        
+        new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p)
+        change_entity_location(&state.world_arena, region.world, entity.storage_index, stored, new_p)
+        
+        if entity.storage_index == state.camera_following_index {
             new_camera_p: WorldPosition
             when false {
                 new_camera_p = state.camera_p
-				new_camera_p.chunk.z = entity.low.p.chunk.z
-				offset := entity.high.p
-
-				if offset.x < -9 * world.tile_size_in_meters {
-					new_camera_p.offset_.x -= 17
-				}
-				if offset.x > 9 * world.tile_size_in_meters {
-					new_camera_p.offset_.x += 17
-				}
-				if offset.y < -5 * world.tile_size_in_meters {
-					new_camera_p.offset_.y -= 9
-				}
-				if offset.y > 5 * world.tile_size_in_meters {
-					new_camera_p.offset_.y += 9
-				}
-			} else {
-				new_camera_p.chunk  = stored.p.chunk
-				new_camera_p.offset.xy = stored.p.offset.xy
-			}
+                new_camera_p.chunk.z = entity.low.p.chunk.z
+                offset := entity.high.p
+                
+                if offset.x < -9 * world.tile_size_in_meters {
+                    new_camera_p.offset_.x -= 17
+                }
+                if offset.x > 9 * world.tile_size_in_meters {
+                    new_camera_p.offset_.x += 17
+                }
+                if offset.y < -5 * world.tile_size_in_meters {
+                    new_camera_p.offset_.y -= 9
+                }
+                if offset.y > 5 * world.tile_size_in_meters {
+                    new_camera_p.offset_.y += 9
+                }
+            } else {
+                new_camera_p.chunk  = stored.p.chunk
+                new_camera_p.offset = stored.p.offset
+            }
             state.camera_p = new_camera_p
-		}
-	}
+        }
+    }
 }
 
 entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volume: EntityCollisionVolume) -> (result: b32) {
@@ -174,65 +176,65 @@ entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volum
 }
 
 get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^SimEntityHash) {
-	assert(storage_index != 0)
-
-	hash := cast(u32) storage_index
-	for offset in u32(0)..<len(region.sim_entity_hash) {
-		hash_mask: u32 = len(region.sim_entity_hash)-1
-		hash_index := (hash + offset) & hash_mask
-
-		entry := &region.sim_entity_hash[hash_index]
-		if entry.index == 0 || entry.index == storage_index {
-			result = entry
-			break
-		}
-	}
-	return result
+    assert(storage_index != 0)
+    
+    hash := cast(u32) storage_index
+    for offset in u32(0)..<len(region.sim_entity_hash) {
+        hash_mask: u32 = len(region.sim_entity_hash)-1
+        hash_index := (hash + offset) & hash_mask
+        
+        entry := &region.sim_entity_hash[hash_index]
+        if entry.index == 0 || entry.index == storage_index {
+            result = entry
+            break
+        }
+    }
+    return result
 }
 
 get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^Entity) {
-	entry := get_hash_from_index(region, storage_index)
-	result = entry.ptr
-	return result
+    entry := get_hash_from_index(region, storage_index)
+    result = entry.ptr
+    return result
 }
 
 load_entity_reference :: #force_inline proc(state: ^GameState, region: ^SimRegion, ref: ^EntityReference) {
-	if ref.index != 0 {
-		entry := get_hash_from_index(region, ref.index)
-		if entry.ptr == nil {
-			entry.index = ref.index
+    if ref.index != 0 {
+        entry := get_hash_from_index(region, ref.index)
+        if entry.ptr == nil {
+            entry.index = ref.index
             entity := get_low_entity(state, ref.index)
             p := get_sim_space_p(region, entity)
-			entry.ptr = add_entity(state, region, ref.index, entity, &p)
-		}
-		ref.ptr = entry.ptr
-	}
+            entry.ptr = add_entity(state, region, ref.index, entity, &p)
+        }
+        ref.ptr = entry.ptr
+    }
 }
 
 store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
-	if ref.ptr != nil {
-		ref.index = ref.ptr.storage_index
-	}
+    if ref.ptr != nil {
+        ref.index = ref.ptr.storage_index
+    }
 }
 
 add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
-	dest = add_entity_raw(state, region, storage_index, source)
-
-	if dest != nil {
-		if sim_p != nil {
-			dest.p = sim_p^
+    dest = add_entity_raw(state, region, storage_index, source)
+    
+    if dest != nil {
+        if sim_p != nil {
+            dest.p = sim_p^
             dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
-		} else {
-			dest.p = get_sim_space_p(region, source)
-		}
-	}
-
-	return dest
+        } else {
+            dest.p = get_sim_space_p(region, source)
+        }
+    }
+    
+    return dest
 }
 
 add_entity_raw :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity) -> (entity: ^Entity) {
-	assert(storage_index != 0)
-        
+    assert(storage_index != 0)
+    
     entry := get_hash_from_index(region, storage_index)
     if entry.ptr == nil {
         entity = &region.entities[region.entity_count]
@@ -241,22 +243,22 @@ add_entity_raw :: proc(state: ^GameState, region: ^SimRegion, storage_index: Sto
         assert(entry.index == 0 || entry.index == storage_index)
         entry.index = storage_index
         entry.ptr = entity
-
+        
         if source != nil {
             // TODO(viktor): this should really be a decompression not a copy
             entity^ = source.sim
-
+            
             load_entity_reference(state, region, &entity.sword)
-
+            
             assert(.Simulated not_in entity.flags)
             entity.flags += { .Simulated }
         }
         entity.storage_index = storage_index
         entity.updatable = false
     }
-	
+    
     assert(entity == nil || .Simulated in entity.flags)
-	return entity
+    return entity
 }
 
 InvalidP :: v3{100_000, 100_000, 100_000}
@@ -285,24 +287,24 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
 
 move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
     assert(.Nonspatial not_in entity.flags)
-
+    
     if entity.type == .Hero {
         BreakHere :: 1
         _ = BreakHere  
     } 
-
+    
     ddp := ddp
     
     if move_spec.normalize_accelaration {
         ddp_length_squared := length_squared(ddp)
-
+        
         if ddp_length_squared > 1 {
             ddp *= 1 / square_root(ddp_length_squared)
         }
     }
-
+    
     ddp *= move_spec.speed
-
+    
     // TODO(viktor): ODE here
     drag := -move_spec.drag * entity.dp
     drag.z = 0
@@ -311,32 +313,32 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
         Gravity :: -9.8
         ddp.z += Gravity
     }
-
+    
     entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
     entity.dp = ddp * dt + entity.dp
     // TODO(viktor): upgrade physical motion routines to handle capping the maximum velocity?
     assert(length_squared(entity.dp) <= square(region.max_entity_velocity))
-
+    
     distance_remaining := entity.distance_limit
     if distance_remaining == 0 {
         // TODO(viktor): Do we want to formalize this number?
         distance_remaining = 1_000_000
     }
-
+    
     for iteration in 0..<4 {
         t_min, t_max: f32 = 1, 0
         wall_normal_min, wall_normal_max: v2
         hit_min, hit_max: ^Entity
-
+        
         entity_delta_length := length(entity_delta)
         // TODO(viktor): What do we want to do for epsilons here?
         if entity_delta_length > 0 {
             if entity_delta_length > distance_remaining {
                 t_min = distance_remaining / entity_delta_length
             }
-
+            
             desired_p := entity.p + entity_delta
-
+            
             if .Nonspatial not_in entity.flags {
                 // TODO(viktor): spatial partition here
                 for &test_entity in region.entities[:region.entity_count] {
@@ -344,16 +346,16 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                     // TODO(viktor): Robustness!
                     OverlapEpsilon :: 0.001
                     if .Traversable in test_entity.flags && entities_overlap(entity, &test_entity, OverlapEpsilon) ||
-                       can_collide(state, entity, &test_entity) {
+                    can_collide(state, entity, &test_entity) {
                         
                         for volume in entity.collision.volumes {
                             for test_volume in test_entity.collision.volumes {
                                 minkowski_diameter := volume.dim + test_volume.dim
                                 min_corner := -0.5 * minkowski_diameter
                                 max_corner :=  0.5 * minkowski_diameter
-
+                                
                                 rel := (entity.p + volume.offset) - (test_entity.p + test_volume.offset)
-
+                                
                                 // TODO(viktor): do we want an close inclusion on the max_corner?
                                 if rel.z >= min_corner.z && rel.z < max_corner.z {
                                     Wall :: struct {
@@ -436,14 +438,14 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                                         }
                                     }
                                 }
-
+                                
                             }
                         }
-
+                        
                     }
                 }
             } 
-
+            
             t_stop: f32
             hit: ^Entity
             wall_normal: v2
@@ -475,7 +477,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
             break
         }
     }
-
+    
     ground: f32
     { // NOTE(viktor): handle events based on area overlapping
         // TODO(viktor): handle collision percisly by moving it into the collision loop
@@ -486,7 +488,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
             }
         }
     }
-
+    
     ground += entity.p.z - get_entity_ground_point(entity).z
     // TODO(viktor): this has to become real height handling, ground collision, etc.
     if (entity.p.z <= ground) || (.Grounded in entity.flags && entity.dp.z == 0) {
@@ -496,11 +498,11 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
     } else {
         entity.flags -= { .Grounded }
     }
-
+    
     if entity.distance_limit != 0 {
         entity.distance_limit = distance_remaining
     }
-
+    
     if entity.dp.x < 0  {
         entity.facing_index = 0
     } else if entity.dp.x > 0 {
@@ -530,13 +532,13 @@ can_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
         if a.storage_index > b.storage_index do swap(&a, &b)
-
+        
         if .Collides in a.flags && .Collides in b.flags {
             if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
                 // TODO(viktor): property-based logic goes here
                 result = true
             }
-                
+            
             // TODO(viktor): BETTER HASH FUNCTION!!!
             hash_bucket := a.storage_index & (len(state.collision_rule_hash) - 1)
             for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
@@ -556,7 +558,7 @@ get_stair_ground :: #force_inline proc(region: ^Entity, at_ground_point: v3) -> 
     region_rect := rectangle_center_diameter(region.p.xy, region.walkable_dim)
     bary := clamp_01(rectangle_get_barycentric(region_rect, at_ground_point.xy))
     result = region.p.z + region.walkable_height * bary.y
-
+    
     return result
 }
 
@@ -573,27 +575,27 @@ speculative_collide :: proc(mover, region: ^Entity) -> (result: b32 = true) {
         step_height :: 0.1
         result = (abs(mover_ground_point.z - ground) > step_height) //  || (bary.y > 0.1 && bary.y < 0.9)
     }
-
+    
     return result
 }
 
 handle_collision :: proc(state: ^GameState, a, b: ^Entity) -> (stops_on_collision: b32) {
     a, b := a, b
     if a.type > b.type do swap(&a, &b)
-
+    
     if b.type == .Sword {
         add_collision_rule(state, a.storage_index, b.storage_index, false)
         stops_on_collision = false
     } else {
         stops_on_collision = true
     }
-
+    
     if a.type == .Monster && b.type == .Sword {
         if a.hit_point_max > 0 {
             a.hit_point_max -= 1
         }
     }
-
+    
     return stops_on_collision
 }
 

@@ -92,10 +92,18 @@ Green    :: GameColor{0, 0.59, 0.28, 1}
 Red      :: GameColor{1, 0.09, 0.24, 1}
 DarkGreen:: GameColor{0, 0.07, 0.0353, 1}
 
-GameOffscreenBuffer :: struct {
-    memory : []OffscreenBufferColor,
-    width  : i32,
-    height : i32,
+LoadedBitmap :: struct {
+    pixels : []OffscreenBufferColor,
+    width, height: i32, 
+    
+    start, pitch: i32,
+}
+
+LoadedBitmapWithFocus :: struct {
+    using bitmap: LoadedBitmap,
+    // TODO(viktor): move this to some other place as it has less to do with the 
+    // image data and more todo with the contents of the image for the human
+    focus: [2]i32, 
 }
 
 GameInputButton :: struct {
@@ -162,10 +170,12 @@ GameState :: struct {
 
     world: ^World,
 
-    grass: [8]LoadedBitmap,
+    grass: [8]LoadedBitmapWithFocus,
     
-    wall, shadow, sword, stair: LoadedBitmap,
-    player, monster: [2]LoadedBitmap,
+    wall, shadow, sword, stair: LoadedBitmapWithFocus,
+    player, monster: [2]LoadedBitmapWithFocus,
+    
+    ground_buffer: LoadedBitmap,
 
     tile_size_in_pixels: u32,
     meters_to_pixels: f32,
@@ -187,7 +197,7 @@ GameState :: struct {
 
 // timing
 @(export)
-game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer, input: GameInput){
+game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
     assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
     state := cast(^GameState) raw_data(memory.permanent_storage)
 
@@ -195,36 +205,26 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Initialization
     // ---------------------- ---------------------- ----------------------
     if !memory.is_initialized {
-        defer memory.is_initialized = true
-        
         // TODO(viktor): lets start partitioning our memory space
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
-        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
-        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
-        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
-        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
-        state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
-        state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
+        state.shadow     = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")       , focus = {   0, -2} }
+        state.player[0]  = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp") , focus = {   6, 28} }
+        state.player[1]  = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp"), focus = {  -6, 28} }
+        state.monster[0] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")     , focus = { -13, 22} }
+        state.monster[1] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")    , focus = {  16, 22} }
+        state.sword      = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")                             }
+        state.wall       = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")                              }
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
-        state.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
-        state.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
-        state.grass[2] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp")
-        state.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
-        state.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
-        state.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
-        state.grass[6]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")
-        state.grass[7]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
-
-        state.player[0].focus = { 6, 28}
-        state.player[1].focus = { -6, 28}
-
-        state.monster[0].focus = { -13, 22}
-        state.monster[1].focus = { 16, 22}
-
-        state.shadow.focus = { 0, -2}
+        state.grass[0] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp") } 
+        state.grass[1] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp") } 
+        state.grass[2] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp") } 
+        state.grass[3] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp") } 
+        state.grass[4] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp") } 
+        state.grass[5] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp") } 
+        state.grass[6] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp") } 
+        state.grass[7] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp") } 
 
         state.world = push_struct(&state.world_arena, World)
 
@@ -277,24 +277,17 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         door_top, door_bottom: b32
         stair_up, stair_down: b32
 
-
+        series := seed(0)
         screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z + 1
         for room_count in u32(0) ..< 200 {
-            // TODO: random number generator
-            random_choice : u32
-            if stair_down || stair_up {
-                random_choice = random() % 2
-            } else {
-                random_choice = random() % 3
-            }
+            choice := random_choice(&series, stair_down || stair_up ? 2 : 3)
             
             created_stair: b32
-            if random_choice == 0 {
-                door_right = true
-            } else if random_choice == 1 {
-                door_top = true
-            } else {
+            switch(choice) {
+            case 0: door_right = true
+            case 1: door_top   = true
+            case 2:
                 created_stair = true
                 if tile_z == 1 {
                     stair_down = true
@@ -328,13 +321,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
                     }
 
                     if should_be_door {
-                        if room_count == 0 {
+                        // if room_count == 0 {
                             add_wall(state,
                                 tile_x + screen_col * tiles_per_screen.x,
                                 tile_y + screen_row * tiles_per_screen.y,
                                 tile_z,
                             ) 
-                        }
+                        // }
                     } else if need_to_place_stair {
                         add_stairs(state, 
                             5 + screen_col * tiles_per_screen.x,
@@ -359,13 +352,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
 
             door_right  = false
             door_top    = false
-
-            if random_choice == 0 {
-                screen_col += 1
-            } else if random_choice == 1 {
-                screen_row += 1
-            } else {
-                tile_z = tile_z == screen_base.z+1 ? screen_base.z : screen_base.z+1
+            
+            switch(choice) {
+            case 0: screen_col += 1
+            case 1: screen_row += 1
+            case 2: tile_z = tile_z == screen_base.z+1 ? screen_base.z : screen_base.z+1
             }
         }
 
@@ -380,9 +371,30 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
         state.camera_p = new_camera_p
 
         monster_p  := new_camera_p.chunk + {10,5,0}
-        familiar_p := new_camera_p.chunk + {10,1,0}
         add_monster(state,  monster_p.x, monster_p.y, monster_p.z)
-        add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
+        for _ in 0..< 1 {
+            familiar_p := new_camera_p.chunk
+            familiar_p.x += random_between_i32(&series, 0, 14)
+            familiar_p.y += random_between_i32(&series, 0, 7)
+            add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
+        }
+        
+        make_empty_bitmap :: proc(arena: ^Arena, width, height: i32) -> (result: LoadedBitmap) {
+            result = {
+                pixels = push_slice(arena, OffscreenBufferColor, auto_cast (width * height)),
+                width  = width,
+                height = height,
+                pitch  = width,
+            }
+            zero_slice(result.pixels)
+            
+            return result
+        }
+        
+        state.ground_buffer = make_empty_bitmap(&state.world_arena, 1024, 512)
+        draw_test_ground(state.ground_buffer, state)
+        
+        memory.is_initialized = true
     }
 
     // ---------------------- ---------------------- ----------------------
@@ -446,23 +458,18 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: GameOffscreenBuffer,
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
     
-    // NOTE: Clear the screen
-    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
-    
-    { // Draw Test 
-        screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-        random_number_index = 140
-        for index in 0..<3 {
-            offset := (vec_cast(f32, random_number[random_number_index], random_number[random_number_index+1]) / MaxRandomValue) * 2 - 1
-            stamp := state.grass[random_number[random_number_index] % len(state.grass)]
-            random_number_index += 3
-            
-            radius := v2{8, 5}
-            p := screen_center + offset * radius * state.meters_to_pixels
-     
-            draw_bitmap(buffer, stamp, p)
-        }
+    draw_buffer := LoadedBitmap{
+        pixels = buffer.pixels,
+        width  = buffer.width,
+        height = buffer.height,
+        pitch  = buffer.pitch,
     }
+    
+    // NOTE: Clear the screen
+    draw_rectangle(draw_buffer, 0, vec_cast(f32, draw_buffer.width, draw_buffer.height), DarkGreen) 
+    // TODO(viktor): draw at center
+    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+    draw_bitmap(draw_buffer, { bitmap = state.ground_buffer }, screen_center)
     
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
@@ -583,14 +590,14 @@ when false {
                 draw_hitpoints(&piece_group, &entity, 1.6)
             
             case .Stairwell: 
-                push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue * {1,1,1,0.5})
-                push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.5})
+                push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue)
+                push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.7})
             
             case .Space: 
                 for volume in entity.collision.volumes {
                     // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
-                    fudge := world.tile_size_in_meters * v2{2, 0.5}
-                    push_rectangle_outline(&piece_group, volume.dim.xy + fudge, volume.offset, Yellow)
+                    // fudge := world.tile_size_in_meters * v2{2, 0.5}
+                    // push_rectangle_outline(&piece_group, volume.dim.xy + fudge, volume.offset, Yellow)
                 }
             }
 
@@ -603,7 +610,7 @@ when false {
             for piece in piece_group.pieces[:piece_group.count] {
                 z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
 
-                center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+                center := vec_cast(f32, draw_buffer.width, draw_buffer.height) * 0.5
                 center.x += state.meters_to_pixels * z_fudge * (base_p.x/*  - 0.5 * entity.size.x */) 
                 center.y -= state.meters_to_pixels * z_fudge * (base_p.y/*  - 0.5 * entity.size.y */) 
                 center.y -= state.meters_to_pixels / state.world.tile_depth_in_meters * base_p.z 
@@ -611,9 +618,9 @@ when false {
                 center += piece.offset.xy
 
                 if piece.bitmap != nil {
-                    draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a))
+                    draw_bitmap(draw_buffer, piece.bitmap^, center, clamp_01(piece.color.a))
                 } else {
-                    draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
+                    draw_rectangle(draw_buffer, center - piece.dim*0.5, piece.dim, piece.color)
                 }
             }
         }
@@ -647,7 +654,7 @@ EntityVisiblePieceGroup :: struct {
 }
 
 EntityVisiblePiece :: struct {
-    bitmap: ^LoadedBitmap,
+    bitmap: ^LoadedBitmapWithFocus,
     offset: v3,
 
     color: GameColor,
@@ -687,13 +694,19 @@ PairwiseCollsionRule :: struct {
     next_in_hash: ^PairwiseCollsionRule
 }
 
-LoadedBitmap :: struct {
-    pixels : []Color,
-    width, height: i32,
-    focus: [2]i32,
+draw_test_ground :: proc(buffer: LoadedBitmap, state: ^GameState){
+    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+    series := seed(140)
+    for index in 0..<100 {
+        offset := random_bilateral_2(&series, f32)
+        stamp := random_choice(&series, state.grass[:])^
+        
+        radius := v2{8, 5}
+        p := screen_center + offset * radius * state.meters_to_pixels
+ 
+        draw_bitmap(buffer, stamp, p)
+    }
 }
-
-Color :: [4]u8
 
 get_low_entity :: #force_inline proc(state: ^GameState, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
     if storage_index > 0 && storage_index <= state.stored_entity_count {
@@ -868,7 +881,7 @@ clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
     }
 }
 
-push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, dim: v2, offset: v3, color: GameColor) {
+push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmapWithFocus, dim: v2, offset: v3, color: GameColor) {
     assert(group.count < len(group.pieces))
     piece := &group.pieces[group.count]
     group.count += 1
@@ -880,7 +893,7 @@ push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^Loade
     piece.color     = color
 }
 
-push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset:v3, alpha: f32 = 1) {
+push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmapWithFocus, offset:v3, alpha: f32 = 1) {
     push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
 }
 
@@ -923,10 +936,11 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1) {
-    rounded_center := round(center) + bitmap.focus * {1, -1}
+// TODO(viktor): use the focus param instead of LoadedBitmapWithFocus
+draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmapWithFocus, center: v2, c_alpha: f32 = 1, focus := [2]i32{} ) {
+    rounded_center := round(center) + focus * {1, -1}
 
-    left   := rounded_center.x - bitmap.width / 2
+    left   := rounded_center.x - bitmap.width  / 2
     top	   := rounded_center.y - bitmap.height / 2
     right  := left + bitmap.width
     bottom := top  + bitmap.height
@@ -944,32 +958,35 @@ draw_bitmap :: proc(buffer: GameOffscreenBuffer, bitmap: LoadedBitmap, center: v
     bottom = min(bottom, buffer.height)
     right  = min(right,  buffer.width)
 
-    src_row  := bitmap.width * (bitmap.height-1)
-    src_row  += -bitmap.width * src_top + src_left
+    src_row  := bitmap.start + bitmap.pitch * src_top + src_left
     dest_row := left + top * buffer.width
     for y in top..< bottom  {
         src_index, dest_index := src_row, dest_row
+        
         for x in left..< right  {
-            src := vec_cast(f32, bitmap.pixels[src_index])
-            dst := &buffer.memory[dest_index]
-            a := src.a / 255
+            src := bitmap.pixels[src_index]
+            dst := &buffer.pixels[dest_index]
+            // TODO(viktor): its only pad for the offscreenbuffer, loadedBitmaps can have actual alpha at that location
+            a := cast(f32) src.pad / 255 
             a *= c_alpha
 
-            dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, a)
-            dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, a)
-            dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, a)
-
+            dst.r = cast(u8) lerp(cast(f32) dst.r, cast(f32) src.r, a)
+            dst.g = cast(u8) lerp(cast(f32) dst.g, cast(f32) src.g, a)
+            dst.b = cast(u8) lerp(cast(f32) dst.b, cast(f32) src.b, a)
+            // TODO(viktor): compute the right alpha here
+            dst.pad = max(dst.pad, src.pad)
+            
             src_index  += 1
             dest_index += 1
         }
-        // TODO: advance by the pitch instead of assuming its the same as the width
-        dest_row += buffer.width
-        src_row  -= bitmap.width
+        
+        dest_row += buffer.pitch
+        src_row  += bitmap.pitch
     }
 }
 
 
-draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, color: GameColor){
+draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: GameColor){
     rounded_position := floor(position)
     rounded_size     := floor(size)
 
@@ -983,7 +1000,7 @@ draw_rectangle :: proc(buffer: GameOffscreenBuffer, position: v2, size: v2, colo
 
     for y in top..<bottom {
         for x in left..<right {
-            dst := &buffer.memory[y*buffer.width + x]
+            dst := &buffer.pixels[y*buffer.width + x]
             src := color * 255
 
             dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
@@ -1013,12 +1030,12 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         planes         : u16,
         bits_per_pixel : u16,
 
-        compression      : u32,
-        size_of_bitmap   : u32,
-        horz_resolution  : i32,
-        vert_resolution  : i32,
-        colors_used      : u32,
-        colors_important : u32,
+        compression           : u32,
+        size_of_bitmap        : u32,
+        horizontal_resolution : i32,
+        vertical_resolution   : i32,
+        colors_used           : u32,
+        colors_important      : u32,
 
         red_mask   : u32,
         green_mask : u32,
@@ -1052,27 +1069,31 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         assert(alpha_scan != 32)
 
         raw_pixels := ( cast([^]u32) &contents[header.bitmap_offset] )[:header.width * header.height]
+        pixels := ( cast([^]OffscreenBufferColor) &contents[header.bitmap_offset] )[:header.width * header.height]
         for y in 0..<header.height {
             for x in 0..<header.width {
                 raw_pixel := &raw_pixels[y * header.width + x]
-                /* TODO: check what the shifts and "C" where actually
-                raw_pixel^ = (rotate_left(raw_pixel^ & red_mask, red_shift) |
-                              rotate_left(raw_pixel^ & green_mask, green_shift) |
-                              rotate_left(raw_pixel^ & blue_mask, blue_shift) |
-                              rotate_left(raw_pixel^ & alpha_mask, alpha_shift))
-                 */
-                a := (raw_pixel^ >> alpha_scan) & 0xFF
-                r := (raw_pixel^ >> red_scan  ) & 0xFF
-                g := (raw_pixel^ >> green_scan) & 0xFF
-                b := (raw_pixel^ >> blue_scan ) & 0xFF
-
-                // // TODO: what?
-                raw_pixel^ = (b << 24) | (a << 16) | (r << 8) | g
+                pixel     := &pixels[y * header.width + x]
+                // raw_pixel^ = (b << 24) | (g << 16) | (r << 8) | a
+                pixel^ = transmute(OffscreenBufferColor) raw_pixel^
+                // TODO(viktor): what is up with the shifts and shit
+                // pixel^ = { 
+                //     pad = cast(u8) (raw_pixel^ >> blue_scan ),  
+                //     r   = cast(u8) (raw_pixel^ >> green_scan),  
+                //     g   = cast(u8) (raw_pixel^ >> red_scan  ),  
+                //     b   = cast(u8) (raw_pixel^ >> alpha_scan),
+                // }
             }
         }
 
-        pixels := ( cast([^]Color) &contents[header.bitmap_offset] )[:header.width * header.height]
-        return {pixels, header.width, header.height, {}}
+        return {
+            pixels = pixels, 
+            width  = header.width, 
+            height = header.height, 
+            start  = header.width * (header.height-1),
+            pitch  = -header.width
+        }
     }
+    
     return {}
 }

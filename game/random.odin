@@ -1,16 +1,77 @@
 package game
 
-random :: proc() -> (result: u32) {
-    result = random_number[random_number_index]
-    random_number_index += 1
+import "base:intrinsics"
+import "core:fmt"
+
+RandomSeries :: struct {
+    index: u32,
+}
+
+seed :: proc(seed: u32) -> (result: RandomSeries) {
+    result = { index = seed % len(random_number_table) }
+    return result
+}
+
+// TODO(viktor): maybe make type a parameter?
+next_random_u32 :: proc(series: ^RandomSeries) -> (result: u32) {
+    result = random_number_table[series.index]
+    series.index += 1
+    if series.index >= len(random_number_table) {
+        series.index = 0
+    }
+    return result
+}
+
+random_choice :: proc { random_choice_integer_0_max, random_choice_integer_min_max, random_choice_data }
+random_choice_integer_0_max :: #force_inline proc(series: ^RandomSeries, max: u32) -> (result: u32) {
+    result = next_random_u32(series) % max
+    return result
+}
+random_choice_integer_min_max :: #force_inline proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
+    result = next_random_u32(series) % (max - min) + min
+    return result
+}
+random_choice_data :: #force_inline proc(series: ^RandomSeries, data:[]$T) -> (result: ^T) {
+    result = &data[random_choice(series, auto_cast len(data))]
+    return result
+}
+
+random_unilateral :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
+    result = cast(T) (cast(f64)(next_random_u32(series) - MinRandomValue) / (MaxRandomValue - MinRandomValue)) 
+    return result
+}
+
+random_bilateral :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
+    result = random_unilateral(series, T) * 2 - 1
     
     return result
 }
 
+random_bilateral_2 :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
+    return {random_bilateral(series, T), random_bilateral(series, T)}
+}
+
+random_between_i32 :: #force_inline proc(series: ^RandomSeries, min, max: i32) -> (result: i32) {
+    assert(min < max)
+    result = min + cast(i32)(next_random_u32(series) % cast(u32)((max+1)-min))
+    
+    return result
+}
+
+random_between_u32 :: #force_inline proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
+    assert(min < max)
+    result = min + (max-min) * (next_random_u32(series) % ((max+1)-min))
+    
+    return result
+}
+
+@(private="file")
 MaxRandomValue :: 429389759
+@(private="file")
 MinRandomValue :: 141215
 
-random_number := [?]u32{
+@(private="file")
+random_number_table := [?]u32{
     0x0b128055,	0x12dc57af,	0x14996bd5,	0x085a021b,	0x06b9bfac,	0x05e842c7,	0x144c9efe,	0x022cc4bc,	0x0df37a2c,	0x1706325c,	0x10cd4a48,	0x10d43f6b,	0x07b8b8e9,	0x08cbd0c2,	0x0e4c677b,	0x145ad81c,	0x18c69c68,	0x065334eb,	0x168232d5,	0x110dd074,	0x169553a7,	0x06d38fc1,	0x0a6c3090,	0x0ea99b60,	0x08fd0a64,	0x0b3d25e0,	0x10e336b5,	0x02791d96,	0x16fbcdff,	0x0d33206e,	0x0ee71654, 0x0b654869,	
     0x02fd50e1,	0x16e5f97f,	0x0d7a4839,	0x17a935b3,	0x160c0447,	0x176bc53d,	0x06c49c98,	0x14cd66dc,	0x1318b066,	0x0e05ea3c,	0x04b91eb3,	0x00e36164,	0x047641e8,	0x040b7123,	0x06a6d361,	0x07090962,	0x12d0ffd5,	0x0aa2f1b8,	0x099fa4ab,	0x0ae0f14a,	0x124c1ab7,	0x0e92a829,	0x12fd7064,	0x13bb94a5,	0x0bab7ef8,	0x104a1bbd,	0x0bc882b2,	0x17771a1a,	0x06b0af58,	0x13b8cdda,	0x00bdb82f,	0x110b2947,
     0x159492c0,	0x0767e816,	0x0be4cf47,	0x05744b97,	0x15cbbca8,	0x07e2c49c,	0x02e1e206,	0x17d88f96,	0x09ebaae6,	0x19765698,	0x13fb7ff3,	0x0df57041,	0x10787d5e,	0x07a11630,	0x146f6716,	0x08672f8f,	0x0cca7b7b,	0x18936b29,	0x0ea4a126,	0x155103c9,	0x0dab4dae,	0x07c9a72c,	0x09185000,	0x194811ba,	0x168bd809,	0x0b1f3588,	0x062196f8,	0x0d7d18bc,	0x048179c0,	0x0712b471,	0x1959af72,	0x0b09b264,
@@ -140,5 +201,3 @@ random_number := [?]u32{
     0x118ab1c0,	0x04fb68a6,	0x087fd6f4,	0x0608d081,	0x03e7c850,	0x13f19b61,	0x00d17ace,	0x131f2138,	0x124ecc13,	0x11659526,	0x088addc8,	0x02f88e2a,	0x13f6eaa2,	0x0e71ec4a,	0x1827137e,	0x11c21270,	0x13577ba0,	0x14233cde,	0x1876a860,	0x11a8d25e,	0x163e95c4,	0x0ee68ca2,	0x0347aa87,	0x007d4a80,	0x074a14f4,	0x14d8844b,	0x129b09dd,	0x067928c5,	0x083661c1,	0x14f67dc9,	0x0f907c56,	0x16197e65,
     0x0a8d7e73,	0x05d73da8,	0x0b3424b0,	0x080867eb,	0x14e01cce,	0x171bad68,	0x08b1ce53,	0x14710d7f,	0x1980a923,	0x00ce24c5,	0x05f719cb,	0x0b0c04ef,	0x07c7a6f7,	0x0a9ae2c0,	0x0d5656dc,	0x052a1b41,	0x12f8e9e7,	0x0932089e,	0x068d139d,	0x085b5806,	0x08087b34,	0x16dd4575,	0x02163e1e,	0x003a9cd1,	0x001f3c7f,	0x05cc11f6,	0x072ea025,	0x16edf7be,	0x15f05457,	0x0bc80d7e,	0x0664448d,	0x01a8ae47,
 }
-
-random_number_index := 0

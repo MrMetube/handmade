@@ -68,67 +68,6 @@ abs_vec_3 :: #force_inline proc(a: [3]$E) -> [3]E where intrinsics.type_is_numer
 }
 
 
-
-// in_bounds :: proc {
-// 	in_bounds_array_2d,
-// 	in_bounds_array_3d,
-// 	in_bounds_slice_2d,
-// 	in_bounds_slice_3d,
-// 	in_bounds_array_2,
-// 	in_bounds_array_3,
-// 	in_bounds_slice_2,
-// 	in_bounds_slice_3,
-// }
-
-// in_bounds_array_2d :: #force_inline proc(arrays: [][$N]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
-// 	return in_bounds_array_2(arrays, index.x, index.y)
-// }
-
-// in_bounds_slice_2d :: #force_inline proc(slices: [][]$T, index: [2]$I) -> b32 where intrinsics.type_is_integer(I) {
-// 	return in_bounds_slice_2(slices, index.x, index.y)
-// }
-
-// in_bounds_array_2 :: #force_inline proc(arrays: [][$N]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
-// 	when intrinsics.type_is_unsigned(I) {
-// 		return x < cast(I) len(arrays[0]) && y < cast(I) len(arrays)
-// 	} else {
-// 		return x >= 0 && x < cast(I) len(arrays[0]) && y >= 0 && y < cast(I) len(arrays)
-// 	}
-// }
-
-// in_bounds_slice_2 :: #force_inline proc(slices: [][]$T, x, y: $I) -> b32 where intrinsics.type_is_integer(I) {
-// 	when intrinsics.type_is_unsigned(I) {
-// 		return x < cast(I) len(slices[0]) && y < cast(I) len(slices)
-// 	} else {
-// 		return x >= 0 && x < cast(I) len(slices[0]) && y >= 0 && y < cast(I) len(slices)
-// 	}
-// }
-
-// in_bounds_array_3d :: #force_inline proc(arrays: [][$N][$M]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
-// 	return in_bounds_array_3(arrays, index.x, index.y, index.z)
-// }
-
-// in_bounds_slice_3d :: #force_inline proc(slices: [][][]$T, index: [3]$I) -> b32 where intrinsics.type_is_integer(I) {
-// 	return in_bounds_slice_3(slices, index.x, index.y, index.z)
-// }
-
-// in_bounds_array_3 :: #force_inline proc(arrays: [][$N][$M]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
-// 	when intrinsics.type_is_unsigned(I) {
-// 		return x < cast(I) len(arrays[0][0]) && y < cast(I) len(arrays[0]) && z < cast(I) len(arrays)
-// 	} else {
-// 		return x >= 0 && x < cast(I) len(arrays[0][0]) && y >= 0 && y < cast(I) len(arrays[0]) && z >= 0 && z < cast(I) len(arrays)
-// 	}
-// }
-
-// in_bounds_slice_3 :: #force_inline proc(slices: [][][]$T, x, y, z: $I) -> b32 where intrinsics.type_is_integer(I) {
-// 	when intrinsics.type_is_unsigned(I) {
-// 		return x < cast(I) len(slices[0][0]) && y < cast(I) len(slices[0]) && z < cast(I) len(slices)
-// 	} else {
-// 		return x >= 0 && x < cast(I) len(slices[0][0]) && y >= 0 && y < cast(I) len(slices[0]) && z >= 0 && z < cast(I) len(slices)
-// 	}
-// }
-
-
 // TODO convert all of these to platform-efficient versions
 sign :: proc{ sign_i, sign_u, sign_vi, sign_vu }
 
@@ -234,29 +173,19 @@ sin_f32_simd :: #force_inline proc(angle: [$N]f32) -> [N]f32 {
 
 cos :: proc {
     cos_f32,
-    cos_f32_simd,	
 }
 
 cos_f32 :: #force_inline proc(angle: f32) -> f32 {
     return math.cos(angle)
 }
 
-cos_f32_simd :: #force_inline proc(angle: [$N]f32) -> [N]f32 {
-
-}
-
 
 atan2 :: proc {
     atan2_f32,
-    atan2_f32_simd,	
 }
 
 atan2_f32 :: #force_inline proc(y, x: f32) -> f32 {
     return math.atan2(y, x)
-}
-
-atan2_f32_simd :: #force_inline proc(y, x: [$N]f32) -> [N]f32 {
-    
 }
 
 rotate_left :: #force_inline proc(value: u32, amount: i32) -> u32 {

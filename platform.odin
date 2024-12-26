@@ -62,8 +62,7 @@ OffscreenBufferColor :: struct{
 OffscreenBuffer :: struct {
     info   : win.BITMAPINFO,
     memory : []OffscreenBufferColor,
-    width  : i32,
-    height : i32,
+    width, height, pitch: i32,
 }
 
 State :: struct {
@@ -439,10 +438,11 @@ main :: proc() {
         // ---------------------- Update, Sound and Render
         // ---------------------- ---------------------- ----------------------
         {
-            offscreen_buffer := GameOffscreenBuffer{
-                memory = GLOBAL_back_buffer.memory,
+            offscreen_buffer := GameLoadedBitmap{
+                pixels = GLOBAL_back_buffer.memory,
                 width  = GLOBAL_back_buffer.width,
                 height = GLOBAL_back_buffer.height,
+                pitch  = GLOBAL_back_buffer.width,
             }
 
             if state.input_record_index != 0 {
