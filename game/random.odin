@@ -7,7 +7,7 @@ RandomSeries :: struct {
     index: u32,
 }
 
-seed :: proc(seed: u32) -> (result: RandomSeries) {
+random_seed :: proc(seed: u32) -> (result: RandomSeries) {
     result = { index = seed % len(random_number_table) }
     return result
 }
@@ -39,6 +39,10 @@ random_choice_data :: #force_inline proc(series: ^RandomSeries, data:[]$T) -> (r
 random_unilateral :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
     result = cast(T) (cast(f64)(next_random_u32(series) - MinRandomValue) / (MaxRandomValue - MinRandomValue)) 
     return result
+}
+
+random_unilateral_2 :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
+    return {random_unilateral(series, T), random_unilateral(series, T)}
 }
 
 random_bilateral :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: T) {

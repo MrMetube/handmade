@@ -161,8 +161,8 @@ main :: proc() {
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
-            960,// win.CW_USEDEFAULT, // TODO(viktor): undo hardcoding
-            540,// win.CW_USEDEFAULT,
+            GLOBAL_back_buffer.width  + 50,
+            GLOBAL_back_buffer.height + 50,
             nil,
             nil,
             window_class.hInstance,

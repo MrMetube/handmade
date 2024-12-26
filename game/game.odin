@@ -172,6 +172,7 @@ GameState :: struct {
     player_focus, monster_focus: [2][2]i32,
     
     ground_buffer: LoadedBitmap,
+    ground_buffer_p: WorldPosition,
 
     tile_size_in_pixels: u32,
     meters_to_pixels: f32,
@@ -278,11 +279,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         door_top, door_bottom: b32
         stair_up, stair_down: b32
 
-        series := seed(0)
+        series := random_seed(0)
         screen_base: [3]i32
-        screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z + 1
+        screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         for room_count in u32(0) ..< 200 {
-            choice := random_choice(&series, stair_down || stair_up ? 2 : 3)
+            // choice := random_choice(&series, stair_down || stair_up ? 2 : 3)
+            choice := random_choice(&series, 2)
             
             created_stair: b32
             switch(choice) {
@@ -322,13 +324,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     }
 
                     if should_be_door {
-                        // if room_count == 0 {
-                            add_wall(state,
-                                tile_x + screen_col * tiles_per_screen.x,
-                                tile_y + screen_row * tiles_per_screen.y,
-                                tile_z,
-                            ) 
-                        // }
+                        add_wall(state,
+                            tile_x + screen_col * tiles_per_screen.x,
+                            tile_y + screen_row * tiles_per_screen.y,
+                            tile_z,
+                        )
                     } else if need_to_place_stair {
                         add_stairs(state, 
                             5 + screen_col * tiles_per_screen.x,
@@ -380,20 +380,24 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
         }
         
-        make_empty_bitmap :: proc(arena: ^Arena, width, height: i32) -> (result: LoadedBitmap) {
+        make_empty_bitmap :: proc(arena: ^Arena, dim: [2]f32) -> (result: LoadedBitmap) {
             result = {
-                pixels = push_slice(arena, BufferColor, auto_cast (width * height)),
-                width  = width,
-                height = height,
-                pitch  = width,
+                pixels = push_slice(arena, BufferColor, cast(u64) (dim.x * dim.y)),
+                width  = cast(i32) dim.x,
+                height = cast(i32) dim.y,
+                pitch  = cast(i32) dim.x,
             }
             zero_slice(result.pixels)
             
             return result
         }
         
-        state.ground_buffer = make_empty_bitmap(&state.world_arena, 512, 512)
-        draw_test_ground(state.ground_buffer, state)
+        screen_dim := vec_cast(f32, buffer.width, buffer.height)
+        max_z_scale: f32 = 0.5
+        ground_overscan: f32 = 1.5
+        state.ground_buffer = make_empty_bitmap(&state.world_arena, screen_dim * ground_overscan)
+        state.ground_buffer_p = state.camera_p
+        draw_ground_chunk(state.ground_buffer, state, state.ground_buffer_p)
         
         memory.is_initialized = true
     }
@@ -470,7 +474,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     draw_rectangle(draw_buffer, 0, vec_cast(f32, draw_buffer.width, draw_buffer.height), DarkGreen) 
 
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    draw_bitmap(draw_buffer, state.ground_buffer, screen_center)
+    ground := screen_center
+    delta := world_difference(world, state.ground_buffer_p, state.camera_p)
+    ground += delta.xy * state.meters_to_pixels * {1,-1}
+    draw_bitmap(draw_buffer, state.ground_buffer, ground)
     
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
@@ -696,18 +703,15 @@ PairwiseCollsionRule :: struct {
     next_in_hash: ^PairwiseCollsionRule
 }
 
-draw_test_ground :: proc(buffer: LoadedBitmap, state: ^GameState){
+draw_ground_chunk :: proc(buffer: LoadedBitmap, state: ^GameState, p: WorldPosition){
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), 0)
     
-    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    series := seed(140)
-    for index in 0..<100 {
-        offset := random_bilateral_2(&series, f32)
+    buffer_dim := vec_cast(f32, buffer.width, buffer.height)
+    // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
+    series := random_seed(cast(u32) (133 * p.chunk.x + 593 * p.chunk.y + 329 * p.chunk.z))
+    for index in 0..<200 {
+        p := random_unilateral_2(&series, f32) * buffer_dim
         stamp := random_choice(&series, state.grass[:])^
-        
-        radius := v2{8, 5}
-        p := screen_center + offset * radius * state.meters_to_pixels
- 
         draw_bitmap(buffer, stamp, p)
     }
 }
