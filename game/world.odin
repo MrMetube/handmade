@@ -156,11 +156,11 @@ world_difference :: #force_inline proc(world: ^World, a, b: WorldPosition) -> (r
 }
 
 is_canonical :: #force_inline proc(world: ^World, offset: v3) -> b32 {
-	epsilon: f32 = 0.0001
+    epsilon: f32 = 0.0001
     half_size := 0.5 * world.chunk_dim_meters + epsilon
     return -half_size.x <= offset.x && offset.x <= half_size.x &&
-		   -half_size.y <= offset.y && offset.y <= half_size.y &&
-		   -half_size.z <= offset.z && offset.z <= half_size.z
+           -half_size.y <= offset.y && offset.y <= half_size.y &&
+           -half_size.z <= offset.z && offset.z <= half_size.z
 }
 
 are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b32 {

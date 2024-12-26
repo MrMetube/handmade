@@ -53,22 +53,22 @@ square_root :: math.sqrt
 
 lerp :: proc { lerp_1, lerp_2, lerp_3 }
 @(require_results)
-lerp_1 :: #force_inline proc(a, b, t: f32) -> f32 {
-    result := (1-t) * a + t * b
+lerp_1 :: #force_inline proc(from, to, t: f32) -> f32 {
+    result := (1-t) * from + t * to
 
     return result
 }
 
 @(require_results)
-lerp_2 :: #force_inline proc(a, b, t: v2) -> v2 {
-    result := (1-t) * a + t * b
+lerp_2 :: #force_inline proc(from, to, t: v2) -> v2 {
+    result := (1-t) * from + t * to
     
     return result
 }
 
 @(require_results)
-lerp_3 :: #force_inline proc(a, b, t: v3) -> v3 {
-    result := (1-t) * a + t * b
+lerp_3 :: #force_inline proc(from, to, t: v3) -> v3 {
+    result := (1-t) * from + t * to
     
     return result
 }

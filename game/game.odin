@@ -34,6 +34,7 @@ INTERNAL :: #config(INTERNAL, true)
       - simple zoomed out view for testing
       
     - Debug code
+      - Fonts
       - Logging
       - Diagramming
       - (a little gui) switches / sliders / etc
@@ -93,17 +94,10 @@ Red      :: GameColor{1, 0.09, 0.24, 1}
 DarkGreen:: GameColor{0, 0.07, 0.0353, 1}
 
 LoadedBitmap :: struct {
-    pixels : []OffscreenBufferColor,
+    pixels : []BufferColor,
     width, height: i32, 
     
     start, pitch: i32,
-}
-
-LoadedBitmapWithFocus :: struct {
-    using bitmap: LoadedBitmap,
-    // TODO(viktor): move this to some other place as it has less to do with the 
-    // image data and more todo with the contents of the image for the human
-    focus: [2]i32, 
 }
 
 GameInputButton :: struct {
@@ -170,10 +164,12 @@ GameState :: struct {
 
     world: ^World,
 
-    grass: [8]LoadedBitmapWithFocus,
+    grass: [8]LoadedBitmap,
+    shadow, wall, sword, stair: LoadedBitmap,
+    player, monster: [2]LoadedBitmap,
     
-    wall, shadow, sword, stair: LoadedBitmapWithFocus,
-    player, monster: [2]LoadedBitmapWithFocus,
+    shadow_focus: [2]i32,
+    player_focus, monster_focus: [2][2]i32,
     
     ground_buffer: LoadedBitmap,
 
@@ -209,22 +205,27 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")       , focus = {   0, -2} }
-        state.player[0]  = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp") , focus = {   6, 28} }
-        state.player[1]  = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp"), focus = {  -6, 28} }
-        state.monster[0] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")     , focus = { -13, 22} }
-        state.monster[1] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")    , focus = {  16, 22} }
-        state.sword      = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")                             }
-        state.wall       = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")                              }
+        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")        
+        state.shadow_focus      = {   0, -2}
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")  
+        state.player_focus[0]   = {   6, 28}
+        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp") 
+        state.player_focus[1]   = {  -6, 28}
+        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")      
+        state.monster_focus[0]  = { -13, 22}
+        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")     
+        state.monster_focus[1]  = {  16, 22}
+        state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")                            
+        state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")                             
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
-        state.grass[0] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp") } 
-        state.grass[1] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp") } 
-        state.grass[2] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp") } 
-        state.grass[3] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp") } 
-        state.grass[4] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp") } 
-        state.grass[5] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp") } 
-        state.grass[6] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp") } 
-        state.grass[7] = { bitmap = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp") } 
+        state.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
+        state.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
+        state.grass[2] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp")
+        state.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
+        state.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
+        state.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
+        state.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")
+        state.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
 
         state.world = push_struct(&state.world_arena, World)
 
@@ -381,7 +382,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         
         make_empty_bitmap :: proc(arena: ^Arena, width, height: i32) -> (result: LoadedBitmap) {
             result = {
-                pixels = push_slice(arena, OffscreenBufferColor, auto_cast (width * height)),
+                pixels = push_slice(arena, BufferColor, auto_cast (width * height)),
                 width  = width,
                 height = height,
                 pitch  = width,
@@ -391,12 +392,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             return result
         }
         
-        state.ground_buffer = make_empty_bitmap(&state.world_arena, 1024, 512)
+        state.ground_buffer = make_empty_bitmap(&state.world_arena, 512, 512)
         draw_test_ground(state.ground_buffer, state)
         
         memory.is_initialized = true
     }
-
+    
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Input
     // ---------------------- ---------------------- ----------------------
@@ -467,9 +468,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     
     // NOTE: Clear the screen
     draw_rectangle(draw_buffer, 0, vec_cast(f32, draw_buffer.width, draw_buffer.height), DarkGreen) 
-    // TODO(viktor): draw at center
+
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    draw_bitmap(draw_buffer, { bitmap = state.ground_buffer }, screen_center)
+    draw_bitmap(draw_buffer, state.ground_buffer, screen_center)
     
     // TODO(viktor): these numbers where picked at random
     tilespan := [3]f32{17, 9, 1} * 2
@@ -514,9 +515,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ddp = con_hero.ddp
 
 
-                        push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-                        push_bitmap(&piece_group, &state.player[entity.facing_index], 0)
-                        draw_hitpoints(&piece_group, &entity, 1)
+                        push_bitmap(&piece_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                        push_bitmap(&piece_group, &state.player[entity.facing_index], focus = state.player_focus[entity.facing_index])
+                        push_hitpoints(&piece_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
                             sword := entity.sword.ptr
@@ -544,8 +545,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     make_entity_nonspatial(&entity)
                 }
 
-                push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-                push_bitmap(&piece_group, &state.sword, 0)
+                push_bitmap(&piece_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                push_bitmap(&piece_group, &state.sword)
 
             case .Familiar:
                 closest_hero: ^Entity
@@ -580,14 +581,14 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(&piece_group, &state.shadow, 0, 1 - shadow_alpha/2 * (coeff+1))
-                push_bitmap(&piece_group, &state.player[entity.facing_index], {0, z, 0}, 0.5)
+                push_bitmap(&piece_group, &state.shadow, alpha = 1 - shadow_alpha/2 * (coeff+1), focus = state.shadow_focus)
+                push_bitmap(&piece_group, &state.player[entity.facing_index], {0, 1+z, 0}, alpha = 0.5, focus = state.player_focus[entity.facing_index])
 
             case .Monster:
-                push_bitmap(&piece_group, &state.shadow, 0, shadow_alpha)
-                push_bitmap(&piece_group, &state.monster[1], 0)
+                push_bitmap(&piece_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                push_bitmap(&piece_group, &state.monster[1], focus = state.monster_focus[1])
                 // TODO(viktor): fix the offsets 
-                draw_hitpoints(&piece_group, &entity, 1.6)
+                push_hitpoints(&piece_group, &entity, 1.6)
             
             case .Stairwell: 
                 push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue)
@@ -618,7 +619,7 @@ when false {
                 center += piece.offset.xy
 
                 if piece.bitmap != nil {
-                    draw_bitmap(draw_buffer, piece.bitmap^, center, clamp_01(piece.color.a))
+                    draw_bitmap(draw_buffer, piece.bitmap^, center, clamp_01(piece.color.a), piece.bitmap_focus)
                 } else {
                     draw_rectangle(draw_buffer, center - piece.dim*0.5, piece.dim, piece.color)
                 }
@@ -654,7 +655,8 @@ EntityVisiblePieceGroup :: struct {
 }
 
 EntityVisiblePiece :: struct {
-    bitmap: ^LoadedBitmapWithFocus,
+    bitmap: ^LoadedBitmap,
+    bitmap_focus: [2]i32,
     offset: v3,
 
     color: GameColor,
@@ -675,7 +677,7 @@ StoredEntity :: struct {
 ControlledHero :: struct {
     storage_index: StorageIndex,
 
-    // NOTE(viktor): these are the controller request for simulation
+    // NOTE(viktor): these are the controller requests for simulation
     ddp: v3,
     dsword: v2,
     dz: f32,
@@ -695,6 +697,8 @@ PairwiseCollsionRule :: struct {
 }
 
 draw_test_ground :: proc(buffer: LoadedBitmap, state: ^GameState){
+    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), 0)
+    
     screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     series := seed(140)
     for index in 0..<100 {
@@ -881,38 +885,39 @@ clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
     }
 }
 
-push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmapWithFocus, dim: v2, offset: v3, color: GameColor) {
+push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, dim: v2, offset: v3, color: GameColor, focus: [2]i32) {
     assert(group.count < len(group.pieces))
     piece := &group.pieces[group.count]
     group.count += 1
 
-    piece.bitmap    = bitmap
-    piece.offset.xy = {offset.x, -offset.y} * group.state.meters_to_pixels
-    piece.offset.z  = offset.z
-    piece.dim       = dim * group.state.meters_to_pixels
-    piece.color     = color
+    piece.bitmap       = bitmap
+    piece.offset.xy    = {offset.x, -offset.y} * group.state.meters_to_pixels
+    piece.offset.z     = offset.z
+    piece.dim          = dim * group.state.meters_to_pixels
+    piece.color        = color
+    piece.bitmap_focus = focus
 }
 
-push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmapWithFocus, offset:v3, alpha: f32 = 1) {
-    push_piece(group, bitmap, {}, offset, {1,1,1, alpha})
+push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset := v3{}, alpha: f32 = 1, focus := [2]i32{}) {
+    push_piece(group, bitmap, {}, offset, {1,1,1, alpha}, focus)
 }
 
 push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
-    push_piece(group, nil, dim, offset, color)
+    push_piece(group, nil, dim, offset, color, {})
 }
 
 push_rectangle_outline :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
     thickness :: 0.1
     // NOTE(viktor): Top and Bottom
-    push_piece(group, nil, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color)
-    push_piece(group, nil, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color)
+    push_piece(group, nil, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color, {})
+    push_piece(group, nil, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color, {})
 
     // NOTE(viktor): Left and Right
-    push_piece(group, nil, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color)
-    push_piece(group, nil, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
+    push_piece(group, nil, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color, {})
+    push_piece(group, nil, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color, {})
 }
 
-draw_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_y: f32) {
+push_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_y: f32) {
     if entity.hit_point_max > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
@@ -936,8 +941,8 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-// TODO(viktor): use the focus param instead of LoadedBitmapWithFocus
-draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmapWithFocus, center: v2, c_alpha: f32 = 1, focus := [2]i32{} ) {
+// TODO(viktor): use the focus param instead of LoadedBitmap
+draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1, focus := [2]i32{} ) {
     rounded_center := round(center) + focus * {1, -1}
 
     left   := rounded_center.x - bitmap.width  / 2
@@ -966,15 +971,19 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmapWithFocus, center:
         for x in left..< right  {
             src := bitmap.pixels[src_index]
             dst := &buffer.pixels[dest_index]
-            // TODO(viktor): its only pad for the offscreenbuffer, loadedBitmaps can have actual alpha at that location
-            a := cast(f32) src.pad / 255 
-            a *= c_alpha
-
-            dst.r = cast(u8) lerp(cast(f32) dst.r, cast(f32) src.r, a)
-            dst.g = cast(u8) lerp(cast(f32) dst.g, cast(f32) src.g, a)
-            dst.b = cast(u8) lerp(cast(f32) dst.b, cast(f32) src.b, a)
-            // TODO(viktor): compute the right alpha here
-            dst.pad = max(dst.pad, src.pad)
+            
+            sa := cast(f32) src.a / 255 * c_alpha
+            sr := cast(f32) src.r * c_alpha
+            sg := cast(f32) src.g * c_alpha
+            sb := cast(f32) src.b * c_alpha
+            
+            da := cast(f32) dst.a / 255
+            inv_alpha := 1 - sa
+            
+            dst.a = cast(u8) (255 * (sa + da - sa * da))
+            dst.r = cast(u8) (inv_alpha * cast(f32) dst.r + sr)
+            dst.g = cast(u8) (inv_alpha * cast(f32) dst.g + sg)
+            dst.b = cast(u8) (inv_alpha * cast(f32) dst.b + sb)
             
             src_index  += 1
             dest_index += 1
@@ -1006,11 +1015,13 @@ draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: Game
             dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
             dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, clamp_01(color.a))
             dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, clamp_01(color.a))
+            // TODO(viktor): compute this
+            dst.a = cast(u8) color.a
         }
     }
 }
 
-game_color_to_buffer_color :: #force_inline proc(c: GameColor) -> OffscreenBufferColor {
+game_color_to_buffer_color :: #force_inline proc(c: GameColor) -> BufferColor {
     casted := vec_cast(u8, round(c * 255))
     return {r=casted.r, g=casted.g, b=casted.b}
 }
@@ -1059,30 +1070,38 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         blue_mask  := header.blue_mask
         alpha_mask := ~(red_mask | green_mask | blue_mask)
 
-        red_scan   := intrinsics.count_leading_zeros(red_mask)
-        green_scan := intrinsics.count_leading_zeros(green_mask)
-        blue_scan  := intrinsics.count_leading_zeros(blue_mask)
-        alpha_scan := intrinsics.count_leading_zeros(alpha_mask)
-        assert(red_scan   != 32)
-        assert(green_scan != 32)
-        assert(blue_scan  != 32)
-        assert(alpha_scan != 32)
-
-        raw_pixels := ( cast([^]u32) &contents[header.bitmap_offset] )[:header.width * header.height]
-        pixels := ( cast([^]OffscreenBufferColor) &contents[header.bitmap_offset] )[:header.width * header.height]
+        red_shift   := intrinsics.count_trailing_zeros(red_mask)
+        green_shift := intrinsics.count_trailing_zeros(green_mask)
+        blue_shift  := intrinsics.count_trailing_zeros(blue_mask)
+        alpha_shift := intrinsics.count_trailing_zeros(alpha_mask)
+        assert(red_shift   != 32)
+        assert(green_shift != 32)
+        assert(blue_shift  != 32)
+        assert(alpha_shift != 32)
+        
+        raw_pixels := (cast([^]u32) &contents[header.bitmap_offset])[:header.width * header.height]
+        pixels     := transmute([]BufferColor) raw_pixels
         for y in 0..<header.height {
             for x in 0..<header.width {
-                raw_pixel := &raw_pixels[y * header.width + x]
-                pixel     := &pixels[y * header.width + x]
-                // raw_pixel^ = (b << 24) | (g << 16) | (r << 8) | a
-                pixel^ = transmute(OffscreenBufferColor) raw_pixel^
-                // TODO(viktor): what is up with the shifts and shit
-                // pixel^ = { 
-                //     pad = cast(u8) (raw_pixel^ >> blue_scan ),  
-                //     r   = cast(u8) (raw_pixel^ >> green_scan),  
-                //     g   = cast(u8) (raw_pixel^ >> red_scan  ),  
-                //     b   = cast(u8) (raw_pixel^ >> alpha_scan),
-                // }
+                c := raw_pixels[y * header.width + x]
+                p := &pixels[y * header.width + x]
+                
+                r := cast(f32) cast(u8) ((c & red_mask)   >> red_shift)
+                g := cast(f32) cast(u8) ((c & green_mask) >> green_shift)
+                b := cast(f32) cast(u8) ((c & blue_mask)  >> blue_shift)
+                a := cast(f32) cast(u8) ((c & alpha_mask) >> alpha_shift)
+                an := a / 255
+                
+                r = r * an
+                g = g * an
+                b = b * an
+                
+                p^ = {
+                    r = cast(u8) (r + 0.5),
+                    g = cast(u8) (g + 0.5),
+                    b = cast(u8) (b + 0.5),
+                    a = cast(u8) (a + 0.5),
+                }
             }
         }
 

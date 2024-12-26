@@ -1,9 +1,10 @@
 package game
 
 // TODO: Copypasta from platform
-// TODO: Offscreenbuffer color and y-axis being down should not leak into the game layer
-OffscreenBufferColor :: struct{
-    b, g, r, pad: u8
+// TODO: Microsoft color layout should not leak into game, should be [4]u8 instead
+// the platform layer would then need to correct to fit the platforms expected layout
+BufferColor :: struct{
+    b, g, r, a: u8,
 }
 
 // TODO: COPYPASTA from debug
