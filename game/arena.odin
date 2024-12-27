@@ -15,12 +15,13 @@ init_arena :: #force_inline proc(arena: ^Arena, storage: []u8) {
     arena.storage = storage
 }
 
-// TODO(viktor): zero all pushed data by default and add nonzeroing version for all procs
+// TODO(viktor): we are now zeroing all pushed data by default and should add nonzeroing version for all procs
 push :: proc { push_slice, push_struct, push_size }
 
 push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int len: u64 ) -> (result: []Element) {
     data := cast([^]Element) push_size(arena, size_of(Element) * len)
     result = data[:len]
+    zero_slice(result)
     return result
 }
 

@@ -1,7 +1,7 @@
 @echo off
 
-set pedantic=-vet-unused-imports -warnings-as-errors  -vet-packages:main,game -vet-unused-procedures -vet-style
-set build-flags=-vet-cast -vet-shadowing -vet-unused-variables -error-pos-style:unix -subsystem:windows
+set pedantic=-vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style
+set build-flags=-vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows
 set debug=-debug -o:none -define:INTERNAL=true 
 
 if not exist .\build mkdir .\build

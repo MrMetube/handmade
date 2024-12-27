@@ -18,8 +18,8 @@ INTERNAL :: #config(INTERNAL, true)
       - how is going "up" and "down" rendered?
     - Collision detection
       - Clean up predicate proliferation! Can we make a nice clean
-        set of flags/rules so that it's easy to understand how
-        things work in terms of special handling? This may involve
+      set of flags/rules so that it's easy to understand how
+      things work in terms of special handling? This may involve
         making the iteration handle everything instead of handling 
         overlap outside and so on.
       - transient collision rules
@@ -717,7 +717,7 @@ when false {
                     for volume in entity.collision.volumes {
                         // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
                         fudge := world.tile_size_in_meters * v2{2, 0.5}
-                        push_rectangle_outline(piece_group, volume.dim.xy + fudge, volume.offset, Yellow)
+                        push_rectangle_outline(render_group, volume.dim.xy + fudge, volume.offset, Yellow)
                     }
                 }
             }
@@ -729,30 +729,9 @@ when false {
             basis.p = get_entity_ground_point(&entity)
         }
     }
-
     
-    // TODO(viktor): fix this
-    pieces := transmute([]EntityVisiblePiece) render_group.push_buffer
-    piece_size := size_of(EntityVisiblePiece)
-    count := render_group.push_buffer_size / auto_cast piece_size
-    
-    for piece in pieces[:count] {
-        base_p := piece.basis.p
-        z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
-
-        center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-        center += state.meters_to_pixels * z_fudge * (base_p.xy) * {1, -1}
-        center.y -= state.meters_to_pixels / state.typical_floor_height * base_p.z 
-
-        center += piece.offset.xy
-
-        if piece.bitmap != nil {
-            draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a), piece.bitmap_focus)
-        } else {
-            draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
-        }
-    }
-        
+    render_to_output(render_group, buffer)
+            
     end_sim(camera_sim_region, state)
     
     end_temporary_memory(sim_memory)
@@ -1000,85 +979,6 @@ clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
 @(export)
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
     // TODO: Allow sample offsets here for more robust platform options
-}
-
-// TODO(viktor): use the focus param instead of LoadedBitmap
-draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1, focus := [2]i32{} ) {
-    rounded_center := round(center) + focus * {1, -1}
-
-    left   := rounded_center.x - bitmap.width  / 2
-    top	   := rounded_center.y - bitmap.height / 2
-    right  := left + bitmap.width
-    bottom := top  + bitmap.height
-
-    src_left: i32
-    src_top : i32
-    if left < 0 {
-        src_left = -left
-        left = 0
-    }
-    if top < 0 {
-        src_top = -top
-        top = 0
-    }
-    bottom = min(bottom, buffer.height)
-    right  = min(right,  buffer.width)
-
-    src_row  := bitmap.start + bitmap.pitch * src_top + src_left
-    dest_row := left + top * buffer.width
-    for _ in top..< bottom  {
-        src_index, dest_index := src_row, dest_row
-        
-        for _ in left..< right  {
-            src := bitmap.memory[src_index]
-            dst := &buffer.memory[dest_index]
-            
-            sa := cast(f32) src.a / 255 * c_alpha
-            sr := cast(f32) src.r * c_alpha
-            sg := cast(f32) src.g * c_alpha
-            sb := cast(f32) src.b * c_alpha
-            
-            da := cast(f32) dst.a / 255
-            inv_alpha := 1 - sa
-            
-            dst.a = cast(u8) (255 * (sa + da - sa * da))
-            dst.r = cast(u8) (inv_alpha * cast(f32) dst.r + sr)
-            dst.g = cast(u8) (inv_alpha * cast(f32) dst.g + sg)
-            dst.b = cast(u8) (inv_alpha * cast(f32) dst.b + sb)
-            
-            src_index  += 1
-            dest_index += 1
-        }
-        
-        dest_row += buffer.pitch
-        src_row  += bitmap.pitch
-    }
-}
-
-draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: GameColor){
-    rounded_position := floor(position)
-    rounded_size     := floor(size)
-
-    left, right := rounded_position.x, rounded_position.x + rounded_size.x
-    top, bottom := rounded_position.y, rounded_position.y + rounded_size.y
-
-    if left < 0 do left = 0
-    if top  < 0 do top  = 0
-    if right  > buffer.width  do right  = buffer.width
-    if bottom > buffer.height do bottom = buffer.height
-
-    for y in top..<bottom {
-        for x in left..<right {
-            dst := &buffer.memory[y*buffer.width + x]
-            src := color * 255
-
-            dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
-            dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, clamp_01(color.a))
-            dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, clamp_01(color.a))
-            // TODO(viktor): compute this
-            dst.a = cast(u8) color.a
-        }
-    }
 }
 
 DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> LoadedBitmap {
