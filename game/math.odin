@@ -247,11 +247,11 @@ rectangle_min_dim_3 :: #force_inline proc(min, dim: v3) -> Rectangle3 {
 rectangle_center_diameter :: proc { rectangle_center_diameter_2, rectangle_center_diameter_3 }
 @(require_results)
 rectangle_center_diameter_2 :: #force_inline proc(center, diameter: v2) -> Rectangle2 {
-    return { center - diameter * 0.5, center + diameter * 0.5 }
+    return { center - (diameter * 0.5), center + (diameter * 0.5) }
 }
 @(require_results)
 rectangle_center_diameter_3 :: #force_inline proc(center, diameter: v3) -> Rectangle3 {
-    return { center - diameter * 0.5, center + diameter * 0.5 }
+    return { center - (diameter * 0.5), center + (diameter * 0.5) }
 }
 
 rectangle_center_half_diameter :: proc { rectangle_center_half_diameter_2, rectangle_center_half_diameter_3 }
@@ -264,19 +264,35 @@ rectangle_center_half_diameter_3 :: #force_inline proc(center, half_diameter: v3
     return { center - half_diameter, center + half_diameter }
 }
 
-rectangle_add :: proc { rectangle_add_2, rectangle_add_3 }
+rectangle_add_radius :: proc { rectangle_add_radius_2, rectangle_add_radius_3 }
 @(require_results)
-rectangle_add_2 :: #force_inline proc(rec: Rectangle2, radius: v2) -> (result: Rectangle2) {
+rectangle_add_radius_2 :: #force_inline proc(rec: Rectangle2, radius: v2) -> (result: Rectangle2) {
     result = rec
     result.min -= radius
     result.max += radius
     return result
 }
 @(require_results)
-rectangle_add_3 :: #force_inline proc(rec: Rectangle3, radius: v3) -> (result: Rectangle3) {
+rectangle_add_radius_3 :: #force_inline proc(rec: Rectangle3, radius: v3) -> (result: Rectangle3) {
     result = rec
     result.min -= radius
     result.max += radius
+    return result
+}
+
+rectangle_add_offset :: proc { rectangle_add_offset_2, rectangle_add_offset_3 }
+@(require_results)
+rectangle_add_offset_2 :: #force_inline proc(rec: Rectangle2, offset: v2) -> (result: Rectangle2) {
+    result.min = rec.min + offset
+    result.max = rec.max + offset
+    
+    return result
+}
+@(require_results)
+rectangle_add_offset_3 :: #force_inline proc(rec: Rectangle3, offset: v3) -> (result: Rectangle3) {
+    result.min = rec.min + offset
+    result.max = rec.max + offset
+    
     return result
 }
 

@@ -93,11 +93,11 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     
     region.world = world
     region.origin = origin
-    region.updatable_bounds = rectangle_add(bounds, update_safety_margin)
-    region.bounds = rectangle_add(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
+    region.updatable_bounds = rectangle_add_radius(bounds, update_safety_margin)
+    region.bounds = rectangle_add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
     
-    min_p := map_into_worldspace(world, region.origin, region.bounds.min )
-    max_p := map_into_worldspace(world, region.origin, region.bounds.max )
+    min_p := map_into_worldspace(world, region.origin, region.bounds.min)
+    max_p := map_into_worldspace(world, region.origin, region.bounds.max)
     // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
@@ -143,34 +143,15 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
         
         if entity.storage_index == state.camera_following_index {
             new_camera_p: WorldPosition
-            when false {
-                new_camera_p = state.camera_p
-                new_camera_p.chunk.z = entity.low.p.chunk.z
-                offset := entity.high.p
-                
-                if offset.x < -9 * world.tile_size_in_meters {
-                    new_camera_p.offset_.x -= 17
-                }
-                if offset.x > 9 * world.tile_size_in_meters {
-                    new_camera_p.offset_.x += 17
-                }
-                if offset.y < -5 * world.tile_size_in_meters {
-                    new_camera_p.offset_.y -= 9
-                }
-                if offset.y > 5 * world.tile_size_in_meters {
-                    new_camera_p.offset_.y += 9
-                }
-            } else {
-                new_camera_p.chunk  = stored.p.chunk
-                new_camera_p.offset = stored.p.offset
-            }
+            new_camera_p.chunk  = stored.p.chunk
+            new_camera_p.offset.xy = stored.p.offset.xy
             state.camera_p = new_camera_p
         }
     }
 }
 
 entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volume: EntityCollisionVolume) -> (result: b32) {
-    grown := rectangle_add(bounds, 0.5 * volume.dim)
+    grown := rectangle_add_radius(bounds, 0.5 * volume.dim)
     result = rectangle_contains(grown, p + volume.offset)
     return result
 }

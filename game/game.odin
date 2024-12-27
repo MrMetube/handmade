@@ -155,6 +155,7 @@ GameMemory :: struct {
 GameState :: struct {
     world_arena: Arena,
 
+    typical_floor_height: f32,
     // TODO(viktor): should we allow split-screen?
     camera_following_index: StorageIndex,
     camera_p : WorldPosition,
@@ -172,8 +173,7 @@ GameState :: struct {
     shadow_focus: [2]i32,
     player_focus, monster_focus: [2][2]i32,
 
-    tile_size_in_pixels: u32,
-    meters_to_pixels: f32,
+    meters_to_pixels, pixels_to_meters: f32,
 
     collision_rule_hash: [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
@@ -276,6 +276,7 @@ PairwiseCollsionRule :: struct {
 // timing
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
+    ground_buffer_size :: 256
     
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Permanent Initialization
@@ -316,49 +317,43 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
 
         add_stored_entity(state, .Nil, null_position())
 
+        state.typical_floor_height = 3
+        state.meters_to_pixels = 32
+        state.pixels_to_meters = 1 / state.meters_to_pixels
+        
         world := state.world
-        init_world(world, 1.5, 3)
-
-        state.tile_size_in_pixels = 60
-        state.meters_to_pixels = f32(state.tile_size_in_pixels) / world.tile_size_in_meters
-
-        make_null_collision :: proc(state: ^GameState) -> (result: ^EntityCollisionVolumeGroup) {
-            result = push(&state.world_arena, EntityCollisionVolumeGroup)
-
-            result^ = {}
-            
-            return result
-        }
-
-        make_simple_grounded_collision :: proc(state: ^GameState, dim: v3) -> (result: ^EntityCollisionVolumeGroup) {
-            // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
-            result = push(&state.world_arena, EntityCollisionVolumeGroup)
-            result.volumes = push(&state.world_arena, EntityCollisionVolume, 1)
-            
-            result.total_volume = {
-                dim = dim, 
-                offset = {0, 0, 0.5*dim.z},
-            }
-            result.volumes[0] = result.total_volume
-
-            return result
-        }
+        chunk_dim_in_meters := state.pixels_to_meters * ground_buffer_size
+        init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
+        
 
         tiles_per_screen :: [2]i32{16, 8}
 
+        tile_size_in_meters :: 1.5
         state.null_collision          = make_null_collision(state)
-        state.wall_collision          = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters, state.world.tile_depth_in_meters})
+        state.wall_collision          = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters, state.typical_floor_height})
         state.sword_collision         = make_simple_grounded_collision(state, {0.5, 1, 0.1})
-        state.stairs_collision        = make_simple_grounded_collision(state, {state.world.tile_size_in_meters, state.world.tile_size_in_meters * 2, state.world.tile_depth_in_meters + 0.1})
+        state.stairs_collision        = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters * 2, state.typical_floor_height + 0.1})
         state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1})
         state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1})
         state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 0.5})
-        state.standart_room_collision = make_simple_grounded_collision(state, {state.world.tile_size_in_meters * cast(f32) tiles_per_screen.x, state.world.tile_size_in_meters * cast(f32) tiles_per_screen.y, state.world.tile_depth_in_meters * 0.9})
+        state.standart_room_collision = make_simple_grounded_collision(state, {tile_size_in_meters * cast(f32) tiles_per_screen.x, tile_size_in_meters * cast(f32) tiles_per_screen.y, state.typical_floor_height * 0.9})
 
         //
         // "World Gen"
         //
 
+        chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
+            tile_size_in_meters :: 1.5
+            tile_depth_in_meters :: 3
+            offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * vec_cast(f32, tile_x, tile_y, tile_z)
+            
+            result = map_into_worldspace(world, result, offset + additional_offset)
+            
+            assert(auto_cast is_canonical(world, result.offset))
+        
+            return result
+        }
+        
         door_left, door_right: b32
         door_top, door_bottom: b32
         stair_up, stair_down: b32
@@ -384,11 +379,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             }
             need_to_place_stair := created_stair
             
-            add_standart_room(state,
+            add_standart_room(state, chunk_position_from_tile_positon(world, 
                 screen_col * tiles_per_screen.x + tiles_per_screen.x/2,
                 screen_row * tiles_per_screen.y + tiles_per_screen.y/2,
                 tile_z,
-            ) 
+            )) 
 
             for tile_y in 0..< tiles_per_screen.y {
                 for tile_x in 0 ..< tiles_per_screen.x {
@@ -408,17 +403,17 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     }
 
                     if should_be_door {
-                        add_wall(state,
+                        add_wall(state, chunk_position_from_tile_positon(world, 
                             tile_x + screen_col * tiles_per_screen.x,
                             tile_y + screen_row * tiles_per_screen.y,
                             tile_z,
-                        )
+                        ))
                     } else if need_to_place_stair {
-                        add_stairs(state, 
-                            5 + screen_col * tiles_per_screen.x,
-                            3 + screen_row * tiles_per_screen.y,
+                        add_stairs(state, chunk_position_from_tile_positon(world, 
+                            5 + screen_col * tiles_per_screen.x, 
+                            3 + screen_row * tiles_per_screen.y, 
                             stair_down ? tile_z-1 : tile_z
-                        )
+                        ))
                         need_to_place_stair = false
                     }
 
@@ -456,12 +451,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.camera_p = new_camera_p
 
         monster_p  := new_camera_p.chunk + {10,5,0}
-        add_monster(state,  monster_p.x, monster_p.y, monster_p.z)
+        add_monster(state,  chunk_position_from_tile_positon(world, monster_p.x, monster_p.y, monster_p.z))
         for _ in 0..< 1 {
             familiar_p := new_camera_p.chunk
             familiar_p.x += random_between_i32(&series, 0, 14)
             familiar_p.y += random_between_i32(&series, 0, 7)
-            add_familiar(state, familiar_p.x, familiar_p.y, familiar_p.z)
+            add_familiar(state, chunk_position_from_tile_positon(world, familiar_p.x, familiar_p.y, familiar_p.z))
         }
         
         memory.is_initialized = true
@@ -474,16 +469,15 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
-        
+
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 128)
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
-            tran_state.ground_buffer_bitmap_template = make_empty_bitmap(&tran_state.arena, 256, false)
+            tran_state.ground_buffer_bitmap_template = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
             ground_buffer.memory = tran_state.ground_buffer_bitmap_template.memory
         }
         
-        // TODO(viktor): this is just a test fill
-        fill_ground_chunk(tran_state, state, &tran_state.ground_buffers[0], state.camera_p)
+
         
         tran_state.is_initialized = true
     }
@@ -549,15 +543,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
     
-    draw_buffer := LoadedBitmap{
-        memory = buffer.memory,
-        width  = buffer.width,
-        height = buffer.height,
-        pitch  = buffer.pitch,
-    }
+    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     
     // NOTE: Clear the screen
-    draw_rectangle(draw_buffer, 0, vec_cast(f32, draw_buffer.width, draw_buffer.height), DarkGreen) 
+    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
 
     for ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
@@ -567,17 +556,47 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             center := vec_cast(f32, bitmap.width, bitmap.height) * 0.5
             delta := world_difference(world, ground_buffer.p, state.camera_p)
             ground := center + delta.xy * {1,-1} * state.meters_to_pixels
-            draw_bitmap(draw_buffer, bitmap, ground)
+            draw_bitmap(buffer, bitmap, ground)
         }
     }
     
-    // TODO(viktor): these numbers where picked at random
-    tilespan := [3]f32{17, 9, 1} * 2
-    camera_bounds := rectangle_center_half_diameter(0, tilespan * {world.tile_size_in_meters, world.tile_size_in_meters, state.world.tile_depth_in_meters })
-    
+    screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * state.pixels_to_meters
+    // TODO(viktor): this is twice the size it should be
+    camera_bounds := rectangle_center_half_diameter(v3{}, v3{screen_dim_in_meters.x, screen_dim_in_meters.y, 0})
+    {
+        min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
+        max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
+
+        for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
+            for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
+                for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
+                    chunk_center := WorldPosition{ chunk = { chunk_x, chunk_y, chunk_z } }
+                    rel_p := world_difference(world, chunk_center, state.camera_p)
+                    
+                    found: b32
+                    empty: ^GroundBuffer
+                    for &ground_buffer in tran_state.ground_buffers {
+                        if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
+                            found = true
+                            break
+                        } else if empty == nil && !is_valid(ground_buffer.p) {
+                            empty = &ground_buffer
+                        }
+                    }
+                    if !found && empty != nil {
+                        fill_ground_chunk(tran_state, state, empty, chunk_center)
+                    }
+                    draw_rectangle_outline(buffer, screen_center + state.meters_to_pixels * rel_p.xy * {1, -1}, state.meters_to_pixels * world.chunk_dim_meters.xy, Yellow)
+                }
+            }
+        }
+    }
+
     sim_temp_mem := begin_temporary_memory(&tran_state.arena)
+    // TODO(viktor): by how much should we expand the sim region?
+    sim_bounds := rectangle_add_radius(camera_bounds, 15)
     camera_sim_region := begin_sim(&tran_state.arena, state, world, state.camera_p, camera_bounds, input.delta_time)
-    
+        
     for &entity in camera_sim_region.entities {
         if entity.updatable {
             // TODO(viktor):  move this out into entity.odin
@@ -708,29 +727,29 @@ when false {
             for piece in piece_group.pieces[:piece_group.count] {
                 z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
 
-                center := vec_cast(f32, draw_buffer.width, draw_buffer.height) * 0.5
+                center := vec_cast(f32, buffer.width, buffer.height) * 0.5
                 center.x += state.meters_to_pixels * z_fudge * (base_p.x/*  - 0.5 * entity.size.x */) 
                 center.y -= state.meters_to_pixels * z_fudge * (base_p.y/*  - 0.5 * entity.size.y */) 
-                center.y -= state.meters_to_pixels / state.world.tile_depth_in_meters * base_p.z 
+                center.y -= state.meters_to_pixels / state.typical_floor_height * base_p.z 
 
                 center += piece.offset.xy
 
                 if piece.bitmap != nil {
-                    draw_bitmap(draw_buffer, piece.bitmap^, center, clamp_01(piece.color.a), piece.bitmap_focus)
+                    draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a), piece.bitmap_focus)
                 } else {
-                    draw_rectangle(draw_buffer, center - piece.dim*0.5, piece.dim, piece.color)
+                    draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
                 }
             }
         }
     }
-
+    
     end_sim(camera_sim_region, state)
     end_temporary_memory(sim_temp_mem)
     
     check_arena(state.world_arena)
     check_arena(tran_state.arena)
 }
-        
+
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
     result = {
         memory = push(arena, BufferColor, cast(u64) (dim.x * dim.y)),
@@ -757,10 +776,32 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
     series := random_seed(cast(u32) (133 * p.chunk.x + 593 * p.chunk.y + 329 * p.chunk.z))
     for index in 0..<20 {
-        p := random_unilateral_2(&series, f32) * buffer_dim
         stamp := random_choice(&series, state.grass[:])^
+        p := random_unilateral_2(&series, f32) * (buffer_dim - (buffer_dim - vec_cast(f32, stamp.width, stamp.height)) * 0.5)
         draw_bitmap(buffer, stamp, p)
     }
+}
+
+make_null_collision :: proc(state: ^GameState) -> (result: ^EntityCollisionVolumeGroup) {
+    result = push(&state.world_arena, EntityCollisionVolumeGroup)
+
+    result^ = {}
+    
+    return result
+}
+
+make_simple_grounded_collision :: proc(state: ^GameState, dim: v3) -> (result: ^EntityCollisionVolumeGroup) {
+    // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
+    result = push(&state.world_arena, EntityCollisionVolumeGroup)
+    result.volumes = push(&state.world_arena, EntityCollisionVolume, 1)
+    
+    result.total_volume = {
+        dim = dim, 
+        offset = {0, 0, 0.5*dim.z},
+    }
+    result.volumes[0] = result.total_volume
+
+    return result
 }
 
 get_low_entity :: #force_inline proc(state: ^GameState, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
@@ -802,8 +843,7 @@ add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEnt
     return index, entity
 }
 
-add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+add_wall :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Wall, p, state.wall_collision)
 
     entity.sim.flags += {.Collides}
@@ -811,12 +851,11 @@ add_wall :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: Stor
     return index, entity
 }
 
-add_stairs :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+add_stairs :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Stairwell, p, state.stairs_collision)
 
     entity.sim.flags += {.Collides}
-    entity.sim.walkable_height = state.world.tile_depth_in_meters
+    entity.sim.walkable_height = state.typical_floor_height
     entity.sim.walkable_dim    = entity.sim.collision.total_volume.dim.xy
 
     return index, entity
@@ -839,8 +878,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEn
     return index, entity
 }
 
-add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+add_monster :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Monster, p, state.monstar_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
@@ -850,8 +888,7 @@ add_monster :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: S
     return index, entity
 }
 
-add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+add_familiar :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Familiar, p, state.familiar_collision)
 
     entity.sim.flags += {.Moveable}
@@ -859,8 +896,7 @@ add_familiar :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: 
     return index, entity
 }
 
-add_standart_room :: proc(state: ^GameState, tile_x, tile_y, tile_z: i32) -> (index: StorageIndex, entity: ^StoredEntity) {
-    p := chunk_position_from_tile_positon(state.world, tile_x, tile_y, tile_z)
+add_standart_room :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Space, p, state.standart_room_collision)
 
     entity.sim.flags += { .Traversable }
@@ -1045,6 +1081,17 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
     }
 }
 
+
+draw_rectangle_outline :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: GameColor){
+    r :: 2
+    // NOTE(viktor): Top and Bottom
+    draw_rectangle(buffer, position,               {size.x+r, r}, color)
+    draw_rectangle(buffer, position + {0, size.y}, {size.x+r, r}, color)
+
+    // NOTE(viktor): Left and Right
+    draw_rectangle(buffer, position,               {r, size.y-r}, color)
+    draw_rectangle(buffer, position + {size.x, 0}, {r, size.y-r}, color)
+}
 
 draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: GameColor){
     rounded_position := floor(position)

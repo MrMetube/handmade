@@ -2,8 +2,6 @@ package game
 
 import "core:fmt"
 
-TilesPerChunk :: 16
-
 WorldPosition :: struct {
     // TODO(viktor): It seems like we have to store ChunkX/Y/Z with each
     // entity because even though the sim region gather doesn't need it
@@ -30,13 +28,11 @@ Chunk :: struct {
 }
 
 World :: struct {
-    tile_size_in_meters: f32,
-    tile_depth_in_meters: f32,
     chunk_dim_meters: v3,
 
     // TODO(viktor): chunk_hash should probably switch to pointers IF
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
-        chunk_hash: [4096]Chunk,
+    chunk_hash: [4096]Chunk,
 
     first_free: ^WorldEntityBlock
 }
@@ -170,16 +166,6 @@ are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b
     return a.chunk == b.chunk
 }
 
-chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
-    offset := world.tile_size_in_meters * vec_cast(f32, tile_x, tile_y, tile_z)
-    
-    result = map_into_worldspace(world, result, offset + additional_offset)
-    
-    assert(auto_cast is_canonical(world, result.offset))
-
-    return result
-}
-
 get_chunk :: proc {
     get_chunk_pos,
     get_chunk_3,
@@ -231,12 +217,8 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_
     return world_chunk
 }
 
-init_world :: proc(world: ^World, tile_size_in_meters, tile_depth_in_meters: f32) {
-    world.tile_size_in_meters  = tile_size_in_meters
-    world.tile_depth_in_meters = tile_depth_in_meters
-    world.chunk_dim_meters = { TilesPerChunk * tile_size_in_meters,
-                               TilesPerChunk * tile_size_in_meters,
-                               world.tile_depth_in_meters }
+init_world :: proc(world: ^World, chunk_dim_in_meters: v3) {
+    world.chunk_dim_meters = chunk_dim_in_meters
 
     world.first_free = nil
     for &chunk_block in world.chunk_hash {
