@@ -16,8 +16,7 @@ init_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
         }
     }
     
-    ignored : FILE_ATTRIBUTE_DATA
-    if !win.GetFileAttributesExW(lock_name, win.GetFileExInfoStandard, &ignored) {
+    if !win.GetFileAttributesExW(lock_name, win.GetFileExInfoStandard, nil) {
         win.CopyFileW(source_dll_name, temp_dll_name, false)
         last_write_time = get_last_write_time(source_dll_name)
         game_lib = win.LoadLibraryW(temp_dll_name)

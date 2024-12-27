@@ -43,7 +43,8 @@ GameInputController :: struct {
 #assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
 
 GameInput :: struct {
-    seconds_to_advance_over_update: f32,
+    delta_time: f32,
+    reloaded_executable: b32,
 
     using _mouse_buttons_array_and_enum : struct #raw_union {
         mouse_buttons: [5]GameInputButton,

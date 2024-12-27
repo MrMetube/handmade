@@ -313,15 +313,18 @@ main :: proc() {
     // ---------------------- ---------------------- ----------------------
     for Running {
         // TODO: if this is too slow the audio and the whole game will lag
+        new_input.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
             game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name, lock_name)
+            
+            new_input.reloaded_executable = true
         }
 
         // ---------------------- ---------------------- ----------------------
         // ---------------------- Input
         // ---------------------- ---------------------- ----------------------
         {
-            new_input.seconds_to_advance_over_update = target_seconds_per_frame
+            new_input.delta_time = target_seconds_per_frame
             { // Mouse Input 
                 mouse : win.POINT
                 win.GetCursorPos(&mouse)
@@ -628,17 +631,16 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
     return f32(end - start) / f32(GLOBAL_perf_counter_frequency)
 }
 
-
-FILE_ATTRIBUTE_DATA :: struct {
-    dwFileAttributes : win.DWORD,
-    ftCreationTime : win.FILETIME,
-    ftLastAccessTime : win.FILETIME,
-    ftLastWriteTime : win.FILETIME,
-    nFileSizeHigh : win.DWORD,
-    nFileSizeLow : win.DWORD,
-}
-
 get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
+    FILE_ATTRIBUTE_DATA :: struct {
+        dwFileAttributes : win.DWORD,
+        ftCreationTime : win.FILETIME,
+        ftLastAccessTime : win.FILETIME,
+        ftLastWriteTime : win.FILETIME,
+        nFileSizeHigh : win.DWORD,
+        nFileSizeLow : win.DWORD,
+    }
+
     file_information : FILE_ATTRIBUTE_DATA
     if win.GetFileAttributesExW(filename, win.GetFileExInfoStandard, &file_information) {
         last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)

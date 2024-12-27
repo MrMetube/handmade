@@ -128,6 +128,7 @@ GameInputController :: struct {
 
 GameInput :: struct {
     delta_time: f32,
+    reloaded_executable: b32,
 
     using _mouse_buttons_array_and_enum : struct #raw_union {
         mouse_buttons: [5]GameInputButton,
@@ -288,21 +289,15 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         // TODO(viktor): formalize the world arena and others being after the GameState in permanent storage
         // initialize the permanent arena first and allocate the state out of it
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
-        
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")        
-        state.shadow_focus      = {   0, -2}
-        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")  
-        state.player_focus[0]   = {   6, 28}
-        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp") 
-        state.player_focus[1]   = {  -6, 28}
-        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")      
-        state.monster_focus[0]  = { -13, 22}
-        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")     
-        state.monster_focus[1]  = {  16, 22}
-        state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")                            
-        state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")                             
+        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
+        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
+        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
+        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
+        state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
+        state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
         state.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
         state.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
@@ -310,8 +305,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
         state.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
         state.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
-        state.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")
+        state.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")   
         state.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
+        
+        state.shadow_focus     = {   0, -2}
+        state.player_focus[0]  = {   6, 28}
+        state.player_focus[1]  = {  -6, 28}
+        state.monster_focus[0] = { -13, 22}
+        state.monster_focus[1] = {  16, 22}
 
         state.world = push_struct(&state.world_arena, World)
 
@@ -470,16 +471,22 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
 
-        tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 128)
+        // TODO(viktor): pick a real number here!
+        tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 32)
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
             tran_state.ground_buffer_bitmap_template = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
             ground_buffer.memory = tran_state.ground_buffer_bitmap_template.memory
         }
         
-
         
         tran_state.is_initialized = true
+    }
+    
+    if input.reloaded_executable {
+        for &ground_buffer in tran_state.ground_buffers {
+            ground_buffer.p = null_position()
+        }
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -543,26 +550,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
     
-    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    
     // NOTE: Clear the screen
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
-
-    for ground_buffer in tran_state.ground_buffers {
-        if is_valid(ground_buffer.p) {
-            bitmap := tran_state.ground_buffer_bitmap_template
-            bitmap.memory = ground_buffer.memory
-            
-            center := vec_cast(f32, bitmap.width, bitmap.height) * 0.5
-            delta := world_difference(world, ground_buffer.p, state.camera_p)
-            ground := center + delta.xy * {1,-1} * state.meters_to_pixels
-            draw_bitmap(buffer, bitmap, ground)
-        }
-    }
+    
+    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
     
     screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * state.pixels_to_meters
     // TODO(viktor): this is twice the size it should be
-    camera_bounds := rectangle_center_half_diameter(v3{}, v3{screen_dim_in_meters.x, screen_dim_in_meters.y, 0})
+    camera_bounds := rectangle_center_diameter(v3{}, v3{screen_dim_in_meters.x, screen_dim_in_meters.y, 0})
     {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
@@ -571,24 +566,51 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
                 for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
                     chunk_center := WorldPosition{ chunk = { chunk_x, chunk_y, chunk_z } }
-                    rel_p := world_difference(world, chunk_center, state.camera_p)
+                    relative := world_difference(world, chunk_center, state.camera_p)
                     
-                    found: b32
-                    empty: ^GroundBuffer
+                    furthest_distance: f32 = -1
+                    furthest: ^GroundBuffer
+                    // TODO(viktor): this is super inefficient. Fix it!
                     for &ground_buffer in tran_state.ground_buffers {
                         if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
-                            found = true
+                            furthest = nil
                             break
-                        } else if empty == nil && !is_valid(ground_buffer.p) {
-                            empty = &ground_buffer
+                        } else if is_valid(ground_buffer.p) {
+                            buffer_delta := world_difference(world, ground_buffer.p, state.camera_p)
+                            distance_from_camera := length_squared(buffer_delta.xy)
+                            if distance_from_camera > furthest_distance {
+                                furthest_distance = distance_from_camera
+                                furthest = &ground_buffer
+                            }
+                        } else {
+                            furthest_distance = max(f32)
+                            furthest = &ground_buffer
                         }
                     }
-                    if !found && empty != nil {
-                        fill_ground_chunk(tran_state, state, empty, chunk_center)
+                    
+                    if furthest != nil {
+                        fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
-                    draw_rectangle_outline(buffer, screen_center + state.meters_to_pixels * rel_p.xy * {1, -1}, state.meters_to_pixels * world.chunk_dim_meters.xy, Yellow)
+                    
+                    when false {
+                        // TODO(viktor): this is offset from the ground buffers but shouldnt they be exactly at the same positions?
+                        size := state.meters_to_pixels * world.chunk_dim_meters.xy
+                        draw_rectangle_outline(buffer, screen_center - size * 0.5 + state.meters_to_pixels * relative.xy * {1, -1}, size, Yellow)
+                    }
                 }
             }
+        }
+    }
+
+    for ground_buffer in tran_state.ground_buffers {
+        if is_valid(ground_buffer.p) {
+            bitmap := tran_state.ground_buffer_bitmap_template
+            bitmap.memory = ground_buffer.memory
+            
+            center := vec_cast(f32, bitmap.width, bitmap.height) * 0.5
+            delta  := world_difference(world, ground_buffer.p, state.camera_p)
+            ground := center + delta.xy * {1,-1} * state.meters_to_pixels
+            draw_bitmap(buffer, bitmap, ground)
         }
     }
 
@@ -771,14 +793,26 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     ground_buffer.p = p
     
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), 0)
-    
     buffer_dim := vec_cast(f32, buffer.width, buffer.height)
-    // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
-    series := random_seed(cast(u32) (133 * p.chunk.x + 593 * p.chunk.y + 329 * p.chunk.z))
-    for index in 0..<20 {
-        stamp := random_choice(&series, state.grass[:])^
-        p := random_unilateral_2(&series, f32) * (buffer_dim - (buffer_dim - vec_cast(f32, stamp.width, stamp.height)) * 0.5)
-        draw_bitmap(buffer, stamp, p)
+    
+    chunk_z := p.chunk.z
+    for offset_y in i32(-1) ..= 1 {
+        for offset_x in i32(-1) ..= 1 {
+            chunk_x := p.chunk.x + offset_x
+            chunk_y := p.chunk.y + -offset_y
+            
+            center := vec_cast(f32, offset_x, offset_y) * buffer_dim
+            // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
+            series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
+            
+            for index in 0..<10 {
+                stamp  := random_choice(&series, state.grass[:])^
+                stamp_center := vec_cast(f32, stamp.width, stamp.height) * 0.5
+                offset := random_unilateral_2(&series, f32) * buffer_dim
+                p := center + offset
+                draw_bitmap(buffer, stamp, p)
+            }
+        }
     }
 }
 
