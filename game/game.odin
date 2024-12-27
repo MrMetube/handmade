@@ -1,7 +1,6 @@
 package game
 
 import "core:fmt"
-import "base:runtime"
 import "base:intrinsics"
 
 INTERNAL :: #config(INTERNAL, true)
@@ -140,7 +139,7 @@ GameInput :: struct {
     mouse_position: [2]i32,
     mouse_wheel: i32,
 
-    controllers: [5]GameInputController
+    controllers: [5]GameInputController,
 }
 #assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
 
@@ -150,7 +149,7 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
 
-    debug: DEBUG_code
+    debug: DEBUG_code,
 }
 
 GameState :: struct {
@@ -186,14 +185,13 @@ GameState :: struct {
     monstar_collision, 
     familiar_collision, 
     standart_room_collision,
-    wall_collision: ^EntityCollisionVolumeGroup
+    wall_collision: ^EntityCollisionVolumeGroup,
 }
 
 TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
     
-    ground_buffer_bitmap_template: LoadedBitmap,
     ground_buffers: []GroundBuffer,
 }
 
@@ -202,7 +200,7 @@ TransientState :: struct {
 GroundBuffer :: struct {
     // NOTE(viktor): An invalid position tells us that this ground buffer has not been filled
     p: WorldPosition, // NOTE(viktor): this is the center of the bitmap
-    memory : []BufferColor,
+    bitmap: LoadedBitmap,
 }
 
 EntityType :: enum u32 {
@@ -210,32 +208,13 @@ EntityType :: enum u32 {
     
     Space,
     
-    Hero, Wall, Familiar, Monster, Sword, Stairwell
+    Hero, Wall, Familiar, Monster, Sword, Stairwell,
 }
 
 HitPointPartCount :: 4
 HitPoint :: struct {
     flags: u8,
     filled_amount: u8,
-}
-
-EntityVisiblePieceGroup :: struct {
-    // TODO(viktor): This is dumb, this should just be part of
-    // the renderer pushbuffer - add correction of coordinates
-    // in there and be done with it.
-
-    state: ^GameState,
-    count: u32,
-    pieces: [8]EntityVisiblePiece,
-}
-
-EntityVisiblePiece :: struct {
-    bitmap: ^LoadedBitmap,
-    bitmap_focus: [2]i32,
-    offset: v3,
-
-    color: GameColor,
-    dim: v2,
 }
 
 EntityIndex :: u32
@@ -263,12 +242,11 @@ PairwiseCollsionRuleFlag :: enum {
     Temporary,
 }
 
-
 PairwiseCollsionRule :: struct {
     can_collide: b32,
     index_a, index_b: StorageIndex,
 
-    next_in_hash: ^PairwiseCollsionRule
+    next_in_hash: ^PairwiseCollsionRule,
 }
 
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
@@ -362,11 +340,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         series := random_seed(0)
         screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
-        for room_count in u32(0) ..< 200 {
-            // choice := random_choice(&series, stair_down || stair_up ? 2 : 3)
-            choice := random_choice(&series, 2)
+        created_stair: b32
+        for _ in u32(0) ..< 200 {
+            choice := random_choice(&series, created_stair ? 2 : 3)
+            // choice := random_choice(&series, 2)
             
-            created_stair: b32
+            created_stair = false
             switch(choice) {
             case 0: door_right = true
             case 1: door_top   = true
@@ -413,7 +392,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         add_stairs(state, chunk_position_from_tile_positon(world, 
                             5 + screen_col * tiles_per_screen.x, 
                             3 + screen_row * tiles_per_screen.y, 
-                            stair_down ? tile_z-1 : tile_z
+                            stair_down ? tile_z-1 : tile_z,
                         ))
                         need_to_place_stair = false
                     }
@@ -472,13 +451,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
 
         // TODO(viktor): pick a real number here!
-        tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 32)
+        tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
-            tran_state.ground_buffer_bitmap_template = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
-            ground_buffer.memory = tran_state.ground_buffer_bitmap_template.memory
+            ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
         }
-        
         
         tran_state.is_initialized = true
     }
@@ -550,10 +527,26 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
     
+    render_memory := begin_temporary_memory(&tran_state.arena)
+    
+    // TODO(viktor): decide what out push_buffer size is
+    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)), state.meters_to_pixels)
+    
     // NOTE: Clear the screen
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
     
-    screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+    // screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+    
+    
+    for &ground_buffer in tran_state.ground_buffers {
+        if is_valid(ground_buffer.p) {
+            bitmap := &ground_buffer.bitmap
+            
+            bitmap_center := [2]i32{bitmap.width, bitmap.height} / 2
+            offset  := world_difference(world, ground_buffer.p, state.camera_p)
+            push_bitmap(render_group, bitmap, offset, focus = bitmap_center)
+        }
+    }
     
     screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * state.pixels_to_meters
     // TODO(viktor): this is twice the size it should be
@@ -592,33 +585,19 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
                     
-                    when false {
-                        // TODO(viktor): this is offset from the ground buffers but shouldnt they be exactly at the same positions?
-                        size := state.meters_to_pixels * world.chunk_dim_meters.xy
-                        draw_rectangle_outline(buffer, screen_center - size * 0.5 + state.meters_to_pixels * relative.xy * {1, -1}, size, Yellow)
+                    when !false {
+                        push_rectangle_outline(render_group, world.chunk_dim_meters.xy, relative, Yellow)
                     }
                 }
             }
         }
     }
 
-    for ground_buffer in tran_state.ground_buffers {
-        if is_valid(ground_buffer.p) {
-            bitmap := tran_state.ground_buffer_bitmap_template
-            bitmap.memory = ground_buffer.memory
-            
-            center := vec_cast(f32, bitmap.width, bitmap.height) * 0.5
-            delta  := world_difference(world, ground_buffer.p, state.camera_p)
-            ground := center + delta.xy * {1,-1} * state.meters_to_pixels
-            draw_bitmap(buffer, bitmap, ground)
-        }
-    }
-
-    sim_temp_mem := begin_temporary_memory(&tran_state.arena)
+    sim_memory := begin_temporary_memory(&tran_state.arena)
     // TODO(viktor): by how much should we expand the sim region?
     sim_bounds := rectangle_add_radius(camera_bounds, 15)
-    camera_sim_region := begin_sim(&tran_state.arena, state, world, state.camera_p, camera_bounds, input.delta_time)
-        
+    camera_sim_region := begin_sim(&tran_state.arena, state, world, state.camera_p, sim_bounds, input.delta_time)
+
     for &entity in camera_sim_region.entities {
         if entity.updatable {
             // TODO(viktor):  move this out into entity.odin
@@ -629,16 +608,17 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             if(shadow_alpha < 0) {
                 shadow_alpha = 0.0;
             }
-
-            piece_group := EntityVisiblePieceGroup { state = state }
-
+            
             ddp: v3
             move_spec := default_move_spec()
-
+            
+            basis := push(&tran_state.arena, RenderBasis)
+            render_group.default_basis = basis
+            
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                push_bitmap(&piece_group, &state.wall, 0)
+                push_bitmap(render_group, &state.wall, 0)
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -653,9 +633,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ddp = con_hero.ddp
 
 
-                        push_bitmap(&piece_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                        push_bitmap(&piece_group, &state.player[entity.facing_index], focus = state.player_focus[entity.facing_index])
-                        push_hitpoints(&piece_group, &entity, 1)
+                        push_bitmap(render_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                        push_bitmap(render_group, &state.player[entity.facing_index], focus = state.player_focus[entity.facing_index])
+                        push_hitpoints(render_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
                             sword := entity.sword.ptr
@@ -683,8 +663,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     make_entity_nonspatial(&entity)
                 }
 
-                push_bitmap(&piece_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                push_bitmap(&piece_group, &state.sword)
+                push_bitmap(render_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                push_bitmap(render_group, &state.sword)
 
             case .Familiar:
                 closest_hero: ^Entity
@@ -719,24 +699,26 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(&piece_group, &state.shadow, alpha = 1 - shadow_alpha/2 * (coeff+1), focus = state.shadow_focus)
-                push_bitmap(&piece_group, &state.player[entity.facing_index], {0, 1+z, 0}, alpha = 0.5, focus = state.player_focus[entity.facing_index])
+                push_bitmap(render_group, &state.shadow, alpha = 1 - shadow_alpha/2 * (coeff+1), focus = state.shadow_focus)
+                push_bitmap(render_group, &state.player[entity.facing_index], {0, 1+z, 0}, alpha = 0.5, focus = state.player_focus[entity.facing_index])
 
             case .Monster:
-                push_bitmap(&piece_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                push_bitmap(&piece_group, &state.monster[1], focus = state.monster_focus[1])
+                push_bitmap(render_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                push_bitmap(render_group, &state.monster[1], focus = state.monster_focus[1])
                 // TODO(viktor): fix the offsets 
-                push_hitpoints(&piece_group, &entity, 1.6)
+                push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
-                push_rectangle(&piece_group, entity.walkable_dim, 0,                              Blue)
-                push_rectangle(&piece_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.7})
+                push_rectangle(render_group, entity.walkable_dim, 0,                              Blue)
+                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.7})
             
             case .Space: 
-                for volume in entity.collision.volumes {
-                    // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
-                    // fudge := world.tile_size_in_meters * v2{2, 0.5}
-                    // push_rectangle_outline(&piece_group, volume.dim.xy + fudge, volume.offset, Yellow)
+                when false {
+                    for volume in entity.collision.volumes {
+                        // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
+                        fudge := world.tile_size_in_meters * v2{2, 0.5}
+                        push_rectangle_outline(piece_group, volume.dim.xy + fudge, volume.offset, Yellow)
+                    }
                 }
             }
 
@@ -744,29 +726,37 @@ when false {
                 move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
-            base_p := get_entity_ground_point(&entity)
-
-            for piece in piece_group.pieces[:piece_group.count] {
-                z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
-
-                center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-                center.x += state.meters_to_pixels * z_fudge * (base_p.x/*  - 0.5 * entity.size.x */) 
-                center.y -= state.meters_to_pixels * z_fudge * (base_p.y/*  - 0.5 * entity.size.y */) 
-                center.y -= state.meters_to_pixels / state.typical_floor_height * base_p.z 
-
-                center += piece.offset.xy
-
-                if piece.bitmap != nil {
-                    draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a), piece.bitmap_focus)
-                } else {
-                    draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
-                }
-            }
+            basis.p = get_entity_ground_point(&entity)
         }
     }
+
     
+    // TODO(viktor): fix this
+    pieces := transmute([]EntityVisiblePiece) render_group.push_buffer
+    piece_size := size_of(EntityVisiblePiece)
+    count := render_group.push_buffer_size / auto_cast piece_size
+    
+    for piece in pieces[:count] {
+        base_p := piece.basis.p
+        z_fudge := 1 + 0.05 * (base_p.z + piece.offset.z)
+
+        center := vec_cast(f32, buffer.width, buffer.height) * 0.5
+        center += state.meters_to_pixels * z_fudge * (base_p.xy) * {1, -1}
+        center.y -= state.meters_to_pixels / state.typical_floor_height * base_p.z 
+
+        center += piece.offset.xy
+
+        if piece.bitmap != nil {
+            draw_bitmap(buffer, piece.bitmap^, center, clamp_01(piece.color.a), piece.bitmap_focus)
+        } else {
+            draw_rectangle(buffer, center - piece.dim*0.5, piece.dim, piece.color)
+        }
+    }
+        
     end_sim(camera_sim_region, state)
-    end_temporary_memory(sim_temp_mem)
+    
+    end_temporary_memory(sim_memory)
+    end_temporary_memory(render_memory)
     
     check_arena(state.world_arena)
     check_arena(tran_state.arena)
@@ -787,8 +777,7 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true)
 }
 
 fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
-    buffer := tran_state.ground_buffer_bitmap_template
-    buffer.memory = ground_buffer.memory
+    buffer := ground_buffer.bitmap
     
     ground_buffer.p = p
     
@@ -805,9 +794,8 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
             series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
             
-            for index in 0..<10 {
+            for _ in 0..<10 {
                 stamp  := random_choice(&series, state.grass[:])^
-                stamp_center := vec_cast(f32, stamp.width, stamp.height) * 0.5
                 offset := random_unilateral_2(&series, f32) * buffer_dim
                 p := center + offset
                 draw_bitmap(buffer, stamp, p)
@@ -902,7 +890,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEn
 
     init_hitpoints(entity, 3)
 
-    sword_index, sword := add_sword(state)
+    sword_index, _ := add_sword(state)
     entity.sim.sword.index = sword_index
 
     if state.camera_following_index == 0 {
@@ -1006,54 +994,6 @@ clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
     }
 }
 
-push_piece :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, dim: v2, offset: v3, color: GameColor, focus: [2]i32) {
-    assert(group.count < len(group.pieces))
-    piece := &group.pieces[group.count]
-    group.count += 1
-
-    piece.bitmap       = bitmap
-    piece.offset.xy    = {offset.x, -offset.y} * group.state.meters_to_pixels
-    piece.offset.z     = offset.z
-    piece.dim          = dim * group.state.meters_to_pixels
-    piece.color        = color
-    piece.bitmap_focus = focus
-}
-
-push_bitmap :: #force_inline proc(group: ^EntityVisiblePieceGroup, bitmap: ^LoadedBitmap, offset := v3{}, alpha: f32 = 1, focus := [2]i32{}) {
-    push_piece(group, bitmap, {}, offset, {1,1,1, alpha}, focus)
-}
-
-push_rectangle :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
-    push_piece(group, nil, dim, offset, color, {})
-}
-
-push_rectangle_outline :: #force_inline proc(group: ^EntityVisiblePieceGroup, dim: v2, offset:v3, color: GameColor) {
-    thickness :: 0.1
-    // NOTE(viktor): Top and Bottom
-    push_piece(group, nil, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color, {})
-    push_piece(group, nil, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color, {})
-
-    // NOTE(viktor): Left and Right
-    push_piece(group, nil, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color, {})
-    push_piece(group, nil, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color, {})
-}
-
-push_hitpoints :: proc(group: ^EntityVisiblePieceGroup, entity: ^Entity, offset_y: f32) {
-    if entity.hit_point_max > 1 {
-        health_size: v2 = 0.1
-        spacing_between: f32 = health_size.x * 1.5
-        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between/*  + entity.size.x/2 */
-
-        for index in 0..<entity.hit_point_max {
-            hit_point := entity.hit_points[index]
-            color := hit_point.filled_amount == 0 ? Gray : Red
-            push_rectangle(group, health_size, {health_x, -offset_y, 0}, color)
-            health_x += spacing_between
-        }
-    }
-
-}
-
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
@@ -1086,10 +1026,10 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
 
     src_row  := bitmap.start + bitmap.pitch * src_top + src_left
     dest_row := left + top * buffer.width
-    for y in top..< bottom  {
+    for _ in top..< bottom  {
         src_index, dest_index := src_row, dest_row
         
-        for x in left..< right  {
+        for _ in left..< right  {
             src := bitmap.memory[src_index]
             dst := &buffer.memory[dest_index]
             
@@ -1113,18 +1053,6 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
         dest_row += buffer.pitch
         src_row  += bitmap.pitch
     }
-}
-
-
-draw_rectangle_outline :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: GameColor){
-    r :: 2
-    // NOTE(viktor): Top and Bottom
-    draw_rectangle(buffer, position,               {size.x+r, r}, color)
-    draw_rectangle(buffer, position + {0, size.y}, {size.x+r, r}, color)
-
-    // NOTE(viktor): Left and Right
-    draw_rectangle(buffer, position,               {r, size.y-r}, color)
-    draw_rectangle(buffer, position + {size.x, 0}, {r, size.y-r}, color)
 }
 
 draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: GameColor){
@@ -1151,11 +1079,6 @@ draw_rectangle :: proc(buffer: LoadedBitmap, position: v2, size: v2, color: Game
             dst.a = cast(u8) color.a
         }
     }
-}
-
-game_color_to_buffer_color :: #force_inline proc(c: GameColor) -> BufferColor {
-    casted := vec_cast(u8, round(c * 255))
-    return {r=casted.r, g=casted.g, b=casted.b}
 }
 
 DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> LoadedBitmap {
@@ -1242,7 +1165,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
             width  = header.width, 
             height = header.height, 
             start  = header.width * (header.height-1),
-            pitch  = -header.width
+            pitch  = -header.width,
         }
     }
     

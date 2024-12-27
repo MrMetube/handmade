@@ -34,7 +34,7 @@ World :: struct {
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
     chunk_hash: [4096]Chunk,
 
-    first_free: ^WorldEntityBlock
+    first_free: ^WorldEntityBlock,
 }
 
 null_position :: #force_inline proc() -> (result:WorldPosition) {

@@ -40,7 +40,7 @@ EntityCollisionVolumeGroup :: struct {
 }
 
 EntityCollisionVolume :: struct {
-    dim, offset: v3
+    dim, offset: v3,
 }
 
 EntityReference :: struct #raw_union {
@@ -89,7 +89,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     region.max_entity_radius   = 5
     region.max_entity_velocity = 30
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
-    UpdateSafetyMarginZ :: 1 // TODO(viktor): what should this be?
+    UpdateSafetyMarginZ :: 2 // TODO(viktor): what should this be?
     
     region.world = world
     region.origin = origin
@@ -144,7 +144,7 @@ end_sim :: proc(region: ^SimRegion, state: ^GameState) {
         if entity.storage_index == state.camera_following_index {
             new_camera_p: WorldPosition
             new_camera_p.chunk  = stored.p.chunk
-            new_camera_p.offset.xy = stored.p.offset.xy
+            new_camera_p.offset = stored.p.offset
             state.camera_p = new_camera_p
         }
     }
@@ -173,10 +173,12 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
     return result
 }
 
+when false {
 get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^Entity) {
     entry := get_hash_from_index(region, storage_index)
     result = entry.ptr
     return result
+}
 }
 
 load_entity_reference :: #force_inline proc(state: ^GameState, region: ^SimRegion, ref: ^EntityReference) {
@@ -306,7 +308,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
         distance_remaining = 1_000_000
     }
     
-    for iteration in 0..<4 {
+    for _ in 0..<4 {
         t_min, t_max: f32 = 1, 0
         wall_normal_min, wall_normal_max: v2
         hit_min, hit_max: ^Entity
@@ -411,7 +413,7 @@ move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp:
                                         if test_hit {
                                             test_p := entity.p + entity_delta * test_t
                                             
-                                            if speculative_collide(entity, &test_entity) {
+                                            if speculative_collide(entity, &test_entity, test_p) {
                                                 t_min = test_t
                                                 wall_normal_min = test_wall_normal
                                                 hit_min = &test_entity
@@ -549,9 +551,9 @@ handle_overlap :: proc(state: ^GameState, mover, region: ^Entity, dt: f32, groun
     }
 }
 
-speculative_collide :: proc(mover, region: ^Entity) -> (result: b32 = true) {
+speculative_collide :: proc(mover, region: ^Entity, test_p: v3) -> (result: b32 = true) {
     if region.type == .Stairwell {
-        mover_ground_point := get_entity_ground_point(mover)
+        mover_ground_point := get_entity_ground_point(mover, test_p)
         ground := get_stair_ground(region, mover_ground_point)
         step_height :: 0.1
         result = (abs(mover_ground_point.z - ground) > step_height) //  || (bary.y > 0.1 && bary.y < 0.9)

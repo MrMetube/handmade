@@ -56,7 +56,7 @@ SoundOutput :: struct {
 }
 
 OffscreenBufferColor :: struct{
-    b, g, r, pad: u8
+    b, g, r, pad: u8,
 }
 
 OffscreenBuffer :: struct {
@@ -85,7 +85,7 @@ ReplayBuffer :: struct {
 }
 
 ThreadContext :: struct {
-    placeholder: i32
+    placeholder: i32,
 }
 
 main :: proc() {
@@ -594,12 +594,12 @@ main :: proc() {
             }
 
 
-            when INTERNAL {
+            when INTERNAL && false {
                 cycles_elapsed        := end_cycle_count - last_cycle_count
                 mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
                 ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
                 frames_per_second     := 1000 / ms_per_frame
-                // fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
+                fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
             }
 
             last_cycle_count = end_cycle_count
@@ -825,7 +825,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
                 biPlanes        = 1,
                 biBitCount      = 32,
                 biCompression   = win.BI_RGB,
-        }
+        },
     }
 
     bytes_per_pixel :: 4
@@ -847,7 +847,7 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
             raw_data(buffer.memory),
             &buffer.info,
             win.DIB_RGB_COLORS,
-            win.SRCCOPY
+            win.SRCCOPY,
         )	
     } else {
         offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
@@ -867,7 +867,7 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
             raw_data(buffer.memory),
             &buffer.info,
             win.DIB_RGB_COLORS,
-            win.SRCCOPY
+            win.SRCCOPY,
         )
     }
 }
@@ -886,7 +886,7 @@ toggle_fullscreen :: proc(window: win.HWND) {
                 info.rcMonitor.left, info.rcMonitor.top,
                 info.rcMonitor.right - info.rcMonitor.left,
                 info.rcMonitor.bottom - info.rcMonitor.top,
-                win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED
+                win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED,
             )
         }
     } else {

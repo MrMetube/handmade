@@ -1,7 +1,8 @@
 @echo off
 
-set build-flags=-warnings-as-errors -vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows
-set debug-flags=-debug -o:none
+set pedantic=-vet-unused-imports -warnings-as-errors  -vet-packages:main,game -vet-unused-procedures -vet-style
+set build-flags=-vet-cast -vet-shadowing -vet-unused-variables -error-pos-style:unix -subsystem:windows
+set debug=-debug -o:none -define:INTERNAL=true 
 
 if not exist .\build mkdir .\build
 if not exist .\data  mkdir .\data
@@ -12,7 +13,7 @@ set EXE=debug.exe
 :: Game
 if exist .\build\*.pdb del .\build\*.pdb
 echo WAITING FOR PDB > lock.tmp
-odin build game -build-mode:dll -out:.\build\game.dll %build-flags% %debug-flags% -pdb-name:.\build\game-%random%.pdb
+odin build game -build-mode:dll -out:.\build\game.dll -pdb-name:.\build\game-%random%.pdb %build-flags% %debug%
 del lock.tmp
 if errorlevel 1 exit /b 1
 
@@ -20,7 +21,7 @@ if errorlevel 1 exit /b 1
 for /f %%x in ('tasklist /NH /FI "IMAGENAME eq %EXE%"') do if %%x == %EXE% exit /b 0
 
 :: Platform
-odin build . -out:.\build\%EXE% %build-flags% %debug-flags% -define:INTERNAL=true
+odin build . -out:.\build\%EXE% %build-flags% %debug%
 if errorlevel 1 exit /b 1
 
 exit /b 0

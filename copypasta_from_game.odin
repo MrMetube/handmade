@@ -56,7 +56,7 @@ GameInput :: struct {
     mouse_position: [2]i32,
     mouse_wheel: i32,
 
-    controllers: [5]GameInputController
+    controllers: [5]GameInputController,
 }
 #assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
 
@@ -67,7 +67,7 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
 
-    debug: DEBUG_code
+    debug: DEBUG_code,
 }
 
 GameState :: struct {}
