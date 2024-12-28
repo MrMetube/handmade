@@ -21,12 +21,17 @@ push :: proc { push_slice, push_struct, push_size }
 push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int len: u64 ) -> (result: []Element) {
     data := cast([^]Element) push_size(arena, size_of(Element) * len)
     result = data[:len]
+    
     zero_slice(result)
+    
     return result
 }
 
 push_struct :: #force_inline proc(arena: ^Arena, $T: typeid) -> (result: ^T) {
     result = cast(^T) push_size(arena, size_of(T))
+    
+    zero_struct(result)
+    
     return result
 }
 

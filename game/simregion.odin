@@ -77,9 +77,6 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
     
-    // TODO(viktor): IMPORTANT(viktor):  DUPE Bug push_slice should have zeroed the memory
-    zero(region.entities)
-    zero(region)
     region.entities = push(sim_arena, Entity, MaxEntityCount)
     
     // TODO(viktor): Try to make these get enforced more rigorously

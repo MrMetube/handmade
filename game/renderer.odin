@@ -38,7 +38,7 @@ RenderGroupEntryBitmap :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
     alpha: f32,
-    bitmap: ^LoadedBitmap,
+    bitmap: LoadedBitmap,
     bitmap_focus: [2]i32,
 }
 
@@ -85,7 +85,7 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: ^LoadedBitmap, offset := v3{}, alpha: f32 = 1, focus := [2]i32{}) {
+push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, offset := v3{}, alpha: f32 = 1, focus := [2]i32{}) {
     entry := push_render_element(group, RenderGroupEntryBitmap)
     
     if entry != nil {
@@ -100,9 +100,10 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: ^LoadedBitmap, of
 
 push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: GameColor) {
     entry := push_render_element(group, RenderGroupEntryRectangle)
-    
-    half_dim := group.meters_to_pixels * entry.dim * 0.5
+
     if entry != nil {
+        half_dim := group.meters_to_pixels * entry.dim * 0.5
+
         entry.basis        = group.default_basis
         entry.offset.xy    = {offset.x, -offset.y} * group.meters_to_pixels + half_dim * {-1,1}
         entry.offset.z     = offset.z
@@ -137,6 +138,13 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
 
 }
 
+clear :: proc(group: ^RenderGroup, color: v4) {
+    entry := push_render_element(group, RenderGroupEntryClear)
+    if entry != nil {
+        entry.color = color
+    }
+}
+
 get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (result: v2) {
     base_p := entry.basis.p
     z_fudge := 1 + 0.05 * (base_p.z + entry.offset.z)
@@ -148,7 +156,8 @@ get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: Rend
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
-    screen_center := vec_cast(f32, target.width, target.height) * 0.5
+    screen_size   := vec_cast(f32, target.width, target.height)
+    screen_center := screen_size * 0.5
 
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         typeless_entry := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
@@ -156,9 +165,12 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case .Clear:
             entry := cast(^RenderGroupEntryClear) typeless_entry
             base_address += auto_cast size_of(entry^)
+            
+            draw_rectangle(target, screen_center, screen_size, entry.color)
         case .Rectangle:
             entry := cast(^RenderGroupEntryRectangle) typeless_entry
             base_address += auto_cast size_of(entry^)
+            
             p := get_render_entity_basis_p(group, entry, screen_center)
             draw_rectangle(target, p, entry.dim, entry.color)
         case .Bitmap:
@@ -166,12 +178,11 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
             
             p := get_render_entity_basis_p(group, entry, screen_center)
-            draw_bitmap(target, entry.bitmap^, p, clamp_01(entry.alpha), entry.bitmap_focus)
+            draw_bitmap(target, entry.bitmap, p, clamp_01(entry.alpha), entry.bitmap_focus)
         case: 
             unreachable()
         }
     }
-
 }
 
 draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1, focus := [2]i32{} ) {
@@ -249,7 +260,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: GameCo
             dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, clamp_01(color.a))
             dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, clamp_01(color.a))
             // TODO(viktor): compute this
-            dst.a = cast(u8) color.a
+            dst.a = cast(u8) src.a
         }
     }
 }

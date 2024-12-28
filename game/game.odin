@@ -527,20 +527,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
     
-    render_memory := begin_temporary_memory(&tran_state.arena)
     
     // TODO(viktor): decide what out push_buffer size is
+    render_memory := begin_temporary_memory(&tran_state.arena)
     render_group := make_render_group(&tran_state.arena, megabytes(u32(4)), state.meters_to_pixels)
     
-    // NOTE: Clear the screen
-    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), DarkGreen) 
-    
-    // screen_center := vec_cast(f32, buffer.width, buffer.height) * 0.5
-    
+    clear(render_group, DarkGreen)
     
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
-            bitmap := &ground_buffer.bitmap
+            bitmap := ground_buffer.bitmap
             
             bitmap_center := [2]i32{bitmap.width, bitmap.height} / 2
             offset  := world_difference(world, ground_buffer.p, state.camera_p)
@@ -585,7 +581,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
                     
-                    when !false {
+                    when true {
                         push_rectangle_outline(render_group, world.chunk_dim_meters.xy, relative, Yellow)
                     }
                 }
@@ -618,7 +614,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                push_bitmap(render_group, &state.wall, 0)
+                push_bitmap(render_group, state.wall, 0)
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -633,8 +629,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ddp = con_hero.ddp
 
 
-                        push_bitmap(render_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                        push_bitmap(render_group, &state.player[entity.facing_index], focus = state.player_focus[entity.facing_index])
+                        push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                        push_bitmap(render_group, state.player[entity.facing_index], focus = state.player_focus[entity.facing_index])
                         push_hitpoints(render_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
@@ -663,8 +659,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     make_entity_nonspatial(&entity)
                 }
 
-                push_bitmap(render_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                push_bitmap(render_group, &state.sword)
+                push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                push_bitmap(render_group, state.sword)
 
             case .Familiar:
                 closest_hero: ^Entity
@@ -699,25 +695,25 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, &state.shadow, alpha = 1 - shadow_alpha/2 * (coeff+1), focus = state.shadow_focus)
-                push_bitmap(render_group, &state.player[entity.facing_index], {0, 1+z, 0}, alpha = 0.5, focus = state.player_focus[entity.facing_index])
+                push_bitmap(render_group, state.shadow, alpha = 1 - shadow_alpha/2 * (coeff+1), focus = state.shadow_focus)
+                push_bitmap(render_group, state.player[entity.facing_index], {0, 1+z, 0}, alpha = 0.5, focus = state.player_focus[entity.facing_index])
 
             case .Monster:
-                push_bitmap(render_group, &state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                push_bitmap(render_group, &state.monster[1], focus = state.monster_focus[1])
+                push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
+                push_bitmap(render_group, state.monster[1], focus = state.monster_focus[1])
                 // TODO(viktor): fix the offsets 
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
                 push_rectangle(render_group, entity.walkable_dim, 0,                              Blue)
-                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height}, Blue * {1,1,0.6,0.7})
+                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height * 3}, Blue * {1,1,0.6,0.7})
             
             case .Space: 
                 when false {
                     for volume in entity.collision.volumes {
                         // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
-                        fudge := world.tile_size_in_meters * v2{2, 0.5}
-                        push_rectangle_outline(render_group, volume.dim.xy + fudge, volume.offset, Yellow)
+                        fudge := world.chunk_dim_meters.xy * v2{2, 0.5}
+                        push_rectangle_outline(render_group, volume.dim.xy + fudge, volume.offset, Blue)
                     }
                 }
             }
@@ -756,8 +752,13 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true)
 }
 
 fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
-    buffer := ground_buffer.bitmap
+    ground_memory := begin_temporary_memory(&tran_state.arena)
+    defer end_temporary_memory(ground_memory)
     
+    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)), 1)
+    defer render_to_output(render_group, ground_buffer.bitmap)
+    
+    buffer := ground_buffer.bitmap
     ground_buffer.p = p
     
     draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), 0)
@@ -777,7 +778,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
                 stamp  := random_choice(&series, state.grass[:])^
                 offset := random_unilateral_2(&series, f32) * buffer_dim
                 p := center + offset
-                draw_bitmap(buffer, stamp, p)
+                push_bitmap(render_group, stamp, V3(p, 0))
             }
         }
     }
