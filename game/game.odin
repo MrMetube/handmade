@@ -703,7 +703,6 @@ when false {
             case .Monster:
                 push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
                 push_bitmap(render_group, state.monster[1], focus = state.monster_focus[1])
-                // TODO(viktor): fix the offsets 
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
@@ -713,7 +712,7 @@ when false {
             case .Space: 
                 when false {
                     for volume in entity.collision.volumes {
-                        // TODO(viktor): remove once the room sizes arent required to be a constant size of 16:9(/17:9)
+                        // TODO(viktor): remove the fudge once the room sizes arent required to be a constant size of 16:9(/17:9)
                         fudge := world.chunk_dim_meters.xy * v2{2, 0.5}
                         push_rectangle_outline(render_group, volume.dim.xy + fudge, volume.offset, Blue)
                     }
@@ -730,13 +729,14 @@ when false {
     
     state.time += input.delta_time
     
-    angle := state.time
+    angle := state.time * 0.1
+    disp := cos(angle*10) * 100
     origin := screen_center
-    scale :: 100
-    x_axis := scale * v2{cos(angle), sin(angle)}
-    y_axis := scale * v2{sin(angle * 2), cos(angle* 4)}
-    // y_axis := perpendicular(x_axis)
-    coordinate_system(render_group, origin, x_axis, y_axis, Red)
+    scale :: 250
+    x_axis := scale * v2{1, 0}
+    y_axis := perpendicular(x_axis)
+    
+    coordinate_system(render_group, origin - x_axis*0.5 - y_axis*0.5 + disp, x_axis, y_axis, state.shadow)
     
     render_to_output(render_group, buffer)
             
@@ -751,13 +751,10 @@ when false {
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
     result = {
-        memory = push(arena, BufferColor, cast(u64) (dim.x * dim.y)),
+        memory = push(arena, BufferColor, cast(u64) (dim.x * dim.y), clear_to_zero),
         width  = cast(i32) dim.x,
         height = cast(i32) dim.y,
         pitch  = cast(i32) dim.x,
-    }
-    if clear_to_zero {
-        zero_slice(result.memory)
     }
     
     return result

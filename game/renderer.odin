@@ -56,7 +56,8 @@ RenderGroupEntryCoordinateSystem :: struct {
     using header: RenderGroupEntryHeader,
     
     origin, x_axis, y_axis: v2,
-    color: v4,
+    texture: LoadedBitmap,
+    alpha: f32,
 }
 
 
@@ -131,7 +132,7 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offse
     push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
-coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, color: v4) {
+coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, texture: LoadedBitmap, alpha:f32= 1) {
     entry := push_render_element(group, RenderGroupEntryCoordinateSystem)
 
     if entry != nil {
@@ -139,7 +140,8 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_a
         entry.x_axis = x_axis
         entry.y_axis = y_axis
         
-        entry.color = color
+        entry.texture = texture
+        entry.alpha   = alpha
     }
 }
 
@@ -204,23 +206,23 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             entry := cast(^RenderGroupEntryCoordinateSystem) typeless_entry
             base_address += auto_cast size_of(entry^)
             
-            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.color)
+            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.texture, clamp_01(entry.alpha))
             
             p := entry.origin
             x := p + entry.x_axis
             y := p + entry.y_axis
             size := v2{10, 10}
             
-            draw_rectangle(target, p, size, entry.color)
-            draw_rectangle(target, x, size, entry.color * 0.7)
-            draw_rectangle(target, y, size, entry.color * 0.7)
+            draw_rectangle(target, p, size, Red)
+            draw_rectangle(target, x, size, Red * 0.7)
+            draw_rectangle(target, y, size, Red * 0.7)
         case:
             unreachable()
         }
     }
 }
 
-draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_alpha: f32 = 1, focus := [2]i32{} ) {
+draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alpha: f32, focus := [2]i32{} ) {
     rounded_center := round(center) + focus * {1, -1}
 
     left   := rounded_center.x - bitmap.width  / 2
@@ -250,10 +252,10 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
             src := bitmap.memory[src_index]
             dst := &buffer.memory[dest_index]
             
-            sa := cast(f32) src.a / 255 * c_alpha
-            sr := cast(f32) src.r * c_alpha
-            sg := cast(f32) src.g * c_alpha
-            sb := cast(f32) src.b * c_alpha
+            sa := cast(f32) src.a / 255 * alpha
+            sr := cast(f32) src.r * alpha
+            sg := cast(f32) src.g * alpha
+            sb := cast(f32) src.b * alpha
             
             da := cast(f32) dst.a / 255
             inv_alpha := 1 - sa
@@ -272,7 +274,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
     }
 }
 
-draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, color: v4){
+draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, alpha: f32) {
     min, max: [2]i32 = max(i32), min(i32)
     for p in ([?]v2{origin, origin + x_axis, origin + y_axis, origin + x_axis + y_axis}) {
         p_floor := floor(p)
@@ -284,28 +286,66 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
         if p_ceil.y  > max.y do max.y = p_ceil.y
     }
     
-    if min.x < 0 do min.x = 0
-    if min.y < 0 do min.y = 0
-    if min.x > buffer.width -1 do min.x = buffer.width -1
-    if min.y > buffer.height-1 do min.y = buffer.height-1
+    max.x = clamp(max.x, 0, buffer.width-1)
+    max.y = clamp(max.x, 0, buffer.height-1)
+    min.x = clamp(min.x, 0, buffer.width-1)
+    min.y = clamp(min.y, 0, buffer.height-1)
+    
+    inv_x_len_squared := 1 / length_squared(x_axis)
+    inv_y_len_squared := 1 / length_squared(y_axis)
     
     for y in min.y..=max.y {
         for x in min.x..=max.x {
             pixel := vec_cast(f32, x, y)
-            edge0 := dot(pixel - (origin)                  , -perpendicular(x_axis))
-            edge1 := dot(pixel - (origin + x_axis)         , -perpendicular(y_axis))
-            edge2 := dot(pixel - (origin + x_axis + y_axis),  perpendicular(x_axis))
-            edge3 := dot(pixel - (origin + y_axis)         ,  perpendicular(y_axis))
+            delta := pixel - origin
+            edge0 := dot(delta                  , -perpendicular(x_axis))
+            edge1 := dot(delta - x_axis         , -perpendicular(y_axis))
+            edge2 := dot(delta - x_axis - y_axis,  perpendicular(x_axis))
+            edge3 := dot(delta - y_axis         ,  perpendicular(y_axis))
             
             if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
-                dst := &buffer.memory[y*buffer.pitch + x]
-                src := color * 255
-
-                dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
-                dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, clamp_01(color.a))
-                dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, clamp_01(color.a))
-                // TODO(viktor): compute this
-                dst.a = cast(u8) src.a
+                u := dot(delta, x_axis) * inv_x_len_squared
+                v := dot(delta, y_axis) * inv_y_len_squared
+                
+                // TODO(viktor): this epsilon should not exists
+                EPSILON :: 0.000001
+                assert(u + EPSILON >= 0 && u - EPSILON <= 1)
+                assert(v + EPSILON >= 0 && v - EPSILON <= 1)
+                
+                uv := v2{u,v}
+                // TODO(viktor): formalize texture boundaries
+                t  := uv * vec_cast(f32, texture.width-2, texture.height-2)
+                s := vec_cast(i32, t)
+                f := t - vec_cast(f32, s)
+                
+                assert(s.x >= 0 && s.x < texture.width)
+                assert(s.y >= 0 && s.y < texture.height)
+                
+                
+                raw_texel00 := texture.memory[texture.start + (s.y + 0) * texture.pitch + (s.x + 0)]
+                raw_texel01 := texture.memory[texture.start + (s.y + 0) * texture.pitch + (s.x + 1)]
+                raw_texel10 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 0)]
+                raw_texel11 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 1)]
+                
+                texel00 := vec_cast(f32, raw_texel00.r, raw_texel00.g, raw_texel00.b, raw_texel00.a)
+                texel01 := vec_cast(f32, raw_texel01.r, raw_texel01.g, raw_texel01.b, raw_texel01.a)
+                texel10 := vec_cast(f32, raw_texel10.r, raw_texel10.g, raw_texel10.b, raw_texel10.a)
+                texel11 := vec_cast(f32, raw_texel11.r, raw_texel11.g, raw_texel11.b, raw_texel11.a)
+                
+                texel := vec_cast(u8, lerp( lerp(texel00, texel01, f.x), lerp(texel10, texel11, f.x), f.y) )
+                
+                pixel := &buffer.memory[buffer.start + y * buffer.pitch + x]
+                
+                sa   := alpha * cast(f32) texel.a / 255
+                srgb := alpha * vec_cast(f32, texel.rgb)
+                
+                da := cast(f32) pixel.a / 255
+                inv_alpha := 1 - sa
+                
+                pixel.a = cast(u8) (255 * (sa + da - sa * da))
+                pixel.r = cast(u8) (inv_alpha * cast(f32) pixel.r + srgb.r)
+                pixel.g = cast(u8) (inv_alpha * cast(f32) pixel.g + srgb.g)
+                pixel.b = cast(u8) (inv_alpha * cast(f32) pixel.b + srgb.b)
             }
         }
     }

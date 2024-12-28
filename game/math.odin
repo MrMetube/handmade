@@ -51,7 +51,7 @@ square :: #force_inline proc(x: f32) -> f32 {
 
 square_root :: math.sqrt
 
-lerp :: proc { lerp_1, lerp_2, lerp_3 }
+lerp :: proc { lerp_1, lerp_2, lerp_3, lerp_4 }
 @(require_results)
 lerp_1 :: #force_inline proc(from, to, t: f32) -> f32 {
     result := (1-t) * from + t * to
@@ -68,6 +68,13 @@ lerp_2 :: #force_inline proc(from, to, t: v2) -> v2 {
 
 @(require_results)
 lerp_3 :: #force_inline proc(from, to, t: v3) -> v3 {
+    result := (1-t) * from + t * to
+    
+    return result
+}
+
+@(require_results)
+lerp_4 :: #force_inline proc(from, to, t: v4) -> v4 {
     result := (1-t) * from + t * to
     
     return result
@@ -124,7 +131,7 @@ safe_ratio_1_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return sa
 safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
 
 @(require_results)
-clamp :: #force_inline proc(value, min, max: f32) -> f32 {
+clamp :: #force_inline proc(value, min, max: $T) -> T {
     result := value
     
     if result < min {
@@ -138,7 +145,7 @@ clamp :: #force_inline proc(value, min, max: f32) -> f32 {
 
 clamp_01 :: proc { clamp_01_1, clamp_01_2, clamp_01_3 }
 @(require_results)
-clamp_01_1 :: #force_inline proc(value:f32) -> (result:f32) {
+clamp_01_1 :: #force_inline proc(value: $T) -> (result:T) where !intrinsics.type_is_array(T) {
     result = clamp(value, 0, 1)
 
     return result
