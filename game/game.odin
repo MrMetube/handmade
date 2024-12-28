@@ -186,6 +186,8 @@ GameState :: struct {
     familiar_collision, 
     standart_room_collision,
     wall_collision: ^EntityCollisionVolumeGroup,
+    
+    time: f32
 }
 
 TransientState :: struct {
@@ -725,6 +727,21 @@ when false {
             basis.p = get_entity_ground_point(&entity)
         }
     }
+    
+    state.time += input.delta_time
+    
+    scale :f32= 100
+    angle := state.time
+    origin := v2{0,0}
+    x_axis := scale * v2{cos(angle), sin(angle)}
+    y_axis := perpendicular(x_axis)
+    points := push(&tran_state.arena, v2, 25)
+    for y in 0..<5 {
+        for x in 0..<5 {
+            points[y * 5 + x] = vec_cast(f32, x, y) - 2.5
+        }
+    }
+    coordinate_system(render_group, origin, x_axis, y_axis, Red, points)
     
     render_to_output(render_group, buffer)
             

@@ -15,9 +15,10 @@ RenderBasis :: struct {
 }
 
 // NOTE(viktor): RenderGroupEntry is a "compact discriminated union"
+// TODO(viktor): remove the header
 RenderGroupEntryHeader :: struct {
     type: enum {
-        Clear, Rectangle, Bitmap,
+        Clear, Rectangle, Bitmap, CoordinateSystem
     }
 }
 
@@ -51,6 +52,14 @@ RenderGroupEntryRectangle :: struct {
     dim: v2,
 }
 
+RenderGroupEntryCoordinateSystem :: struct {
+    using header: RenderGroupEntryHeader,
+    
+    origin, x_axis, y_axis: v2,
+    points: []v2,
+    color: GameColor,
+}
+
 
 make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, meters_to_pixels: f32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
@@ -73,9 +82,10 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
         
         id := typeid_of(T)
         switch id {
-        case RenderGroupEntryClear:     result.type = .Clear
-        case RenderGroupEntryRectangle: result.type = .Rectangle
-        case RenderGroupEntryBitmap:    result.type = .Bitmap
+        case RenderGroupEntryClear:            result.type = .Clear
+        case RenderGroupEntryRectangle:        result.type = .Rectangle
+        case RenderGroupEntryBitmap:           result.type = .Bitmap
+        case RenderGroupEntryCoordinateSystem: result.type = .CoordinateSystem
         case: fmt.panicf("Unhandled RenderGroupEntry type: %v", type_info_of(id))
         }
     } else {
@@ -104,11 +114,11 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, co
     if entry != nil {
         half_dim := group.meters_to_pixels * entry.dim * 0.5
 
-        entry.basis        = group.default_basis
-        entry.offset.xy    = {offset.x, -offset.y} * group.meters_to_pixels + half_dim * {-1,1}
-        entry.offset.z     = offset.z
-        entry.color        = color
-        entry.dim          = dim * group.meters_to_pixels
+        entry.basis     = group.default_basis
+        entry.offset.xy = {offset.x, -offset.y} * group.meters_to_pixels + half_dim * {-1,1}
+        entry.offset.z  = offset.z
+        entry.color     = color
+        entry.dim       = dim * group.meters_to_pixels
     }
 }
 
@@ -120,6 +130,19 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offse
     // NOTE(viktor): Left and Right
     push_rectangle(group, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color)
     push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
+}
+
+coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, color: GameColor, points: []v2) {
+    entry := push_render_element(group, RenderGroupEntryCoordinateSystem)
+
+    if entry != nil {
+        entry.origin = origin
+        entry.x_axis = x_axis
+        entry.y_axis = y_axis
+        
+        entry.color = color
+        entry.points = points
+    }
 }
 
 push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
@@ -179,7 +202,23 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             
             p := get_render_entity_basis_p(group, entry, screen_center)
             draw_bitmap(target, entry.bitmap, p, clamp_01(entry.alpha), entry.bitmap_focus)
-        case: 
+        case .CoordinateSystem:
+            entry := cast(^RenderGroupEntryCoordinateSystem) typeless_entry
+            base_address += auto_cast size_of(entry^)
+            
+            p := screen_center + entry.origin
+            x := p + entry.x_axis
+            y := p + entry.y_axis
+            size := v2{10, 10}
+            draw_rectangle(target, p, size, entry.color)
+            draw_rectangle(target, x, size, entry.color * 0.7)
+            draw_rectangle(target, y, size, entry.color * 0.7)
+            
+            for point in entry.points {
+                pp := p + point.x * entry.x_axis + point.y * entry.y_axis
+                draw_rectangle(target, pp, size/2, entry.color * 0.4)
+            }
+        case:
             unreachable()
         }
     }
