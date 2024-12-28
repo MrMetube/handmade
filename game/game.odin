@@ -80,17 +80,15 @@ GameSoundBuffer :: struct {
     samples_per_second : u32,
 }
 
-GameColor :: [4]f32
-
-White    :: GameColor{1,1,1, 1}
-Gray     :: GameColor{0.5,0.5,0.5, 1}
-Black    :: GameColor{0,0,0, 1}
-Blue     :: GameColor{0.08, 0.49, 0.72, 1}
-Yellow   :: GameColor{0.71, 0.71, 0.09, 1}
-Orange   :: GameColor{1, 0.71, 0.2, 1}
-Green    :: GameColor{0, 0.59, 0.28, 1}
-Red      :: GameColor{1, 0.09, 0.24, 1}
-DarkGreen:: GameColor{0, 0.07, 0.0353, 1}
+White    :: v4{1,1,1, 1}
+Gray     :: v4{0.5,0.5,0.5, 1}
+Black    :: v4{0,0,0, 1}
+Blue     :: v4{0.08, 0.49, 0.72, 1}
+Yellow   :: v4{0.71, 0.71, 0.09, 1}
+Orange   :: v4{1, 0.71, 0.2, 1}
+Green    :: v4{0, 0.59, 0.28, 1}
+Red      :: v4{1, 0.09, 0.24, 1}
+DarkGreen:: v4{0, 0.07, 0.0353, 1}
 
 LoadedBitmap :: struct {
     memory : []BufferColor,
@@ -529,6 +527,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
     
+    screen_size   := vec_cast(f32, buffer.width, buffer.height)
+    screen_center := screen_size * 0.5
     
     // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
@@ -730,18 +730,13 @@ when false {
     
     state.time += input.delta_time
     
-    scale :f32= 100
     angle := state.time
-    origin := v2{0,0}
+    origin := screen_center
+    scale :: 100
     x_axis := scale * v2{cos(angle), sin(angle)}
-    y_axis := perpendicular(x_axis)
-    points := push(&tran_state.arena, v2, 25)
-    for y in 0..<5 {
-        for x in 0..<5 {
-            points[y * 5 + x] = vec_cast(f32, x, y) - 2.5
-        }
-    }
-    coordinate_system(render_group, origin, x_axis, y_axis, Red, points)
+    y_axis := scale * v2{sin(angle * 2), cos(angle* 4)}
+    // y_axis := perpendicular(x_axis)
+    coordinate_system(render_group, origin, x_axis, y_axis, Red)
     
     render_to_output(render_group, buffer)
             

@@ -165,8 +165,10 @@ V3 :: proc { V3_x, V3_z }
 V3_x :: proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
 V3_z :: proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
 
-perpendicular :: proc(v: v2) -> v2 {
-    return { -v.y, v.x }
+@(require_results)
+perpendicular :: #force_inline proc(v: v2) -> (result: v2) {
+    result = { -v.y, v.x }
+    return result
 }
 
 dot :: proc { dot2, dot3}

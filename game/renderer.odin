@@ -30,7 +30,7 @@ RenderGroupEntryBasis :: struct {
 RenderGroupEntryClear :: struct {
     using header: RenderGroupEntryHeader,
     
-    color: GameColor,
+    color: v4,
 }
 
 RenderGroupEntryBitmap :: struct {
@@ -48,7 +48,7 @@ RenderGroupEntryRectangle :: struct {
     
     using rendering_basis: RenderGroupEntryBasis,
     
-    color: GameColor,
+    color: v4,
     dim: v2,
 }
 
@@ -56,8 +56,7 @@ RenderGroupEntryCoordinateSystem :: struct {
     using header: RenderGroupEntryHeader,
     
     origin, x_axis, y_axis: v2,
-    points: []v2,
-    color: GameColor,
+    color: v4,
 }
 
 
@@ -108,7 +107,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, off
     }
 }
 
-push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: GameColor) {
+push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: v4) {
     entry := push_render_element(group, RenderGroupEntryRectangle)
 
     if entry != nil {
@@ -122,7 +121,7 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, co
     }
 }
 
-push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: GameColor, thickness: f32 = 0.1) {
+push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: v4, thickness: f32 = 0.1) {
     // NOTE(viktor): Top and Bottom
     push_rectangle(group, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color)
     push_rectangle(group, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color)
@@ -132,7 +131,7 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offse
     push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
-coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, color: GameColor, points: []v2) {
+coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, color: v4) {
     entry := push_render_element(group, RenderGroupEntryCoordinateSystem)
 
     if entry != nil {
@@ -141,7 +140,6 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_a
         entry.y_axis = y_axis
         
         entry.color = color
-        entry.points = points
     }
 }
 
@@ -206,18 +204,16 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             entry := cast(^RenderGroupEntryCoordinateSystem) typeless_entry
             base_address += auto_cast size_of(entry^)
             
-            p := screen_center + entry.origin
+            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.color)
+            
+            p := entry.origin
             x := p + entry.x_axis
             y := p + entry.y_axis
             size := v2{10, 10}
+            
             draw_rectangle(target, p, size, entry.color)
             draw_rectangle(target, x, size, entry.color * 0.7)
             draw_rectangle(target, y, size, entry.color * 0.7)
-            
-            for point in entry.points {
-                pp := p + point.x * entry.x_axis + point.y * entry.y_axis
-                draw_rectangle(target, pp, size/2, entry.color * 0.4)
-            }
         case:
             unreachable()
         }
@@ -276,7 +272,46 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, c_al
     }
 }
 
-draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: GameColor){
+draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, color: v4){
+    min, max: [2]i32 = max(i32), min(i32)
+    for p in ([?]v2{origin, origin + x_axis, origin + y_axis, origin + x_axis + y_axis}) {
+        p_floor := floor(p)
+        p_ceil := ceil(p)
+        
+        if p_floor.x < min.x do min.x = p_floor.x
+        if p_floor.y < min.y do min.y = p_floor.y
+        if p_ceil.x  > max.x do max.x = p_ceil.x
+        if p_ceil.y  > max.y do max.y = p_ceil.y
+    }
+    
+    if min.x < 0 do min.x = 0
+    if min.y < 0 do min.y = 0
+    if min.x > buffer.width -1 do min.x = buffer.width -1
+    if min.y > buffer.height-1 do min.y = buffer.height-1
+    
+    for y in min.y..=max.y {
+        for x in min.x..=max.x {
+            pixel := vec_cast(f32, x, y)
+            edge0 := dot(pixel - (origin)                  , -perpendicular(x_axis))
+            edge1 := dot(pixel - (origin + x_axis)         , -perpendicular(y_axis))
+            edge2 := dot(pixel - (origin + x_axis + y_axis),  perpendicular(x_axis))
+            edge3 := dot(pixel - (origin + y_axis)         ,  perpendicular(y_axis))
+            
+            if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
+                dst := &buffer.memory[y*buffer.pitch + x]
+                src := color * 255
+
+                dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
+                dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, clamp_01(color.a))
+                dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, clamp_01(color.a))
+                // TODO(viktor): compute this
+                dst.a = cast(u8) src.a
+            }
+        }
+    }
+}
+
+draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     rounded_center := floor(center)
     rounded_size   := floor(size)
     
@@ -292,6 +327,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: GameCo
 
     for y in top..<bottom {
         for x in left..<right {
+            // TODO(viktor): should use pitch here
             dst := &buffer.memory[y*buffer.width + x]
             src := color * 255
 
