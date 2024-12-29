@@ -9,6 +9,14 @@ INTERNAL :: #config(INTERNAL, true)
     TODO(viktor):
     ARCHITECTURE EXPLORATION
     
+    - Rendering
+      - Lighting
+      - Straighten out all coordinate systems!
+        - Screen
+        - World
+        - Texture
+      - Optimization    
+      
     - Z !
       - debug drawing of Z levels and inclusion of Z to make sure
         that there are no bugs
@@ -65,8 +73,6 @@ INTERNAL :: #config(INTERNAL, true)
       - Particle systems
 
     PRODUCTION
-    - Rendering
-
     -> Game
       - Entity system
       - World generation
@@ -194,9 +200,18 @@ TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
     
-    grass6_normal: LoadedBitmap,
+    test_diffuse: LoadedBitmap,
+    test_normal: LoadedBitmap,
     
     ground_buffers: []GroundBuffer,
+    
+    env_size: [2]i32,
+    using _ : struct #raw_union {
+        using _ : struct {
+            env_bottom, env_middle, env_top: EnvironmentMap,
+        },
+        envs: [3]EnvironmentMap,
+    },
 }
 
 
@@ -461,18 +476,33 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
         }
         
-        tran_state.grass6_normal = make_empty_bitmap(&tran_state.arena, {state.grass[6].width, state.grass[6].height}, false)
-        make_sphere_normal_map(tran_state.grass6_normal, 0)
+        test_size :[2]i32= 256
+        tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
+        draw_rectangle(tran_state.test_diffuse, vec_cast(f32, test_size/2), vec_cast(f32, test_size), 0.5)
+        
+        tran_state.test_normal = make_empty_bitmap(&tran_state.arena, test_size, false)
+        make_sphere_normal_map(tran_state.test_normal, 0)
+        
+        tran_state.env_size = {512, 256}
+        for &env_map in tran_state.envs {
+            size := tran_state.env_size
+            for &lod in env_map.LOD {
+                lod = make_empty_bitmap(&tran_state.arena, size, false)
+                size /= 2
+            }
+        }
         
         tran_state.is_initialized = true
     }
     
     if input.reloaded_executable {
-        make_sphere_normal_map(tran_state.grass6_normal, 0)
-        
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
         }
+        
+        make_sphere_normal_map(tran_state.test_normal, 0)
+        test_size:= vec_cast(f32, tran_state.test_diffuse.width, tran_state.test_diffuse.height)
+        draw_rectangle(tran_state.test_diffuse, test_size*0.5, test_size, V4_xyz_w(0.15, 1))
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -762,29 +792,65 @@ when false {
             basis.p = get_entity_ground_point(&entity)
         }
     }
+
+    map_color := [?]v4{Red, Green, Blue}
+    for env_map, env_index in tran_state.envs {
+        lod := env_map.LOD[0]
+        checker_dim := [2]i32{16, 16}
+        
+        row_on: b32
+        for y: i32; y < lod.height; y += checker_dim.y {
+            on := row_on
+            for x: i32; x < lod.width; x += checker_dim.x {
+                color := map_color[env_index]
+                size := vec_cast(f32, checker_dim)
+                draw_rectangle(lod, vec_cast(f32, x, y) + size*0.5, size, on ? color : Black)
+                on = !on
+            }
+            row_on = !row_on
+        }
+    }
+    
     
     state.time += input.delta_time
+    
     
     angle :f32= 0 // state.time * 0.1
     disp := cos(angle*10) * 100
     origin := screen_center
-    scale :: 400
+    scale :: 200
     x_axis := scale * v2{cos(angle), sin(angle)}
     y_axis := perpendicular(x_axis)
+
+    for env_map, index in tran_state.envs {
+        size := vec_cast(f32, env_map.LOD[0].width, env_map.LOD[0].height) / 2
+        
+        if entry := coordinate_system(render_group); entry != nil {
+            entry.x_axis = {size.x, 0}
+            entry.y_axis = {0, size.y}
+            entry.origin = 20 + (entry.x_axis + {10, 0}) * auto_cast index
+            
+            entry.texture = env_map.LOD[0]
+        }
+    }
     
     if entry := coordinate_system(render_group); entry != nil {
         entry.origin = origin - x_axis*0.5 - y_axis*0.5
         entry.x_axis = x_axis
         entry.y_axis = y_axis
         
-        entry.texture = state.grass[6]
-        entry.normal  = tran_state.grass6_normal
+        entry.texture = tran_state.test_diffuse
+        entry.normal  = tran_state.test_normal
         
-        entry.top    = nil
-        entry.middle = nil
-        entry.bottom = nil
+        entry.top    = tran_state.env_top
+        entry.middle = tran_state.env_middle
+        entry.bottom = tran_state.env_bottom
     }
-    
+
+when false {
+    saturation(render_group, cos(state.time*4) + 1 * 0.5)
+}
+        
     render_to_output(render_group, buffer)
             
     end_sim(camera_sim_region, state)

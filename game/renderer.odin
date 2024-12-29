@@ -32,6 +32,10 @@ RenderGroupEntryClear :: struct {
     color: v4,
 }
 
+RenderGroupEntrySaturation :: struct {
+    level: f32
+}
+
 RenderGroupEntryBitmap :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
@@ -52,7 +56,7 @@ RenderGroupEntryCoordinateSystem :: struct {
     color: v4,
     texture, normal: LoadedBitmap,
     
-    top, middle, bottom: ^EnvironmentMap,
+    top, middle, bottom: EnvironmentMap,
 }
 
 
@@ -158,6 +162,13 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
+saturation :: proc(group: ^RenderGroup, level: f32) {
+    entry := push_render_element(group, RenderGroupEntrySaturation)
+    if entry != nil {
+        entry.level = level
+    }
+}
+
 get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (result: v2) {
     base_p := entry.basis.p
     z_fudge := 1 + 0.05 * (base_p.z + entry.offset.z)
@@ -181,10 +192,14 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryClear:
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
-
+            
             draw_rectangle(target, screen_center, screen_size, entry.color)
-
-            case RenderGroupEntryRectangle:
+        case RenderGroupEntrySaturation:
+            entry := cast(^RenderGroupEntrySaturation) data
+            base_address += auto_cast size_of(entry^)
+            
+            change_saturation(target, entry.level)
+        case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
         when false {
@@ -214,7 +229,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             draw_rectangle(target, y, size, Red * 0.7)
             
         case:
-            unreachable()
+            fmt.panicf("Unhandled Entry: %v", header.type)
         }
     }
 }
@@ -269,7 +284,32 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alph
     }
 }
 
-draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: ^EnvironmentMap) {
+change_saturation :: proc(buffer: LoadedBitmap, level: f32 ) {
+    dst_row: i32
+    for _ in 0..< buffer.height  {
+        dst_index := dst_row
+        defer dst_row += buffer.pitch
+        
+        for _ in 0..< buffer.width  {
+            dst := &buffer.memory[dst_index]
+            defer dst_index += 1
+            
+            pixel := vec_cast(f32, dst^)
+            pixel = srgb_255_to_linear_1(pixel)
+            
+            // TODO(viktor): convert to hsv, adjust and convert back
+            average := (1.0/3.0) * pixel.r + pixel.g + pixel.b
+            delta := pixel.rgb - average
+            
+            result := V4(average + level * delta, pixel.a)
+            result = linear_1_to_srgb_255(result)
+            
+            dst^ = vec_cast(u8, result + 0.5)
+        }
+    }
+}
+
+draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap) {
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a
@@ -338,28 +378,27 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                 if normal_map.memory != nil {
                     normal := blend_bilinear(sample_bilinear(normal_map, s), f)
                     normal = unscale_and_bias(normal)
+                    // TODO(viktor): do we really need this
+                    normal = normalize(normal)
                     
-                    far_map: ^EnvironmentMap
+                    far_map: EnvironmentMap
                     t_environment := normal.y
                     t_far_map: f32
-                    switch t_environment {
-                    case -1..< -0.5: 
+                    if  t_environment < -0.5 {
                         far_map = bottom
-                        t_far_map = (t_environment + 1) * 2
-                    case 0.5 ..= 1: 
+                        t_far_map = -1 - 2 * t_environment
+                    } else if t_environment > 0.5 {
                         far_map = top
                         t_far_map = (t_environment - 0.5) * 2
-                    case: 
-                        far_map = middle
                     }
 
-                    light_color := v3{0, 0, 0} // sample_environment_map(screen_space_uv, normal.xyz, normal.w, middle)
-                    if far_map != nil {
+                    light_color := v3{} // sample_environment_map(screen_space_uv, normal.xyz, normal.w, middle)
+                    if t_far_map > 0 {
                         far_map_color := sample_environment_map(screen_space_uv, normal.xyz, normal.w, far_map)
                         light_color = lerp(light_color, far_map_color, t_far_map)
                     }
 
-                    texel.rgb *= texel.a * light_color
+                    texel.rgb += texel.a * light_color.rgb
                 }
 
                 texel *= color
@@ -423,18 +462,28 @@ sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00,
     return s00, s01, s10, s11
 }
                     
-sample_environment_map :: #force_inline proc(screen_space_uv: v2, normal: v3, roughness: f32, environment_map: ^EnvironmentMap) -> (result: v3) {
-    lod_index := cast(i32) (roughness * cast(f32) (len(environment_map.LOD)-1) + 0.5)
-    level_of_detail := environment_map.LOD[lod_index]
+sample_environment_map :: #force_inline proc(screen_space_uv: v2, normal: v3, roughness: f32, environment_map: EnvironmentMap) -> (result: v3) {
+    assert(environment_map.LOD[0].memory != nil)
     
-    t: v2
+    lod_index := cast(i32) (roughness * cast(f32) (len(environment_map.LOD)-1) + 0.5)
+    lod := environment_map.LOD[lod_index]
+    lod_size := vec_cast(f32, lod.width, lod.height)
+    
+    t: v2 = lod_size * 0.5 + normal.xy * lod_size * 0.5
     s := vec_cast(i32, t)
     f := t - vec_cast(f32, s)
     
-    assert(s.x >= 0 && s.x < level_of_detail.width)
-    assert(s.y >= 0 && s.y < level_of_detail.height)
+    assert(s.x >= 0 && s.x < lod.width)
+    assert(s.y >= 0 && s.y < lod.height)
     
-    result = blend_bilinear(sample_bilinear(level_of_detail, s), f).rgb
+    l00,l01,l10,l11 := sample_bilinear(lod, s)
+    
+    l00 = srgb_255_to_linear_1(l00)
+    l01 = srgb_255_to_linear_1(l01)
+    l10 = srgb_255_to_linear_1(l10)
+    l11 = srgb_255_to_linear_1(l11)
+    
+    result = blend_bilinear(l00,l01,l10,l11, f).rgb
     
     return result
 }

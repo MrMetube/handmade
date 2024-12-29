@@ -221,7 +221,7 @@ perpendicular :: #force_inline proc(v: v2) -> (result: v2) {
     return result
 }
 
-dot :: proc { dot2, dot3}
+dot :: proc { dot2, dot3, dot4 }
 @(require_results)
 dot2 :: #force_inline proc(a, b: v2) -> f32 {
     return a.x * b.x + a.y * b.y
@@ -229,6 +229,10 @@ dot2 :: #force_inline proc(a, b: v2) -> f32 {
 @(require_results)
 dot3 :: #force_inline proc(a, b: v3) -> f32 {
     return a.x * b.x + a.y * b.y + a.z * b.z
+}
+@(require_results)
+dot4 :: #force_inline proc(a, b: v4) -> f32 {
+    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
 }
 
 
@@ -248,7 +252,7 @@ reflect :: #force_inline proc(v, axis:v2) -> v2 {
 }
 
 
-length :: proc { length_2, length_3 }
+length :: proc { length_2, length_3, length_4 }
 @(require_results)
 length_2 :: #force_inline proc(vec: v2) -> (length:f32) {
     length_squared := length_squared(vec)
@@ -261,8 +265,14 @@ length_3 :: #force_inline proc(vec: v3) -> (length:f32) {
     length = math.sqrt(length_squared)
     return length
 }
+@(require_results)
+length_4 :: #force_inline proc(vec: v4) -> (length:f32) {
+    length_squared := length_squared(vec)
+    length = math.sqrt(length_squared)
+    return length
+}
 
-length_squared :: proc { length_squared_2, length_squared_3 }
+length_squared :: proc { length_squared_2, length_squared_3, length_squared_4 }
 @(require_results)
 length_squared_2 :: #force_inline proc(vec: v2) -> f32 {
     return dot(vec, vec)
@@ -271,17 +281,24 @@ length_squared_2 :: #force_inline proc(vec: v2) -> f32 {
 length_squared_3 :: #force_inline proc(vec: v3) -> f32 {
     return dot(vec, vec)
 }
+@(require_results)
+length_squared_4 :: #force_inline proc(vec: v4) -> f32 {
+    return dot(vec, vec)
+}
 
-normalize :: proc { normalize_2, normalize_3 }
-
+normalize :: proc { normalize_2, normalize_3, normalize_4 }
 @(require_results)
 normalize_2 :: #force_inline proc(vec: v2) -> (result: v2) {
     result = vec / length(vec)
     return result
 }
-
 @(require_results)
 normalize_3 :: #force_inline proc(vec: v3) -> (result: v3) {
+    result = vec / length(vec)
+    return result
+}
+@(require_results)
+normalize_4 :: #force_inline proc(vec: v4) -> (result: v4) {
     result = vec / length(vec)
     return result
 }
