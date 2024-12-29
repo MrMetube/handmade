@@ -90,8 +90,10 @@ Green    :: v4{0, 0.59, 0.28, 1}
 Red      :: v4{1, 0.09, 0.24, 1}
 DarkGreen:: v4{0, 0.07, 0.0353, 1}
 
+ByteColor :: [4]u8
+
 LoadedBitmap :: struct {
-    memory : []BufferColor,
+    memory : []ByteColor,
     width, height: i32, 
     
     start, pitch: i32,
@@ -733,10 +735,11 @@ when false {
     disp := cos(angle*10) * 100
     origin := screen_center
     scale :: 250
-    x_axis := scale * v2{1, 0}
+    x_axis := scale * v2{cos(angle*2), sin(angle*5)}
     y_axis := perpendicular(x_axis)
     
-    coordinate_system(render_group, origin - x_axis*0.5 - y_axis*0.5 + disp, x_axis, y_axis, state.shadow)
+    tint := v4{cos(angle*3) + sin(angle*7), cos(angle*20), sin(angle*5), (cos(angle)+1)/2}
+    coordinate_system(render_group, origin - x_axis*0.5 - y_axis*0.5/*  + disp */, x_axis, y_axis, state.monster[0], tint)
     
     render_to_output(render_group, buffer)
             
@@ -751,7 +754,7 @@ when false {
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
     result = {
-        memory = push(arena, BufferColor, cast(u64) (dim.x * dim.y), clear_to_zero),
+        memory = push(arena, ByteColor, cast(u64) (dim.x * dim.y), clear_to_zero),
         width  = cast(i32) dim.x,
         height = cast(i32) dim.y,
         pitch  = cast(i32) dim.x,
@@ -1045,7 +1048,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         assert(alpha_shift != 32)
         
         raw_pixels := (cast([^]u32) &contents[header.bitmap_offset])[:header.width * header.height]
-        pixels     := transmute([]BufferColor) raw_pixels
+        pixels     := transmute([]ByteColor) raw_pixels
         for y in 0..<header.height {
             for x in 0..<header.width {
                 c := raw_pixels[y * header.width + x]
@@ -1061,12 +1064,10 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
                 g = g * an
                 b = b * an
                 
-                p^ = {
-                    r = cast(u8) (r + 0.5),
-                    g = cast(u8) (g + 0.5),
-                    b = cast(u8) (b + 0.5),
-                    a = cast(u8) (a + 0.5),
-                }
+                p.r = cast(u8) (r + 0.5)
+                p.g = cast(u8) (g + 0.5)
+                p.b = cast(u8) (b + 0.5)
+                p.a = cast(u8) (a + 0.5)
             }
         }
 

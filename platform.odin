@@ -55,13 +55,15 @@ SoundOutput :: struct {
     safety_bytes         : u32,
 }
 
-OffscreenBufferColor :: struct{
+WindowsColor :: struct{
     b, g, r, pad: u8,
 }
 
+Color :: [4]u8
+
 OffscreenBuffer :: struct {
     info   : win.BITMAPINFO,
-    memory : []OffscreenBufferColor,
+    memory : []Color,
     width, height, pitch: i32,
 }
 
@@ -830,13 +832,28 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 
     bytes_per_pixel :: 4
     bitmap_memory_size := buffer.width * buffer.height * bytes_per_pixel
-    buffer_ptr := cast([^]OffscreenBufferColor) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+    buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]
 
     // TODO: probably clear this to black
 }
 
-display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){
+display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32, fix_windows_colors: b32 = true){
+    // TODO(viktor): can we avoid this without forcing the game to have to handle the windows color component order?
+    if fix_windows_colors {
+        for y in 0..<buffer.height {
+            for x in 0..<buffer.width {
+                useful_color := &buffer.memory[y * buffer.width + x]
+                windows_color:= WindowsColor{
+                    r = useful_color.r,
+                    g = useful_color.g,
+                    b = useful_color.b,
+                }
+                useful_color^ = transmute(Color) windows_color
+            }
+        }
+    }
+        
     if window_width >= buffer.width*2 && window_height >= buffer.height*2 {
         offset := [2]i32{window_width - buffer.width*2, window_height - buffer.height*2} / 2
         
@@ -926,7 +943,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         device_context := win.BeginPaint(window, &paint)
 
         window_width, window_height := get_window_dimension(window)
-        display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
+        display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height, false)
 
         win.EndPaint(window, &paint)
     case win.WM_SETCURSOR: 

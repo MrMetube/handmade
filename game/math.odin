@@ -45,6 +45,7 @@ DegPerRad :: 360.0/Tau
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
+@(require_results)
 square :: #force_inline proc(x: f32) -> f32 {
     return x * x
 }
@@ -171,6 +172,10 @@ clamp_01_3 :: #force_inline proc(value:v3) -> (result:v3) {
 V3 :: proc { V3_x, V3_z }
 V3_x :: proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
 V3_z :: proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
+
+V4 :: proc { V4_x, V4_w }
+V4_x :: proc(x: f32, yzw: v3) -> v4 { return { x, yzw.x, yzw.y, yzw.z }}
+V4_w :: proc(xyz: v3, w: f32) -> v4 { return { xyz.x, xyz.y, xyz.z, w }}
 
 @(require_results)
 perpendicular :: #force_inline proc(v: v2) -> (result: v2) {

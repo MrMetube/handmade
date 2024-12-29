@@ -1,12 +1,5 @@
 package game
 
-// TODO: Copypasta from platform
-// TODO: Microsoft color layout should not leak into game, should be [4]u8 instead
-// the platform layer would then need to correct to fit the platforms expected layout
-BufferColor :: struct{
-    b, g, r, a: u8,
-}
-
 // TODO: COPYPASTA from debug
 
 DEBUG_code :: struct {

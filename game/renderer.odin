@@ -57,7 +57,7 @@ RenderGroupEntryCoordinateSystem :: struct {
     
     origin, x_axis, y_axis: v2,
     texture: LoadedBitmap,
-    alpha: f32,
+    color: v4,
 }
 
 
@@ -132,7 +132,7 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offse
     push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
-coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, texture: LoadedBitmap, alpha:f32= 1) {
+coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4 = 1) {
     entry := push_render_element(group, RenderGroupEntryCoordinateSystem)
 
     if entry != nil {
@@ -141,7 +141,7 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_a
         entry.y_axis = y_axis
         
         entry.texture = texture
-        entry.alpha   = alpha
+        entry.color   = color
     }
 }
 
@@ -206,7 +206,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             entry := cast(^RenderGroupEntryCoordinateSystem) typeless_entry
             base_address += auto_cast size_of(entry^)
             
-            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.texture, clamp_01(entry.alpha))
+            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.texture, entry.color)
             
             p := entry.origin
             x := p + entry.x_axis
@@ -274,7 +274,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alph
     }
 }
 
-draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, alpha: f32) {
+draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4) {
     min, max: [2]i32 = max(i32), min(i32)
     for p in ([?]v2{origin, origin + x_axis, origin + y_axis, origin + x_axis + y_axis}) {
         p_floor := floor(p)
@@ -314,42 +314,66 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                 
                 uv := v2{u,v}
                 // TODO(viktor): formalize texture boundaries
-                t  := uv * vec_cast(f32, texture.width-2, texture.height-2)
+                t := uv * vec_cast(f32, texture.width-2, texture.height-2)
                 s := vec_cast(i32, t)
                 f := t - vec_cast(f32, s)
                 
                 assert(s.x >= 0 && s.x < texture.width)
                 assert(s.y >= 0 && s.y < texture.height)
                 
-                
                 raw_texel00 := texture.memory[texture.start + (s.y + 0) * texture.pitch + (s.x + 0)]
                 raw_texel01 := texture.memory[texture.start + (s.y + 0) * texture.pitch + (s.x + 1)]
                 raw_texel10 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 0)]
                 raw_texel11 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 1)]
                 
-                texel00 := vec_cast(f32, raw_texel00.r, raw_texel00.g, raw_texel00.b, raw_texel00.a)
-                texel01 := vec_cast(f32, raw_texel01.r, raw_texel01.g, raw_texel01.b, raw_texel01.a)
-                texel10 := vec_cast(f32, raw_texel10.r, raw_texel10.g, raw_texel10.b, raw_texel10.a)
-                texel11 := vec_cast(f32, raw_texel11.r, raw_texel11.g, raw_texel11.b, raw_texel11.a)
+                texel00 := srgb_to_linear(vec_cast(f32, raw_texel00) / 255)
+                texel01 := srgb_to_linear(vec_cast(f32, raw_texel01) / 255)
+                texel10 := srgb_to_linear(vec_cast(f32, raw_texel10) / 255)
+                texel11 := srgb_to_linear(vec_cast(f32, raw_texel11) / 255)
+                                
+                texel := lerp( lerp(texel00, texel01, f.x), lerp(texel10, texel11, f.x), f.y )
+                texel.a *= color.a
                 
-                texel := vec_cast(u8, lerp( lerp(texel00, texel01, f.x), lerp(texel10, texel11, f.x), f.y) )
+                raw_pixel := &buffer.memory[buffer.start + y * buffer.pitch + x]
+                pixel := srgb_to_linear(vec_cast(f32, raw_pixel^) / 255)
                 
-                pixel := &buffer.memory[buffer.start + y * buffer.pitch + x]
+                inv_alpha := 1 - texel.a
                 
-                sa   := alpha * cast(f32) texel.a / 255
-                srgb := alpha * vec_cast(f32, texel.rgb)
+                blended := v4{
+                    (inv_alpha * pixel.r + color.a * color.r * texel.r),
+                    (inv_alpha * pixel.g + color.a * color.g * texel.g),
+                    (inv_alpha * pixel.b + color.a * color.b * texel.b),
+                    (texel.a + pixel.a - texel.a * pixel.a),
+                }
                 
-                da := cast(f32) pixel.a / 255
-                inv_alpha := 1 - sa
+                blended = 255 * linear_to_srgb(blended)
                 
-                pixel.a = cast(u8) (255 * (sa + da - sa * da))
-                pixel.r = cast(u8) (inv_alpha * cast(f32) pixel.r + srgb.r)
-                pixel.g = cast(u8) (inv_alpha * cast(f32) pixel.g + srgb.g)
-                pixel.b = cast(u8) (inv_alpha * cast(f32) pixel.b + srgb.b)
+                raw_pixel^ = vec_cast(u8, blended)
             }
         }
     }
 }
+                
+// NOTE(viktor): this assumes a gamma of 2 instead of 2.2
+@(require_results)
+srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
+    result.r = square(srgb.r)
+    result.g = square(srgb.g)
+    result.b = square(srgb.b)
+    result.a = srgb.a
+    
+    return result
+} 
+                
+@(require_results)
+linear_to_srgb :: #force_inline proc(linear: v4) -> (result: v4) {
+    result.r = square_root(linear.r)
+    result.g = square_root(linear.g)
+    result.b = square_root(linear.b)
+    result.a = linear.a
+    
+    return result
+} 
 
 draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     rounded_center := floor(center)

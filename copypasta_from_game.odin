@@ -10,7 +10,7 @@ GameSoundBuffer :: struct {
 }
 
 GameLoadedBitmap :: struct {
-    pixels : []OffscreenBufferColor,
+    pixels : []Color,
     width, height: i32, 
     
     start, pitch: i32,
