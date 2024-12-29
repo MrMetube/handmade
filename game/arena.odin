@@ -78,6 +78,6 @@ end_temporary_memory :: #force_inline proc(temp_mem: TemporaryMemory) {
     arena.temp_count -= 1
 }
 
-check_arena :: #force_inline proc(arena: Arena) {
+check_arena :: #force_inline proc(arena: ^Arena) {
     assert(arena.temp_count == 0)
 }

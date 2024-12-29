@@ -11,8 +11,6 @@ RenderGroup :: struct {
 }
 
 EnvironmentMap :: struct {
-    // NOTE(viktor): LOD[0] size is 2^base_pow_2
-    base_pow_2: [2]u8,
     LOD: [4]LoadedBitmap,
 }
 
@@ -131,7 +129,7 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, color: v4 = 1) -> (
     result = push_render_element(group, RenderGroupEntryCoordinateSystem)
 
     if result != nil {
-        result.color   = color
+        result.color = color
     }
     
     return result
@@ -327,61 +325,46 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                 
                 assert(s.x >= 0 && s.x < texture.width)
                 assert(s.y >= 0 && s.y < texture.height)
+
+                t00, t01, t10, t11 := sample_bilinear(texture, s)
                 
-                src_texel00 := texture.memory[texture.start + (s.y + 0) * texture.pitch + (s.x + 0)]
-                src_texel01 := texture.memory[texture.start + (s.y + 0) * texture.pitch + (s.x + 1)]
-                src_texel10 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 0)]
-                src_texel11 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 1)]
+                t00 = srgb_255_to_linear_1(t00)
+                t01 = srgb_255_to_linear_1(t01)
+                t10 = srgb_255_to_linear_1(t10)
+                t11 = srgb_255_to_linear_1(t11)
                 
-                texel00 := srgb_255_to_linear_1(vec_cast(f32, src_texel00))
-                texel01 := srgb_255_to_linear_1(vec_cast(f32, src_texel01))
-                texel10 := srgb_255_to_linear_1(vec_cast(f32, src_texel10))
-                texel11 := srgb_255_to_linear_1(vec_cast(f32, src_texel11))
-                                
-                texel := lerp( lerp(texel00, texel01, f.x), lerp(texel10, texel11, f.x), f.y )
-                texel *= color
+                texel := blend_bilinear(t00, t01, t10, t11, f)
                 
                 if normal_map.memory != nil {
-                    src_normal00 := normal_map.memory[normal_map.start + (s.y + 0) * normal_map.pitch + (s.x + 0)]
-                    src_normal01 := normal_map.memory[normal_map.start + (s.y + 0) * normal_map.pitch + (s.x + 1)]
-                    src_normal10 := normal_map.memory[normal_map.start + (s.y + 1) * normal_map.pitch + (s.x + 0)]
-                    src_normal11 := normal_map.memory[normal_map.start + (s.y + 1) * normal_map.pitch + (s.x + 1)]
-                    
-                    normal00 := vec_cast(f32, src_normal00)
-                    normal01 := vec_cast(f32, src_normal01)
-                    normal10 := vec_cast(f32, src_normal10)
-                    normal11 := vec_cast(f32, src_normal11)
-                                    
-                    normal := lerp( lerp(normal00, normal01, f.x), lerp(normal10, normal11, f.x), f.y )
+                    normal := blend_bilinear(sample_bilinear(normal_map, s), f)
+                    normal = unscale_and_bias(normal)
                     
                     far_map: ^EnvironmentMap
-                    t_environment := normal.z
+                    t_environment := normal.y
                     t_far_map: f32
                     switch t_environment {
-                    case 0    ..< 0.25: 
+                    case -1..< -0.5: 
                         far_map = bottom
-                        t_far_map = 1 - (t_environment / 0.25)
-                    case 0.25 ..< 0.75: 
-                        far_map = middle
-                    case 0.75 ..= 1   : 
+                        t_far_map = (t_environment + 1) * 2
+                    case 0.5 ..= 1: 
                         far_map = top
-                        t_far_map = (1 - t_environment) / 0.25
+                        t_far_map = (t_environment - 0.5) * 2
+                    case: 
+                        far_map = middle
                     }
-                    
-                    sample_environment_map :: #force_inline proc(screen_space_uv: v2, normal: v3, roughness: f32, environment_map: ^EnvironmentMap) -> (result: v3) {
-                        result = normal
-                        return result
-                    }
-                    
-                    light_color := sample_environment_map(screen_space_uv, normal.xyz, normal.w, middle)
+
+                    light_color := v3{0, 0, 0} // sample_environment_map(screen_space_uv, normal.xyz, normal.w, middle)
                     if far_map != nil {
                         far_map_color := sample_environment_map(screen_space_uv, normal.xyz, normal.w, far_map)
                         light_color = lerp(light_color, far_map_color, t_far_map)
                     }
-                    
-                    texel.rgb *= light_color
+
+                    texel.rgb *= texel.a * light_color
                 }
-                                
+
+                texel *= color
+                texel.rgb = clamp_01(texel.rgb)
+
                 dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
                 pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
                 
@@ -424,8 +407,55 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     }
 }
 
+sample :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (result: v4) {
+    texel := texture.memory[texture.start + p.y * texture.pitch + p.x]
+    result = vec_cast(f32, texel)
+    
+    return result
+}
 
-// NOTE(viktor): this assumes a gamma of 2 instead of 2.2
+sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
+    s00 = sample(texture, p + {0, 0})
+    s01 = sample(texture, p + {1, 0})
+    s10 = sample(texture, p + {0, 1})
+    s11 = sample(texture, p + {1, 1})
+    
+    return s00, s01, s10, s11
+}
+                    
+sample_environment_map :: #force_inline proc(screen_space_uv: v2, normal: v3, roughness: f32, environment_map: ^EnvironmentMap) -> (result: v3) {
+    lod_index := cast(i32) (roughness * cast(f32) (len(environment_map.LOD)-1) + 0.5)
+    level_of_detail := environment_map.LOD[lod_index]
+    
+    t: v2
+    s := vec_cast(i32, t)
+    f := t - vec_cast(f32, s)
+    
+    assert(s.x >= 0 && s.x < level_of_detail.width)
+    assert(s.y >= 0 && s.y < level_of_detail.height)
+    
+    result = blend_bilinear(sample_bilinear(level_of_detail, s), f).rgb
+    
+    return result
+}
+
+blend_bilinear :: #force_inline proc(s00, s01, s10, s11: v4, t: v2) -> (result: v4) {
+    result = lerp( lerp(s00, s01, t.x), lerp(s10, s11, t.x), t.y )
+    
+    return result
+}
+
+@(require_results)
+unscale_and_bias :: #force_inline proc(normal: v4) -> (result: v4) {
+    inv_255: f32 = 1.0 / 255.0
+
+    result.xyz = -1 + 2 * (normal.xyz * inv_255)
+    result.w = inv_255 * normal.w
+    
+    return result
+}
+
+// NOTE(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
 @(require_results)
 srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
     result.r = square(srgb.r)
@@ -437,7 +467,8 @@ srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
 } 
 @(require_results)
 srgb_255_to_linear_1 :: #force_inline proc(srgb: v4) -> (result: v4) {
-    result = srgb / 255
+    inv_255: f32 = 1.0 / 255.0
+    result = srgb * inv_255
     result = srgb_to_linear(result)
     
     return result

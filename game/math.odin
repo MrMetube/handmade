@@ -275,15 +275,15 @@ length_squared_3 :: #force_inline proc(vec: v3) -> f32 {
 normalize :: proc { normalize_2, normalize_3 }
 
 @(require_results)
-normalize_2 :: #force_inline proc(vec: v2) -> v2 {
-    length := length(vec)
-    return vec / length
+normalize_2 :: #force_inline proc(vec: v2) -> (result: v2) {
+    result = vec / length(vec)
+    return result
 }
 
 @(require_results)
-normalize_3 :: #force_inline proc(vec: v3) -> v3 {
-    length := length(vec)
-    return vec / length
+normalize_3 :: #force_inline proc(vec: v3) -> (result: v3) {
+    result = vec / length(vec)
+    return result
 }
 
 // ---------------------- ---------------------- ----------------------

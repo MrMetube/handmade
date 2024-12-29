@@ -194,6 +194,8 @@ TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
     
+    grass6_normal: LoadedBitmap,
+    
     ground_buffers: []GroundBuffer,
 }
 
@@ -459,10 +461,15 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
         }
         
+        tran_state.grass6_normal = make_empty_bitmap(&tran_state.arena, {state.grass[6].width, state.grass[6].height}, false)
+        make_sphere_normal_map(tran_state.grass6_normal, 0)
+        
         tran_state.is_initialized = true
     }
     
     if input.reloaded_executable {
+        make_sphere_normal_map(tran_state.grass6_normal, 0)
+        
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
         }
@@ -764,14 +771,14 @@ when false {
     scale :: 400
     x_axis := scale * v2{cos(angle), sin(angle)}
     y_axis := perpendicular(x_axis)
-    entry := coordinate_system(render_group)
-    if entry != nil {
+    
+    if entry := coordinate_system(render_group); entry != nil {
         entry.origin = origin - x_axis*0.5 - y_axis*0.5
         entry.x_axis = x_axis
         entry.y_axis = y_axis
         
         entry.texture = state.grass[6]
-        entry.normal  = {}
+        entry.normal  = tran_state.grass6_normal
         
         entry.top    = nil
         entry.middle = nil
@@ -785,35 +792,40 @@ when false {
     end_temporary_memory(sim_memory)
     end_temporary_memory(render_memory)
     
-    check_arena(state.world_arena)
-    check_arena(tran_state.arena)
+    check_arena(&state.world_arena)
+    check_arena(&tran_state.arena)
 }
 
 make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32) {
-    inv_size := 1 / (1 - vec_cast(f32, buffer.width, buffer.height))
+    inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
     
     for y in 0..<buffer.height {
         for x in 0..<buffer.width {
-            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
-            
             bitmap_uv := inv_size * vec_cast(f32, x, y)
-            normal := V3(2 * bitmap_uv - 1, 0)
-            normal.z = square_root(1 - min(1, square(normal.x) + square(normal.y)))
+            nxy := (2 * bitmap_uv) - 1
             
-            normal = normalize(normal)
-            color := V4(255 * (0.5 * (normal.xy + 1)), 127*normal.z,  255*roughness)
+            root_term := 1 - square(nxy.x) - square(nxy.y)
+
+            normal := v3{0, 0, 1}
+            if root_term >= 0 {
+                nz := square_root(root_term)
+                normal = V3(nxy, nz)
+            }
             
+            color := 255 * V4((normal + 1) * 0.5, roughness)
+            
+            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
             dst^ = vec_cast(u8, color)
         }
     }
 }
 
-make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
+make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
     result = {
         memory = push(arena, ByteColor, cast(u64) (dim.x * dim.y), clear_to_zero),
-        width  = cast(i32) dim.x,
-        height = cast(i32) dim.y,
-        pitch  = cast(i32) dim.x,
+        width  = dim.x,
+        height = dim.y,
+        pitch  = dim.x,
     }
     
     return result
