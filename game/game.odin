@@ -734,12 +734,12 @@ when false {
     angle := state.time * 0.1
     disp := cos(angle*10) * 100
     origin := screen_center
-    scale :: 250
-    x_axis := scale * v2{cos(angle*2), sin(angle*5)}
+    scale :: 500
+    x_axis := scale * v2{cos(angle), sin(angle)}
     y_axis := perpendicular(x_axis)
     
-    tint := v4{cos(angle*3) + sin(angle*7), cos(angle*20), sin(angle*5), (cos(angle)+1)/2}
-    coordinate_system(render_group, origin - x_axis*0.5 - y_axis*0.5/*  + disp */, x_axis, y_axis, state.monster[0], tint)
+    tint ::  1 // v4{cos(angle*3) + sin(angle*7), cos(angle*20), sin(angle*5), (cos(angle)+1)/2}
+    coordinate_system(render_group, origin - x_axis*0.5 - y_axis*0.5/*  + disp */, x_axis, y_axis, state.grass[0], tint)
     
     render_to_output(render_group, buffer)
             
@@ -1054,20 +1054,22 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
                 c := raw_pixels[y * header.width + x]
                 p := &pixels[y * header.width + x]
                 
-                r := cast(f32) cast(u8) ((c & red_mask)   >> red_shift)
-                g := cast(f32) cast(u8) ((c & green_mask) >> green_shift)
-                b := cast(f32) cast(u8) ((c & blue_mask)  >> blue_shift)
-                a := cast(f32) cast(u8) ((c & alpha_mask) >> alpha_shift)
-                an := a / 255
+                texel := vec_cast(f32, 
+                    vec_cast(u8, 
+                        ((c & red_mask)   >> red_shift),
+                        ((c & green_mask) >> green_shift),
+                        ((c & blue_mask)  >> blue_shift),
+                        ((c & alpha_mask) >> alpha_shift),
+                    )
+                )
                 
-                r = r * an
-                g = g * an
-                b = b * an
+                texel = srgb_255_to_linear_1(texel)
                 
-                p.r = cast(u8) (r + 0.5)
-                p.g = cast(u8) (g + 0.5)
-                p.b = cast(u8) (b + 0.5)
-                p.a = cast(u8) (a + 0.5)
+                texel.rgb = texel.rgb * texel.a
+                
+                texel = linear_1_to_srgb_255(texel)
+                
+                p^ = vec_cast(u8, texel + 0.5)
             }
         }
 
