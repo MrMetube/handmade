@@ -168,14 +168,52 @@ clamp_01_3 :: #force_inline proc(value:v3) -> (result:v3) {
 // ---------------------- Vector operations
 // ---------------------- ---------------------- ----------------------
 
-// TODO(viktor): is this necessary?
-V3 :: proc { V3_x, V3_z }
-V3_x :: proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
-V3_z :: proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
+V3 :: proc { V3_x_yz, V3_xy_z }
+@(require_results) 
+V3_x_yz :: #force_inline proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
+@(require_results) 
+V3_xy_z :: #force_inline proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
 
-V4 :: proc { V4_x, V4_w }
-V4_x :: proc(x: f32, yzw: v3) -> v4 { return { x, yzw.x, yzw.y, yzw.z }}
-V4_w :: proc(xyz: v3, w: f32) -> v4 { return { xyz.x, xyz.y, xyz.z, w }}
+V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
+@(require_results) 
+V4_x_yzw  :: #force_inline proc(x: f32, yzw: v3) -> (result: v4) {
+    result.x = x
+    result.yzw = yzw
+    return result
+}
+@(require_results) 
+V4_xy_zw  :: #force_inline proc(xy: v2, zw: v2) -> (result: v4) {
+    result.xy = xy
+    result.zw = zw
+    return result
+}
+@(require_results) 
+V4_xyz_w  :: #force_inline proc(xyz: v3, w: f32) -> (result: v4) {
+    result.xyz = xyz
+    result.w = w
+    return result
+}
+@(require_results) 
+V4_x_y_zw :: #force_inline proc(x, y: f32, zw: v2) -> (result: v4) {
+    result.x = x
+    result.y = y
+    result.zw = zw
+    return result
+}
+@(require_results) 
+V4_x_yz_w :: #force_inline proc(x: f32, yz: v2, w:f32) -> (result: v4) {
+    result.x = x
+    result.yz = yz
+    result.w = w
+    return result
+}
+@(require_results) 
+V4_xy_z_w :: #force_inline proc(xy: v2, z, w: f32) -> (result: v4) {
+    result.xy = xy
+    result.z = z
+    result.w = w
+    return result
+}
 
 @(require_results)
 perpendicular :: #force_inline proc(v: v2) -> (result: v2) {

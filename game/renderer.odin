@@ -10,6 +10,12 @@ RenderGroup :: struct {
     push_buffer_size: u32,
 }
 
+EnvironmentMap :: struct {
+    // NOTE(viktor): LOD[0] size is 2^base_pow_2
+    base_pow_2: [2]u8,
+    LOD: [4]LoadedBitmap,
+}
+
 RenderBasis :: struct {
     p: v3,
 }
@@ -45,8 +51,10 @@ RenderGroupEntryRectangle :: struct {
 
 RenderGroupEntryCoordinateSystem :: struct {
     origin, x_axis, y_axis: v2,
-    texture: LoadedBitmap,
     color: v4,
+    texture, normal: LoadedBitmap,
+    
+    top, middle, bottom: ^EnvironmentMap,
 }
 
 
@@ -80,19 +88,21 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, offset := v3{}, alpha: f32 = 1, focus := [2]i32{}) {
-    entry := push_render_element(group, RenderGroupEntryBitmap)
+push_bitmap :: #force_inline proc(group: ^RenderGroup, offset:= v3{}, alpha: f32 = 1) -> (result: ^RenderGroupEntryBitmap) {
+    result = push_render_element(group, RenderGroupEntryBitmap)
     
-    if entry != nil {
-        entry.basis        = group.default_basis
-        entry.bitmap       = bitmap
-        entry.offset.xy    = {offset.x, -offset.y} * group.meters_to_pixels
-        entry.offset.z     = offset.z
-        entry.alpha        = alpha
-        entry.bitmap_focus = focus
+    if result != nil {
+        result.basis        = group.default_basis
+        result.alpha        = alpha
+        result.offset.xy    = {offset.x, -offset.y} * group.meters_to_pixels
+        result.offset.z     = offset.z
     }
+    
+    return result
 }
 
+// TODO(viktor): dont be a setter return the pointer and let the caller do the work
+// But do keep the non-zero default values 
 push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: v4) {
     entry := push_render_element(group, RenderGroupEntryRectangle)
 
@@ -101,9 +111,9 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, co
 
         entry.basis     = group.default_basis
         entry.offset.xy = {offset.x, -offset.y} * group.meters_to_pixels + half_dim * {-1,1}
+        entry.dim       = dim * group.meters_to_pixels
         entry.offset.z  = offset.z
         entry.color     = color
-        entry.dim       = dim * group.meters_to_pixels
     }
 }
 
@@ -117,17 +127,14 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offse
     push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
-coordinate_system :: #force_inline proc(group: ^RenderGroup, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4 = 1) {
-    entry := push_render_element(group, RenderGroupEntryCoordinateSystem)
+coordinate_system :: #force_inline proc(group: ^RenderGroup, color: v4 = 1) -> (result: ^RenderGroupEntryCoordinateSystem) {
+    result = push_render_element(group, RenderGroupEntryCoordinateSystem)
 
-    if entry != nil {
-        entry.origin = origin
-        entry.x_axis = x_axis
-        entry.y_axis = y_axis
-        
-        entry.texture = texture
-        entry.color   = color
+    if result != nil {
+        result.color   = color
     }
+    
+    return result
 }
 
 push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
@@ -176,28 +183,28 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryClear:
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
-            
+
             draw_rectangle(target, screen_center, screen_size, entry.color)
-            
-        case RenderGroupEntryRectangle:
+
+            case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
-            
+        when false {
             p := get_render_entity_basis_p(group, entry, screen_center)
             draw_rectangle(target, p, entry.dim, entry.color)
-            
+        }            
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
-            
+        when false {
             p := get_render_entity_basis_p(group, entry, screen_center)
             draw_bitmap(target, entry.bitmap, p, clamp_01(entry.alpha), entry.bitmap_focus)
-            
+        }
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
             base_address += auto_cast size_of(entry^)
             
-            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.texture, entry.color)
+            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.texture, entry.normal, entry.color, entry.top, entry.middle, entry.bottom)
             
             p := entry.origin
             x := p + entry.x_axis
@@ -235,7 +242,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alph
     bottom = min(bottom, buffer.height)
     right  = min(right,  buffer.width)
 
-    src_row  := bitmap.start + bitmap.pitch * src_top + src_left
+    src_row := bitmap.start + bitmap.pitch * src_top + src_left
     dst_row := left + top * buffer.width
     for _ in top..< bottom  {
         src_index := src_row
@@ -264,7 +271,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alph
     }
 }
 
-draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4) {
+draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: ^EnvironmentMap) {
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a
@@ -280,24 +287,31 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
         if p_ceil.y  > max.y do max.y = p_ceil.y
     }
     
-    max.x = clamp(max.x, 0, buffer.width-1)
-    max.y = clamp(max.x, 0, buffer.height-1)
-    min.x = clamp(min.x, 0, buffer.width-1)
-    min.y = clamp(min.y, 0, buffer.height-1)
+    width_max      := buffer.width-1
+    height_max     := buffer.height-1
+    inv_width_max  := 1 / cast(f32) width_max
+    inv_height_max := 1 / cast(f32) height_max
+    
+    max.x = clamp(max.x, 0, width_max)
+    max.y = clamp(max.x, 0, height_max)
+    min.x = clamp(min.x, 0, width_max)
+    min.y = clamp(min.y, 0, height_max)
     
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
     
     for y in min.y..=max.y {
         for x in min.x..=max.x {
-            pixel := vec_cast(f32, x, y)
-            delta := pixel - origin
+            pixel_p := vec_cast(f32, x, y)
+            delta := pixel_p - origin
             edge0 := dot(delta                  , -perpendicular(x_axis))
             edge1 := dot(delta - x_axis         , -perpendicular(y_axis))
             edge2 := dot(delta - x_axis - y_axis,  perpendicular(x_axis))
             edge3 := dot(delta - y_axis         ,  perpendicular(y_axis))
             
             if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
+                screen_space_uv := pixel_p * {inv_width_max, inv_height_max}
+
                 u := dot(delta, x_axis) * inv_x_len_squared
                 v := dot(delta, y_axis) * inv_y_len_squared
                 
@@ -319,17 +333,58 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                 src_texel10 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 0)]
                 src_texel11 := texture.memory[texture.start + (s.y + 1) * texture.pitch + (s.x + 1)]
                 
-                dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
-                                
                 texel00 := srgb_255_to_linear_1(vec_cast(f32, src_texel00))
                 texel01 := srgb_255_to_linear_1(vec_cast(f32, src_texel01))
                 texel10 := srgb_255_to_linear_1(vec_cast(f32, src_texel10))
                 texel11 := srgb_255_to_linear_1(vec_cast(f32, src_texel11))
-                
-                pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-                
+                                
                 texel := lerp( lerp(texel00, texel01, f.x), lerp(texel10, texel11, f.x), f.y )
                 texel *= color
+                
+                if normal_map.memory != nil {
+                    src_normal00 := normal_map.memory[normal_map.start + (s.y + 0) * normal_map.pitch + (s.x + 0)]
+                    src_normal01 := normal_map.memory[normal_map.start + (s.y + 0) * normal_map.pitch + (s.x + 1)]
+                    src_normal10 := normal_map.memory[normal_map.start + (s.y + 1) * normal_map.pitch + (s.x + 0)]
+                    src_normal11 := normal_map.memory[normal_map.start + (s.y + 1) * normal_map.pitch + (s.x + 1)]
+                    
+                    normal00 := vec_cast(f32, src_normal00)
+                    normal01 := vec_cast(f32, src_normal01)
+                    normal10 := vec_cast(f32, src_normal10)
+                    normal11 := vec_cast(f32, src_normal11)
+                                    
+                    normal := lerp( lerp(normal00, normal01, f.x), lerp(normal10, normal11, f.x), f.y )
+                    
+                    far_map: ^EnvironmentMap
+                    t_environment := normal.z
+                    t_far_map: f32
+                    switch t_environment {
+                    case 0    ..< 0.25: 
+                        far_map = bottom
+                        t_far_map = 1 - (t_environment / 0.25)
+                    case 0.25 ..< 0.75: 
+                        far_map = middle
+                    case 0.75 ..= 1   : 
+                        far_map = top
+                        t_far_map = (1 - t_environment) / 0.25
+                    }
+                    
+                    sample_environment_map :: #force_inline proc(screen_space_uv: v2, normal: v3, roughness: f32, environment_map: ^EnvironmentMap) -> (result: v3) {
+                        result = normal
+                        return result
+                    }
+                    
+                    light_color := sample_environment_map(screen_space_uv, normal.xyz, normal.w, middle)
+                    if far_map != nil {
+                        far_map_color := sample_environment_map(screen_space_uv, normal.xyz, normal.w, far_map)
+                        light_color = lerp(light_color, far_map_color, t_far_map)
+                    }
+                    
+                    texel.rgb *= light_color
+                }
+                                
+                dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
+                pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
+                
                 
                 blended := (1 - texel.a) * pixel + texel
                 blended = linear_1_to_srgb_255(blended)
@@ -357,7 +412,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     for y in top..<bottom {
         for x in left..<right {
             // TODO(viktor): should use pitch here
-            dst := &buffer.memory[y*buffer.width + x]
+            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
             src := color * 255
 
             dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
@@ -369,7 +424,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     }
 }
 
-                
+
 // NOTE(viktor): this assumes a gamma of 2 instead of 2.2
 @(require_results)
 srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
@@ -397,6 +452,7 @@ linear_to_srgb :: #force_inline proc(linear: v4) -> (result: v4) {
     
     return result
 } 
+@(require_results)
 linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     result = linear_to_srgb(linear)
     result *= 255

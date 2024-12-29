@@ -544,7 +544,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             
             bitmap_center := [2]i32{bitmap.width, bitmap.height} / 2
             offset  := world_difference(world, ground_buffer.p, state.camera_p)
-            push_bitmap(render_group, bitmap, offset, focus = bitmap_center)
+            if entry := push_bitmap(render_group, offset); entry != nil {
+                entry.bitmap       = bitmap
+                entry.bitmap_focus = bitmap_center
+            }
         }
     }
     
@@ -618,7 +621,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                push_bitmap(render_group, state.wall, 0)
+                if entry := push_bitmap(render_group); entry != nil {
+                    entry.bitmap = state.wall
+                }
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -632,9 +637,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         move_spec.speed = 50
                         ddp = con_hero.ddp
 
-
-                        push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                        push_bitmap(render_group, state.player[entity.facing_index], focus = state.player_focus[entity.facing_index])
+                        if entry := push_bitmap(render_group, alpha = shadow_alpha); entry != nil {
+                            entry.bitmap = state.shadow
+                            entry.bitmap_focus = state.shadow_focus
+                        }
+                        if entry := push_bitmap(render_group); entry != nil {
+                            entry.bitmap = state.player[entity.facing_index]
+                            entry.bitmap_focus = state.player_focus[entity.facing_index]
+                        }
                         push_hitpoints(render_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
@@ -662,9 +672,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     clear_collision_rules(state, entity.storage_index)
                     make_entity_nonspatial(&entity)
                 }
-
-                push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                push_bitmap(render_group, state.sword)
+                
+                if entry := push_bitmap(render_group, alpha = shadow_alpha); entry != nil {
+                    entry.bitmap = state.shadow
+                    entry.bitmap_focus = state.shadow_focus
+                }
+                if entry := push_bitmap(render_group); entry != nil {
+                    entry.bitmap = state.sword
+                }
 
             case .Familiar:
                 closest_hero: ^Entity
@@ -699,12 +714,24 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, state.shadow, alpha = 1 - shadow_alpha/2 * (coeff+1), focus = state.shadow_focus)
-                push_bitmap(render_group, state.player[entity.facing_index], {0, 1+z, 0}, alpha = 0.5, focus = state.player_focus[entity.facing_index])
+                if entry := push_bitmap(render_group, alpha = 1 - shadow_alpha/2 * (coeff+1)); entry != nil {
+                    entry.bitmap = state.shadow
+                    entry.bitmap_focus = state.shadow_focus
+                }
+                if entry := push_bitmap(render_group, offset = {0, 1+z, 0}, alpha = 0.5); entry != nil {
+                    entry.bitmap = state.player[entity.facing_index]
+                    entry.bitmap_focus = state.player_focus[entity.facing_index]
+                }
 
             case .Monster:
-                push_bitmap(render_group, state.shadow, alpha = shadow_alpha, focus = state.shadow_focus)
-                push_bitmap(render_group, state.monster[1], focus = state.monster_focus[1])
+                if entry := push_bitmap(render_group, alpha = shadow_alpha); entry != nil {
+                    entry.bitmap = state.shadow
+                    entry.bitmap_focus = state.shadow_focus
+                }
+                if entry := push_bitmap(render_group); entry != nil {
+                    entry.bitmap = state.monster[1]
+                    entry.bitmap_focus = state.monster_focus[1]
+                }
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
@@ -731,15 +758,25 @@ when false {
     
     state.time += input.delta_time
     
-    angle := state.time * 0.1
+    angle :f32= 0 // state.time * 0.1
     disp := cos(angle*10) * 100
     origin := screen_center
-    scale :: 500
+    scale :: 400
     x_axis := scale * v2{cos(angle), sin(angle)}
     y_axis := perpendicular(x_axis)
-    
-    tint ::  1 // v4{cos(angle*3) + sin(angle*7), cos(angle*20), sin(angle*5), (cos(angle)+1)/2}
-    coordinate_system(render_group, origin - x_axis*0.5 - y_axis*0.5/*  + disp */, x_axis, y_axis, state.grass[0], tint)
+    entry := coordinate_system(render_group)
+    if entry != nil {
+        entry.origin = origin - x_axis*0.5 - y_axis*0.5
+        entry.x_axis = x_axis
+        entry.y_axis = y_axis
+        
+        entry.texture = state.grass[6]
+        entry.normal  = {}
+        
+        entry.top    = nil
+        entry.middle = nil
+        entry.bottom = nil
+    }
     
     render_to_output(render_group, buffer)
             
@@ -750,6 +787,25 @@ when false {
     
     check_arena(state.world_arena)
     check_arena(tran_state.arena)
+}
+
+make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32) {
+    inv_size := 1 / (1 - vec_cast(f32, buffer.width, buffer.height))
+    
+    for y in 0..<buffer.height {
+        for x in 0..<buffer.width {
+            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
+            
+            bitmap_uv := inv_size * vec_cast(f32, x, y)
+            normal := V3(2 * bitmap_uv - 1, 0)
+            normal.z = square_root(1 - min(1, square(normal.x) + square(normal.y)))
+            
+            normal = normalize(normal)
+            color := V4(255 * (0.5 * (normal.xy + 1)), 127*normal.z,  255*roughness)
+            
+            dst^ = vec_cast(u8, color)
+        }
+    }
 }
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]u32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
@@ -790,7 +846,10 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
                 stamp  := random_choice(&series, state.grass[:])^
                 offset := random_unilateral_2(&series, f32) * buffer_dim
                 p := center + offset
-                push_bitmap(render_group, stamp, V3(p, 0))
+                
+                if entry := push_bitmap(render_group, offset = V3(p, 0)); entry != nil {
+                    entry.bitmap = stamp
+                }
             }
         }
     }
