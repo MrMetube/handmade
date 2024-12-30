@@ -481,7 +481,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         draw_rectangle(tran_state.test_diffuse, vec_cast(f32, test_size/2), vec_cast(f32, test_size), 0.5)
         
         tran_state.test_normal = make_empty_bitmap(&tran_state.arena, test_size, false)
-        make_sphere_normal_map(tran_state.test_normal, 0, {0, 1})
+        make_sphere_normal_map(tran_state.test_normal, 0)
         
         tran_state.env_size = {512, 256}
         for &env_map in tran_state.envs {
@@ -500,7 +500,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             ground_buffer.p = null_position()
         }
         
-        make_sphere_normal_map(tran_state.test_normal, 0, {0, 1})
+        make_sphere_normal_map(tran_state.test_normal, 0)
         test_size:= vec_cast(f32, tran_state.test_diffuse.width, tran_state.test_diffuse.height)
         draw_rectangle(tran_state.test_diffuse, test_size*0.5, test_size, V4_xyz_w(0.15, 1))
     }
@@ -822,18 +822,6 @@ when false {
     x_axis := scale * /* v2{1, 0}// */ v2{cos(angle*10), sin(angle*3)}
     y_axis := perpendicular(x_axis)
 
-    for env_map, index in tran_state.envs {
-        size := vec_cast(f32, env_map.LOD[0].width, env_map.LOD[0].height) / 2
-        
-        if entry := coordinate_system(render_group); entry != nil {
-            entry.x_axis = {size.x, 0}
-            entry.y_axis = {0, size.y}
-            entry.origin = 20 + (entry.x_axis + {10, 0}) * auto_cast index
-            
-            entry.texture = env_map.LOD[0]
-        }
-    }
-    
     if entry := coordinate_system(render_group); entry != nil {
         entry.origin = origin - x_axis*0.5 - y_axis*0.5 + disp
         entry.x_axis = x_axis
@@ -847,6 +835,18 @@ when false {
         entry.bottom = tran_state.env_bottom
     }
 
+    for env_map, index in tran_state.envs {
+        size := vec_cast(f32, env_map.LOD[0].width, env_map.LOD[0].height) / 2
+        
+        if entry := coordinate_system(render_group); entry != nil {
+            entry.x_axis = {size.x, 0}
+            entry.y_axis = {0, size.y}
+            entry.origin = 20 + (entry.x_axis + {10, 0}) * auto_cast index
+            
+            entry.texture = env_map.LOD[0]
+        }
+    }
+    
 when false {
     saturation(render_group, cos(state.time*4) + 1 * 0.5)
 }

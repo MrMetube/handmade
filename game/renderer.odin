@@ -314,6 +314,18 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     color := color
     color.rgb *= color.a
     
+    length_x_axis := length(x_axis)
+    length_y_axis := length(y_axis)
+    normal_x_axis := (length_y_axis / length_x_axis) * x_axis
+    normal_y_axis := (length_x_axis / length_y_axis) * y_axis
+    // NOTE(viktor): normal_z_scale could be a parameter if we want people to 
+    // have control over the amount of scaling in the z direction that the 
+    // normals appear to have
+    normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
+    
+    inv_x_len_squared := 1 / length_squared(x_axis)
+    inv_y_len_squared := 1 / length_squared(y_axis)
+    
     min, max: [2]i32 = max(i32), min(i32)
     for p in ([?]v2{origin, origin + x_axis, origin + y_axis, origin + x_axis + y_axis}) {
         p_floor := floor(p)
@@ -334,9 +346,6 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     max.y = clamp(max.x, 0, height_max)
     min.x = clamp(min.x, 0, width_max)
     min.y = clamp(min.y, 0, height_max)
-    
-    inv_x_len_squared := 1 / length_squared(x_axis)
-    inv_y_len_squared := 1 / length_squared(y_axis)
     
     for y in min.y..=max.y {
         for x in min.x..=max.x {
@@ -378,21 +387,27 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                 if normal_map.memory != nil {
                     normal := blend_bilinear(sample_bilinear(normal_map, s), f)
                     normal = unscale_and_bias(normal)
-                    // TODO(viktor): do we really need this
+                    normal.xy = normal.x * normal_x_axis + normal.y * normal_y_axis
+                    normal.z *= normal_z_scale
                     normal = normalize(normal)
                     
                     // NOTE(viktor): the eye-vector is always assumed to be [0, 0, 1]
                     // This is just a simplified version of the reflection -e + 2 * dot(e, n) * n
                     bounce_direction := 2 * normal.z * normal.xyz
                     bounce_direction.z -= 1
+                    // TODO(viktor): eventually we need to support two mappings
+                    // one for top-down view(which we do not do now) and one 
+                    // for sideways, which is happening here.
+                    bounce_direction.z -= bounce_direction.z
                     
                     far_map: EnvironmentMap
                     t_environment := bounce_direction.y
                     t_far_map: f32
+                    distance_from_map_in_z: f32 = 1
                     if  t_environment < -0.5 {
                         far_map = bottom
                         t_far_map = -1 - 2 * t_environment
-                        bounce_direction.y = -bounce_direction.y
+                        distance_from_map_in_z = -distance_from_map_in_z
                     } else if t_environment > 0.5 {
                         far_map = top
                         t_far_map = (t_environment - 0.5) * 2
@@ -400,7 +415,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
 
                     light_color := v3{} // TODO(viktor): how do we sample from the middle environment m?ap
                     if t_far_map > 0 {
-                        far_map_color := sample_environment_map(screen_space_uv, bounce_direction, normal.w, far_map)
+                        far_map_color := sample_environment_map(screen_space_uv, bounce_direction, normal.w, far_map, distance_from_map_in_z)
                         light_color = lerp(light_color, far_map_color, t_far_map)
                     }
 
@@ -467,23 +482,40 @@ sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00,
     
     return s00, s01, s10, s11
 }
-                    
-sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap) -> (result: v3) {
+
+/* 
+    NOTE(viktor):
+
+    screen_space_uv tells us where the ray is being cast _from_ in
+    normalized screen coordinates.
+
+    sample_direction tells us what direction the cast is going
+    it does not have to be normalized, but y _must be positive_.
+
+    roughness says which LODs of Map we sample from. 
+    
+    distance_from_map_in_z says how far the map is from the sample
+    point in z, given in meters
+*/
+sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
     assert(environment_map.LOD[0].memory != nil)
     
+    // NOTE(viktor): pick which LOD to sample from
     lod_index := cast(i32) (roughness * cast(f32) (len(environment_map.LOD)-1) + 0.5)
     lod := environment_map.LOD[lod_index]
     lod_size := vec_cast(f32, lod.width, lod.height)
     
-    assert(sample_direction.y > 0)
-    distance_from_map_in_z :: 1
-    uvs_per_meter :: 0.01
+    // NOTE(viktor): compute the distance to the map and the 
+    // scaling factor for meters-to-UVs
+    uvs_per_meter :: 0.01 // TODO(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
-    // TODO(viktor): make sure we know what direction z should go in y
     offset := c * sample_direction.xz
+    
+    // NOTE(viktor): Find the intersection point
     uv := screen_space_uv + offset
     uv = clamp_01(uv)
     
+    // NOTE(viktor): bilinear sample
     t        := uv * (lod_size - 2)
     index    := vec_cast(i32, t)
     fraction := t - vec_cast(f32, index)
@@ -491,14 +523,18 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     assert(index.x >= 0 && index.x < lod.width)
     assert(index.y >= 0 && index.y < lod.height)
     
-    l00,l01,l10,l11 := sample_bilinear(lod, index)
+    l00, l01, l10, l11 := sample_bilinear(lod, index)
     
     l00 = srgb_255_to_linear_1(l00)
     l01 = srgb_255_to_linear_1(l01)
     l10 = srgb_255_to_linear_1(l10)
     l11 = srgb_255_to_linear_1(l11)
+when true {
+    texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
+    texel^ = 255
+}
     
-    result = blend_bilinear(l00,l01,l10,l11, fraction).rgb
+    result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
     
     return result
 }
