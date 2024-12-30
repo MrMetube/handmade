@@ -2,7 +2,7 @@
 
 set pedantic=-vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style
 set flags=-vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows
-set debug=-debug -define:INTERNAL=true -o:none
+set debug=-debug -define:INTERNAL=true -o:speed
 
 if not exist .\build mkdir .\build
 if not exist .\data  mkdir .\data

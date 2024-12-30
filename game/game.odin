@@ -481,7 +481,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         draw_rectangle(tran_state.test_diffuse, vec_cast(f32, test_size/2), vec_cast(f32, test_size), 0.5)
         
         tran_state.test_normal = make_empty_bitmap(&tran_state.arena, test_size, false)
-        make_sphere_normal_map(tran_state.test_normal, 0)
+        make_sphere_normal_map(tran_state.test_normal, 0, {0, 1})
         
         tran_state.env_size = {512, 256}
         for &env_map in tran_state.envs {
@@ -500,7 +500,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             ground_buffer.p = null_position()
         }
         
-        make_sphere_normal_map(tran_state.test_normal, 0)
+        make_sphere_normal_map(tran_state.test_normal, 0, {0, 1})
         test_size:= vec_cast(f32, tran_state.test_diffuse.width, tran_state.test_diffuse.height)
         draw_rectangle(tran_state.test_diffuse, test_size*0.5, test_size, V4_xyz_w(0.15, 1))
     }
@@ -815,11 +815,11 @@ when false {
     state.time += input.delta_time
     
     
-    angle :f32= 0 // state.time * 0.1
+    angle :f32= state.time * 0.1
     disp := cos(angle*10) * 100
     origin := screen_center
     scale :: 200
-    x_axis := scale * v2{cos(angle), sin(angle)}
+    x_axis := scale * /* v2{1, 0}// */ v2{cos(angle*10), sin(angle*3)}
     y_axis := perpendicular(x_axis)
 
     for env_map, index in tran_state.envs {
@@ -835,7 +835,7 @@ when false {
     }
     
     if entry := coordinate_system(render_group); entry != nil {
-        entry.origin = origin - x_axis*0.5 - y_axis*0.5
+        entry.origin = origin - x_axis*0.5 - y_axis*0.5 + disp
         entry.x_axis = x_axis
         entry.y_axis = y_axis
         
@@ -862,17 +862,50 @@ when false {
     check_arena(&tran_state.arena)
 }
 
-make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32) {
+make_pyramid_normal_map :: proc(bitmap: LoadedBitmap, roughness: f32) {
+    inv_size: v2 = 1 / (vec_cast(f32, bitmap.width, bitmap.height) - 1)
+    
+    for y in 0..<bitmap.height {
+        for x in 0..<bitmap.width {
+            bitmap_uv := inv_size * vec_cast(f32, x, y)
+            
+            inv_x := bitmap.width - x
+            InvSqrtTwo :: 1.0 / SqrtTwo
+            normal: v3 = { 0, 0, InvSqrtTwo }
+            if x < y {
+                if inv_x < y {
+                    normal.y = InvSqrtTwo
+                } else {
+                    normal.x = -InvSqrtTwo
+                }
+            } else {
+                if inv_x < y {
+                    normal.x = InvSqrtTwo
+                } else {
+                    normal.y = -InvSqrtTwo
+                }
+            }
+            
+            color := 255 * V4((normal + 1) * 0.5, roughness)
+            
+            dst := &bitmap.memory[bitmap.start + y*bitmap.pitch + x]
+            dst^ = vec_cast(u8, color)
+        }
+    }
+}
+
+make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32, c:= v2{1,1}) {
     inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
     
     for y in 0..<buffer.height {
         for x in 0..<buffer.width {
             bitmap_uv := inv_size * vec_cast(f32, x, y)
-            nxy := (2 * bitmap_uv) - 1
+            nxy := c * ((2 * bitmap_uv) - 1)
             
             root_term := 1 - square(nxy.x) - square(nxy.y)
 
-            normal := v3{0, 0, 1}
+            InvSqrtTwo :: 1.0 / SqrtTwo
+            normal := v3{0, InvSqrtTwo, InvSqrtTwo}
             if root_term >= 0 {
                 nz := square_root(root_term)
                 normal = V3(nxy, nz)

@@ -381,20 +381,26 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                     // TODO(viktor): do we really need this
                     normal = normalize(normal)
                     
+                    // NOTE(viktor): the eye-vector is always assumed to be [0, 0, 1]
+                    // This is just a simplified version of the reflection -e + 2 * dot(e, n) * n
+                    bounce_direction := 2 * normal.z * normal.xyz
+                    bounce_direction.z -= 1
+                    
                     far_map: EnvironmentMap
-                    t_environment := normal.y
+                    t_environment := bounce_direction.y
                     t_far_map: f32
                     if  t_environment < -0.5 {
                         far_map = bottom
                         t_far_map = -1 - 2 * t_environment
+                        bounce_direction.y = -bounce_direction.y
                     } else if t_environment > 0.5 {
                         far_map = top
                         t_far_map = (t_environment - 0.5) * 2
                     }
 
-                    light_color := v3{} // sample_environment_map(screen_space_uv, normal.xyz, normal.w, middle)
+                    light_color := v3{} // TODO(viktor): how do we sample from the middle environment m?ap
                     if t_far_map > 0 {
-                        far_map_color := sample_environment_map(screen_space_uv, normal.xyz, normal.w, far_map)
+                        far_map_color := sample_environment_map(screen_space_uv, bounce_direction, normal.w, far_map)
                         light_color = lerp(light_color, far_map_color, t_far_map)
                     }
 
@@ -462,28 +468,37 @@ sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00,
     return s00, s01, s10, s11
 }
                     
-sample_environment_map :: #force_inline proc(screen_space_uv: v2, normal: v3, roughness: f32, environment_map: EnvironmentMap) -> (result: v3) {
+sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap) -> (result: v3) {
     assert(environment_map.LOD[0].memory != nil)
     
     lod_index := cast(i32) (roughness * cast(f32) (len(environment_map.LOD)-1) + 0.5)
     lod := environment_map.LOD[lod_index]
     lod_size := vec_cast(f32, lod.width, lod.height)
     
-    t: v2 = lod_size * 0.5 + normal.xy * lod_size * 0.5
-    s := vec_cast(i32, t)
-    f := t - vec_cast(f32, s)
+    assert(sample_direction.y > 0)
+    distance_from_map_in_z :: 1
+    uvs_per_meter :: 0.01
+    c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
+    // TODO(viktor): make sure we know what direction z should go in y
+    offset := c * sample_direction.xz
+    uv := screen_space_uv + offset
+    uv = clamp_01(uv)
     
-    assert(s.x >= 0 && s.x < lod.width)
-    assert(s.y >= 0 && s.y < lod.height)
+    t        := uv * (lod_size - 2)
+    index    := vec_cast(i32, t)
+    fraction := t - vec_cast(f32, index)
     
-    l00,l01,l10,l11 := sample_bilinear(lod, s)
+    assert(index.x >= 0 && index.x < lod.width)
+    assert(index.y >= 0 && index.y < lod.height)
+    
+    l00,l01,l10,l11 := sample_bilinear(lod, index)
     
     l00 = srgb_255_to_linear_1(l00)
     l01 = srgb_255_to_linear_1(l01)
     l10 = srgb_255_to_linear_1(l10)
     l11 = srgb_255_to_linear_1(l11)
     
-    result = blend_bilinear(l00,l01,l10,l11, f).rgb
+    result = blend_bilinear(l00,l01,l10,l11, fraction).rgb
     
     return result
 }
