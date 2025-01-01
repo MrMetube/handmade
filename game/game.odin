@@ -478,10 +478,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         
         test_size :[2]i32= 256
         tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
-        draw_rectangle(tran_state.test_diffuse, vec_cast(f32, test_size/2), vec_cast(f32, test_size), 0.5)
+        // draw_rectangle(tran_state.test_diffuse, vec_cast(f32, test_size/2), vec_cast(f32, test_size), 0.5)
         
         tran_state.test_normal = make_empty_bitmap(&tran_state.arena, test_size, false)
         make_sphere_normal_map(tran_state.test_normal, 0)
+        make_sphere_diffuse_map(tran_state.test_diffuse, 0)
         
         tran_state.env_size = {512, 256}
         for &env_map in tran_state.envs {
@@ -500,9 +501,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             ground_buffer.p = null_position()
         }
         
+        // test_size:= vec_cast(f32, tran_state.test_diffuse.width, tran_state.test_diffuse.height)
+        // draw_rectangle(tran_state.test_diffuse, test_size*0.5, test_size, V4_xyz_w(0.15, 1))
+     
         make_sphere_normal_map(tran_state.test_normal, 0)
-        test_size:= vec_cast(f32, tran_state.test_diffuse.width, tran_state.test_diffuse.height)
-        draw_rectangle(tran_state.test_diffuse, test_size*0.5, test_size, V4_xyz_w(0.15, 1))
+        make_sphere_diffuse_map(tran_state.test_diffuse)
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -792,17 +795,18 @@ when false {
             basis.p = get_entity_ground_point(&entity)
         }
     }
-
+    
     map_color := [?]v4{Red, Green, Blue}
-    for env_map, env_index in tran_state.envs {
-        lod := env_map.LOD[0]
-        checker_dim := [2]i32{16, 16}
+   
+    for it, it_index in tran_state.envs {
+        lod := it.LOD[0]
+        checker_dim: [2]i32 = 32
         
         row_on: b32
         for y: i32; y < lod.height; y += checker_dim.y {
             on := row_on
             for x: i32; x < lod.width; x += checker_dim.x {
-                color := map_color[env_index]
+                color := map_color[it_index]
                 size := vec_cast(f32, checker_dim)
                 draw_rectangle(lod, vec_cast(f32, x, y) + size*0.5, size, on ? color : Black)
                 on = !on
@@ -810,23 +814,29 @@ when false {
             row_on = !row_on
         }
     }
-    
+    tran_state.env_bottom.pz = -4
+    tran_state.env_middle.pz =  0
+    tran_state.env_top.pz    =  4
     
     state.time += input.delta_time
     
-    
-    angle :f32= state.time * 0.1
-    disp := cos(angle*10) * 100
+    angle :f32= state.time
+when !true {
+    disp :f32= 0
+} else {
+    disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
+}
     origin := screen_center
     scale :: 200
-    x_axis := scale * /* v2{1, 0}// */ v2{cos(angle*10), sin(angle*3)}
+    x_axis := scale * v2{cos(angle), sin(angle)}
     y_axis := perpendicular(x_axis)
-
+    
     if entry := coordinate_system(render_group); entry != nil {
         entry.origin = origin - x_axis*0.5 - y_axis*0.5 + disp
         entry.x_axis = x_axis
         entry.y_axis = y_axis
         
+        assert(tran_state.test_diffuse.memory != nil)
         entry.texture = tran_state.test_diffuse
         entry.normal  = tran_state.test_normal
         
@@ -835,21 +845,22 @@ when false {
         entry.bottom = tran_state.env_bottom
     }
 
-    for env_map, index in tran_state.envs {
-        size := vec_cast(f32, env_map.LOD[0].width, env_map.LOD[0].height) / 2
+    for it, it_index in tran_state.envs {
+        size := vec_cast(f32, it.LOD[0].width, it.LOD[0].height) / 2
         
         if entry := coordinate_system(render_group); entry != nil {
             entry.x_axis = {size.x, 0}
             entry.y_axis = {0, size.y}
-            entry.origin = 20 + (entry.x_axis + {10, 0}) * auto_cast index
+            entry.origin = 20 + (entry.x_axis + {20, 0}) * auto_cast it_index
             
-            entry.texture = env_map.LOD[0]
+            entry.texture = it.LOD[0]
+            assert(it.LOD[0].memory != nil)
         }
     }
-    
-when false {
-    saturation(render_group, cos(state.time*4) + 1 * 0.5)
-}
+
+    when false {
+        saturation(render_group, cos(state.time*4) + 1 * 0.5)
+    }
         
     render_to_output(render_group, buffer)
             
@@ -912,6 +923,30 @@ make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32, c:= v2{1,1}
             }
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
+            
+            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
+            dst^ = vec_cast(u8, color)
+        }
+    }
+}
+
+make_sphere_diffuse_map :: proc(buffer: LoadedBitmap, c := v2{1,1}) {
+    inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
+    
+    for y in 0..<buffer.height {
+        for x in 0..<buffer.width {
+            bitmap_uv := inv_size * vec_cast(f32, x, y)
+            nxy := c * ((2 * bitmap_uv) - 1)
+            
+            root_term := 1 - square(nxy.x) - square(nxy.y)
+
+            alpha: f32
+            if root_term > 0 {
+                alpha = 1
+            }
+            alpha *= 255
+            base_color : v3 = 0
+            color := V4(alpha * base_color, alpha)
             
             dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
             dst^ = vec_cast(u8, color)

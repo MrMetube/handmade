@@ -131,8 +131,9 @@ safe_ratio_1_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return sa
 @(require_results)
 safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
 
+clamp :: proc{ clamp_t, clamp_2 }
 @(require_results)
-clamp :: #force_inline proc(value, min, max: $T) -> T {
+clamp_t :: #force_inline proc(value, min, max: $T) -> T where !intrinsics.type_is_array(T) {
     result := value
     
     if result < min {
@@ -140,6 +141,13 @@ clamp :: #force_inline proc(value, min, max: $T) -> T {
     } else if result > max {
         result = max
     }
+
+    return result
+}
+@(require_results)
+clamp_2 :: #force_inline proc(value, min, max: $T) -> (result: T) where intrinsics.type_is_array(T) {
+    result.x = clamp_t(value.x, min.x, max.x)
+    result.y = clamp_t(value.y, min.y, max.y)
 
     return result
 }

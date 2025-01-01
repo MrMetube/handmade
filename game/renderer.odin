@@ -11,6 +11,7 @@ RenderGroup :: struct {
 }
 
 EnvironmentMap :: struct {
+    pz: f32,
     LOD: [4]LoadedBitmap,
 }
 
@@ -186,6 +187,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
         base_address += size_of(RenderGroupEntryHeader)
+
         data := &group.push_buffer[base_address]
         
         switch header.type {
@@ -216,8 +218,13 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
             base_address += auto_cast size_of(entry^)
-            
-            draw_rectangle_slowly(target, entry.origin, entry.x_axis, entry.y_axis, entry.texture, entry.normal, entry.color, entry.top, entry.middle, entry.bottom)
+
+            draw_rectangle_slowly(target,
+                entry.origin, entry.x_axis, entry.y_axis, 
+                entry.texture, entry.normal, entry.color, 
+                entry.top, entry.middle, entry.bottom,
+                1 / group.meters_to_pixels,
+            )
             
             p := entry.origin
             x := p + entry.x_axis
@@ -309,11 +316,13 @@ change_saturation :: proc(buffer: LoadedBitmap, level: f32 ) {
     }
 }
 
-draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap) {
+draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
+    assert(texture.memory != nil)
+    
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a
-    
+
     length_x_axis := length(x_axis)
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
@@ -325,7 +334,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
-    
+        
     min, max: [2]i32 = max(i32), min(i32)
     for p in ([?]v2{origin, origin + x_axis, origin + y_axis, origin + x_axis + y_axis}) {
         p_floor := floor(p)
@@ -341,6 +350,11 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     height_max     := buffer.height-1
     inv_width_max  := 1 / cast(f32) width_max
     inv_height_max := 1 / cast(f32) height_max
+
+    // TODO(viktor): this will need to be specified separately
+    origin_z     :f32= 0.5
+    origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
+    fixed_cast_y := inv_height_max * origin_y
     
     max.x = clamp(max.x, 0, width_max)
     max.y = clamp(max.x, 0, height_max)
@@ -357,7 +371,14 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
             edge3 := dot(delta - y_axis         ,  perpendicular(y_axis))
             
             if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
-                screen_space_uv := pixel_p * {inv_width_max, inv_height_max}
+                Card :: true
+                when Card {
+                    screen_space_uv := v2{cast(f32) x, fixed_cast_y} * {inv_width_max, inv_height_max}
+                    z_difference    := pixels_to_meters * (cast(f32) y - origin_y)
+                } else {
+                    screen_space_uv := vec_cast(f32, x, y) * {inv_width_max, inv_height_max}
+                    z_difference: f32 
+                }
 
                 u := dot(delta, x_axis) * inv_x_len_squared
                 v := dot(delta, y_axis) * inv_y_len_squared
@@ -403,23 +424,29 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                     far_map: EnvironmentMap
                     t_environment := bounce_direction.y
                     t_far_map: f32
-                    distance_from_map_in_z: f32 = 1
+                    pz := origin_z + z_difference
                     if  t_environment < -0.5 {
                         far_map = bottom
                         t_far_map = -1 - 2 * t_environment
-                        distance_from_map_in_z = -distance_from_map_in_z
                     } else if t_environment > 0.5 {
                         far_map = top
                         t_far_map = (t_environment - 0.5) * 2
                     }
-
+                    t_far_map = square(t_far_map)
+                    
                     light_color := v3{} // TODO(viktor): how do we sample from the middle environment m?ap
                     if t_far_map > 0 {
+                        distance_from_map_in_z := far_map.pz - pz
                         far_map_color := sample_environment_map(screen_space_uv, bounce_direction, normal.w, far_map, distance_from_map_in_z)
                         light_color = lerp(light_color, far_map_color, t_far_map)
                     }
 
                     texel.rgb += texel.a * light_color.rgb
+                    when false {
+                        // NOTE(viktor): draws the bounce direction
+                        texel.rgb = 0.5 + 0.5 * bounce_direction
+                        texel.rgb *= texel.a
+                    }
                 }
 
                 texel *= color
@@ -507,9 +534,9 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     
     // NOTE(viktor): compute the distance to the map and the 
     // scaling factor for meters-to-UVs
-    uvs_per_meter :: 0.01 // TODO(viktor): parameterize
+    uvs_per_meter :: 0.2 // TODO(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
-    offset := c * sample_direction.xz
+    offset := c * sample_direction.xy
     
     // NOTE(viktor): Find the intersection point
     uv := screen_space_uv + offset
@@ -529,7 +556,8 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     l01 = srgb_255_to_linear_1(l01)
     l10 = srgb_255_to_linear_1(l10)
     l11 = srgb_255_to_linear_1(l11)
-when true {
+    
+when false {
     texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
     texel^ = 255
 }
