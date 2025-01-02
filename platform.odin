@@ -823,7 +823,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
         bmiHeader = {
                 biSize          = size_of(buffer.info.bmiHeader),
                 biWidth         = buffer.width,
-                biHeight        = -buffer.height,
+                biHeight        = buffer.height,
                 biPlanes        = 1,
                 biBitCount      = 32,
                 biCompression   = win.BI_RGB,

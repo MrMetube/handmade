@@ -2,6 +2,19 @@ package game
 
 import "core:fmt"
 
+/* NOTE(viktor): 
+    1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
+    2) All Bitmaps including the render target are assumed to be bottom-up
+        (meaning that the first row is the bottom-most row when viewed on 
+        screen).
+    3) Unless otherwise specified, all inputs to the renderer are in world
+        coordinate ("meters"), NOT pixels. Anything that is in pixel values 
+        will be explicitly marked as such.
+    4) Z is a special axis, because it is broken up into discrete slices,
+        and the renderer actually understands these slices(potentially).
+    TODO(viktor): :ZHandling
+*/
+
 RenderGroup :: struct {
     default_basis: ^RenderBasis,
     meters_to_pixels: f32,
@@ -97,7 +110,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, offset:= v3{}, alpha: f32
     if result != nil {
         result.basis        = group.default_basis
         result.alpha        = alpha
-        result.offset.xy    = {offset.x, -offset.y} * group.meters_to_pixels
+        result.offset.xy    = offset.xy * group.meters_to_pixels
         result.offset.z     = offset.z
     }
     
@@ -113,7 +126,7 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, co
         half_dim := group.meters_to_pixels * entry.dim * 0.5
 
         entry.basis     = group.default_basis
-        entry.offset.xy = {offset.x, -offset.y} * group.meters_to_pixels + half_dim * {-1,1}
+        entry.offset.xy = offset.xy * group.meters_to_pixels + half_dim
         entry.dim       = dim * group.meters_to_pixels
         entry.offset.z  = offset.z
         entry.color     = color
@@ -174,8 +187,8 @@ get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: Rend
     base_p := entry.basis.p
     z_fudge := 1 + 0.05 * (base_p.z + entry.offset.z)
     
-    result = screen_center + group.meters_to_pixels * z_fudge * (base_p.xy) * {1, -1} + entry.offset.xy
-    result.y -= group.meters_to_pixels * base_p.z 
+    // :ZHandling
+    result = screen_center + entry.offset.xy + group.meters_to_pixels * (z_fudge * base_p.xy + {0, base_p.z})
     
     return result
 }
@@ -204,17 +217,17 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
-        when false {
+        
             p := get_render_entity_basis_p(group, entry, screen_center)
             draw_rectangle(target, p, entry.dim, entry.color)
-        }            
+
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
-        when false {
+        
             p := get_render_entity_basis_p(group, entry, screen_center)
             draw_bitmap(target, entry.bitmap, p, clamp_01(entry.alpha), entry.bitmap_focus)
-        }
+
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
             base_address += auto_cast size_of(entry^)
@@ -536,7 +549,7 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     // scaling factor for meters-to-UVs
     uvs_per_meter :: 0.2 // TODO(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
-    offset := c * sample_direction.xy
+    offset := c * sample_direction.xz
     
     // NOTE(viktor): Find the intersection point
     uv := screen_space_uv + offset

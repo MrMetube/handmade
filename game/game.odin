@@ -305,11 +305,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")   
         state.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
         
-        state.shadow_focus     = {   0, -2}
-        state.player_focus[0]  = {   6, 28}
-        state.player_focus[1]  = {  -6, 28}
-        state.monster_focus[0] = { -13, 22}
-        state.monster_focus[1] = {  16, 22}
+        set_topdown_focus :: proc(bitmap: LoadedBitmap, drawing_software_focus_value: [2]i32) -> (result: [2]i32) {
+            result = drawing_software_focus_value - [2]i32{0, bitmap.height-1}
+            return result
+        }
+        
+        state.shadow_focus     = set_topdown_focus(state.shadow,     {   0, -2})
+        state.player_focus[0]  = set_topdown_focus(state.player[0],  {   6, 28})
+        state.player_focus[1]  = set_topdown_focus(state.player[1],  {  -6, 28})
+        state.monster_focus[0] = set_topdown_focus(state.monster[0], { -13, 22})
+        state.monster_focus[1] = set_topdown_focus(state.monster[1], {  16, 22})
 
         state.world = push_struct(&state.world_arena, World)
 
@@ -628,7 +633,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
                     
-                    when true {
+                    when false {
                         push_rectangle_outline(render_group, world.chunk_dim_meters.xy, relative, Yellow)
                     }
                 }
@@ -775,8 +780,8 @@ when false {
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
-                push_rectangle(render_group, entity.walkable_dim, 0,                              Blue)
-                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height * 3}, Blue * {1,1,0.6,0.7})
+                push_rectangle(render_group, entity.walkable_dim, 0, Blue)
+                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height * world.chunk_dim_meters.z}, Blue * {1,1,0.6,0.7})
             
             case .Space: 
                 when false {
@@ -795,7 +800,7 @@ when false {
             basis.p = get_entity_ground_point(&entity)
         }
     }
-    
+when false {
     map_color := [?]v4{Red, Green, Blue}
    
     for it, it_index in tran_state.envs {
@@ -861,7 +866,7 @@ when !true {
     when false {
         saturation(render_group, cos(state.time*4) + 1 * 0.5)
     }
-        
+}
     render_to_output(render_group, buffer)
             
     end_sim(camera_sim_region, state)
@@ -982,7 +987,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     for offset_y in i32(-1) ..= 1 {
         for offset_x in i32(-1) ..= 1 {
             chunk_x := p.chunk.x + offset_x
-            chunk_y := p.chunk.y + -offset_y
+            chunk_y := p.chunk.y + offset_y
             
             center := vec_cast(f32, offset_x, offset_y) * buffer_dim
             // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
@@ -1199,7 +1204,7 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> LoadedBitmap {
+DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> (result: LoadedBitmap) {
     contents := read_entire_file(file_name)
 
     BMPHeader :: struct #packed {
@@ -1236,6 +1241,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
         header := cast(^BMPHeader) &contents[0]
 
         assert(header.bits_per_pixel == 32)
+        assert(header.height >= 0)
         assert(header.compression == 3)
 
         red_mask   := header.red_mask
@@ -1278,13 +1284,18 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
             }
         }
 
-        return {
+        result = {
             memory = pixels, 
             width  = header.width, 
             height = header.height, 
-            start  = header.width * (header.height-1),
-            pitch  = -header.width,
+            start  = 0,
+            pitch  = header.width,
         }
+        when false {
+            result.start = header.width * (header.height-1)
+            result.pitch = -result.pitch
+        }
+        return result
     }
     
     return {}
