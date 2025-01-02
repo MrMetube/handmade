@@ -133,8 +133,8 @@ safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return sa
 
 clamp :: proc{ clamp_t, clamp_2 }
 @(require_results)
-clamp_t :: #force_inline proc(value, min, max: $T) -> T where !intrinsics.type_is_array(T) {
-    result := value
+clamp_t :: #force_inline proc(value, min, max: $T) -> (result: T) where !intrinsics.type_is_array(T) {
+    result = value
     
     if result < min {
         result = min

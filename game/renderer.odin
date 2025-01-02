@@ -4,14 +4,20 @@ import "core:fmt"
 
 /* NOTE(viktor): 
     1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
+    
     2) All Bitmaps including the render target are assumed to be bottom-up
         (meaning that the first row is the bottom-most row when viewed on 
         screen).
+        
     3) Unless otherwise specified, all inputs to the renderer are in world
         coordinate ("meters"), NOT pixels. Anything that is in pixel values 
         will be explicitly marked as such.
+        
     4) Z is a special axis, because it is broken up into discrete slices,
         and the renderer actually understands these slices(potentially).
+        Z slices are what control the _scaling_ of things, whereas Z-offsets
+        inside a slice are what control y-offsetting.
+        
     5) All color values specified to the renderer as v4s are in 
         _NON-premulitplied_ alpha.
         
@@ -20,15 +26,15 @@ import "core:fmt"
 
 
 RenderGroup :: struct {
-    default_basis: ^RenderBasis,
+    default_basis:    ^RenderBasis,
     meters_to_pixels: f32,
     
-    push_buffer: []u8,
+    push_buffer:      []u8,
     push_buffer_size: u32,
 }
 
 EnvironmentMap :: struct {
-    pz: f32,
+    pz:  f32,
     LOD: [4]LoadedBitmap,
 }
 
@@ -42,7 +48,7 @@ RenderGroupEntryHeader :: struct {
 }
 
 RenderGroupEntryBasis :: struct {
-    basis: ^RenderBasis,
+    basis:  ^RenderBasis,
     offset: v3,
 }
 
@@ -53,7 +59,7 @@ RenderGroupEntryClear :: struct {
 RenderGroupEntryBitmap :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
-    color: v4,
+    color:  v4,
     bitmap: LoadedBitmap,
 }
 
@@ -61,15 +67,15 @@ RenderGroupEntryRectangle :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
     color: v4,
-    dim: v2,
+    dim:   v2,
 }
 
 RenderGroupEntryCoordinateSystem :: struct {
     origin, x_axis, y_axis: v2,
-    color: v4,
-    texture, normal: LoadedBitmap,
+    color:                  v4,
+    texture, normal:        LoadedBitmap,
     
-    top, middle, bottom: EnvironmentMap,
+    top, middle, bottom:    EnvironmentMap,
 }
 
 
@@ -172,20 +178,22 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (result: v2) {
+get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (position: v2, scale: f32) {
     base_p  := group.meters_to_pixels * entry.basis.p
     total_z := entry.offset.z + base_p.z
-    z_fudge := 1 + 0.003 * total_z
+    z_fudge := 1 + 0.0015 * base_p.z
     
     // :ZHandling
-    result = screen_center + entry.offset.xy + (z_fudge * base_p.xy + {0, total_z})
+    position = screen_center + z_fudge * (entry.offset.xy + base_p.xy) /* + {0, total_z} */
+    scale    = z_fudge
     
-    return result
+    return position, scale
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
-    screen_size   := vec_cast(f32, target.width, target.height)
-    screen_center := screen_size * 0.5
+    screen_size      := vec_cast(f32, target.width, target.height)
+    screen_center    := screen_size * 0.5
+    pixels_to_meters := 1 / group.meters_to_pixels
 
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
@@ -203,15 +211,24 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
         
-            p := get_render_entity_basis_p(group, entry, screen_center)
-            draw_rectangle(target, p, entry.dim, entry.color)
+            p, scale := get_render_entity_basis_p(group, entry, screen_center)
+            draw_rectangle(target, p, scale * entry.dim, entry.color)
 
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
         
-            p := get_render_entity_basis_p(group, entry, screen_center)
-            draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
+            p, scale := get_render_entity_basis_p(group, entry, screen_center)
+            when true {
+                draw_rectangle_slowly(target,
+                    p, {scale * cast(f32) entry.bitmap.width, 0}, {0, scale * cast(f32) entry.bitmap.height}, 
+                    entry.bitmap, {}, entry.color, 
+                    {}, {}, {},
+                    pixels_to_meters,
+                )
+            } else {
+                draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
+            }
 
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
@@ -221,7 +238,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
                 entry.origin, entry.x_axis, entry.y_axis, 
                 entry.texture, entry.normal, entry.color, 
                 entry.top, entry.middle, entry.bottom,
-                1 / group.meters_to_pixels,
+                pixels_to_meters,
             )
             
             p := entry.origin
@@ -325,23 +342,22 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
     normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-    // NOTE(viktor): normal_z_scale could be a parameter if we want people to 
-    // have control over the amount of scaling in the z direction that the 
-    // normals appear to have
+    // NOTE(viktor): normal_z_scale could be a parameter if we want people 
+    // to have control over the amount of scaling in the z direction that 
+    // the normals appear to have
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
     
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
         
-    min, max: [2]i32 = max(i32), min(i32)
-    for p in ([?]v2{origin, origin + x_axis, origin + y_axis, origin + x_axis + y_axis}) {
-        p_floor := floor(p)
-        p_ceil := ceil(p)
-        
-        if p_floor.x < min.x do min.x = p_floor.x
-        if p_floor.y < min.y do min.y = p_floor.y
-        if p_ceil.x  > max.x do max.x = p_ceil.x
-        if p_ceil.y  > max.y do max.y = p_ceil.y
+    minimum := [2]i32{
+        floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
+        floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
+    }
+    
+    maximum := [2]i32{
+        ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
+        ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
     
     width_max      := buffer.width-1
@@ -353,14 +369,12 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     origin_z     :f32= 0.5
     origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
     fixed_cast_y := inv_height_max * origin_y
+
+    maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
+    minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
     
-    max.x = clamp(max.x, 0, width_max)
-    max.y = clamp(max.x, 0, height_max)
-    min.x = clamp(min.x, 0, width_max)
-    min.y = clamp(min.y, 0, height_max)
-    
-    for y in min.y..=max.y {
-        for x in min.x..=max.x {
+    for y in minimum.y..=maximum.y {
+        for x in minimum.x..=maximum.x {
             pixel_p := vec_cast(f32, x, y)
             delta := pixel_p - origin
             edge0 := dot(delta                  , -perpendicular(x_axis))
@@ -413,11 +427,11 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                     // NOTE(viktor): the eye-vector is always assumed to be [0, 0, 1]
                     // This is just a simplified version of the reflection -e + 2 * dot(e, n) * n
                     bounce_direction := 2 * normal.z * normal.xyz
-                    bounce_direction.z -= 1
+                    bounce_direction.z -= 2
                     // TODO(viktor): eventually we need to support two mappings
                     // one for top-down view(which we do not do now) and one 
                     // for sideways, which is happening here.
-                    bounce_direction.z -= bounce_direction.z
+                    bounce_direction.z = -bounce_direction.z
                     
                     far_map: EnvironmentMap
                     t_environment := bounce_direction.y
@@ -532,10 +546,9 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     
     // NOTE(viktor): compute the distance to the map and the 
     // scaling factor for meters-to-UVs
-    uvs_per_meter :: 0.2 // TODO(viktor): parameterize
+    uvs_per_meter: f32 = 0.1 // TODO(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
     offset := c * sample_direction.xz
-    // TODO(viktor): this sampling does not match casey's visuals from "102 Card-like Normal Map Reflections"
     
     // NOTE(viktor): Find the intersection point
     uv := screen_space_uv + offset
@@ -558,7 +571,8 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
 
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
     
-    when !true {
+    when false {
+        // NOTE(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
         texel^ = 255
     }

@@ -194,7 +194,9 @@ GameState :: struct {
     standart_room_collision,
     wall_collision: ^EntityCollisionVolumeGroup,
     
-    time: f32
+    time: f32,
+    
+    z_offset: f32,
 }
 
 TransientState :: struct {
@@ -477,7 +479,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         
         tran_state.test_normal = make_empty_bitmap(&tran_state.arena, test_size, false)
         make_sphere_normal_map(tran_state.test_normal, 0)
-        make_sphere_diffuse_map(tran_state.test_diffuse, 0)
+        make_sphere_diffuse_map(tran_state.test_diffuse)
         
         tran_state.env_size = {512, 256}
         for &env_map in tran_state.envs {
@@ -496,9 +498,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             ground_buffer.p = null_position()
         }
         
-        // test_size:= vec_cast(f32, tran_state.test_diffuse.width, tran_state.test_diffuse.height)
-        // draw_rectangle(tran_state.test_diffuse, test_size*0.5, test_size, V4_xyz_w(0.15, 1))
-     
         make_sphere_normal_map(tran_state.test_normal, 0)
         make_sphere_diffuse_map(tran_state.test_diffuse)
     }
@@ -543,7 +542,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             if controller.start.ended_down {
                 con_hero.dz = 2
             }
-
+when !true {
             con_hero.dsword = {}
             if controller.button_up.ended_down {
                 con_hero.dsword =  {0, 1}
@@ -557,6 +556,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             if controller.button_right.ended_down {
                 con_hero.dsword =  {1, 0}
             }
+} else {
+            zoom_rate: f32
+            if controller.button_up.ended_down {
+                zoom_rate += 3
+            }
+            if controller.button_down.ended_down {
+                zoom_rate -= 3
+            }
+            state.z_offset += zoom_rate * input.delta_time
+}
         }
     }
 
@@ -578,27 +587,30 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             bitmap := ground_buffer.bitmap
             bitmap.focus = vec_cast(f32, bitmap.width, bitmap.height) * 0.5
             
-            offset  := world_difference(world, ground_buffer.p, state.camera_p)
-            push_bitmap(render_group, bitmap, offset)
+            offset := world_difference(world, ground_buffer.p, state.camera_p)
+            basis := push(&tran_state.arena, RenderBasis)
+            render_group.default_basis = basis
+            basis.p = offset + v3{0, 0, state.z_offset}
+            push_bitmap(render_group, bitmap)
         }
     }
     
     screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * state.pixels_to_meters
-    // TODO(viktor): this is twice the size it should be
     camera_bounds := rectangle_center_diameter(v3{}, v3{screen_dim_in_meters.x, screen_dim_in_meters.y, 0})
-    {
+    push_rectangle_outline(render_group, screen_dim_in_meters*0.9, 0, Red, 0.2)
+    if false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
-        for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
-            for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
-                for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
-                    chunk_center := WorldPosition{ chunk = { chunk_x, chunk_y, chunk_z } }
-                    relative := world_difference(world, chunk_center, state.camera_p)
+        for z in min_p.chunk.z ..= max_p.chunk.z {
+            for y in min_p.chunk.y ..= max_p.chunk.y {
+                for x in min_p.chunk.x ..= max_p.chunk.x {
+                    chunk_center := WorldPosition{ chunk = { x, y, z } }
+                    relative     := world_difference(world, chunk_center, state.camera_p)
                     
                     furthest_distance: f32 = -1
                     furthest: ^GroundBuffer
-                    // TODO(viktor): this is super inefficient. Fix it!
+                    // TODO(viktor): @Speed this is super inefficient. Fix it!
                     for &ground_buffer in tran_state.ground_buffers {
                         if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
                             furthest = nil
@@ -620,7 +632,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
                     
-                    when false {
+                    when !false {
                         push_rectangle_outline(render_group, world.chunk_dim_meters.xy, relative, Yellow)
                     }
                 }
@@ -634,8 +646,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     camera_sim_region := begin_sim(&tran_state.arena, state, world, state.camera_p, sim_bounds, input.delta_time)
 
     for &entity in camera_sim_region.entities {
-        if entity.updatable {
-            // TODO(viktor):  move this out into entity.odin
+        if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
 
             // TODO(viktor): this is incorrect, should be computed after update
@@ -667,7 +678,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         move_spec.speed = 50
                         ddp = con_hero.ddp
 
-                        push_bitmap(render_group, state.shadow, color = {0, 0, 0, shadow_alpha})
+                        push_bitmap(render_group, state.shadow, color = {1, 1, 1, shadow_alpha})
                         push_bitmap(render_group, state.player[entity.facing_index])
                         push_hitpoints(render_group, &entity, 1)
 
@@ -697,7 +708,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     make_entity_nonspatial(&entity)
                 }
                 
-                push_bitmap(render_group, state.shadow, color = {0, 0, 0, shadow_alpha})
+                push_bitmap(render_group, state.shadow, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, state.sword)
 
             case .Familiar: 
@@ -733,11 +744,11 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, state.shadow, color = {0, 0, 0, 1 - shadow_alpha/2 * (coeff+1)})
-                push_bitmap(render_group, state.player[entity.facing_index], offset = {0, 1+z, 0}, color = {0, 0, 0, 0.5})
+                push_bitmap(render_group, state.shadow, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, state.player[entity.facing_index], offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                push_bitmap(render_group, state.shadow, color = {0, 0, 0, shadow_alpha})
+                push_bitmap(render_group, state.shadow, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, state.monster[1])
                 push_hitpoints(render_group, &entity, 1.6)
             
@@ -746,11 +757,9 @@ when false {
                 push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height * world.chunk_dim_meters.z}, Blue * {1,1,0.6,0.7})
             
             case .Space: 
-                when false {
+                when !false {
                     for volume in entity.collision.volumes {
-                        // TODO(viktor): remove the fudge once the room sizes arent required to be a constant size of 16:9(/17:9)
-                        fudge := world.chunk_dim_meters.xy * v2{2, 0.5}
-                        push_rectangle_outline(render_group, volume.dim.xy + fudge, volume.offset, Blue)
+                        push_rectangle_outline(render_group, volume.dim.xy, volume.offset, Blue)
                     }
                 }
             }
@@ -759,10 +768,12 @@ when false {
                 move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
-            basis.p = get_entity_ground_point(&entity)
+            basis.p = get_entity_ground_point(&entity) + v3{0, 0, state.z_offset}
         }
     }
-when !false {
+    
+    
+when false {
     map_color := [?]v4{Red, Green, Blue}
    
     for it, it_index in tran_state.envs {
@@ -788,11 +799,11 @@ when !false {
     state.time += input.delta_time
     
     angle :f32= state.time
-when !true {
-    disp :f32= 0
-} else {
-    disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
-}
+    when !true {
+        disp :f32= 0
+    } else {
+        disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
+    }
     origin := screen_center
     scale :: 100
     x_axis := scale * v2{cos(angle), sin(angle)}
@@ -956,8 +967,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             for _ in 0..<20 {
                 stamp  := random_choice(&series, state.grass[:])^
                 offset := random_unilateral_2(&series, f32) * buffer_dim
-                p := center + offset
-                
+                p := center + offset 
                 push_bitmap(render_group, stamp, offset = V3(p, 0))
             }
         }

@@ -35,17 +35,17 @@ cast_vec_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != 
 
 @(require_results)
 cast_vec_v2 :: #force_inline proc($T: typeid, v:[2]$E) -> [2]T where T != E {
-    return cast_vec_2(T, v.x, v.y)
+    return vec_cast(T, v.x, v.y)
 }
 
 @(require_results)
 cast_vec_v3 :: #force_inline proc($T: typeid, v:[3]$E) -> [3]T where T != E {
-    return cast_vec_3(T, v.x, v.y, v.z)
+    return vec_cast(T, v.x, v.y, v.z)
 }
 
 @(require_results)
 cast_vec_v4 :: #force_inline proc($T: typeid, v:[4]$E) -> [4]T where T != E {
-    return cast_vec_4(T, v.x, v.y, v.z, v.w)
+    return vec_cast(T, v.x, v.y, v.z, v.w)
 }
 
 
