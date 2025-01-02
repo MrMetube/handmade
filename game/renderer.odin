@@ -12,8 +12,12 @@ import "core:fmt"
         will be explicitly marked as such.
     4) Z is a special axis, because it is broken up into discrete slices,
         and the renderer actually understands these slices(potentially).
+    5) All color values specified to the renderer as v4s are in 
+        _NON-premulitplied_ alpha.
+        
     TODO(viktor): :ZHandling
 */
+
 
 RenderGroup :: struct {
     default_basis: ^RenderBasis,
@@ -46,16 +50,11 @@ RenderGroupEntryClear :: struct {
     color: v4,
 }
 
-RenderGroupEntrySaturation :: struct {
-    level: f32
-}
-
 RenderGroupEntryBitmap :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
-    alpha: f32,
+    color: v4,
     bitmap: LoadedBitmap,
-    bitmap_focus: [2]i32,
 }
 
 RenderGroupEntryRectangle :: struct {
@@ -104,36 +103,33 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, offset:= v3{}, alpha: f32 = 1) -> (result: ^RenderGroupEntryBitmap) {
+push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, offset:= v3{}, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryBitmap) {
     result = push_render_element(group, RenderGroupEntryBitmap)
     
     if result != nil {
-        result.basis        = group.default_basis
-        result.alpha        = alpha
-        result.offset.xy    = offset.xy * group.meters_to_pixels
-        result.offset.z     = offset.z
+        result.bitmap     = bitmap
+        result.basis      = group.default_basis
+        result.color      = color
+        result.offset     = offset * group.meters_to_pixels
+        result.offset.xy += bitmap.focus
     }
     
     return result
 }
 
-// TODO(viktor): dont be a setter return the pointer and let the caller do the work
-// But do keep the non-zero default values 
-push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: v4) {
+push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color:= v4{1,1,1,1}) {
     entry := push_render_element(group, RenderGroupEntryRectangle)
 
     if entry != nil {
-        half_dim := group.meters_to_pixels * entry.dim * 0.5
-
         entry.basis     = group.default_basis
-        entry.offset.xy = offset.xy * group.meters_to_pixels + half_dim
-        entry.dim       = dim * group.meters_to_pixels
-        entry.offset.z  = offset.z
         entry.color     = color
+        entry.offset.xy = group.meters_to_pixels * (offset.xy + entry.dim * 0.5)
+        entry.offset.z  = offset.z
+        entry.dim       = dim * group.meters_to_pixels
     }
 }
 
-push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color: v4, thickness: f32 = 0.1) {
+push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
     // NOTE(viktor): Top and Bottom
     push_rectangle(group, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color)
     push_rectangle(group, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color)
@@ -143,7 +139,7 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offse
     push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
 }
 
-coordinate_system :: #force_inline proc(group: ^RenderGroup, color: v4 = 1) -> (result: ^RenderGroupEntryCoordinateSystem) {
+coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
     result = push_render_element(group, RenderGroupEntryCoordinateSystem)
 
     if result != nil {
@@ -176,19 +172,13 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-saturation :: proc(group: ^RenderGroup, level: f32) {
-    entry := push_render_element(group, RenderGroupEntrySaturation)
-    if entry != nil {
-        entry.level = level
-    }
-}
-
 get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (result: v2) {
-    base_p := entry.basis.p
-    z_fudge := 1 + 0.05 * (base_p.z + entry.offset.z)
+    base_p  := group.meters_to_pixels * entry.basis.p
+    total_z := entry.offset.z + base_p.z
+    z_fudge := 1 + 0.003 * total_z
     
     // :ZHandling
-    result = screen_center + entry.offset.xy + group.meters_to_pixels * (z_fudge * base_p.xy + {0, base_p.z})
+    result = screen_center + entry.offset.xy + (z_fudge * base_p.xy + {0, total_z})
     
     return result
 }
@@ -209,11 +199,6 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
             
             draw_rectangle(target, screen_center, screen_size, entry.color)
-        case RenderGroupEntrySaturation:
-            entry := cast(^RenderGroupEntrySaturation) data
-            base_address += auto_cast size_of(entry^)
-            
-            change_saturation(target, entry.level)
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
@@ -226,7 +211,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
         
             p := get_render_entity_basis_p(group, entry, screen_center)
-            draw_bitmap(target, entry.bitmap, p, clamp_01(entry.alpha), entry.bitmap_focus)
+            draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
 
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
@@ -254,8 +239,8 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
     }
 }
 
-draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alpha: f32, focus := [2]i32{} ) {
-    rounded_center := round(center) + focus * {1, -1}
+draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, color: v4) {
+    rounded_center := round(center)
 
     left   := rounded_center.x - bitmap.width  / 2
     top	   := rounded_center.y - bitmap.height / 2
@@ -291,7 +276,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, alph
             
             texel := vec_cast(f32, src)
             texel = srgb_255_to_linear_1(texel)
-            texel *= alpha
+            texel *= color.a
             
             pixel := vec_cast(f32, dst^)
             pixel = srgb_255_to_linear_1(pixel)
@@ -550,6 +535,7 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     uvs_per_meter :: 0.2 // TODO(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
     offset := c * sample_direction.xz
+    // TODO(viktor): this sampling does not match casey's visuals from "102 Card-like Normal Map Reflections"
     
     // NOTE(viktor): Find the intersection point
     uv := screen_space_uv + offset
@@ -569,14 +555,14 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     l01 = srgb_255_to_linear_1(l01)
     l10 = srgb_255_to_linear_1(l10)
     l11 = srgb_255_to_linear_1(l11)
-    
-when false {
-    texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
-    texel^ = 255
-}
-    
+
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
     
+    when !true {
+        texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
+        texel^ = 255
+    }
+            
     return result
 }
 

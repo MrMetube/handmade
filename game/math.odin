@@ -152,7 +152,7 @@ clamp_2 :: #force_inline proc(value, min, max: $T) -> (result: T) where intrinsi
     return result
 }
 
-clamp_01 :: proc { clamp_01_1, clamp_01_2, clamp_01_3 }
+clamp_01 :: proc { clamp_01_1, clamp_01_2, clamp_01_3, clamp_01_4 }
 @(require_results)
 clamp_01_1 :: #force_inline proc(value: $T) -> (result:T) where !intrinsics.type_is_array(T) {
     result = clamp(value, 0, 1)
@@ -168,6 +168,12 @@ clamp_01_2 :: #force_inline proc(value:v2) -> (result:v2) {
 @(require_results)
 clamp_01_3 :: #force_inline proc(value:v3) -> (result:v3) {
     result = v3{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
+    
+    return result
+}
+@(require_results)
+clamp_01_4 :: #force_inline proc(value:v4) -> (result:v4) {
+    result = v4{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z), clamp_01(value.w) }
     
     return result
 }

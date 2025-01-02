@@ -103,6 +103,7 @@ LoadedBitmap :: struct {
     width, height: i32, 
     
     start, pitch: i32,
+    focus: v2,
 }
 
 GameInputButton :: struct {
@@ -288,11 +289,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp")
-        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp")
-        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp")
-        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp")
-        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp")
+        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , {0   , -2})
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , {   6, 28})
+        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", {  -6, 28})
+        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , { -13, 22})
+        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , {  16, 22})
         state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
         state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
@@ -305,17 +306,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")   
         state.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
         
-        set_topdown_focus :: proc(bitmap: LoadedBitmap, drawing_software_focus_value: [2]i32) -> (result: [2]i32) {
-            result = drawing_software_focus_value - [2]i32{0, bitmap.height-1}
-            return result
-        }
-        
-        state.shadow_focus     = set_topdown_focus(state.shadow,     {   0, -2})
-        state.player_focus[0]  = set_topdown_focus(state.player[0],  {   6, 28})
-        state.player_focus[1]  = set_topdown_focus(state.player[1],  {  -6, 28})
-        state.monster_focus[0] = set_topdown_focus(state.monster[0], { -13, 22})
-        state.monster_focus[1] = set_topdown_focus(state.monster[1], {  16, 22})
-
         state.world = push_struct(&state.world_arena, World)
 
         add_stored_entity(state, .Nil, null_position())
@@ -586,13 +576,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
             bitmap := ground_buffer.bitmap
+            bitmap.focus = vec_cast(f32, bitmap.width, bitmap.height) * 0.5
             
-            bitmap_center := [2]i32{bitmap.width, bitmap.height} / 2
             offset  := world_difference(world, ground_buffer.p, state.camera_p)
-            if entry := push_bitmap(render_group, offset); entry != nil {
-                entry.bitmap       = bitmap
-                entry.bitmap_focus = bitmap_center
-            }
+            push_bitmap(render_group, bitmap, offset)
         }
     }
     
@@ -666,9 +653,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                if entry := push_bitmap(render_group); entry != nil {
-                    entry.bitmap = state.wall
-                }
+                push_bitmap(render_group, state.wall)
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -682,14 +667,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         move_spec.speed = 50
                         ddp = con_hero.ddp
 
-                        if entry := push_bitmap(render_group, alpha = shadow_alpha); entry != nil {
-                            entry.bitmap = state.shadow
-                            entry.bitmap_focus = state.shadow_focus
-                        }
-                        if entry := push_bitmap(render_group); entry != nil {
-                            entry.bitmap = state.player[entity.facing_index]
-                            entry.bitmap_focus = state.player_focus[entity.facing_index]
-                        }
+                        push_bitmap(render_group, state.shadow, color = {0, 0, 0, shadow_alpha})
+                        push_bitmap(render_group, state.player[entity.facing_index])
                         push_hitpoints(render_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
@@ -718,15 +697,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     make_entity_nonspatial(&entity)
                 }
                 
-                if entry := push_bitmap(render_group, alpha = shadow_alpha); entry != nil {
-                    entry.bitmap = state.shadow
-                    entry.bitmap_focus = state.shadow_focus
-                }
-                if entry := push_bitmap(render_group); entry != nil {
-                    entry.bitmap = state.sword
-                }
+                push_bitmap(render_group, state.shadow, color = {0, 0, 0, shadow_alpha})
+                push_bitmap(render_group, state.sword)
 
-            case .Familiar:
+            case .Familiar: 
                 closest_hero: ^Entity
                 closest_hero_dsq := square(10)
 
@@ -759,24 +733,12 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                if entry := push_bitmap(render_group, alpha = 1 - shadow_alpha/2 * (coeff+1)); entry != nil {
-                    entry.bitmap = state.shadow
-                    entry.bitmap_focus = state.shadow_focus
-                }
-                if entry := push_bitmap(render_group, offset = {0, 1+z, 0}, alpha = 0.5); entry != nil {
-                    entry.bitmap = state.player[entity.facing_index]
-                    entry.bitmap_focus = state.player_focus[entity.facing_index]
-                }
+                push_bitmap(render_group, state.shadow, color = {0, 0, 0, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, state.player[entity.facing_index], offset = {0, 1+z, 0}, color = {0, 0, 0, 0.5})
 
             case .Monster:
-                if entry := push_bitmap(render_group, alpha = shadow_alpha); entry != nil {
-                    entry.bitmap = state.shadow
-                    entry.bitmap_focus = state.shadow_focus
-                }
-                if entry := push_bitmap(render_group); entry != nil {
-                    entry.bitmap = state.monster[1]
-                    entry.bitmap_focus = state.monster_focus[1]
-                }
+                push_bitmap(render_group, state.shadow, color = {0, 0, 0, shadow_alpha})
+                push_bitmap(render_group, state.monster[1])
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
@@ -800,7 +762,7 @@ when false {
             basis.p = get_entity_ground_point(&entity)
         }
     }
-when false {
+when !false {
     map_color := [?]v4{Red, Green, Blue}
    
     for it, it_index in tran_state.envs {
@@ -832,7 +794,7 @@ when !true {
     disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
 }
     origin := screen_center
-    scale :: 200
+    scale :: 100
     x_axis := scale * v2{cos(angle), sin(angle)}
     y_axis := perpendicular(x_axis)
     
@@ -863,9 +825,6 @@ when !true {
         }
     }
 
-    when false {
-        saturation(render_group, cos(state.time*4) + 1 * 0.5)
-    }
 }
     render_to_output(render_group, buffer)
             
@@ -950,7 +909,7 @@ make_sphere_diffuse_map :: proc(buffer: LoadedBitmap, c := v2{1,1}) {
                 alpha = 1
             }
             alpha *= 255
-            base_color : v3 = 0
+            base_color: v3 = 0
             color := V4(alpha * base_color, alpha)
             
             dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
@@ -993,14 +952,13 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
             series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
             
-            for _ in 0..<10 {
+            // TODO(viktor): since the switch to y-is-up rendering this has seams near the edges
+            for _ in 0..<20 {
                 stamp  := random_choice(&series, state.grass[:])^
                 offset := random_unilateral_2(&series, f32) * buffer_dim
                 p := center + offset
                 
-                if entry := push_bitmap(render_group, offset = V3(p, 0)); entry != nil {
-                    entry.bitmap = stamp
-                }
+                push_bitmap(render_group, stamp, offset = V3(p, 0))
             }
         }
     }
@@ -1204,7 +1162,7 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> (result: LoadedBitmap) {
+DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_focus_value := v2{}) -> (result: LoadedBitmap) {
     contents := read_entire_file(file_name)
 
     BMPHeader :: struct #packed {
@@ -1290,7 +1248,9 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
             height = header.height, 
             start  = 0,
             pitch  = header.width,
+            focus  = topdown_focus_value - vec_cast(f32, i32(0), header.height-1)
         }
+
         when false {
             result.start = header.width * (header.height-1)
             result.pitch = -result.pitch
