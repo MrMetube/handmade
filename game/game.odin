@@ -103,7 +103,9 @@ LoadedBitmap :: struct {
     width, height: i32, 
     
     start, pitch: i32,
-    focus: v2,
+    
+    align_percentage: v2,
+    width_over_height: f32,
 }
 
 GameInputButton :: struct {
@@ -179,8 +181,6 @@ GameState :: struct {
     
     shadow_focus: [2]i32,
     player_focus, monster_focus: [2][2]i32,
-
-    meters_to_pixels, pixels_to_meters: f32,
 
     collision_rule_hash: [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
@@ -311,11 +311,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         add_stored_entity(state, .Nil, null_position())
 
         state.typical_floor_height = 3
-        state.meters_to_pixels = 32
-        state.pixels_to_meters = 1 / state.meters_to_pixels
         
         world := state.world
-        chunk_dim_in_meters := state.pixels_to_meters * ground_buffer_size
+        // TODO(viktor): REMOVE THIS
+        pixels_to_meters :: 1.0 / 42.0
+        chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
         init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
         
 
@@ -326,9 +326,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.wall_collision          = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters, state.typical_floor_height})
         state.sword_collision         = make_simple_grounded_collision(state, {0.5, 1, 0.1})
         state.stairs_collision        = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters * 2, state.typical_floor_height + 0.1})
-        state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1})
-        state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1})
-        state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 0.5})
+        state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1.2})
+        state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1.5})
+        state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 1})
         state.standart_room_collision = make_simple_grounded_collision(state, {tile_size_in_meters * cast(f32) tiles_per_screen.x, tile_size_in_meters * cast(f32) tiles_per_screen.y, state.typical_floor_height * 0.9})
 
         //
@@ -356,7 +356,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         created_stair: b32
         for _ in u32(0) ..< 200 {
-            choice := random_choice(&series, 4)
+            when false {
+                choice := random_choice(&series, 4)
+            } else {
+                choice := 3
+            }
             
             created_stair = false
             switch(choice) {
@@ -403,8 +407,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ))
                     } else if need_to_place_stair {
                         add_stairs(state, chunk_position_from_tile_positon(world, 
-                            random_between_i32(&series, 5, 10) + screen_col * tiles_per_screen.x, 
-                            random_between_i32(&series, 2, 5) + screen_row * tiles_per_screen.y, 
+                            random_between_i32(&series, 2, 14) + screen_col * tiles_per_screen.x, 
+                            random_between_i32(&series, 3, 5) + screen_row * tiles_per_screen.y, 
                             stair_down ? tile_z-1 : tile_z,
                         ))
                         need_to_place_stair = false
@@ -565,26 +569,28 @@ when !true {
     
     // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
-    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)), state.meters_to_pixels)
+    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)))
     
     clear(render_group, DarkGreen)
     
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
             bitmap := ground_buffer.bitmap
-            bitmap.focus = vec_cast(f32, bitmap.width, bitmap.height) * 0.5
+            bitmap.align_percentage = 0.5
             
             offset := world_difference(world, ground_buffer.p, state.camera_p)
             basis := push(&tran_state.arena, RenderBasis)
             render_group.default_basis = basis
             basis.p = offset
-            push_bitmap(render_group, bitmap)
+            push_bitmap(render_group, bitmap, 1)
         }
     }
     
-    screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * state.pixels_to_meters
+    
+    // TODO(viktor): REMOVE THIS
+    pixels_to_meters :: 1.0 / 42.0
+    screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * pixels_to_meters
     camera_bounds := rectangle_center_diameter(v3{0, 0, -0.5 * state.typical_floor_height}, V3(screen_dim_in_meters, 4 * state.typical_floor_height))
-    push_rectangle_outline(render_group, screen_dim_in_meters*0.9, 0, Red, 0.2)
     if false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
@@ -670,7 +676,7 @@ when !true {
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Wall:
-                push_bitmap(render_group, state.wall)
+                push_bitmap(render_group, state.wall, 1.5)
     
             case .Hero:
                 for &con_hero in state.controlled_heroes {
@@ -684,8 +690,8 @@ when !true {
                         move_spec.speed = 50
                         ddp = con_hero.ddp
 
-                        push_bitmap(render_group, state.shadow, color = {1, 1, 1, shadow_alpha})
-                        push_bitmap(render_group, state.player[entity.facing_index])
+                        push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                        push_bitmap(render_group, state.player[entity.facing_index], 1.2)
                         push_hitpoints(render_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
@@ -714,8 +720,8 @@ when !true {
                     make_entity_nonspatial(&entity)
                 }
                 
-                push_bitmap(render_group, state.shadow, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, state.sword)
+                push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, state.sword, 0.1)
 
             case .Familiar: 
                 closest_hero: ^Entity
@@ -750,12 +756,12 @@ when false {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, state.shadow, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
-                push_bitmap(render_group, state.player[entity.facing_index], offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
+                push_bitmap(render_group, state.shadow, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, state.player[entity.facing_index], 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                push_bitmap(render_group, state.shadow, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, state.monster[1])
+                push_bitmap(render_group, state.shadow, 0.75, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, state.monster[1], 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
@@ -843,7 +849,10 @@ when false {
 
 }
     render_to_output(render_group, buffer)
-            
+    
+    // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
+    // can know about the location of the camera at the end of the frame so there isn't
+    // a frame of lag in camera updating compared to the hero.       
     end_sim(camera_sim_region, state)
     
     end_temporary_memory(sim_memory)
@@ -949,7 +958,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     ground_memory := begin_temporary_memory(&tran_state.arena)
     defer end_temporary_memory(ground_memory)
     
-    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)), 1)
+    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)))
     defer render_to_output(render_group, ground_buffer.bitmap)
     
     buffer := ground_buffer.bitmap
@@ -973,7 +982,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
                 stamp  := random_choice(&series, state.grass[:])^
                 offset := random_unilateral_2(&series, f32) * buffer_dim
                 p := center + offset 
-                push_bitmap(render_group, stamp, offset = V3(p, 0))
+                push_bitmap(render_group, stamp, 1, offset = V3(p, 0))
             }
         }
     }
@@ -1178,10 +1187,10 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
 }
 
 @(private="file")
-_UNSET_FOCUS :: v2{-1,-1}
-DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_focus_value := _UNSET_FOCUS) -> (result: LoadedBitmap) {
+_UNSET_ALIGNMENT :: v2{-1,-1}
+DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_alignment_value := _UNSET_ALIGNMENT) -> (result: LoadedBitmap) {
     contents := read_entire_file(file_name)
-
+    
     BMPHeader :: struct #packed {
         file_type      : [2]u8,
         file_size      : u32,
@@ -1258,6 +1267,9 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
                 p^ = vec_cast(u8, texel + 0.5)
             }
         }
+        
+        meters_to_pixels :: 42.0
+        pixels_to_meters :: 1.0 / meters_to_pixels
 
         result = {
             memory = pixels, 
@@ -1265,13 +1277,16 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
             height = header.height, 
             start  = 0,
             pitch  = header.width,
+            width_over_height = safe_ratio_0(cast(f32) header.width, cast(f32) header.height),
         }
         
-        topdown_focus_value := topdown_focus_value
-        if topdown_focus_value == _UNSET_FOCUS {
-            topdown_focus_value = vec_cast(f32, result.width, result.height) * 0.5
+        topdown_alignment_value := topdown_alignment_value
+        if topdown_alignment_value == _UNSET_ALIGNMENT {
+            topdown_alignment_value = vec_cast(f32, result.width, result.height) * 0.5
         }
-        result.focus = topdown_focus_value - vec_cast(f32, i32(0), header.height-1)
+        
+        align := topdown_alignment_value - vec_cast(f32, i32(0), result.height-1)
+        result.align_percentage = safe_ratio_0(align, vec_cast(f32, result.width, result.height))
 
         when false {
             result.start = header.width * (header.height-1)

@@ -9,9 +9,10 @@ import "core:fmt"
         (meaning that the first row is the bottom-most row when viewed on 
         screen).
         
-    3) Unless otherwise specified, all inputs to the renderer are in world
-        coordinate ("meters"), NOT pixels. Anything that is in pixel values 
-        will be explicitly marked as such.
+    3) It is mandatory that all inputs to the renderer are in world
+        coordinate ("meters"), NOT pixels. If for some reason something
+        absolutely has to be specified in pixels, that will be explicitly
+        marked in the API, but this should occur exceedingly sparingly.
         
     4) Z is a special axis, because it is broken up into discrete slices,
         and the renderer actually understands these slices(potentially).
@@ -27,7 +28,6 @@ import "core:fmt"
 
 RenderGroup :: struct {
     default_basis:    ^RenderBasis,
-    meters_to_pixels: f32,
     
     push_buffer:      []u8,
     push_buffer_size: u32,
@@ -61,6 +61,7 @@ RenderGroupEntryClear :: struct {
 RenderGroupEntryBitmap :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
+    size:   v2,
     color:  v4,
     bitmap: LoadedBitmap,
 }
@@ -81,11 +82,10 @@ RenderGroupEntryCoordinateSystem :: struct {
 }
 
 
-make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, meters_to_pixels: f32) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
     result.push_buffer = push(arena, u8, max_push_buffer_size)
     
-    result.meters_to_pixels = meters_to_pixels
     result.push_buffer_size = 0
     
     result.default_basis = push(arena, RenderBasis)
@@ -94,6 +94,26 @@ make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, meters_to_pi
     result.global_alpha = 1
     
     return result
+}
+
+get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_size:v2, meters_to_pixels: f32) -> (position: v2, scale: f32, valid: b32) {
+    focal_length                 :: 6.0
+    camera_distance_above_target :: 5.0
+    near_clip_plane              :: 0.2
+    base_p                       := entry.basis.p
+    distance_to_p_z              := camera_distance_above_target - base_p.z
+    
+    if distance_to_p_z > near_clip_plane {
+        raw := V3(base_p.xy + entry.offset.xy, 1)
+        projected := focal_length * raw / distance_to_p_z
+        
+        screen_center := screen_size * 0.5
+        position = screen_center + meters_to_pixels * projected.xy
+        scale    = meters_to_pixels * projected.z
+        valid    = true
+    }
+    
+    return position, scale, valid
 }
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
@@ -113,17 +133,20 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, offset:= v3{}, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryBitmap) {
+push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset:= v3{}, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryBitmap) {
     result = push_render_element(group, RenderGroupEntryBitmap)
     alpha := v4{1,1,1, group.global_alpha}
     
     if result != nil {
-        result.bitmap     = bitmap
         result.basis      = group.default_basis
+        result.bitmap     = bitmap
+        result.offset     = offset
         result.color      = color * alpha
-        result.offset     = offset * group.meters_to_pixels
-        result.offset.x -= bitmap.focus.x
-        result.offset.y += bitmap.focus.y
+        result.size       = v2{bitmap.width_over_height, 1} * height
+        
+        align := bitmap.align_percentage * result.size
+        result.offset.x -= align.x
+        result.offset.y += align.y
     }
     
     return result
@@ -136,9 +159,9 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3={},
     if entry != nil {
         entry.basis     = group.default_basis
         entry.color     = color * alpha
-        entry.offset.xy = group.meters_to_pixels * (offset.xy + entry.dim * 0.5)
+        entry.offset.xy = (offset.xy + entry.dim * 0.5)
         entry.offset.z  = offset.z
-        entry.dim       = dim * group.meters_to_pixels
+        entry.dim       = dim
     }
 }
 
@@ -185,31 +208,11 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (position: v2, scale: f32, valid: b32) {
-    // TODO(viktor): The values of 20 and 20 seem wrong - did I mess something up here?
-    base_p                       := group.meters_to_pixels * entry.basis.p
-    focal_length                 := group.meters_to_pixels * 20
-    camera_distance_above_target := group.meters_to_pixels * 20
-    near_clip_plane              := group.meters_to_pixels * 0.2
-    distance_to_p_z              := camera_distance_above_target - base_p.z
-    
-    if distance_to_p_z > near_clip_plane {
-        raw := V3(base_p.xy + entry.offset.xy, 1)
-        projected := focal_length * raw / distance_to_p_z
-        
-        // :ZHandling
-        position = screen_center + projected.xy
-        scale    = projected.z
-        valid    = true
-    }
-    
-    return position, scale, valid
-}
-
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
     screen_size      := vec_cast(f32, target.width, target.height)
     screen_center    := screen_size * 0.5
-    pixels_to_meters := 1 / group.meters_to_pixels
+    meters_to_pixels := screen_size.x / 20
+    pixels_to_meters := 1.0 / meters_to_pixels
     
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
@@ -228,7 +231,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
             
             // TODO(viktor): handle invalid
-            p, scale, valid := get_render_entity_basis_p(group, entry, screen_center)
+            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size, meters_to_pixels)
             draw_rectangle(target, p, scale * entry.dim, entry.color)
 
         case RenderGroupEntryBitmap:
@@ -236,13 +239,13 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
         
             // TODO(viktor): handle invalid
-            p, scale, valid := get_render_entity_basis_p(group, entry, screen_center)
+            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size, meters_to_pixels)
             when true {
                 draw_rectangle_slowly(target,
-                    p, {scale * cast(f32) entry.bitmap.width, 0}, {0, scale * cast(f32) entry.bitmap.height}, 
+                    p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
                     entry.bitmap, {}, entry.color, 
                     {}, {}, {},
-                    pixels_to_meters,
+                    pixels_to_meters
                 )
             } else {
                 draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
@@ -256,7 +259,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
                 entry.origin, entry.x_axis, entry.y_axis, 
                 entry.texture, entry.normal, entry.color, 
                 entry.top, entry.middle, entry.bottom,
-                pixels_to_meters,
+                pixels_to_meters
             )
             
             p := entry.origin
