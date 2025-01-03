@@ -66,7 +66,6 @@ SimRegion :: struct {
     entities: []Entity,
     
     // TODO(viktor): Do I really want a hash for this?
-    // NOTE(viktor): Must be a power of two
     sim_entity_hash: [4096]SimEntityHash,
 }
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
@@ -94,7 +93,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(world, region.origin, region.bounds.max)
-    // TODO(viktor): this needs to be accelarated, but man, this CPU is crazy fast
+    // TODO(viktor): @Speed this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {

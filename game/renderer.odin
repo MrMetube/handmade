@@ -185,16 +185,25 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (position: v2, scale: f32) {
-    base_p  := group.meters_to_pixels * entry.basis.p
-    total_z := entry.offset.z + base_p.z
-    z_fudge := 1 + 0.0015 * base_p.z
+get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_center:v2) -> (position: v2, scale: f32, valid: b32) {
+    // TODO(viktor): The values of 20 and 20 seem wrong - did I mess something up here?
+    base_p                       := group.meters_to_pixels * entry.basis.p
+    focal_length                 := group.meters_to_pixels * 20
+    camera_distance_above_target := group.meters_to_pixels * 20
+    near_clip_plane              := group.meters_to_pixels * 0.2
+    distance_to_p_z              := camera_distance_above_target - base_p.z
     
-    // :ZHandling
-    position = screen_center + z_fudge * (entry.offset.xy + base_p.xy) /* + {0, total_z} */
-    scale    = z_fudge
+    if distance_to_p_z > near_clip_plane {
+        raw := V3(base_p.xy + entry.offset.xy, 1)
+        projected := focal_length * raw / distance_to_p_z
+        
+        // :ZHandling
+        position = screen_center + projected.xy
+        scale    = projected.z
+        valid    = true
+    }
     
-    return position, scale
+    return position, scale, valid
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
@@ -217,15 +226,17 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
-        
-            p, scale := get_render_entity_basis_p(group, entry, screen_center)
+            
+            // TODO(viktor): handle invalid
+            p, scale, valid := get_render_entity_basis_p(group, entry, screen_center)
             draw_rectangle(target, p, scale * entry.dim, entry.color)
 
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
         
-            p, scale := get_render_entity_basis_p(group, entry, screen_center)
+            // TODO(viktor): handle invalid
+            p, scale, valid := get_render_entity_basis_p(group, entry, screen_center)
             when true {
                 draw_rectangle_slowly(target,
                     p, {scale * cast(f32) entry.bitmap.width, 0}, {0, scale * cast(f32) entry.bitmap.height}, 
@@ -306,31 +317,6 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
             pixel = srgb_255_to_linear_1(pixel)
             
             result := (1 - texel.a) * pixel + texel
-            result = linear_1_to_srgb_255(result)
-            
-            dst^ = vec_cast(u8, result + 0.5)
-        }
-    }
-}
-
-change_saturation :: proc(buffer: LoadedBitmap, level: f32 ) {
-    dst_row: i32
-    for _ in 0..< buffer.height  {
-        dst_index := dst_row
-        defer dst_row += buffer.pitch
-        
-        for _ in 0..< buffer.width  {
-            dst := &buffer.memory[dst_index]
-            defer dst_index += 1
-            
-            pixel := vec_cast(f32, dst^)
-            pixel = srgb_255_to_linear_1(pixel)
-            
-            // TODO(viktor): convert to hsv, adjust and convert back
-            average := (1.0/3.0) * pixel.r + pixel.g + pixel.b
-            delta := pixel.rgb - average
-            
-            result := V4(average + level * delta, pixel.a)
             result = linear_1_to_srgb_255(result)
             
             dst^ = vec_cast(u8, result + 0.5)
