@@ -178,6 +178,14 @@ clamp_01_4 :: #force_inline proc(value:v4) -> (result:v4) {
     return result
 }
 
+clamp_01_to_range :: #force_inline proc(min, t, max: f32) -> (result: f32) {
+    range := max - min
+    if range != 0 {
+        result = clamp_01((t-min) / range)
+    }
+    return result
+}
+
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Vector operations
 // ---------------------- ---------------------- ----------------------

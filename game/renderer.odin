@@ -31,6 +31,8 @@ RenderGroup :: struct {
     
     push_buffer:      []u8,
     push_buffer_size: u32,
+
+    global_alpha: f32,
 }
 
 EnvironmentMap :: struct {
@@ -89,6 +91,8 @@ make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, meters_to_pi
     result.default_basis = push(arena, RenderBasis)
     result.default_basis.p = {0,0,0}
     
+    result.global_alpha = 1
+    
     return result
 }
 
@@ -111,24 +115,27 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
 
 push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, offset:= v3{}, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryBitmap) {
     result = push_render_element(group, RenderGroupEntryBitmap)
+    alpha := v4{1,1,1, group.global_alpha}
     
     if result != nil {
         result.bitmap     = bitmap
         result.basis      = group.default_basis
-        result.color      = color
+        result.color      = color * alpha
         result.offset     = offset * group.meters_to_pixels
-        result.offset.xy += bitmap.focus
+        result.offset.x -= bitmap.focus.x
+        result.offset.y += bitmap.focus.y
     }
     
     return result
 }
 
-push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color:= v4{1,1,1,1}) {
+push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3={}, color:= v4{1,1,1,1}) {
     entry := push_render_element(group, RenderGroupEntryRectangle)
+    alpha := v4{1,1,1, group.global_alpha}
 
     if entry != nil {
         entry.basis     = group.default_basis
-        entry.color     = color
+        entry.color     = color * alpha
         entry.offset.xy = group.meters_to_pixels * (offset.xy + entry.dim * 0.5)
         entry.offset.z  = offset.z
         entry.dim       = dim * group.meters_to_pixels
@@ -194,7 +201,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
     screen_size      := vec_cast(f32, target.width, target.height)
     screen_center    := screen_size * 0.5
     pixels_to_meters := 1 / group.meters_to_pixels
-
+    
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
         base_address += size_of(RenderGroupEntryHeader)

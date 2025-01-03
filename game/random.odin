@@ -22,6 +22,11 @@ next_random_u32 :: proc(series: ^RandomSeries) -> (result: u32) {
     return result
 }
 
+random_bool :: #force_inline proc(series: ^RandomSeries) -> (result: b32) {
+    result = (next_random_u32(series) & 1) == 0
+    return result
+}
+
 random_choice :: proc { random_choice_integer_0_max, random_choice_integer_min_max, random_choice_data }
 random_choice_integer_0_max :: #force_inline proc(series: ^RandomSeries, max: u32) -> (result: u32) {
     result = next_random_u32(series) % max

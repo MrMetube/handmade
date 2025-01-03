@@ -195,8 +195,6 @@ GameState :: struct {
     wall_collision: ^EntityCollisionVolumeGroup,
     
     time: f32,
-    
-    z_offset: f32,
 }
 
 TransientState :: struct {
@@ -291,11 +289,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , {0   , -2})
-        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , {   6, 28})
-        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", {  -6, 28})
-        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , { -13, 22})
-        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , {  16, 22})
+        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , {  22, 14})
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , {  16, 60})
+        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", {  28, 60})
+        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , {  46, 44})
+        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , {  18, 44})
         state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
         state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
@@ -358,21 +356,20 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         created_stair: b32
         for _ in u32(0) ..< 200 {
-            choice := random_choice(&series, created_stair ? 2 : 3)
-            // choice := random_choice(&series, 2)
+            choice := random_choice(&series, 4)
             
             created_stair = false
             switch(choice) {
-            case 0: door_right = true
-            case 1: door_top   = true
-            case 2:
-                created_stair = true
-                if tile_z == 1 {
-                    stair_down = true
-                } else {
-                    stair_up = true
-                }
+            case 0: door_right  = true
+            case 1: door_top    = true
+            case 2: stair_up    = true
+            case 3: stair_down  = true
+            // TODO(viktor): this wont work for now, but whatever
+            case 4: door_left   = true
+            case 5: door_bottom = true
             }
+            
+            created_stair = stair_down || stair_up
             need_to_place_stair := created_stair
             
             add_standart_room(state, chunk_position_from_tile_positon(world, 
@@ -406,8 +403,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ))
                     } else if need_to_place_stair {
                         add_stairs(state, chunk_position_from_tile_positon(world, 
-                            5 + screen_col * tiles_per_screen.x, 
-                            3 + screen_row * tiles_per_screen.y, 
+                            random_between_i32(&series, 5, 10) + screen_col * tiles_per_screen.x, 
+                            random_between_i32(&series, 2, 5) + screen_row * tiles_per_screen.y, 
                             stair_down ? tile_z-1 : tile_z,
                         ))
                         need_to_place_stair = false
@@ -415,24 +412,22 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
 
                 }
             }
-
+            
             door_left   = door_right
             door_bottom = door_top
-
-            if created_stair {
-                swap(&stair_up, &stair_down)
-            } else {
-                stair_up   = false
-                stair_down = false
-            }
-
             door_right  = false
             door_top    = false
-            
+
+            stair_up   = false
+            stair_down = false
+
             switch(choice) {
             case 0: screen_col += 1
             case 1: screen_row += 1
-            case 2: tile_z = tile_z == screen_base.z+1 ? screen_base.z : screen_base.z+1
+            case 2: tile_z += 1
+            case 3: tile_z -= 1
+            case 4: screen_col -= 1
+            case 5: screen_row -= 1
             }
         }
 
@@ -557,14 +552,6 @@ when !true {
                 con_hero.dsword =  {1, 0}
             }
 } else {
-            zoom_rate: f32
-            if controller.button_up.ended_down {
-                zoom_rate += 3
-            }
-            if controller.button_down.ended_down {
-                zoom_rate -= 3
-            }
-            state.z_offset += zoom_rate * input.delta_time
 }
         }
     }
@@ -590,13 +577,13 @@ when !true {
             offset := world_difference(world, ground_buffer.p, state.camera_p)
             basis := push(&tran_state.arena, RenderBasis)
             render_group.default_basis = basis
-            basis.p = offset + v3{0, 0, state.z_offset}
+            basis.p = offset
             push_bitmap(render_group, bitmap)
         }
     }
     
     screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * state.pixels_to_meters
-    camera_bounds := rectangle_center_diameter(v3{}, v3{screen_dim_in_meters.x, screen_dim_in_meters.y, 0})
+    camera_bounds := rectangle_center_diameter(v3{0, 0, -0.5 * state.typical_floor_height}, V3(screen_dim_in_meters, 4 * state.typical_floor_height))
     push_rectangle_outline(render_group, screen_dim_in_meters*0.9, 0, Red, 0.2)
     if false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
@@ -639,19 +626,38 @@ when !true {
             }
         }
     }
-
+    
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // TODO(viktor): by how much should we expand the sim region?
-    sim_bounds := rectangle_add_radius(camera_bounds, 15)
-    camera_sim_region := begin_sim(&tran_state.arena, state, world, state.camera_p, sim_bounds, input.delta_time)
+    // TODO(viktor): do we want to simulate upper floors, etc?
+    sim_bounds := rectangle_add_radius(camera_bounds, v3{15, 15, 0})
+    sim_origin := state.camera_p
+    camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
+    
+    render_group.global_alpha = 1
+    camera_p := world_difference(world, state.camera_p, sim_origin)
 
-    for &entity in camera_sim_region.entities {
+    for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
 
+            // TODO(viktor): Probably indicates we want to separate update adn rednder for entities sometime soon?
+            camera_relative_ground := get_entity_ground_point(&entity) - camera_p
+            fade_top_end      :=  0.75 * state.typical_floor_height
+            fade_top_start    :=  0.5  * state.typical_floor_height
+            fade_bottom_start := -1    * state.typical_floor_height
+            fade_bottom_end   := -1.5  * state.typical_floor_height 
+            render_group.global_alpha = 1
+            if camera_relative_ground.z > fade_top_start {
+                render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
+            } else if camera_relative_ground.z < fade_bottom_start {
+                render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
+            }
+            
+
             // TODO(viktor): this is incorrect, should be computed after update
             shadow_alpha := 1 - 0.5 * entity.p.z;
-            if(shadow_alpha < 0) {
+            if shadow_alpha < 0 {
                 shadow_alpha = 0.0;
             }
             
@@ -753,8 +759,8 @@ when false {
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
-                push_rectangle(render_group, entity.walkable_dim, 0, Blue)
-                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height * world.chunk_dim_meters.z}, Blue * {1,1,0.6,0.7})
+                push_rectangle(render_group, entity.walkable_dim, color = Blue)
+                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height}, color = Orange * {1, 1, 1, 0.5})
             
             case .Space: 
                 when !false {
@@ -768,10 +774,9 @@ when false {
                 move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
-            basis.p = get_entity_ground_point(&entity) + v3{0, 0, state.z_offset}
+            basis.p = get_entity_ground_point(&entity)
         }
     }
-    
     
 when false {
     map_color := [?]v4{Red, Green, Blue}
@@ -1172,7 +1177,9 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_focus_value := v2{}) -> (result: LoadedBitmap) {
+@(private="file")
+_UNSET_FOCUS :: v2{-1,-1}
+DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_focus_value := _UNSET_FOCUS) -> (result: LoadedBitmap) {
     contents := read_entire_file(file_name)
 
     BMPHeader :: struct #packed {
@@ -1258,8 +1265,13 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
             height = header.height, 
             start  = 0,
             pitch  = header.width,
-            focus  = topdown_focus_value - vec_cast(f32, i32(0), header.height-1)
         }
+        
+        topdown_focus_value := topdown_focus_value
+        if topdown_focus_value == _UNSET_FOCUS {
+            topdown_focus_value = vec_cast(f32, result.width, result.height) * 0.5
+        }
+        result.focus = topdown_focus_value - vec_cast(f32, i32(0), header.height-1)
 
         when false {
             result.start = header.width * (header.height-1)

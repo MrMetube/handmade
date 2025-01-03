@@ -65,18 +65,17 @@ SimRegion :: struct {
     entity_count: EntityIndex,
     entities: []Entity,
     
-    // ground_base_z: f32,
-    
     // TODO(viktor): Do I really want a hash for this?
     // NOTE(viktor): Must be a power of two
     sim_entity_hash: [4096]SimEntityHash,
 }
+// NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
+#assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
 begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     // TODO(viktor): make storedEntities part of world
     region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
-    
     region.entities = push(sim_arena, Entity, MaxEntityCount)
     
     // TODO(viktor): Try to make these get enforced more rigorously
@@ -86,11 +85,11 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     region.max_entity_radius   = 5
     region.max_entity_velocity = 30
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
-    UpdateSafetyMarginZ :: 2 // TODO(viktor): what should this be?
+    UpdateSafetyMarginZ :: 1 // TODO(viktor): what should this be?
     
     region.world = world
     region.origin = origin
-    region.updatable_bounds = rectangle_add_radius(bounds, update_safety_margin)
+    region.updatable_bounds = rectangle_add_radius(bounds, v3{update_safety_margin, update_safety_margin, 0})
     region.bounds = rectangle_add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
     
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)

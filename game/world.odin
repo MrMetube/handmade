@@ -2,14 +2,20 @@ package game
 
 import "core:fmt"
 
-WorldPosition :: struct {
-    // TODO(viktor): It seems like we have to store ChunkX/Y/Z with each
-    // entity because even though the sim region gather doesn't need it
-    // at first, and we could get by without it, but entity references pull
-    // in entities WITHOUT going through their world_chunk, and thus
-    // still need to know the ChunkX/Y/Z
+World :: struct {
+    chunk_dim_meters: v3,
+
+    // TODO(viktor): chunk_hash should probably switch to pointers IF
+    // tile_entity_blocks continue to be stored en masse in the tile chunk!
+    chunk_hash: [4096]Chunk,
+    first_free: ^WorldEntityBlock,
+}
+
+Chunk :: struct {
     chunk: [3]i32,
-    offset: v3,
+
+    first_block: WorldEntityBlock,
+    next_in_hash: ^Chunk,
 }
 
 // TODO(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
@@ -19,22 +25,14 @@ WorldEntityBlock :: struct {
     next: ^WorldEntityBlock,
 }
 
-Chunk :: struct {
+WorldPosition :: struct {
+    // TODO(viktor): It seems like we have to store ChunkX/Y/Z with each
+    // entity because even though the sim region gather doesn't need it
+    // at first, and we could get by without it, but entity references pull
+    // in entities WITHOUT going through their world_chunk, and thus
+    // still need to know the ChunkX/Y/Z
     chunk: [3]i32,
-
-    first_block: WorldEntityBlock,
-
-    next_in_hash: ^Chunk,
-}
-
-World :: struct {
-    chunk_dim_meters: v3,
-
-    // TODO(viktor): chunk_hash should probably switch to pointers IF
-    // tile_entity_blocks continue to be stored en masse in the tile chunk!
-    chunk_hash: [4096]Chunk,
-
-    first_free: ^WorldEntityBlock,
+    offset: v3,
 }
 
 null_position :: #force_inline proc() -> (result:WorldPosition) {
