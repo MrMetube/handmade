@@ -8,3 +8,5 @@
 *.pdb
 *.test
 *.input
+
+lock.tmp

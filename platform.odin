@@ -258,7 +258,7 @@ main :: proc() {
     {
         base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
 
-        permanent_storage_size := cast(u64) megabytes(256)
+        permanent_storage_size := megabytes(256)
         transient_storage_size := gigabytes(1)
         total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
 

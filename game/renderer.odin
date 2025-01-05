@@ -55,7 +55,7 @@ RenderBasis :: struct {
 // TODO(viktor): Why always prefix rendergroup?
 // NOTE(viktor): RenderGroupEntry is a "compact discriminated union"
 RenderGroupEntryHeader :: struct {
-    type: typeid
+    type: typeid,
 }
 
 RenderGroupEntryBasis :: struct {
@@ -79,7 +79,7 @@ RenderGroupEntryRectangle :: struct {
     using rendering_basis: RenderGroupEntryBasis,
     
     color: v4,
-    dim:   v2,
+    size:  v2,
 }
 
 RenderGroupEntryCoordinateSystem :: struct {
@@ -101,13 +101,13 @@ make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, resolution_p
     
     result.global_alpha = 1
     
+    monitor_width_in_meters                 :: 0.635
     result.game_camera.focal_length          = 0.6
     result.game_camera.distance_above_target = 8.0
         
     result.render_camera = result.game_camera
-    result.render_camera.distance_above_target = 38
+    // result.render_camera.distance_above_target = 38
     
-    monitor_width_in_meters :: 0.635
     result.meters_to_pixels_for_monitor = cast(f32) resolution_pixels.x * monitor_width_in_meters
     
     pixels_to_meters := 1 / result.meters_to_pixels_for_monitor
@@ -190,28 +190,28 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, hei
     return result
 }
 
-push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3={}, color:= v4{1,1,1,1}) {
+push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}) {
     entry := push_render_element(group, RenderGroupEntryRectangle)
     alpha := v4{1,1,1, group.global_alpha}
 
     if entry != nil {
         entry.basis     = group.default_basis
         entry.color     = color * alpha
-        entry.offset.xy = (offset.xy + entry.dim * 0.5)
+        entry.offset.xy = (offset.xy + entry.size * 0.5)
         entry.offset.z  = offset.z
-        entry.dim       = dim
+        entry.size      = size
     }
 }
 
-push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
-    // TODO(viktor):  this has gaps and overlaps, ew
+push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+    // TODO(viktor): there are rounding issues with draw_rectangle
     // NOTE(viktor): Top and Bottom
-    push_rectangle(group, {dim.x+thickness*2, thickness}, offset - {0, dim.y*0.5, 0}, color)
-    push_rectangle(group, {dim.x+thickness*2, thickness}, offset + {0, dim.y*0.5, 0}, color)
+    push_rectangle(group, offset - {0, size.y*0.5, 0}, {size.x+thickness, thickness}, color)
+    push_rectangle(group, offset + {0, size.y*0.5, 0}, {size.x+thickness, thickness}, color)
 
     // NOTE(viktor): Left and Right
-    push_rectangle(group, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color)
-    push_rectangle(group, {thickness, dim.y-thickness}, offset + {dim.x*0.5, 0, 0}, color)
+    push_rectangle(group, offset - {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
+    push_rectangle(group, offset + {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
@@ -233,7 +233,7 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
         for index in 0..<entity.hit_point_max {
             hit_point := entity.hit_points[index]
             color := hit_point.filled_amount == 0 ? Gray : Red
-            push_rectangle(group, health_size, {health_x, -offset_y, 0}, color)
+            push_rectangle(group, {health_x, -offset_y, 0}, health_size, color)
             health_x += spacing_between
         }
     }
@@ -271,20 +271,20 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             
             // TODO(viktor): handle invalid
             p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
-            draw_rectangle(target, p, scale * entry.dim, entry.color)
+            draw_rectangle(target, p, scale * entry.size, entry.color)
 
-        case RenderGroupEntryBitmap:
+            case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
         
             // TODO(viktor): handle invalid
             p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
-            when true {
+                when true {
                 draw_rectangle_slowly(target,
                     p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
                     entry.bitmap, {}, entry.color, 
                     {}, {}, {},
-                    pixels_to_meters
+                    pixels_to_meters,
                 )
             } else {
                 draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
@@ -298,7 +298,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
                 entry.origin, entry.x_axis, entry.y_axis, 
                 entry.texture, entry.normal, entry.color, 
                 entry.top, entry.middle, entry.bottom,
-                pixels_to_meters
+                pixels_to_meters,
             )
             
             p := entry.origin

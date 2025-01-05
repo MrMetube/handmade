@@ -289,11 +289,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , {  22, 14})
-        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , {  16, 60})
-        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", {  28, 60})
-        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , {  46, 44})
-        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , {  18, 44})
+        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , v2{  22, 14})
+        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , v2{  16, 60})
+        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", v2{  28, 60})
+        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , v2{  46, 44})
+        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , v2{  18, 44})
         state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
         state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
         // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
@@ -357,7 +357,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         created_stair: b32
         for room in u32(0) ..< 200 {
             when !false {
-                choice := random_choice(&series, 2)
+                choice := random_choice(&series, 3)
             } else {
                 choice := 3
             }
@@ -366,8 +366,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             switch(choice) {
             case 0: door_right  = true
             case 1: door_top    = true
-            case 2: stair_up    = true
-            case 3: stair_down  = true
+            case 2: stair_down  = true
+            case 3: stair_up    = true
             // TODO(viktor): this wont work for now, but whatever
             case 4: door_left   = true
             case 5: door_bottom = true
@@ -428,8 +428,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             switch(choice) {
             case 0: screen_col += 1
             case 1: screen_row += 1
-            case 2: tile_z += 1
-            case 3: tile_z -= 1
+            case 2: tile_z -= 1
+            case 3: tile_z += 1
             case 4: screen_col -= 1
             case 5: screen_row -= 1
             }
@@ -537,10 +537,11 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     con_hero.ddp.y -= 1
                 }
             }
-
+when false {
             if controller.start.ended_down {
                 con_hero.dz = 2
             }
+}
 when !true {
             con_hero.dsword = {}
             if controller.button_up.ended_down {
@@ -569,7 +570,7 @@ when !true {
     
     // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
-    render_group := make_render_group(&tran_state.arena, megabytes(4), {buffer.width, buffer.height})
+    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4), {buffer.width, buffer.height})
     
     clear(render_group, DarkGreen)
     
@@ -582,7 +583,12 @@ when !true {
             basis := push(&tran_state.arena, RenderBasis)
             render_group.default_basis = basis
             basis.p = offset
-            push_bitmap(render_group, bitmap, 1)
+            
+            ground_chunk_size := world.chunk_dim_meters.x
+            push_bitmap(render_group, bitmap, ground_chunk_size)
+            when false {
+                push_rectangle_outline(render_group, ground_chunk_size, 0, Yellow)
+            }
         }
     }
     
@@ -590,10 +596,10 @@ when !true {
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := rectangle_min_max(
         V3(screen_bounds.min, -0.5 * state.typical_floor_height), 
-        V3(screen_bounds.max, 4 * state.typical_floor_height)
+        V3(screen_bounds.max, 4 * state.typical_floor_height),
     )
 
-    if false {
+    {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -601,7 +607,6 @@ when !true {
             for y in min_p.chunk.y ..= max_p.chunk.y {
                 for x in min_p.chunk.x ..= max_p.chunk.x {
                     chunk_center := WorldPosition{ chunk = { x, y, z } }
-                    relative     := world_difference(world, chunk_center, state.camera_p)
                     
                     furthest_distance: f32 = -1
                     furthest: ^GroundBuffer
@@ -626,10 +631,6 @@ when !true {
                     if furthest != nil {
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
-                    
-                    when !false {
-                        push_rectangle_outline(render_group, world.chunk_dim_meters.xy, relative, Yellow)
-                    }
                 }
             }
         }
@@ -642,12 +643,15 @@ when !true {
     sim_origin := state.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
-    push_rectangle_outline(render_group, rectangle_get_diameter(screen_bounds),                         0, Red,   0.2)
-    push_rectangle_outline(render_group, rectangle_get_diameter(camera_sim_region.bounds).xy,           0, Blue,  0.2)
-    push_rectangle_outline(render_group, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, 0, Green, 0.2)
+    render_basis := push(&tran_state.arena, RenderBasis)
+    render_group.default_basis = render_basis
+    
+    push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Red,   0.2)
+    push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.bounds).xy,           Blue,  0.2)
+    push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, Green, 0.2)
     
     camera_p := world_difference(world, state.camera_p, sim_origin)
-    
+        
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
@@ -771,8 +775,8 @@ when false {
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Stairwell: 
-                push_rectangle(render_group, entity.walkable_dim, color = Blue)
-                push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height}, color = Orange * {1, 1, 1, 0.5})
+                push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
+                push_rectangle(render_group, {0, 0, state.typical_floor_height}, entity.walkable_dim, color = Orange * {1, 1, 1, 0.5})
             
             case .Space: 
                 when false {
@@ -869,12 +873,8 @@ when false {
 }
 
 make_pyramid_normal_map :: proc(bitmap: LoadedBitmap, roughness: f32) {
-    inv_size: v2 = 1 / (vec_cast(f32, bitmap.width, bitmap.height) - 1)
-    
     for y in 0..<bitmap.height {
         for x in 0..<bitmap.width {
-            bitmap_uv := inv_size * vec_cast(f32, x, y)
-            
             inv_x := bitmap.width - x
             InvSqrtTwo :: 1.0 / SqrtTwo
             normal: v3 = { 0, 0, InvSqrtTwo }
@@ -963,15 +963,21 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true)
 fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
     ground_memory := begin_temporary_memory(&tran_state.arena)
     defer end_temporary_memory(ground_memory)
+    
+    bitmap := &ground_buffer.bitmap
+    bitmap.align_percentage = 0.5
+    bitmap.width_over_height = 1
+    ground_buffer.p = p
+
     // TODO(viktor): how do we want to control our ground chunk resolution?
-    render_group := make_render_group(&tran_state.arena, megabytes(4), {1920, 1080})
+    // TODO(viktor): Need to be able to set an orthographic display mode here
+    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4), {1920, 1080})
     defer render_to_output(render_group, ground_buffer.bitmap)
     
-    buffer := ground_buffer.bitmap
-    ground_buffer.p = p
-    
-    draw_rectangle(buffer, 0, vec_cast(f32, buffer.width, buffer.height), 0)
-    buffer_dim := vec_cast(f32, buffer.width, buffer.height)
+    clear(render_group, Red)
+        
+    buffer_dim := state.world.chunk_dim_meters.xy
+    half_dim := buffer_dim * 0.5
     
     chunk_z := p.chunk.z
     for offset_y in i32(-1) ..= 1 {
@@ -986,9 +992,8 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             // TODO(viktor): since the switch to y-is-up rendering this has seams near the edges
             for _ in 0..<20 {
                 stamp  := random_choice(&series, state.grass[:])^
-                offset := random_unilateral_2(&series, f32) * buffer_dim
-                p := center + offset 
-                push_bitmap(render_group, stamp, 1, offset = V3(p, 0))
+                p := center + random_bilateral_2(&series, f32) * half_dim 
+                push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
             }
         }
     }
@@ -1192,9 +1197,13 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-@(private="file")
-_UNSET_ALIGNMENT :: v2{-1,-1}
-DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_alignment_value := _UNSET_ALIGNMENT) -> (result: LoadedBitmap) {
+DEBUG_load_bmp :: proc { DEBUG_load_bmp_centerer_alignment, DEBUG_load_bmp_custom_alignment }
+DEBUG_load_bmp_centerer_alignment :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> (result: LoadedBitmap) {
+    result = DEBUG_load_bmp_custom_alignment(read_entire_file, file_name, 0)
+    result.align_percentage = 0.5
+    return result
+}
+DEBUG_load_bmp_custom_alignment :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_alignment_value: v2) -> (result: LoadedBitmap) {
     contents := read_entire_file(file_name)
     
     BMPHeader :: struct #packed {
@@ -1261,7 +1270,7 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
                         ((c & green_mask) >> green_shift),
                         ((c & blue_mask)  >> blue_shift),
                         ((c & alpha_mask) >> alpha_shift),
-                    )
+                    ),
                 )
                 
                 texel = srgb_255_to_linear_1(texel)
@@ -1284,11 +1293,6 @@ DEBUG_load_bmp :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name
             start  = 0,
             pitch  = header.width,
             width_over_height = safe_ratio_0(cast(f32) header.width, cast(f32) header.height),
-        }
-        
-        topdown_alignment_value := topdown_alignment_value
-        if topdown_alignment_value == _UNSET_ALIGNMENT {
-            topdown_alignment_value = vec_cast(f32, result.width, result.height) * 0.5
         }
         
         align := topdown_alignment_value - vec_cast(f32, i32(0), result.height-1)
