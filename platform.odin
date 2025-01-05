@@ -258,13 +258,13 @@ main :: proc() {
     {
         base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
 
-        permanent_storage_size := megabytes(u64(256))
-        transient_storage_size := gigabytes(u64(1))
+        permanent_storage_size := cast(u64) megabytes(256)
+        transient_storage_size := gigabytes(1)
         total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
 
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         // TODO(viktor): why limit ourselves?
-        assert(total_size < gigabytes(uint(4)))
+        assert(cast(u64) total_size < gigabytes(4))
         state.game_memory_block = storage_ptr[:total_size]
 
         // TODO(viktor): TransientStorage needs to be broken up

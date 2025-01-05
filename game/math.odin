@@ -339,6 +339,16 @@ rectangle_min_dim_3 :: #force_inline proc(min, dim: v3) -> Rectangle3 {
     return { min, min + dim }
 }
 
+rectangle_min_max :: proc { rectangle_min_max_2, rectangle_min_max_3 }
+@(require_results)
+rectangle_min_max_2 :: #force_inline proc(min, max: v2) -> Rectangle2 {
+    return { min, max }
+}
+@(require_results)
+rectangle_min_max_3 :: #force_inline proc(min, max: v3) -> Rectangle3 {
+    return { min, max }
+}
+
 rectangle_center_diameter :: proc { rectangle_center_diameter_2, rectangle_center_diameter_3 }
 @(require_results)
 rectangle_center_diameter_2 :: #force_inline proc(center, diameter: v2) -> Rectangle2 {
@@ -357,6 +367,16 @@ rectangle_center_half_diameter_2 :: #force_inline proc(center, half_diameter: v2
 @(require_results)
 rectangle_center_half_diameter_3 :: #force_inline proc(center, half_diameter: v3) -> Rectangle3 {
     return { center - half_diameter, center + half_diameter }
+}
+
+rectangle_get_diameter :: proc { rectangle_get_diameter_2, rectangle_get_diameter_3 }
+@(require_results)
+rectangle_get_diameter_2 :: #force_inline proc(rec: Rectangle2) -> (result: v2) {
+    return rec.max - rec.min
+}
+@(require_results)
+rectangle_get_diameter_3 :: #force_inline proc(rec: Rectangle3) -> (result: v3) {
+    return rec.max - rec.min
 }
 
 rectangle_add_radius :: proc { rectangle_add_radius_2, rectangle_add_radius_3 }

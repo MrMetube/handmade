@@ -25,14 +25,22 @@ import "core:fmt"
     TODO(viktor): :ZHandling
 */
 
-
 RenderGroup :: struct {
-    default_basis:    ^RenderBasis,
-    
     push_buffer:      []u8,
     push_buffer_size: u32,
+    default_basis:    ^RenderBasis,
+    global_alpha:     f32,
+    
+    meters_to_pixels_for_monitor:    f32,
+    monitor_half_diameter_in_meters: v2,
+    
+    game_camera:   Camera,
+    render_camera: Camera,
+}
 
-    global_alpha: f32,
+Camera :: struct {
+    focal_length:          f32, // meters the player is sitting from their monitor
+    distance_above_target: f32,
 }
 
 EnvironmentMap :: struct {
@@ -44,6 +52,7 @@ RenderBasis :: struct {
     p: v3,
 }
 
+// TODO(viktor): Why always prefix rendergroup?
 // NOTE(viktor): RenderGroupEntry is a "compact discriminated union"
 RenderGroupEntryHeader :: struct {
     type: typeid
@@ -81,8 +90,7 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
-
-make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, resolution_pixels: [2]i32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
     result.push_buffer = push(arena, u8, max_push_buffer_size)
     
@@ -93,23 +101,53 @@ make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32) -> (result: 
     
     result.global_alpha = 1
     
+    result.game_camera.focal_length          = 0.6
+    result.game_camera.distance_above_target = 8.0
+        
+    result.render_camera = result.game_camera
+    result.render_camera.distance_above_target = 38
+    
+    monitor_width_in_meters :: 0.635
+    result.meters_to_pixels_for_monitor = cast(f32) resolution_pixels.x * monitor_width_in_meters
+    
+    pixels_to_meters := 1 / result.meters_to_pixels_for_monitor
+    result.monitor_half_diameter_in_meters = 0.5 * pixels_to_meters * vec_cast(f32, resolution_pixels)
+    
     return result
 }
 
-get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_size:v2, meters_to_pixels: f32) -> (position: v2, scale: f32, valid: b32) {
-    focal_length                 :: 6.0
-    camera_distance_above_target :: 5.0
+get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
+    result = get_camera_rectangle_at_distance(group, group.game_camera.distance_above_target)
+    
+    return result
+}
+get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
+    camera_half_diameter := unproject(group, group.monitor_half_diameter_in_meters, distance_from_camera)
+    result = rectangle_center_half_diameter(v2{}, camera_half_diameter) 
+    
+    return result
+}
+
+@(require_results)
+unproject :: #force_inline proc(group: ^RenderGroup, projected: v2, distance_from_camera: f32) -> (result: v2) {
+    result = projected * (distance_from_camera / group.game_camera.focal_length)
+    
+    return result
+}
+
+get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_size:v2) -> (position: v2, scale: f32, valid: b32) {
     near_clip_plane              :: 0.2
     base_p                       := entry.basis.p
-    distance_to_p_z              := camera_distance_above_target - base_p.z
+    distance_to_p_z              := group.render_camera.distance_above_target - base_p.z
     
     if distance_to_p_z > near_clip_plane {
         raw := V3(base_p.xy + entry.offset.xy, 1)
-        projected := focal_length * raw / distance_to_p_z
+        projected := group.render_camera.focal_length * raw / distance_to_p_z
         
         screen_center := screen_size * 0.5
-        position = screen_center + meters_to_pixels * projected.xy
-        scale    = meters_to_pixels * projected.z
+        
+        position = screen_center + projected.xy * group.meters_to_pixels_for_monitor
+        scale    =                 projected.z  * group.meters_to_pixels_for_monitor
         valid    = true
     }
     
@@ -166,9 +204,10 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3={},
 }
 
 push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, dim: v2, offset:v3, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+    // TODO(viktor):  this has gaps and overlaps, ew
     // NOTE(viktor): Top and Bottom
-    push_rectangle(group, {dim.x+thickness, thickness}, offset - {0, dim.y*0.5, 0}, color)
-    push_rectangle(group, {dim.x+thickness, thickness}, offset + {0, dim.y*0.5, 0}, color)
+    push_rectangle(group, {dim.x+thickness*2, thickness}, offset - {0, dim.y*0.5, 0}, color)
+    push_rectangle(group, {dim.x+thickness*2, thickness}, offset + {0, dim.y*0.5, 0}, color)
 
     // NOTE(viktor): Left and Right
     push_rectangle(group, {thickness, dim.y-thickness}, offset - {dim.x*0.5, 0, 0}, color)
@@ -231,7 +270,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
             
             // TODO(viktor): handle invalid
-            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size, meters_to_pixels)
+            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
             draw_rectangle(target, p, scale * entry.dim, entry.color)
 
         case RenderGroupEntryBitmap:
@@ -239,7 +278,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             base_address += auto_cast size_of(entry^)
         
             // TODO(viktor): handle invalid
-            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size, meters_to_pixels)
+            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
             when true {
                 draw_rectangle_slowly(target,
                     p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 

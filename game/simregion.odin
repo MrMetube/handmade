@@ -88,7 +88,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     
     region.world = world
     region.origin = origin
-    region.updatable_bounds = rectangle_add_radius(bounds, v3{update_safety_margin, update_safety_margin, 0})
+    region.updatable_bounds = rectangle_add_radius(bounds, v3{region.max_entity_radius, region.max_entity_radius, 0})
     region.bounds = rectangle_add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
     
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)

@@ -4,10 +4,10 @@ import "base:intrinsics"
 import "core:math"
 import "core:simd"
 
-kilobytes :: #force_inline proc(value: $N) -> N where intrinsics.type_is_numeric(N), size_of(N) >= 2 { return value*1024 }
-megabytes :: #force_inline proc(value: $N) -> N where intrinsics.type_is_numeric(N), size_of(N) >= 4 { return kilobytes(value)*1024 }
-gigabytes :: #force_inline proc(value: $N) -> N where intrinsics.type_is_numeric(N), size_of(N) >= 8 { return megabytes(value)*1024 }
-terabytes :: #force_inline proc(value: $N) -> N where intrinsics.type_is_numeric(N), size_of(N) >= 8 { return gigabytes(value)*1024 }
+kilobytes :: #force_inline proc(#any_int value: u32) -> u32 { return value * 1024 }
+megabytes :: #force_inline proc(#any_int value: u32) -> u32 { return value * 1024*1024 }
+gigabytes :: #force_inline proc(#any_int value: u64) -> u64 { return value * 1024*1024*1024 }
+terabytes :: #force_inline proc(#any_int value: u64) -> u64 { return value * 1024*1024*1024*1024 }
 
 swap :: proc(a, b: ^$T) {
     b^, a^ = a^, b^

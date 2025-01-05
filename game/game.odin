@@ -3,7 +3,7 @@ package game
 import "core:fmt"
 import "base:intrinsics"
 
-INTERNAL :: #config(INTERNAL, true)
+INTERNAL :: #config(INTERNAL, false)
 
 /*
     TODO(viktor):
@@ -319,7 +319,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
         
 
-        tiles_per_screen :: [2]i32{16, 8}
+        tiles_per_screen :: [2]i32{15, 7}
 
         tile_size_in_meters :: 1.5
         state.null_collision          = make_null_collision(state)
@@ -329,16 +329,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1.2})
         state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1.5})
         state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 1})
-        state.standart_room_collision = make_simple_grounded_collision(state, {tile_size_in_meters * cast(f32) tiles_per_screen.x, tile_size_in_meters * cast(f32) tiles_per_screen.y, state.typical_floor_height * 0.9})
+        state.standart_room_collision = make_simple_grounded_collision(state, V3(vec_cast(f32, tiles_per_screen) * tile_size_in_meters, state.typical_floor_height * 0.9))
 
         //
         // "World Gen"
         //
 
         chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
-            tile_size_in_meters :: 1.5
+            tile_size_in_meters  :: 1.5
             tile_depth_in_meters :: 3
-            offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * vec_cast(f32, tile_x, tile_y, tile_z)
+            offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_x, tile_y, tile_z) + {0.5, 0.5, 0})
             
             result = map_into_worldspace(world, result, offset + additional_offset)
             
@@ -355,9 +355,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         created_stair: b32
-        for _ in u32(0) ..< 200 {
-            when false {
-                choice := random_choice(&series, 4)
+        for room in u32(0) ..< 200 {
+            when !false {
+                choice := random_choice(&series, 2)
             } else {
                 choice := 3
             }
@@ -407,8 +407,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ))
                     } else if need_to_place_stair {
                         add_stairs(state, chunk_position_from_tile_positon(world, 
-                            random_between_i32(&series, 2, 14) + screen_col * tiles_per_screen.x, 
-                            random_between_i32(&series, 3, 5) + screen_row * tiles_per_screen.y, 
+                            room % 2 == 0 ? 5 : 10 + screen_col * tiles_per_screen.x, 
+                            3                      + screen_row * tiles_per_screen.y, 
                             stair_down ? tile_z-1 : tile_z,
                         ))
                         need_to_place_stair = false
@@ -569,7 +569,7 @@ when !true {
     
     // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
-    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)))
+    render_group := make_render_group(&tran_state.arena, megabytes(4), {buffer.width, buffer.height})
     
     clear(render_group, DarkGreen)
     
@@ -587,10 +587,12 @@ when !true {
     }
     
     
-    // TODO(viktor): REMOVE THIS
-    pixels_to_meters :: 1.0 / 42.0
-    screen_dim_in_meters := vec_cast(f32, buffer.width, buffer.height) * pixels_to_meters
-    camera_bounds := rectangle_center_diameter(v3{0, 0, -0.5 * state.typical_floor_height}, V3(screen_dim_in_meters, 4 * state.typical_floor_height))
+    screen_bounds := get_camera_rectangle_at_target(render_group)
+    camera_bounds := rectangle_min_max(
+        V3(screen_bounds.min, -0.5 * state.typical_floor_height), 
+        V3(screen_bounds.max, 4 * state.typical_floor_height)
+    )
+
     if false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
@@ -640,9 +642,12 @@ when !true {
     sim_origin := state.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
-    render_group.global_alpha = 1
+    push_rectangle_outline(render_group, rectangle_get_diameter(screen_bounds),                         0, Red,   0.2)
+    push_rectangle_outline(render_group, rectangle_get_diameter(camera_sim_region.bounds).xy,           0, Blue,  0.2)
+    push_rectangle_outline(render_group, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, 0, Green, 0.2)
+    
     camera_p := world_difference(world, state.camera_p, sim_origin)
-
+    
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
@@ -653,6 +658,7 @@ when !true {
             fade_top_start    :=  0.5  * state.typical_floor_height
             fade_bottom_start := -1    * state.typical_floor_height
             fade_bottom_end   := -1.5  * state.typical_floor_height 
+            
             render_group.global_alpha = 1
             if camera_relative_ground.z > fade_top_start {
                 render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
@@ -769,7 +775,7 @@ when false {
                 push_rectangle(render_group, entity.walkable_dim, {0, 0, entity.walkable_height}, color = Orange * {1, 1, 1, 0.5})
             
             case .Space: 
-                when !false {
+                when false {
                     for volume in entity.collision.volumes {
                         push_rectangle_outline(render_group, volume.dim.xy, volume.offset, Blue)
                     }
@@ -957,8 +963,8 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true)
 fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
     ground_memory := begin_temporary_memory(&tran_state.arena)
     defer end_temporary_memory(ground_memory)
-    
-    render_group := make_render_group(&tran_state.arena, megabytes(u32(4)))
+    // TODO(viktor): how do we want to control our ground chunk resolution?
+    render_group := make_render_group(&tran_state.arena, megabytes(4), {1920, 1080})
     defer render_to_output(render_group, ground_buffer.bitmap)
     
     buffer := ground_buffer.bitmap
