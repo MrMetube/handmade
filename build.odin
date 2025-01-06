@@ -16,6 +16,7 @@ debug    :: "-debug -define:INTERNAL=true -o:speed"
 src_path :: `.\build.odin`
 
 main :: proc() {
+    // TODO(viktor): maybe automatically copypasta the copypasta files?
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
     
     exe_path := os.args[0]
@@ -47,9 +48,31 @@ main :: proc() {
 
     if is_running(debug_build) do os.exit(0)
 
-    // Platform
-    if !run_command_sync(`C:\Odin\odin.exe`, fmt.tprintf(`odin build . -out:.\build\%v %s %s`, debug_build, flags, debug)) {
-        os.exit(1)
+    {// Platform
+        
+        { // copy over the common code
+            common_game_path     := `.\game\common.odin`
+            common_platform_path := `.\common.odin`
+            file, ok := os.read_entire_file(common_game_path)
+            if !ok {
+                log.error("common.odin file could not be read")
+                os.exit(1)
+            }
+            
+            if os.exists(common_platform_path) do os.remove(common_platform_path)
+            common, err := os.open(common_platform_path, os.O_CREATE)
+            
+            common_code, _ := strings.replace(cast(string) file, "package game", "", 1)
+            if err != nil do log.error(os.error_string(err))
+            
+            fmt.fprintfln(common, common_platform_header, common_game_path)
+            fmt.fprint(common, common_code)
+            os.close(common)
+        }
+        
+        if !run_command_sync(`C:\Odin\odin.exe`, fmt.tprintf(`odin build . -out:.\build\%v %s %s`, debug_build, flags, debug)) {
+            os.exit(1)
+        }
     }
     
     os.exit(0)
@@ -154,7 +177,7 @@ is_running :: proc(exe_name: string) -> (running: b32) {
 }
 
 run_command_sync :: proc(program, args: string) -> (success: b32) {
-    log.info("running:", program, args)
+    log.info("Running: [", program,"]", args)
     startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW)}
     process_info := win.PROCESS_INFORMATION{}
      
@@ -192,5 +215,25 @@ random_number :: proc() ->(result: u32) {
     
     return result
 }
+
+common_platform_header :: `package main
+
+/* @Generated @Copypasta from %v
+
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+
+    IMPORTANT: Do not modify this file, all changes will be lost!
+    
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    -------------------------------------------------------------
+    
+*/`
 
 } // end when #config(BUILD)

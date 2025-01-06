@@ -5,16 +5,6 @@ import win "core:sys/windows"
 
 when INTERNAL {
 
-    DEBUG_code :: struct {
-        read_entire_file  : proc_DEBUG_read_entire_file,
-        write_entire_file : proc_DEBUG_write_entire_file,
-        free_file_memory  : proc_DEBUG_free_file_memory,
-    }
-
-    proc_DEBUG_read_entire_file :: #type proc(filename: string) -> (result: []u8)
-    proc_DEBUG_write_entire_file :: #type proc(filename: string, memory: []u8) -> b32
-    proc_DEBUG_free_file_memory :: #type proc(memory: []u8)
-
     /* IMPORTANT:
         These are not for doing anything in the shipping game
         they are blocking and the write doesnt protect against lost data!

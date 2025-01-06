@@ -248,6 +248,8 @@ clear :: proc(group: ^RenderGroup, color: v4) {
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
+    scoped_timed_block(.render_to_output)
+    
     screen_size      := vec_cast(f32, target.width, target.height)
     screen_center    := screen_size * 0.5
     meters_to_pixels := screen_size.x / 20
@@ -367,6 +369,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
 }
 
 draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
+    scoped_timed_block(.draw_rectangle_slowly)
     assert(texture.memory != nil)
     
     // NOTE(viktor): premultiply color
@@ -410,6 +413,8 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     
     for y in minimum.y..=maximum.y {
         for x in minimum.x..=maximum.x {
+            scoped_timed_block(.test_pixel)
+            
             pixel_p := vec_cast(f32, x, y)
             delta := pixel_p - origin
             edge0 := dot(delta                  , -perpendicular(x_axis))
@@ -418,6 +423,8 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
             edge3 := dot(delta - y_axis         ,  perpendicular(y_axis))
             
             if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
+                scoped_timed_block(.fill_pixel)
+                
                 Card :: true
                 when Card {
                     screen_space_uv := v2{cast(f32) x, fixed_cast_y} * {inv_width_max, inv_height_max}

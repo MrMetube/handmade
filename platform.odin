@@ -443,8 +443,8 @@ main :: proc() {
         // ---------------------- Update, Sound and Render
         // ---------------------- ---------------------- ----------------------
         {
-            offscreen_buffer := GameLoadedBitmap{
-                pixels = GLOBAL_back_buffer.memory,
+            offscreen_buffer := LoadedBitmap{
+                memory = GLOBAL_back_buffer.memory,
                 width  = GLOBAL_back_buffer.width,
                 height = GLOBAL_back_buffer.height,
                 pitch  = GLOBAL_back_buffer.width,
@@ -459,10 +459,34 @@ main :: proc() {
 
             if game_lib_is_valid {
                 game_update_and_render(&game_memory, offscreen_buffer, new_input)
+                handle_debug_cycle_counters :: proc(game_memory: ^GameMemory) {
+                    when INTERNAL {
+                        title := "Debug Game Cycle Counts"
+                        longest_name_length := len(title)
+                        for counter, name in game_memory.counters {
+                            name_string := fmt.tprint(name)
+                            longest_name_length = max(longest_name_length, len(name_string))
+                        }
+                        
+                        format := fmt.tprintf("%%%ds:", longest_name_length)
+                        
+                        fmt.printfln(format, title)
+                        format = fmt.tprintf("%s %% 10vcy, %% 4vh, %% 10v cy/h", format)
+                        for &counter, name in game_memory.counters {
+                            fmt.printfln(format, name, counter.cycle_count, counter.hit_count, counter.cycle_count / counter.hit_count)
+                            counter.cycle_count = 0
+                            counter.hit_count = 0
+                            // 4.8 GHz with 144 fps -> 33.333.333 cycles per frame
+                            // game_update_and_render:
+                            //  5 Jan 2025             18.476.474
+                        }
+                    }
+                }
+                handle_debug_cycle_counters(&game_memory)
             }
 
             sound_is_valid = true
-            play_cursor, write_cursor : win.DWORD
+            play_cursor, write_cursor: win.DWORD
             audio_counter := get_wall_clock()
             from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
             if result := GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {

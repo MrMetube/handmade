@@ -9,4 +9,6 @@
 *.test
 *.input
 
+/common.odin
+
 lock.tmp

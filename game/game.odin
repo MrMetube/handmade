@@ -78,14 +78,6 @@ INTERNAL :: #config(INTERNAL, false)
       - World generation
 */
 
-Sample :: [2]i16
-
-// TODO: allow outputing vibration
-GameSoundBuffer :: struct {
-    samples            : []Sample,
-    samples_per_second : u32,
-}
-
 White    :: v4{1,1,1, 1}
 Gray     :: v4{0.5,0.5,0.5, 1}
 Black    :: v4{0,0,0, 1}
@@ -95,71 +87,6 @@ Orange   :: v4{1, 0.71, 0.2, 1}
 Green    :: v4{0, 0.59, 0.28, 1}
 Red      :: v4{1, 0.09, 0.24, 1}
 DarkGreen:: v4{0, 0.07, 0.0353, 1}
-
-ByteColor :: [4]u8
-
-LoadedBitmap :: struct {
-    memory : []ByteColor,
-    width, height: i32, 
-    
-    start, pitch: i32,
-    
-    align_percentage: v2,
-    width_over_height: f32,
-}
-
-GameInputButton :: struct {
-    half_transition_count: i32,
-    ended_down : b32,
-}
-
-GameInputController :: struct {
-    is_connected: b32,
-    is_analog: b32,
-
-    stick_average: v2,
-
-    using _buttons_array_and_enum : struct #raw_union {
-        buttons: [18]GameInputButton,
-        using _buttons_enum : struct {
-            stick_up , stick_down , stick_left , stick_right ,
-            button_up, button_down, button_left, button_right,
-            dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
-
-            start, back,
-            shoulder_left, shoulder_right,
-            thumb_left   , thumb_right : GameInputButton,
-        },
-    },
-}
-#assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
-
-GameInput :: struct {
-    delta_time: f32,
-    reloaded_executable: b32,
-
-    using _mouse_buttons_array_and_enum : struct #raw_union {
-        mouse_buttons: [5]GameInputButton,
-        using _buttons_enum : struct {
-            mouse_left,	mouse_right, mouse_middle,
-            mouse_extra1, mouse_extra2 : GameInputButton,
-        },
-    },
-    mouse_position: [2]i32,
-    mouse_wheel: i32,
-
-    controllers: [5]GameInputController,
-}
-#assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
-
-GameMemory :: struct {
-    is_initialized: b32,
-    // NOTE: REQUIRED to be cleared to zero at startup
-    permanent_storage: []u8,
-    transient_storage: []u8,
-
-    debug: DEBUG_code,
-}
 
 GameState :: struct {
     world_arena: Arena,
@@ -272,9 +199,14 @@ PairwiseCollsionRule :: struct {
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(GameState{}.collision_rule_hash) & ( len(GameState{}.collision_rule_hash) - 1 ) == 0)
 
-// timing
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
+    when INTERNAL {
+        DEBUG_GLOBAL_memory = memory
+    }
+    
+    scoped_timed_block(.game_update_and_render)
+    
     ground_buffer_size :: 256
     
     // ---------------------- ---------------------- ----------------------
