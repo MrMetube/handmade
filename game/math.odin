@@ -1,7 +1,9 @@
 package game
 
 import "base:intrinsics"
+import "base:builtin"
 import "core:math"
+import "core:simd"
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Types
@@ -45,12 +47,17 @@ DegPerRad :: 360.0/Tau
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
+square :: proc { square_f, square_x8 }
 @(require_results)
-square :: #force_inline proc(x: f32) -> f32 {
+square_f :: #force_inline proc(x: f32) -> f32 {
+    return x * x
+}
+@(require_results)
+square_x8 :: #force_inline proc(x: simd.f32x8) -> simd.f32x8 {
     return x * x
 }
 
-square_root :: math.sqrt
+square_root :: simd.sqrt
 
 lerp :: proc { lerp_1, lerp_2, lerp_3, lerp_4 }
 @(require_results)
@@ -131,50 +138,45 @@ safe_ratio_1_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return sa
 @(require_results)
 safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
 
-clamp :: proc{ clamp_t, clamp_2 }
 @(require_results)
-clamp_t :: #force_inline proc(value, min, max: $T) -> (result: T) where !intrinsics.type_is_array(T) {
-    result = value
-    
-    if result < min {
-        result = min
-    } else if result > max {
-        result = max
+clamp :: #force_inline proc(value: $T, min, max: T) -> (result:T) {
+    when intrinsics.type_is_simd_vector(T) {
+        result = simd.clamp(value, min, max)
+    } else when intrinsics.type_is_array(T) {
+        E :: intrinsics.type_elem_type(T)
+        when 2 * size_of(E) == size_of(T) {
+            result = T{ clamp(value.x, min.x, max.x), clamp(value.y, min.y, max.y) }
+        } else when 3 * size_of(E) == size_of(T) {
+            result = T{ clamp(value.x, min.x, max.x), clamp(value.y, min.y, max.y), clamp(value.z, min.z, max.z) }
+        } else when 4 * size_of(E) == size_of(T) {
+            result = T{ clamp(value.x, min.x, max.x), clamp(value.y, min.y, max.y), clamp(value.z, min.z, max.z), clamp(value.w, min.w, max.w) }
+        }
+    } else {
+        result = builtin.clamp(value, min, max)
     }
 
     return result
 }
-@(require_results)
-clamp_2 :: #force_inline proc(value, min, max: $T) -> (result: T) where intrinsics.type_is_array(T) {
-    result.x = clamp_t(value.x, min.x, max.x)
-    result.y = clamp_t(value.y, min.y, max.y)
 
-    return result
-}
+@(require_results)
+clamp_01 :: #force_inline proc(value: $T) -> (result:T) {
+    when intrinsics.type_is_simd_vector(T) {
+        zero :: cast(T) 0
+        one  :: cast(T) 1
+        result = simd.clamp(value, zero, one)
+    } else when intrinsics.type_is_array(T) {
+        E :: intrinsics.type_elem_type(T)
+        when 2 * size_of(E) == size_of(T) {
+            result = T{ clamp_01(value.x), clamp_01(value.y) }
+        } else when 3 * size_of(E) == size_of(T) {
+            result = T{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
+        } else when 4 * size_of(E) == size_of(T) {
+            result = T{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z), clamp_01(value.w) }
+        }
+    } else {
+        result = clamp(value, 0, 1)
+    }
 
-clamp_01 :: proc { clamp_01_1, clamp_01_2, clamp_01_3, clamp_01_4 }
-@(require_results)
-clamp_01_1 :: #force_inline proc(value: $T) -> (result:T) where !intrinsics.type_is_array(T) {
-    result = clamp(value, 0, 1)
-
-    return result
-}
-@(require_results)
-clamp_01_2 :: #force_inline proc(value:v2) -> (result:v2) {
-    result = v2{ clamp_01(value.x), clamp_01(value.y) }
-    
-    return result
-}
-@(require_results)
-clamp_01_3 :: #force_inline proc(value:v3) -> (result:v3) {
-    result = v3{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
-    
-    return result
-}
-@(require_results)
-clamp_01_4 :: #force_inline proc(value:v4) -> (result:v4) {
-    result = v4{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z), clamp_01(value.w) }
-    
     return result
 }
 

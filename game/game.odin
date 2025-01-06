@@ -508,18 +508,22 @@ when !true {
     
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
-            bitmap := ground_buffer.bitmap
-            bitmap.align_percentage = 0.5
-            
             offset := world_difference(world, ground_buffer.p, state.camera_p)
-            basis := push(&tran_state.arena, RenderBasis)
-            render_group.default_basis = basis
-            basis.p = offset
-            
-            ground_chunk_size := world.chunk_dim_meters.x
-            push_bitmap(render_group, bitmap, ground_chunk_size)
-            when false {
-                push_rectangle_outline(render_group, ground_chunk_size, 0, Yellow)
+            // TODO(viktor): IMPORTANT(viktor): Remove once renderer is sped up, and there is no need for fair comparisons
+            if true || abs(offset.z) == 0 {
+                bitmap := ground_buffer.bitmap
+                bitmap.align_percentage = 0.5
+                
+                basis := push(&tran_state.arena, RenderBasis)
+                render_group.default_basis = basis
+                basis.p = offset
+                
+                ground_chunk_size := world.chunk_dim_meters.x
+                push_bitmap(render_group, bitmap, ground_chunk_size)
+                
+                when false {
+                    push_rectangle_outline(render_group, ground_chunk_size, 0, Yellow)
+                }
             }
         }
     }

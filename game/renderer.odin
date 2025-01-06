@@ -385,7 +385,6 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
     }
 }
 
-// @(optimization_mode="none")
 draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32) {
     scoped_timed_block(.draw_rectangle_quickly_hopefully)
     assert(texture.memory != nil)
@@ -417,15 +416,15 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
     }
     
     // TODO(viktor): IMPORTANT(viktor):  STOP DOING THIS ONCE WE HAVE REAL ROW LOADING
-    width_max      := (buffer.width-1)  - 4
-    height_max     := (buffer.height-1) - 4
+    width_max      := (buffer.width-1)  - 8
+    height_max     := (buffer.height-1) - 8
     inv_width_max  := 1 / cast(f32) width_max
     inv_height_max := 1 / cast(f32) height_max
 
     // TODO(viktor): this will need to be specified separately
-    origin_z     :f32= 0.5
-    origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
-    fixed_cast_y := inv_height_max * origin_y
+    origin_z_     :f32= 0.5
+    origin_y_     := (origin + 0.5*x_axis + 0.5*y_axis).y
+    fixed_cast_y := inv_height_max * origin_y_
 
     maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
     minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
@@ -436,106 +435,233 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
     // TODO(viktor): formalize texture boundaries
     texture_boundaries := vec_cast(f32, texture.width-2, texture.height-2)
     
-    inv_255: f32 : 1.0 / 255.0
+    f32x8 :: #simd[8]f32
+    inv_255 := cast(f32x8) (1.0 / 255.0)
+    one_255 := cast(f32x8) 255
+    one     := cast(f32x8) 1
+    zero    := cast(f32x8) 0
+    one_plus_epsilon := cast(f32x8) 1.00000001
     
+    color_r := cast(f32x8) color.r
+    color_g := cast(f32x8) color.g
+    color_b := cast(f32x8) color.b
+    color_a := cast(f32x8) color.a
+                
+    origin_x := cast(f32x8) origin.x
+    origin_y := cast(f32x8) origin.y
+    
+    n_x_axis_x := cast(f32x8) n_x_axis.x
+    n_x_axis_y := cast(f32x8) n_x_axis.y
+    n_y_axis_x := cast(f32x8) n_y_axis.x
+    n_y_axis_y := cast(f32x8) n_y_axis.y
+    
+    scoped_timed_block_counted(.test_pixel, cast(i64) ((maximum.x - minimum.x + 1) * (maximum.y - minimum.y + 1)) )
     for y in minimum.y..=maximum.y {
-        for x_base := minimum.x; x_base <= maximum.x; x_base += 4 {
-            scoped_timed_block(.test_pixel)
+        for x_base := minimum.x; x_base <= maximum.x; x_base += 8 {
+            fx: f32x8 = ---
+            fy: f32x8 = ---
             
-            // TODO(viktor): initialization?
-            f:   [4]v2
-            dst: [4]^ByteColor
-            t00, t01, t10, t11, blended: [4]v4
+            zero_ : u8 = 0
+            better_nil := &zero_
+            dstr: [8]^u8 = better_nil
+            dstg: [8]^u8 = better_nil
+            dstb: [8]^u8 = better_nil
+            dsta: [8]^u8 = better_nil
             
-            should_fill: [4]b32
-            for i in i32(0)..<4 {
-                x := x_base + i
-                
-                pixel_p := vec_cast(f32, x, y)
-                delta := pixel_p - origin
+            t00_r: f32x8 = ---
+            t00_g: f32x8 = ---
+            t00_b: f32x8 = ---
+            t00_a: f32x8 = ---
+            
+            t01_r: f32x8 = ---
+            t01_g: f32x8 = ---
+            t01_b: f32x8 = ---
+            t01_a: f32x8 = ---
+            
+            t10_r: f32x8 = ---
+            t10_g: f32x8 = ---
+            t10_b: f32x8 = ---
+            t10_a: f32x8 = ---
+            
+            t11_r: f32x8 = ---
+            t11_g: f32x8 = ---
+            t11_b: f32x8 = ---
+            t11_a: f32x8 = ---
 
-                u := dot(delta, n_x_axis)
-                v := dot(delta, n_y_axis)
-                
-                should_fill[i] = u >= 0 && u <= 1 && v >= 0 && v <= 1
-                if should_fill[i] {
-                    t := v2{u,v} * texture_boundaries
+                            
+            pixel_p_x := f32x8{
+                cast(f32) x_base, 
+                cast(f32) x_base+1, 
+                cast(f32) x_base+2, 
+                cast(f32) x_base+3,
+                cast(f32) x_base+4,
+                cast(f32) x_base+5,
+                cast(f32) x_base+6,
+                cast(f32) x_base+7,
+            }
+            pixel_p_y := cast(f32x8) y 
+            
+            delta_x := pixel_p_x - origin_x
+            delta_y := pixel_p_y - origin_y
+
+            // u := dot(delta, n_x_axis)
+            // v := dot(delta, n_y_axis)
+            u := delta_x * n_x_axis_x + delta_y * n_x_axis_y
+            v := delta_x * n_y_axis_x + delta_y * n_y_axis_y
+            
+            // u >= 0 && u <= 1 && v >= 0 && v <= 1
+            should_fill := simd.ceil( simd.max(u, zero) * simd.max(one_plus_epsilon - u, zero) * simd.max(v, zero) * simd.max(one_plus_epsilon - v, zero) )
+            for i in i32(0)..<8 {
+                x := x_base + i
+            
+                if (cast([^]f32)&should_fill)[i] != 0 {
+                    t := v2{ (cast([^]f32)&u)[i], (cast([^]f32)&v)[i] } * texture_boundaries
                     s := vec_cast(i32, t)
-                    f[i] = t - vec_cast(f32, s)
+                    (cast([^]f32)&fx)[i] = t.x - cast(f32) s.x
+                    (cast([^]f32)&fy)[i] = t.y - cast(f32) s.y
                     
                     assert(s.x >= 0 && s.x < texture.width)
                     assert(s.y >= 0 && s.y < texture.height)
 
                     // t00, t01, t10, t11 := sample_bilinear(texture, s)
-                    t00[i] = vec_cast(f32, texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 0])
-                    t01[i] = vec_cast(f32, texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 1])
-                    t10[i] = vec_cast(f32, texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 0])
-                    t11[i] = vec_cast(f32, texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1])
+                    (cast([^]f32)&t00_r)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 0].r
+                    (cast([^]f32)&t00_g)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 0].g
+                    (cast([^]f32)&t00_b)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 0].b
+                    (cast([^]f32)&t00_a)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 0].a
                     
-                    dst[i] = &buffer.memory[buffer.start + y * buffer.pitch + x]
+                    (cast([^]f32)&t01_r)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 1].r
+                    (cast([^]f32)&t01_g)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 1].g
+                    (cast([^]f32)&t01_b)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 1].b
+                    (cast([^]f32)&t01_a)[i] = cast(f32) texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 1].a
+                    
+                    (cast([^]f32)&t10_r)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 0].r
+                    (cast([^]f32)&t10_g)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 0].g
+                    (cast([^]f32)&t10_b)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 0].b
+                    (cast([^]f32)&t10_a)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 0].a
+                    
+                    (cast([^]f32)&t11_r)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1].r
+                    (cast([^]f32)&t11_g)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1].g
+                    (cast([^]f32)&t11_b)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1].b
+                    (cast([^]f32)&t11_a)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1].a
+                    
+                    dstr[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].r
+                    dstg[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].g
+                    dstb[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].b
+                    dsta[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].a
                 }
             }
             
-            for i in 0..<4 {
-                if !should_fill[i] do continue
-                // t00 = srgb_255_to_linear_1(t00)
-                // t01 = srgb_255_to_linear_1(t01)
-                // t10 = srgb_255_to_linear_1(t10)
-                // t11 = srgb_255_to_linear_1(t11)
-                t00[i]   *= inv_255
-                t00[i].r *= t00[i].r
-                t00[i].g *= t00[i].g
-                t00[i].b *= t00[i].b
-                t01[i]  *= inv_255
-                t01[i].r = square(t01[i].r)
-                t01[i].g = square(t01[i].g)
-                t01[i].b = square(t01[i].b)
-                t10[i]  *= inv_255
-                t10[i].r = square(t10[i].r)
-                t10[i].g = square(t10[i].g)
-                t10[i].b = square(t10[i].b)
-                t11[i]  *= inv_255
-                t11[i].r = square(t11[i].r)
-                t11[i].g = square(t11[i].g)
-                t11[i].b = square(t11[i].b)
-                                
-                // texel := blend_bilinear(t00, t01, t10, t11, f)
-                ifx := 1-f[i].x
-                ify := 1-f[i].y
-                l0 := ify * ifx
-                l1 := ify * f[i].x
-                l2 := f[i].y * ifx
-                l3 := f[i].y * f[i].x
-                texel: v4 = ---
-                texel.r = l0 * t00[i].r + l1 * t01[i].r + l2 * t10[i].r + l3 * t11[i].r
-                texel.g = l0 * t00[i].g + l1 * t01[i].g + l2 * t10[i].g + l3 * t11[i].g
-                texel.b = l0 * t00[i].b + l1 * t01[i].b + l2 * t10[i].b + l3 * t11[i].b
-                texel.a = l0 * t00[i].a + l1 * t01[i].a + l2 * t10[i].a + l3 * t11[i].a
-                
-                texel *= color
-                texel.rgb = clamp_01(texel.rgb)
-                
-                // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-                pixel := vec_cast(f32, dst[i]^)
-                pixel *= inv_255
-                pixel.r = square(pixel.r)
-                pixel.g = square(pixel.g)
-                pixel.b = square(pixel.b)
-                
-                inv_texel_a := (1 - texel.a)
-                blended[i] = inv_texel_a * pixel + texel
-                
-                // blended = linear_1_to_srgb_255(blended)
-                blended[i].r = square_root(blended[i].r)
-                blended[i].g = square_root(blended[i].g)
-                blended[i].b = square_root(blended[i].b)
-                blended[i] *= 255
+            // t00 = srgb_255_to_linear_1(t00)
+            // t01 = srgb_255_to_linear_1(t01)
+            // t10 = srgb_255_to_linear_1(t10)
+            // t11 = srgb_255_to_linear_1(t11)
+            t00_a *= inv_255
+            t00_r = square(t00_r * inv_255)
+            t00_g = square(t00_g * inv_255)
+            t00_b = square(t00_b * inv_255)
+            
+            t01_a *= inv_255
+            t01_r = square(t01_r * inv_255)
+            t01_g = square(t01_g * inv_255)
+            t01_b = square(t01_b * inv_255)
+            
+            t10_a *= inv_255
+            t10_r = square(t10_r * inv_255)
+            t10_g = square(t10_g * inv_255)
+            t10_b = square(t10_b * inv_255)
+            
+            t11_a *= inv_255
+            t11_r = square(t11_r * inv_255)
+            t11_g = square(t11_g * inv_255)
+            t11_b = square(t11_b * inv_255)
+            
+            // texel := blend_bilinear(t00, t01, t10, t11, f)
+            ifx := one - fx
+            ify := one - fy
+            l0  := ify * ifx
+            l1  := ify * fx
+            l2  :=  fy * ifx
+            l3  :=  fy * fx
+            
+            texel_r := l0 * t00_r + l1 * t01_r + l2 * t10_r + l3 * t11_r
+            texel_g := l0 * t00_g + l1 * t01_g + l2 * t10_g + l3 * t11_g
+            texel_b := l0 * t00_b + l1 * t01_b + l2 * t10_b + l3 * t11_b
+            texel_a := l0 * t00_a + l1 * t01_a + l2 * t10_a + l3 * t11_a
+            
+            texel_r *= color_r
+            texel_g *= color_g
+            texel_b *= color_b
+            texel_a *= color_a
+            
+            texel_r = clamp_01(texel_r)
+            texel_g = clamp_01(texel_g)
+            texel_b = clamp_01(texel_b)
+        
+            // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
+            pixel_r := f32x8{ 
+                cast(f32) dstr[0]^, 
+                cast(f32) dstr[1]^, 
+                cast(f32) dstr[2]^, 
+                cast(f32) dstr[3]^,
+                cast(f32) dstr[4]^,
+                cast(f32) dstr[5]^,
+                cast(f32) dstr[6]^,
+                cast(f32) dstr[7]^,
             }
+            pixel_g := f32x8{ 
+                cast(f32) dstg[0]^, 
+                cast(f32) dstg[1]^, 
+                cast(f32) dstg[2]^, 
+                cast(f32) dstg[3]^,
+                cast(f32) dstg[4]^,
+                cast(f32) dstg[5]^,
+                cast(f32) dstg[6]^,
+                cast(f32) dstg[7]^,
+            }
+            pixel_b := f32x8{ 
+                cast(f32) dstb[0]^, 
+                cast(f32) dstb[1]^, 
+                cast(f32) dstb[2]^, 
+                cast(f32) dstb[3]^,
+                cast(f32) dstb[4]^,
+                cast(f32) dstb[5]^,
+                cast(f32) dstb[6]^,
+                cast(f32) dstb[7]^,
+            }
+            pixel_a := f32x8{ 
+                cast(f32) dsta[0]^, 
+                cast(f32) dsta[1]^, 
+                cast(f32) dsta[2]^, 
+                cast(f32) dsta[3]^,
+                cast(f32) dsta[4]^,
+                cast(f32) dsta[5]^,
+                cast(f32) dsta[6]^,
+                cast(f32) dsta[7]^,
+            }
+            
+            pixel_r = square(pixel_r * inv_255)
+            pixel_g = square(pixel_g * inv_255)
+            pixel_b = square(pixel_b * inv_255)
+            pixel_a *= inv_255
+            
+            inv_texel_a := (one - texel_a)
+            blended_r := inv_texel_a * pixel_r + texel_r
+            blended_g := inv_texel_a * pixel_g + texel_g
+            blended_b := inv_texel_a * pixel_b + texel_b
+            blended_a := inv_texel_a * pixel_a + texel_a
+            
+            // blended = linear_1_to_srgb_255(blended)
+            blended_r = one_255 * square_root(blended_r)
+            blended_g = one_255 * square_root(blended_g)
+            blended_b = one_255 * square_root(blended_b)
+            blended_a *= one_255
+
                     
-            for i in 0..<4 {
-                if !should_fill[i] do continue
-                
-                dst[i]^ = vec_cast(u8, blended[i])
+            for i in 0..<8 {
+                dstr[i]^ = cast(u8) (cast([^]f32)&blended_r)[i]
+                dstg[i]^ = cast(u8) (cast([^]f32)&blended_g)[i]
+                dstb[i]^ = cast(u8) (cast([^]f32)&blended_b)[i]
+                dsta[i]^ = cast(u8) (cast([^]f32)&blended_a)[i]
             }
         }
     }
@@ -585,8 +711,6 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     
     for y in minimum.y..=maximum.y {
         for x in minimum.x..=maximum.x {
-            scoped_timed_block(.test_pixel)
-            
             pixel_p := vec_cast(f32, x, y)
             delta := pixel_p - origin
             edge0 := dot(delta                  , -perpendicular(x_axis))
@@ -595,8 +719,6 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
             edge3 := dot(delta - y_axis         ,  perpendicular(y_axis))
             
             if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
-                scoped_timed_block(.fill_pixel)
-                
                 Card :: true
                 when Card {
                     screen_space_uv := v2{cast(f32) x, fixed_cast_y} * {inv_width_max, inv_height_max}

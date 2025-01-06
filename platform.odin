@@ -471,7 +471,7 @@ main :: proc() {
                         format := fmt.tprintf("%%%ds:", longest_name_length)
                         
                         fmt.printfln(format, title)
-                        format = fmt.tprintf("%s %% 10vcy, %% 4vh, %% 10v cy/h", format)
+                        format = fmt.tprintf("%s %% 10vcy, %% 10vh, %% 10v cy/h", format)
                         for &counter, name in game_memory.counters {
                             denom := counter.hit_count == 0 ? 1 : counter.hit_count
                             fmt.printfln(format, name, counter.cycle_count, counter.hit_count, counter.cycle_count / denom)

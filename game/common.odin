@@ -78,7 +78,6 @@ when INTERNAL {
         draw_rectangle_slowly,
         draw_rectangle_quickly_hopefully,
         test_pixel,
-        fill_pixel,
     }
 } else {
     DebugCycleCounterName :: enum {}
@@ -116,6 +115,17 @@ when INTERNAL {
             counter := &DEBUG_GLOBAL_memory.counters[name]
             counter.cycle_count += end_cycle_count - start_cycle_count
             counter.hit_count   += 1
+        }
+    }
+    
+    @(deferred_in_out=end_timed_block_counted)
+    scoped_timed_block_counted :: #force_inline proc(name: DebugCycleCounterName, count: i64) -> i64 { return intrinsics.read_cycle_counter()}
+    end_timed_block_counted    :: #force_inline proc(name: DebugCycleCounterName, count, start_cycle_count: i64) {
+        #no_bounds_check {
+            end_cycle_count := intrinsics.read_cycle_counter()
+            counter := &DEBUG_GLOBAL_memory.counters[name]
+            counter.cycle_count += end_cycle_count - start_cycle_count
+            counter.hit_count   += count
         }
     }
     
