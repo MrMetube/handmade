@@ -1,6 +1,7 @@
 package game
 
 import "core:fmt"
+import "core:simd"
 
 /* NOTE(viktor): 
     1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
@@ -275,7 +276,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
             draw_rectangle(target, p, scale * entry.size, entry.color)
 
-            case RenderGroupEntryBitmap:
+        case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
         
@@ -384,10 +385,11 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
     }
 }
 
+// @(optimization_mode="none")
 draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32) {
     scoped_timed_block(.draw_rectangle_quickly_hopefully)
     assert(texture.memory != nil)
-    
+
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a
@@ -414,8 +416,9 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
         ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
     
-    width_max      := buffer.width-1
-    height_max     := buffer.height-1
+    // TODO(viktor): IMPORTANT(viktor):  STOP DOING THIS ONCE WE HAVE REAL ROW LOADING
+    width_max      := (buffer.width-1)  - 4
+    height_max     := (buffer.height-1) - 4
     inv_width_max  := 1 / cast(f32) width_max
     inv_height_max := 1 / cast(f32) height_max
 
@@ -430,92 +433,109 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
     n_x_axis := x_axis * inv_x_len_squared
     n_y_axis := y_axis * inv_y_len_squared
     
+    // TODO(viktor): formalize texture boundaries
     texture_boundaries := vec_cast(f32, texture.width-2, texture.height-2)
     
     inv_255: f32 : 1.0 / 255.0
     
     for y in minimum.y..=maximum.y {
-        for x in minimum.x..=maximum.x {
+        for x_base := minimum.x; x_base <= maximum.x; x_base += 4 {
             scoped_timed_block(.test_pixel)
             
-            pixel_p := vec_cast(f32, x, y)
-            delta := pixel_p - origin
-
-            u := dot(delta, n_x_axis)
-            v := dot(delta, n_y_axis)
+            // TODO(viktor): initialization?
+            f:   [4]v2
+            dst: [4]^ByteColor
+            t00, t01, t10, t11, blended: [4]v4
             
-            if u >= 0 && u <= 1 && v >= 0 && v <= 1 {
-                scoped_timed_block(.fill_pixel)
+            should_fill: [4]b32
+            for i in i32(0)..<4 {
+                x := x_base + i
                 
-                // TODO(viktor): formalize texture boundaries
-                t := v2{u,v} * texture_boundaries
-                s := vec_cast(i32, t)
-                f := t - vec_cast(f32, s)
+                pixel_p := vec_cast(f32, x, y)
+                delta := pixel_p - origin
+
+                u := dot(delta, n_x_axis)
+                v := dot(delta, n_y_axis)
                 
-                assert(s.x >= 0 && s.x < texture.width)
-                assert(s.y >= 0 && s.y < texture.height)
+                should_fill[i] = u >= 0 && u <= 1 && v >= 0 && v <= 1
+                if should_fill[i] {
+                    t := v2{u,v} * texture_boundaries
+                    s := vec_cast(i32, t)
+                    f[i] = t - vec_cast(f32, s)
+                    
+                    assert(s.x >= 0 && s.x < texture.width)
+                    assert(s.y >= 0 && s.y < texture.height)
 
-                // t00, t01, t10, t11 := sample_bilinear(texture, s)
-                t00 := vec_cast(f32, texture.memory[texture.start + 0 * texture.pitch + 0])
-                t01 := vec_cast(f32, texture.memory[texture.start + 0 * texture.pitch + 1])
-                t10 := vec_cast(f32, texture.memory[texture.start + 1 * texture.pitch + 0])
-                t11 := vec_cast(f32, texture.memory[texture.start + 1 * texture.pitch + 1])
-
+                    // t00, t01, t10, t11 := sample_bilinear(texture, s)
+                    t00[i] = vec_cast(f32, texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 0])
+                    t01[i] = vec_cast(f32, texture.memory[texture.start + (s.y+0) * texture.pitch + s.x + 1])
+                    t10[i] = vec_cast(f32, texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 0])
+                    t11[i] = vec_cast(f32, texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1])
+                    
+                    dst[i] = &buffer.memory[buffer.start + y * buffer.pitch + x]
+                }
+            }
+            
+            for i in 0..<4 {
+                if !should_fill[i] do continue
                 // t00 = srgb_255_to_linear_1(t00)
                 // t01 = srgb_255_to_linear_1(t01)
                 // t10 = srgb_255_to_linear_1(t10)
                 // t11 = srgb_255_to_linear_1(t11)
-                t00  *= inv_255
-                t00.r = square(t00.r)
-                t00.g = square(t00.g)
-                t00.b = square(t00.b)
-                t01  *= inv_255
-                t01.r = square(t01.r)
-                t01.g = square(t01.g)
-                t01.b = square(t01.b)
-                t10  *= inv_255
-                t10.r = square(t10.r)
-                t10.g = square(t10.g)
-                t10.b = square(t10.b)
-                t11  *= inv_255
-                t11.r = square(t11.r)
-                t11.g = square(t11.g)
-                t11.b = square(t11.b)
+                t00[i]   *= inv_255
+                t00[i].r *= t00[i].r
+                t00[i].g *= t00[i].g
+                t00[i].b *= t00[i].b
+                t01[i]  *= inv_255
+                t01[i].r = square(t01[i].r)
+                t01[i].g = square(t01[i].g)
+                t01[i].b = square(t01[i].b)
+                t10[i]  *= inv_255
+                t10[i].r = square(t10[i].r)
+                t10[i].g = square(t10[i].g)
+                t10[i].b = square(t10[i].b)
+                t11[i]  *= inv_255
+                t11[i].r = square(t11[i].r)
+                t11[i].g = square(t11[i].g)
+                t11[i].b = square(t11[i].b)
                                 
                 // texel := blend_bilinear(t00, t01, t10, t11, f)
-                ifx := 1-f.x
-                ify := 1-f.y
+                ifx := 1-f[i].x
+                ify := 1-f[i].y
                 l0 := ify * ifx
-                l1 := ify * f.x
-                l2 := f.y * ifx
-                l3 := f.y * f.x
-                texel : v4 = ---
-                texel.r = l0 * t00.r + l1 * t01.r + l2 * t10.r + l3 * t11.r
-                texel.g = l0 * t00.g + l1 * t01.g + l2 * t10.g + l3 * t11.g
-                texel.b = l0 * t00.b + l1 * t01.b + l2 * t10.b + l3 * t11.b
-                texel.a = l0 * t00.a + l1 * t01.a + l2 * t10.a + l3 * t11.a
+                l1 := ify * f[i].x
+                l2 := f[i].y * ifx
+                l3 := f[i].y * f[i].x
+                texel: v4 = ---
+                texel.r = l0 * t00[i].r + l1 * t01[i].r + l2 * t10[i].r + l3 * t11[i].r
+                texel.g = l0 * t00[i].g + l1 * t01[i].g + l2 * t10[i].g + l3 * t11[i].g
+                texel.b = l0 * t00[i].b + l1 * t01[i].b + l2 * t10[i].b + l3 * t11[i].b
+                texel.a = l0 * t00[i].a + l1 * t01[i].a + l2 * t10[i].a + l3 * t11[i].a
                 
                 texel *= color
                 texel.rgb = clamp_01(texel.rgb)
                 
-                dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
                 // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-                pixel  := vec_cast(f32, dst^)
+                pixel := vec_cast(f32, dst[i]^)
                 pixel *= inv_255
                 pixel.r = square(pixel.r)
                 pixel.g = square(pixel.g)
                 pixel.b = square(pixel.b)
                 
                 inv_texel_a := (1 - texel.a)
-                blended := inv_texel_a * pixel + texel
+                blended[i] = inv_texel_a * pixel + texel
                 
                 // blended = linear_1_to_srgb_255(blended)
-                blended.r = square_root(blended.r)
-                blended.g = square_root(blended.g)
-                blended.b = square_root(blended.b)
-                blended *= 255
+                blended[i].r = square_root(blended[i].r)
+                blended[i].g = square_root(blended[i].g)
+                blended[i].b = square_root(blended[i].b)
+                blended[i] *= 255
+            }
+                    
+            for i in 0..<4 {
+                if !should_fill[i] do continue
                 
-                dst^ = vec_cast(u8, blended)
+                dst[i]^ = vec_cast(u8, blended[i])
             }
         }
     }
