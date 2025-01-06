@@ -2,6 +2,7 @@ package game
 
 import "core:fmt"
 import "core:simd"
+import "core:simd/x86"
 
 /* NOTE(viktor): 
     1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
@@ -385,6 +386,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
     }
 }
 
+@(enable_target_feature="sse2"/* , optimization_mode="none" */)
 draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32) {
     scoped_timed_block(.draw_rectangle_quickly_hopefully)
     assert(texture.memory != nil)
@@ -435,7 +437,7 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
     // TODO(viktor): formalize texture boundaries
     texture_boundaries := vec_cast(f32, texture.width-2, texture.height-2)
     
-    f32x8 :: #simd[8]f32
+    f32x8 :: #simd[4]f32
     inv_255 := cast(f32x8) (1.0 / 255.0)
     one_255 := cast(f32x8) 255
     one     := cast(f32x8) 1
@@ -457,16 +459,9 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
     
     scoped_timed_block_counted(.test_pixel, cast(i64) ((maximum.x - minimum.x + 1) * (maximum.y - minimum.y + 1)) )
     for y in minimum.y..=maximum.y {
-        for x_base := minimum.x; x_base <= maximum.x; x_base += 8 {
+        for x_base := minimum.x; x_base <= maximum.x; x_base += 4 {
             fx: f32x8 = ---
             fy: f32x8 = ---
-            
-            zero_ : u8 = 0
-            better_nil := &zero_
-            dstr: [8]^u8 = better_nil
-            dstg: [8]^u8 = better_nil
-            dstb: [8]^u8 = better_nil
-            dsta: [8]^u8 = better_nil
             
             t00_r: f32x8 = ---
             t00_g: f32x8 = ---
@@ -487,17 +482,21 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
             t11_g: f32x8 = ---
             t11_b: f32x8 = ---
             t11_a: f32x8 = ---
-
+            
+            pixel_r: f32x8
+            pixel_g: f32x8
+            pixel_b: f32x8
+            pixel_a: f32x8
                             
             pixel_p_x := f32x8{
                 cast(f32) x_base, 
                 cast(f32) x_base+1, 
                 cast(f32) x_base+2, 
                 cast(f32) x_base+3,
-                cast(f32) x_base+4,
-                cast(f32) x_base+5,
-                cast(f32) x_base+6,
-                cast(f32) x_base+7,
+                // cast(f32) x_base+4,
+                // cast(f32) x_base+5,
+                // cast(f32) x_base+6,
+                // cast(f32) x_base+7,
             }
             pixel_p_y := cast(f32x8) y 
             
@@ -510,11 +509,14 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
             v := delta_x * n_y_axis_x + delta_y * n_y_axis_y
             
             // u >= 0 && u <= 1 && v >= 0 && v <= 1
-            should_fill := simd.ceil( simd.max(u, zero) * simd.max(one_plus_epsilon - u, zero) * simd.max(v, zero) * simd.max(one_plus_epsilon - v, zero) )
-            for i in i32(0)..<8 {
+            // should_fill := simd.ceil( simd.max(u, zero) * simd.max(one_plus_epsilon - u, zero) * simd.max(v, zero) * simd.max(one_plus_epsilon - v, zero) )
+            for i in i32(0)..<4 {
                 x := x_base + i
-            
-                if (cast([^]f32)&should_fill)[i] != 0 {
+                
+                ui := (cast([^]f32)&u)[i]
+                vi := (cast([^]f32)&v)[i]
+                // if (cast([^]f32)&should_fill)[i] != 0 {
+                if ui >= 0 && ui <= 1 && vi >= 0 && vi <= 1 {
                     t := v2{ (cast([^]f32)&u)[i], (cast([^]f32)&v)[i] } * texture_boundaries
                     s := vec_cast(i32, t)
                     (cast([^]f32)&fx)[i] = t.x - cast(f32) s.x
@@ -544,10 +546,10 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
                     (cast([^]f32)&t11_b)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1].b
                     (cast([^]f32)&t11_a)[i] = cast(f32) texture.memory[texture.start + (s.y+1) * texture.pitch + s.x + 1].a
                     
-                    dstr[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].r
-                    dstg[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].g
-                    dstb[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].b
-                    dsta[i] = &buffer.memory[buffer.start + y * buffer.pitch + x].a
+                    (cast([^]f32)&pixel_r)[i] = cast(f32) buffer.memory[buffer.start + y * buffer.pitch + x].r
+                    (cast([^]f32)&pixel_g)[i] = cast(f32) buffer.memory[buffer.start + y * buffer.pitch + x].g
+                    (cast([^]f32)&pixel_b)[i] = cast(f32) buffer.memory[buffer.start + y * buffer.pitch + x].b
+                    (cast([^]f32)&pixel_a)[i] = cast(f32) buffer.memory[buffer.start + y * buffer.pitch + x].a
                 }
             }
             
@@ -598,47 +600,6 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
             texel_b = clamp_01(texel_b)
         
             // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-            pixel_r := f32x8{ 
-                cast(f32) dstr[0]^, 
-                cast(f32) dstr[1]^, 
-                cast(f32) dstr[2]^, 
-                cast(f32) dstr[3]^,
-                cast(f32) dstr[4]^,
-                cast(f32) dstr[5]^,
-                cast(f32) dstr[6]^,
-                cast(f32) dstr[7]^,
-            }
-            pixel_g := f32x8{ 
-                cast(f32) dstg[0]^, 
-                cast(f32) dstg[1]^, 
-                cast(f32) dstg[2]^, 
-                cast(f32) dstg[3]^,
-                cast(f32) dstg[4]^,
-                cast(f32) dstg[5]^,
-                cast(f32) dstg[6]^,
-                cast(f32) dstg[7]^,
-            }
-            pixel_b := f32x8{ 
-                cast(f32) dstb[0]^, 
-                cast(f32) dstb[1]^, 
-                cast(f32) dstb[2]^, 
-                cast(f32) dstb[3]^,
-                cast(f32) dstb[4]^,
-                cast(f32) dstb[5]^,
-                cast(f32) dstb[6]^,
-                cast(f32) dstb[7]^,
-            }
-            pixel_a := f32x8{ 
-                cast(f32) dsta[0]^, 
-                cast(f32) dsta[1]^, 
-                cast(f32) dsta[2]^, 
-                cast(f32) dsta[3]^,
-                cast(f32) dsta[4]^,
-                cast(f32) dsta[5]^,
-                cast(f32) dsta[6]^,
-                cast(f32) dsta[7]^,
-            }
-            
             pixel_r = square(pixel_r * inv_255)
             pixel_g = square(pixel_g * inv_255)
             pixel_b = square(pixel_b * inv_255)
@@ -648,21 +609,54 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
             blended_r := inv_texel_a * pixel_r + texel_r
             blended_g := inv_texel_a * pixel_g + texel_g
             blended_b := inv_texel_a * pixel_b + texel_b
-            blended_a := inv_texel_a * pixel_a + texel_a
+            blended_a := inv_texel_a * pixel_a + texel_a 
             
             // blended = linear_1_to_srgb_255(blended)
-            blended_r = one_255 * square_root(blended_r)
-            blended_g = one_255 * square_root(blended_g)
-            blended_b = one_255 * square_root(blended_b)
+            blended_r  = one_255 * square_root(blended_r)
+            blended_g  = one_255 * square_root(blended_g)
+            blended_b  = one_255 * square_root(blended_b)
             blended_a *= one_255
 
-                    
-            for i in 0..<8 {
-                dstr[i]^ = cast(u8) (cast([^]f32)&blended_r)[i]
-                dstg[i]^ = cast(u8) (cast([^]f32)&blended_g)[i]
-                dstb[i]^ = cast(u8) (cast([^]f32)&blended_b)[i]
-                dsta[i]^ = cast(u8) (cast([^]f32)&blended_a)[i]
-            }
+            // TODO(viktor): can this be done easier?
+            r1 := simd.shuffle(blended_r, zero, 0, 1, 2, 3)
+            g1 := simd.shuffle(blended_g, zero, 0, 1, 2, 3)
+            b1 := simd.shuffle(blended_b, zero, 0, 1, 2, 3)
+            a1 := simd.shuffle(blended_a, zero, 0, 1, 2, 3)
+
+            // r2 := simd.shuffle(blended_r, zero, 4, 5, 6, 7)
+            // g2 := simd.shuffle(blended_g, zero, 4, 5, 6, 7)
+            // b2 := simd.shuffle(blended_b, zero, 4, 5, 6, 7)
+            // a2 := simd.shuffle(blended_a, zero, 4, 5, 6, 7)
+            
+            intr1 := x86._mm_cvttps_epi32(r1) 
+            intg1 := x86._mm_cvttps_epi32(g1) 
+            intb1 := x86._mm_cvttps_epi32(b1) 
+            inta1 := x86._mm_cvttps_epi32(a1) 
+            
+            // intr2 := x86._mm_cvttps_epi32(r2)
+            // intg2 := x86._mm_cvttps_epi32(g2)
+            // intb2 := x86._mm_cvttps_epi32(b2)
+            // inta2 := x86._mm_cvttps_epi32(a2)
+
+            mixed1 := cast(simd.i64x2) 0
+            mixed1 =    intr1 | 
+                simd.shl(intg1, cast(simd.u64x2)  8) | 
+                simd.shl(intb1, cast(simd.u64x2) 16) | 
+                simd.shl(inta1, cast(simd.u64x2) 24)
+                
+            // mixed2 := cast(simd.i64x2) 0
+            // mixed2 =    intr2 | 
+            //     simd.shl(intg2, cast(simd.u64x2)  8) | 
+            //     simd.shl(intb2, cast(simd.u64x2) 16) | 
+            //     simd.shl(inta2, cast(simd.u64x2) 32)
+            
+            #assert(size_of([4]ByteColor) == size_of(mixed1))
+            // #assert(size_of([4]ByteColor) == size_of(mixed2))
+                
+            pixel1 := cast(^[4]ByteColor) &buffer.memory[buffer.start + y * buffer.pitch + x_base]
+            pixel2 := cast(^[4]ByteColor) &buffer.memory[buffer.start + y * buffer.pitch + x_base + 4]
+            x86._mm_storeu_si128(auto_cast pixel1, mixed1)
+            // x86._mm_storeu_si128(auto_cast pixel2, mixed2)
         }
     }
 }

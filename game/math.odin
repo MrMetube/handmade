@@ -47,9 +47,13 @@ DegPerRad :: 360.0/Tau
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
-square :: proc { square_f, square_x8 }
+square :: proc { square_f, square_x4, square_x8 }
 @(require_results)
 square_f :: #force_inline proc(x: f32) -> f32 {
+    return x * x
+}
+@(require_results)
+square_x4 :: #force_inline proc(x: simd.f32x4) -> simd.f32x4 {
     return x * x
 }
 @(require_results)
