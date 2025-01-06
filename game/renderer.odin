@@ -281,13 +281,21 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         
             // TODO(viktor): handle invalid
             p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
+            when true {
                 when true {
-                draw_rectangle_slowly(target,
-                    p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
-                    entry.bitmap, {}, entry.color, 
-                    {}, {}, {},
-                    pixels_to_meters,
-                )
+                    draw_rectangle_quickly_hopefully(target,
+                        p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
+                        entry.bitmap, entry.color, 
+                        pixels_to_meters,
+                    )
+                } else {
+                    draw_rectangle_slowly(target,
+                        p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
+                        entry.bitmap, {}, entry.color, 
+                        {}, {}, {},
+                        pixels_to_meters,
+                    )
+                }
             } else {
                 draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
             }
@@ -295,14 +303,22 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
             base_address += auto_cast size_of(entry^)
-
-            draw_rectangle_slowly(target,
-                entry.origin, entry.x_axis, entry.y_axis, 
-                entry.texture, entry.normal, entry.color, 
-                entry.top, entry.middle, entry.bottom,
-                pixels_to_meters,
-            )
-            
+            when true {
+                draw_rectangle_quickly_hopefully(target,
+                    entry.origin, entry.x_axis, entry.y_axis, 
+                    entry.texture, /* entry.normal, */ entry.color, 
+                    /* entry.top, entry.middle, entry.bottom, */
+                    pixels_to_meters,
+                )
+            } else {
+                draw_rectangle_slowly(target,
+                    entry.origin, entry.x_axis, entry.y_axis, 
+                    entry.texture, entry.normal, entry.color, 
+                    entry.top, entry.middle, entry.bottom,
+                    pixels_to_meters,
+                )
+            }
+        
             p := entry.origin
             x := p + entry.x_axis
             y := p + entry.y_axis
@@ -368,6 +384,142 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
     }
 }
 
+draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32) {
+    scoped_timed_block(.draw_rectangle_quickly_hopefully)
+    assert(texture.memory != nil)
+    
+    // NOTE(viktor): premultiply color
+    color := color
+    color.rgb *= color.a
+
+    length_x_axis := length(x_axis)
+    length_y_axis := length(y_axis)
+    normal_x_axis := (length_y_axis / length_x_axis) * x_axis
+    normal_y_axis := (length_x_axis / length_y_axis) * y_axis
+    // NOTE(viktor): normal_z_scale could be a parameter if we want people 
+    // to have control over the amount of scaling in the z direction that 
+    // the normals appear to have
+    normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
+    
+    inv_x_len_squared := 1 / length_squared(x_axis)
+    inv_y_len_squared := 1 / length_squared(y_axis)
+        
+    minimum := [2]i32{
+        floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
+        floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
+    }
+    
+    maximum := [2]i32{
+        ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
+        ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
+    }
+    
+    width_max      := buffer.width-1
+    height_max     := buffer.height-1
+    inv_width_max  := 1 / cast(f32) width_max
+    inv_height_max := 1 / cast(f32) height_max
+
+    // TODO(viktor): this will need to be specified separately
+    origin_z     :f32= 0.5
+    origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
+    fixed_cast_y := inv_height_max * origin_y
+
+    maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
+    minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
+    
+    n_x_axis := x_axis * inv_x_len_squared
+    n_y_axis := y_axis * inv_y_len_squared
+    
+    texture_boundaries := vec_cast(f32, texture.width-2, texture.height-2)
+    
+    inv_255: f32 : 1.0 / 255.0
+    
+    for y in minimum.y..=maximum.y {
+        for x in minimum.x..=maximum.x {
+            scoped_timed_block(.test_pixel)
+            
+            pixel_p := vec_cast(f32, x, y)
+            delta := pixel_p - origin
+
+            u := dot(delta, n_x_axis)
+            v := dot(delta, n_y_axis)
+            
+            if u >= 0 && u <= 1 && v >= 0 && v <= 1 {
+                scoped_timed_block(.fill_pixel)
+                
+                // TODO(viktor): formalize texture boundaries
+                t := v2{u,v} * texture_boundaries
+                s := vec_cast(i32, t)
+                f := t - vec_cast(f32, s)
+                
+                assert(s.x >= 0 && s.x < texture.width)
+                assert(s.y >= 0 && s.y < texture.height)
+
+                // t00, t01, t10, t11 := sample_bilinear(texture, s)
+                t00 := vec_cast(f32, texture.memory[texture.start + 0 * texture.pitch + 0])
+                t01 := vec_cast(f32, texture.memory[texture.start + 0 * texture.pitch + 1])
+                t10 := vec_cast(f32, texture.memory[texture.start + 1 * texture.pitch + 0])
+                t11 := vec_cast(f32, texture.memory[texture.start + 1 * texture.pitch + 1])
+
+                // t00 = srgb_255_to_linear_1(t00)
+                // t01 = srgb_255_to_linear_1(t01)
+                // t10 = srgb_255_to_linear_1(t10)
+                // t11 = srgb_255_to_linear_1(t11)
+                t00  *= inv_255
+                t00.r = square(t00.r)
+                t00.g = square(t00.g)
+                t00.b = square(t00.b)
+                t01  *= inv_255
+                t01.r = square(t01.r)
+                t01.g = square(t01.g)
+                t01.b = square(t01.b)
+                t10  *= inv_255
+                t10.r = square(t10.r)
+                t10.g = square(t10.g)
+                t10.b = square(t10.b)
+                t11  *= inv_255
+                t11.r = square(t11.r)
+                t11.g = square(t11.g)
+                t11.b = square(t11.b)
+                                
+                // texel := blend_bilinear(t00, t01, t10, t11, f)
+                ifx := 1-f.x
+                ify := 1-f.y
+                l0 := ify * ifx
+                l1 := ify * f.x
+                l2 := f.y * ifx
+                l3 := f.y * f.x
+                texel : v4 = ---
+                texel.r = l0 * t00.r + l1 * t01.r + l2 * t10.r + l3 * t11.r
+                texel.g = l0 * t00.g + l1 * t01.g + l2 * t10.g + l3 * t11.g
+                texel.b = l0 * t00.b + l1 * t01.b + l2 * t10.b + l3 * t11.b
+                texel.a = l0 * t00.a + l1 * t01.a + l2 * t10.a + l3 * t11.a
+                
+                texel *= color
+                texel.rgb = clamp_01(texel.rgb)
+                
+                dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
+                // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
+                pixel  := vec_cast(f32, dst^)
+                pixel *= inv_255
+                pixel.r = square(pixel.r)
+                pixel.g = square(pixel.g)
+                pixel.b = square(pixel.b)
+                
+                inv_texel_a := (1 - texel.a)
+                blended := inv_texel_a * pixel + texel
+                
+                // blended = linear_1_to_srgb_255(blended)
+                blended.r = square_root(blended.r)
+                blended.g = square_root(blended.g)
+                blended.b = square_root(blended.b)
+                blended *= 255
+                
+                dst^ = vec_cast(u8, blended)
+            }
+        }
+    }
+}
 draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
     scoped_timed_block(.draw_rectangle_slowly)
     assert(texture.memory != nil)
@@ -548,6 +700,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     }
 }
 
+// TODO(viktor): should sample return a pointer instead?
 sample :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (result: v4) {
     texel := texture.memory[texture.start + p.y * texture.pitch + p.x]
     result = vec_cast(f32, texel)

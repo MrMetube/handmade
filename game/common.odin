@@ -76,6 +76,7 @@ when INTERNAL {
         game_update_and_render,
         render_to_output,
         draw_rectangle_slowly,
+        draw_rectangle_quickly_hopefully,
         test_pixel,
         fill_pixel,
     }
@@ -110,10 +111,12 @@ when INTERNAL {
     @(deferred_in_out=end_timed_block)
     scoped_timed_block :: #force_inline proc(name: DebugCycleCounterName) -> i64 { return intrinsics.read_cycle_counter()}
     end_timed_block    :: #force_inline proc(name: DebugCycleCounterName, start_cycle_count: i64) {
-        end_cycle_count := intrinsics.read_cycle_counter()
-        counter := &DEBUG_GLOBAL_memory.counters[name]
-        counter.cycle_count += end_cycle_count - start_cycle_count
-        counter.hit_count   += 1
+        #no_bounds_check {
+            end_cycle_count := intrinsics.read_cycle_counter()
+            counter := &DEBUG_GLOBAL_memory.counters[name]
+            counter.cycle_count += end_cycle_count - start_cycle_count
+            counter.hit_count   += 1
+        }
     }
     
 }

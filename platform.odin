@@ -473,7 +473,8 @@ main :: proc() {
                         fmt.printfln(format, title)
                         format = fmt.tprintf("%s %% 10vcy, %% 4vh, %% 10v cy/h", format)
                         for &counter, name in game_memory.counters {
-                            fmt.printfln(format, name, counter.cycle_count, counter.hit_count, counter.cycle_count / counter.hit_count)
+                            denom := counter.hit_count == 0 ? 1 : counter.hit_count
+                            fmt.printfln(format, name, counter.cycle_count, counter.hit_count, counter.cycle_count / denom)
                             counter.cycle_count = 0
                             counter.hit_count = 0
                             // 4.8 GHz with 144 fps -> 33.333.333 cycles per frame
