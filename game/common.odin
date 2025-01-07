@@ -76,7 +76,7 @@ when INTERNAL {
         game_update_and_render,
         render_to_output,
         draw_rectangle_slowly,
-        draw_rectangle_quickly_hopefully,
+        draw_rectangle_quickly,
         test_pixel,
     }
 } else {

@@ -4,26 +4,26 @@ import "core:fmt"
 import "core:simd"
 import "core:simd/x86"
 
-/* NOTE(viktor): 
+/* NOTE(viktor):
     1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
-    
+
     2) All Bitmaps including the render target are assumed to be bottom-up
-        (meaning that the first row is the bottom-most row when viewed on 
+        (meaning that the first row is the bottom-most row when viewed on
         screen).
-        
+
     3) It is mandatory that all inputs to the renderer are in world
         coordinate ("meters"), NOT pixels. If for some reason something
         absolutely has to be specified in pixels, that will be explicitly
         marked in the API, but this should occur exceedingly sparingly.
-        
+
     4) Z is a special axis, because it is broken up into discrete slices,
         and the renderer actually understands these slices(potentially).
         Z slices are what control the _scaling_ of things, whereas Z-offsets
         inside a slice are what control y-offsetting.
-        
-    5) All color values specified to the renderer as v4s are in 
+
+    5) All color values specified to the renderer as v4s are in
         _NON-premulitplied_ alpha.
-        
+
     TODO(viktor): :ZHandling
 */
 
@@ -32,10 +32,10 @@ RenderGroup :: struct {
     push_buffer_size: u32,
     default_basis:    ^RenderBasis,
     global_alpha:     f32,
-    
+
     meters_to_pixels_for_monitor:    f32,
     monitor_half_diameter_in_meters: v2,
-    
+
     game_camera:   Camera,
     render_camera: Camera,
 }
@@ -71,7 +71,7 @@ RenderGroupEntryClear :: struct {
 
 RenderGroupEntryBitmap :: struct {
     using rendering_basis: RenderGroupEntryBasis,
-    
+
     size:   v2,
     color:  v4,
     bitmap: LoadedBitmap,
@@ -79,7 +79,7 @@ RenderGroupEntryBitmap :: struct {
 
 RenderGroupEntryRectangle :: struct {
     using rendering_basis: RenderGroupEntryBasis,
-    
+
     color: v4,
     size:  v2,
 }
@@ -88,52 +88,52 @@ RenderGroupEntryCoordinateSystem :: struct {
     origin, x_axis, y_axis: v2,
     color:                  v4,
     texture, normal:        LoadedBitmap,
-    
+
     top, middle, bottom:    EnvironmentMap,
 }
 
 make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, resolution_pixels: [2]i32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
     result.push_buffer = push(arena, u8, max_push_buffer_size)
-    
+
     result.push_buffer_size = 0
-    
+
     result.default_basis = push(arena, RenderBasis)
     result.default_basis.p = {0,0,0}
-    
+
     result.global_alpha = 1
-    
+
     monitor_width_in_meters                 :: 0.635
     result.game_camera.focal_length          = 0.6
     result.game_camera.distance_above_target = 8.0
-        
+
     result.render_camera = result.game_camera
     // result.render_camera.distance_above_target = 38
-    
+
     result.meters_to_pixels_for_monitor = cast(f32) resolution_pixels.x * monitor_width_in_meters
-    
+
     pixels_to_meters := 1 / result.meters_to_pixels_for_monitor
     result.monitor_half_diameter_in_meters = 0.5 * pixels_to_meters * vec_cast(f32, resolution_pixels)
-    
+
     return result
 }
 
 get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
     result = get_camera_rectangle_at_distance(group, group.game_camera.distance_above_target)
-    
+
     return result
 }
 get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
     camera_half_diameter := unproject(group, group.monitor_half_diameter_in_meters, distance_from_camera)
-    result = rectangle_center_half_diameter(v2{}, camera_half_diameter) 
-    
+    result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
+
     return result
 }
 
 @(require_results)
 unproject :: #force_inline proc(group: ^RenderGroup, projected: v2, distance_from_camera: f32) -> (result: v2) {
     result = projected * (distance_from_camera / group.game_camera.focal_length)
-    
+
     return result
 }
 
@@ -141,18 +141,18 @@ get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: Rend
     near_clip_plane              :: 0.2
     base_p                       := entry.basis.p
     distance_to_p_z              := group.render_camera.distance_above_target - base_p.z
-    
+
     if distance_to_p_z > near_clip_plane {
         raw := V3(base_p.xy + entry.offset.xy, 1)
         projected := group.render_camera.focal_length * raw / distance_to_p_z
-        
+
         screen_center := screen_size * 0.5
-        
+
         position = screen_center + projected.xy * group.meters_to_pixels_for_monitor
         scale    =                 projected.z  * group.meters_to_pixels_for_monitor
         valid    = true
     }
-    
+
     return position, scale, valid
 }
 
@@ -162,33 +162,33 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     if group.push_buffer_size + size < auto_cast len(group.push_buffer) {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[group.push_buffer_size]
         header.type = typeid_of(T)
-        
+
         result = cast(^T) &group.push_buffer[group.push_buffer_size + header_size]
-        
+
         group.push_buffer_size += size
     } else {
         unreachable()
     }
-    
+
     return result
 }
 
 push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset:= v3{}, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryBitmap) {
     result = push_render_element(group, RenderGroupEntryBitmap)
     alpha := v4{1,1,1, group.global_alpha}
-    
+
     if result != nil {
         result.basis      = group.default_basis
         result.bitmap     = bitmap
         result.offset     = offset
         result.color      = color * alpha
         result.size       = v2{bitmap.width_over_height, 1} * height
-        
+
         align := bitmap.align_percentage * result.size
         result.offset.x -= align.x
         result.offset.y += align.y
     }
-    
+
     return result
 }
 
@@ -222,7 +222,7 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}
     if result != nil {
         result.color = color
     }
-    
+
     return result
 }
 
@@ -251,28 +251,28 @@ clear :: proc(group: ^RenderGroup, color: v4) {
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
     scoped_timed_block(.render_to_output)
-    
+
     screen_size      := vec_cast(f32, target.width, target.height)
     screen_center    := screen_size * 0.5
     meters_to_pixels := screen_size.x / 20
     pixels_to_meters := 1.0 / meters_to_pixels
-    
+
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
         base_address += size_of(RenderGroupEntryHeader)
 
         data := &group.push_buffer[base_address]
-        
+
         switch header.type {
         case RenderGroupEntryClear:
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
-            
+
             draw_rectangle(target, screen_center, screen_size, entry.color)
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
-            
+
             // TODO(viktor): handle invalid
             p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
             draw_rectangle(target, p, scale * entry.size, entry.color)
@@ -280,7 +280,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
-        
+
             // TODO(viktor): handle invalid
             p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
             when true {
@@ -288,16 +288,16 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
                     EPSILON :: 0.00001
                     // TODO(viktor): Brother ewww...
                     if scale > EPSILON {
-                        draw_rectangle_quickly_hopefully(target,
-                            p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
-                            entry.bitmap, entry.color, 
+                        draw_rectangle_quickly(target,
+                            p, {scale * entry.size.x, 0}, {0, scale * entry.size.y},
+                            entry.bitmap, entry.color,
                             pixels_to_meters,
                         )
                     }
                 } else {
                     draw_rectangle_slowly(target,
-                        p, {scale * entry.size.x, 0}, {0, scale * entry.size.y}, 
-                        entry.bitmap, {}, entry.color, 
+                        p, {scale * entry.size.x, 0}, {0, scale * entry.size.y},
+                        entry.bitmap, {}, entry.color,
                         {}, {}, {},
                         pixels_to_meters,
                     )
@@ -310,30 +310,30 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
             entry := cast(^RenderGroupEntryCoordinateSystem) data
             base_address += auto_cast size_of(entry^)
             when true {
-                draw_rectangle_quickly_hopefully(target,
-                    entry.origin, entry.x_axis, entry.y_axis, 
-                    entry.texture, /* entry.normal, */ entry.color, 
+                draw_rectangle_quickly(target,
+                    entry.origin, entry.x_axis, entry.y_axis,
+                    entry.texture, /* entry.normal, */ entry.color,
                     /* entry.top, entry.middle, entry.bottom, */
                     pixels_to_meters,
                 )
             } else {
                 draw_rectangle_slowly(target,
-                    entry.origin, entry.x_axis, entry.y_axis, 
-                    entry.texture, entry.normal, entry.color, 
+                    entry.origin, entry.x_axis, entry.y_axis,
+                    entry.texture, entry.normal, entry.color,
                     entry.top, entry.middle, entry.bottom,
                     pixels_to_meters,
                 )
             }
-        
+
             p := entry.origin
             x := p + entry.x_axis
             y := p + entry.y_axis
             size := v2{10, 10}
-            
+
             draw_rectangle(target, p, size, Red)
             draw_rectangle(target, x, size, Red * 0.7)
             draw_rectangle(target, y, size, Red * 0.7)
-            
+
         case:
             fmt.panicf("Unhandled Entry: %v", header.type)
         }
@@ -368,34 +368,34 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
         dst_index := dst_row
         defer dst_row += buffer.pitch
         defer src_row += bitmap.pitch
-        
+
         for _ in left..< right  {
             src := bitmap.memory[src_index]
             dst := &buffer.memory[dst_index]
             defer src_index += 1
             defer dst_index += 1
-            
+
             texel := vec_cast(f32, src)
             texel = srgb_255_to_linear_1(texel)
             texel *= color.a
-            
+
             pixel := vec_cast(f32, dst^)
             pixel = srgb_255_to_linear_1(pixel)
-            
+
             result := (1 - texel.a) * pixel + texel
             result = linear_1_to_srgb_255(result)
-            
+
             dst^ = vec_cast(u8, result + 0.5)
         }
     }
 }
 
 @(
-    enable_target_feature="sse,sse2" , 
+    enable_target_feature="sse,sse2" ,
     // optimization_mode="none",
 )
-draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32) {
-    scoped_timed_block(.draw_rectangle_quickly_hopefully)
+draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32) {
+    scoped_timed_block(.draw_rectangle_quickly)
     assert(texture.memory != nil)
     assert(texture.width  >= 0)
     assert(texture.height >= 0)
@@ -409,267 +409,227 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
     normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-    // NOTE(viktor): normal_z_scale could be a parameter if we want people 
-    // to have control over the amount of scaling in the z direction that 
+    // NOTE(viktor): normal_z_scale could be a parameter if we want people
+    // to have control over the amount of scaling in the z direction that
     // the normals appear to have
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
-    
+
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
-        
+
     minimum := [2]i32{
         floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
         floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
-    
+
     maximum := [2]i32{
         ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
         ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
-    
-    width_max      := (buffer.width-1)
-    height_max     := (buffer.height-1)
+
+    // TODO(viktor): IMPORTANT(viktor):  STOP DOING THIS ONCE WE HAVE REAL ROW LOADING
+    width_max      := (buffer.width-1)  -10
+    height_max     := (buffer.height-1) -10
     inv_width_max  := 1 / cast(f32) width_max
     inv_height_max := 1 / cast(f32) height_max
 
     // TODO(viktor): this will need to be specified separately
-    origin_z_     :f32= 0.5
-    origin_y_     := (origin + 0.5*x_axis + 0.5*y_axis).y
-    fixed_cast_y := inv_height_max * origin_y_
+    origin_z     :f32= 0.5
+    origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
+    fixed_cast_y := inv_height_max * origin_y
 
     maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
     minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
-    
+
     n_x_axis := x_axis * inv_x_len_squared
     n_y_axis := y_axis * inv_y_len_squared
-    
-    // TODO(viktor): IMPORTANT(viktor):  STOP DOING THIS ONCE WE HAVE REAL ROW LOADING
+
     // TODO(viktor): formalize texture boundaries
     texture_width_x4  := cast(f32x8) (texture.width-2)
     texture_height_x4 := cast(f32x8) (texture.height-2)
     
-    // TODO(viktor): IMPORTANT(viktor): Why wont x8 work here?
-    f32x8 :: #simd[4]f32
+    LANES :: 8
+    f32x8 :: #simd[8]f32
+    i32x8 :: #simd[8]i32
+    u32x8 :: #simd[8]u32
+    
     inv_255 := cast(f32x8) (1.0 / 255.0)
     one_255 := cast(f32x8) 255
     one     := cast(f32x8) 1
     zero    := cast(f32x8) 0
+    eight   := cast(f32x8) 8
+
     one_plus_epsilon := cast(f32x8) 1.00000001
-                
-    maskFF  := cast(simd.i32x4) 0xff
-    
-    shift8  := cast(simd.u32x4)  8
-    shift16 := cast(simd.u32x4) 16
-    shift24 := cast(simd.u32x4) 24
-    
+
+    maskFF  := cast(i32x8) 0xff
+
+    shift8  := cast(u32x8)  8
+    shift16 := cast(u32x8) 16
+    shift24 := cast(u32x8) 24
+
     color_r := cast(f32x8) color.r
     color_g := cast(f32x8) color.g
     color_b := cast(f32x8) color.b
     color_a := cast(f32x8) color.a
-                
+
     origin_x := cast(f32x8) origin.x
-    origin_y := cast(f32x8) origin.y
-    
+
     n_x_axis_x := cast(f32x8) n_x_axis.x
     n_x_axis_y := cast(f32x8) n_x_axis.y
     n_y_axis_x := cast(f32x8) n_y_axis.x
     n_y_axis_y := cast(f32x8) n_y_axis.y
-    
-    scoped_timed_block_counted(.test_pixel, cast(i64) ((maximum.x - minimum.x + 1) * (maximum.y - minimum.y + 1)) )
-    for y in minimum.y..=maximum.y {
-        for x_base := minimum.x; x_base <= maximum.x; x_base += 4 {
-            // TODO(viktor): x4 -> x8
-            pixel1 := &buffer.memory[buffer.start + y * buffer.pitch + x_base]
-            // pixel2 := &buffer.memory[buffer.start + y * buffer.pitch + x_base + 4]
 
-            pixel_p_x := f32x8{
-                cast(f32) x_base, 
-                cast(f32) x_base+1, 
-                cast(f32) x_base+2, 
-                cast(f32) x_base+3,
-                // cast(f32) x_base+4,
-                // cast(f32) x_base+5,
-                // cast(f32) x_base+6,
-                // cast(f32) x_base+7,
-            }
-            pixel_p_y := cast(f32x8) y 
-            
-            delta_x := pixel_p_x - origin_x
-            delta_y := pixel_p_y - origin_y
+    scoped_timed_block_counted(.test_pixel, cast(i64) ((maximum.x - minimum.x + 1) * (maximum.y - minimum.y + 1)) )
+
+    delta_y := cast(f32x8) minimum.y - cast(f32x8) origin.y
+    for y in minimum.y..=maximum.y {
+        defer delta_y += one
+
+        delta_y_n_x_axis_y := delta_y * n_x_axis_y
+        delta_y_n_y_axis_y := delta_y * n_y_axis_y
+
+        delta_x := cast(f32x8) minimum.x + f32x8{ 0, 1, 2, 3, 4, 5, 6, 7} - origin_x
+        for x_base := minimum.x; x_base <= maximum.x; x_base += LANES {
+            defer delta_x += eight
+
+            pixel :=cast(^[8]u8)  &buffer.memory[buffer.start + y * buffer.pitch + x_base]
 
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
-            u := delta_x * n_x_axis_x + delta_y * n_x_axis_y
-            v := delta_x * n_y_axis_x + delta_y * n_y_axis_y
-            
+            u := delta_x * n_x_axis_x + delta_y_n_x_axis_y
+            v := delta_x * n_y_axis_x + delta_y_n_y_axis_y
+
             // u >= 0 && u <= 1 && v >= 0 && v <= 1
-            write_mask := x86._mm_castps_si128( x86._mm_and_ps(
-                x86._mm_and_ps( x86._mm_cmpge_ps(u, zero), x86._mm_cmple_ps(u, one)), 
-                x86._mm_and_ps( x86._mm_cmpge_ps(v, zero), x86._mm_cmple_ps(v, one))
-            ))
-            
+            write_mask := transmute(i32x8) (simd.lanes_ge(u, zero) & simd.lanes_le(u, one) & simd.lanes_ge(v, zero) & simd.lanes_le(v, one))
+
             // TODO(viktor): recheck later if this helps
-            // if x86._mm_movemask_epi8(write_mask) != 0 
-            {
-                u = clamp_01(u)
-                v = clamp_01(v)
-                
-                tx := u * texture_width_x4
-                ty := v * texture_height_x4
+            // if x86._mm_movemask_epi8(write_mask) != 0
+            u = clamp_01(u)
+            v = clamp_01(v)
 
-                sx := cast(simd.i32x4) tx
-                sy := cast(simd.i32x4) ty
-                
-                fx := tx - cast(simd.f32x4) sx
-                fy := ty - cast(simd.f32x4) sy
+            tx := u * texture_width_x4
+            ty := v * texture_height_x4
 
-                original_pixel1 := x86._mm_loadu_si128(cast(^simd.i64x2) pixel1)
-                            
-                sample_a: simd.i32x4 = ---
-                sample_b: simd.i32x4 = ---
-                sample_c: simd.i32x4 = ---
-                sample_d: simd.i32x4 = ---
+            sx := cast(i32x8) tx
+            sy := cast(i32x8) ty
 
-                // t00, t01, t10, t11 := sample_bilinear(texture, s)
-                for i in 0..<4 {
-                    (cast([^]i32)&sample_a)[i] = transmute(i32) texture.memory[texture.start + ((cast([^]i32)&sy)[i]+0) * texture.pitch + (cast([^]i32)&sx)[i] + 0]
-                    (cast([^]i32)&sample_b)[i] = transmute(i32) texture.memory[texture.start + ((cast([^]i32)&sy)[i]+0) * texture.pitch + (cast([^]i32)&sx)[i] + 1]
-                    (cast([^]i32)&sample_c)[i] = transmute(i32) texture.memory[texture.start + ((cast([^]i32)&sy)[i]+1) * texture.pitch + (cast([^]i32)&sx)[i] + 0]
-                    (cast([^]i32)&sample_d)[i] = transmute(i32) texture.memory[texture.start + ((cast([^]i32)&sy)[i]+1) * texture.pitch + (cast([^]i32)&sx)[i] + 1]
-                }
+            fx := tx - cast(f32x8) sx
+            fy := ty - cast(f32x8) sy
 
-                ta_r := cast(simd.f32x4) (maskFF &          sample_a)
-                ta_g := cast(simd.f32x4) (maskFF & simd.shr(sample_a,  shift8))
-                ta_b := cast(simd.f32x4) (maskFF & simd.shr(sample_a,  shift16))
-                ta_a := cast(simd.f32x4) (maskFF & simd.shr(sample_a,  shift24))
-                
-                tb_r := cast(simd.f32x4) (maskFF &          sample_b)
-                tb_g := cast(simd.f32x4) (maskFF & simd.shr(sample_b,  shift8))
-                tb_b := cast(simd.f32x4) (maskFF & simd.shr(sample_b,  shift16))
-                tb_a := cast(simd.f32x4) (maskFF & simd.shr(sample_b,  shift24))
-                
-                tc_r := cast(simd.f32x4) (maskFF &          sample_c)
-                tc_g := cast(simd.f32x4) (maskFF & simd.shr(sample_c,  shift8))
-                tc_b := cast(simd.f32x4) (maskFF & simd.shr(sample_c,  shift16))
-                tc_a := cast(simd.f32x4) (maskFF & simd.shr(sample_c,  shift24))
-                
-                td_r := cast(simd.f32x4) (maskFF &          sample_d)
-                td_g := cast(simd.f32x4) (maskFF & simd.shr(sample_d,  shift8))
-                td_b := cast(simd.f32x4) (maskFF & simd.shr(sample_d,  shift16))
-                td_a := cast(simd.f32x4) (maskFF & simd.shr(sample_d,  shift24))
-                
-                pixel_r := cast(simd.f32x4) (maskFF &          transmute(simd.i32x4) original_pixel1)
-                pixel_g := cast(simd.f32x4) (maskFF & simd.shr(transmute(simd.i32x4) original_pixel1,  shift8))
-                pixel_b := cast(simd.f32x4) (maskFF & simd.shr(transmute(simd.i32x4) original_pixel1,  shift16))
-                pixel_a := cast(simd.f32x4) (maskFF & simd.shr(transmute(simd.i32x4) original_pixel1,  shift24))
-                
-                // t00 = srgb_255_to_linear_1(t00)
-                // t01 = srgb_255_to_linear_1(t01)
-                // t10 = srgb_255_to_linear_1(t10)
-                // t11 = srgb_255_to_linear_1(t11)
-                ta_a *= inv_255
-                ta_r = square(ta_r * inv_255)
-                ta_g = square(ta_g * inv_255)
-                ta_b = square(ta_b * inv_255)
-                
-                tb_a *= inv_255
-                tb_r = square(tb_r * inv_255)
-                tb_g = square(tb_g * inv_255)
-                tb_b = square(tb_b * inv_255)
-                
-                tc_a *= inv_255
-                tc_r = square(tc_r * inv_255)
-                tc_g = square(tc_g * inv_255)
-                tc_b = square(tc_b * inv_255)
-                
-                td_a *= inv_255
-                td_r = square(td_r * inv_255)
-                td_g = square(td_g * inv_255)
-                td_b = square(td_b * inv_255)
-                
-                // texel := blend_bilinear(t00, t01, t10, t11, f)
-                ifx := one - fx
-                ify := one - fy
-                l0  := ify * ifx
-                l1  := ify * fx
-                l2  :=  fy * ifx
-                l3  :=  fy * fx
-                
-                texel_r := l0 * ta_r + l1 * tb_r + l2 * tc_r + l3 * td_r
-                texel_g := l0 * ta_g + l1 * tb_g + l2 * tc_g + l3 * td_g
-                texel_b := l0 * ta_b + l1 * tb_b + l2 * tc_b + l3 * td_b
-                texel_a := l0 * ta_a + l1 * tb_a + l2 * tc_a + l3 * td_a
-                
-                texel_r *= color_r
-                texel_g *= color_g
-                texel_b *= color_b
-                texel_a *= color_a
-                
-                texel_r = clamp_01(texel_r)
-                texel_g = clamp_01(texel_g)
-                texel_b = clamp_01(texel_b)
-            
-                // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-                pixel_r = square(pixel_r * inv_255)
-                pixel_g = square(pixel_g * inv_255)
-                pixel_b = square(pixel_b * inv_255)
-                pixel_a *= inv_255
-                
-                inv_texel_a := (one - texel_a)
-                blended_r := inv_texel_a * pixel_r + texel_r
-                blended_g := inv_texel_a * pixel_g + texel_g
-                blended_b := inv_texel_a * pixel_b + texel_b
-                blended_a := inv_texel_a * pixel_a + texel_a 
-                
-                // blended = linear_1_to_srgb_255(blended)
-                blended_r  = one_255 * square_root(blended_r)
-                blended_g  = one_255 * square_root(blended_g)
-                blended_b  = one_255 * square_root(blended_b)
-                blended_a *= one_255
+            original_pixel := simd.masked_load(pixel, cast(i32x8) 0, maskFF)
 
-                // TODO(viktor): can this be done easier?
-                r1 := simd.shuffle(blended_r, zero, 0, 1, 2, 3)
-                g1 := simd.shuffle(blended_g, zero, 0, 1, 2, 3)
-                b1 := simd.shuffle(blended_b, zero, 0, 1, 2, 3)
-                a1 := simd.shuffle(blended_a, zero, 0, 1, 2, 3)
+            sample_a: i32x8 = ---
+            sample_b: i32x8 = ---
+            sample_c: i32x8 = ---
+            sample_d: i32x8 = ---
 
-                // r2 := simd.shuffle(blended_r, zero, 4, 5, 6, 7)
-                // g2 := simd.shuffle(blended_g, zero, 4, 5, 6, 7)
-                // b2 := simd.shuffle(blended_b, zero, 4, 5, 6, 7)
-                // a2 := simd.shuffle(blended_a, zero, 4, 5, 6, 7)
-                
-                // TODO(viktor): can this be a cast(simd.i32x4)
-                intr1 := x86._mm_cvtps_epi32(r1)
-                intg1 := x86._mm_cvtps_epi32(g1)
-                intb1 := x86._mm_cvtps_epi32(b1)
-                inta1 := x86._mm_cvtps_epi32(a1)
-                
-                // intr2 := x86._mm_cvttps_epi32(r2)
-                // intg2 := x86._mm_cvttps_epi32(g2)
-                // intb2 := x86._mm_cvttps_epi32(b2)
-                // inta2 := x86._mm_cvttps_epi32(a2)
-
-                mixed1 := cast(simd.i64x2) 0
-                mixed1 =    intr1 | 
-                    simd.shl(intg1, cast(simd.u64x2)  8) | 
-                    simd.shl(intb1, cast(simd.u64x2) 16) | 
-                    simd.shl(inta1, cast(simd.u64x2) 24)
-                    
-                // mixed2 := cast(simd.i64x2) 0
-                // mixed2 =    intr2 | 
-                //     simd.shl(intg2, cast(simd.u64x2)  8) | 
-                //     simd.shl(intb2, cast(simd.u64x2) 16) | 
-                //     simd.shl(inta2, cast(simd.u64x2) 32)
-                
-                #assert(size_of([4]ByteColor) == size_of(mixed1))
-                // #assert(size_of([4]ByteColor) == size_of(mixed2))
-
-                masked1 := write_mask & mixed1 | x86._mm_andnot_si128(write_mask, original_pixel1)
-                // masked2 := write_mask & mixed2 | x86._mm_andnot_si128(write_mask, original_pixel2)
-                
-                x86._mm_storeu_si128(auto_cast pixel1, masked1)
-                // x86._mm_storeu_si128(auto_cast pixel2, mixed2)
+            // t00, t01, t10, t11 := sample_bilinear(texture, s)
+            for i in 0..<LANES {
+                fetch_x := (cast([^]i32)&sx)[i]
+                fetch_y := (cast([^]i32)&sy)[i]
+                (cast([^]i32)&sample_a)[i] = transmute(i32) texture.memory[texture.start + (fetch_y+0) * texture.pitch + fetch_x + 0]
+                (cast([^]i32)&sample_b)[i] = transmute(i32) texture.memory[texture.start + (fetch_y+0) * texture.pitch + fetch_x + 1]
+                (cast([^]i32)&sample_c)[i] = transmute(i32) texture.memory[texture.start + (fetch_y+1) * texture.pitch + fetch_x + 0]
+                (cast([^]i32)&sample_d)[i] = transmute(i32) texture.memory[texture.start + (fetch_y+1) * texture.pitch + fetch_x + 1]
             }
+
+            ta_r := cast(f32x8) (maskFF &          sample_a)
+            ta_g := cast(f32x8) (maskFF & simd.shr(sample_a,  shift8))
+            ta_b := cast(f32x8) (maskFF & simd.shr(sample_a,  shift16))
+            ta_a := cast(f32x8) (maskFF & simd.shr(sample_a,  shift24))
+
+            tb_r := cast(f32x8) (maskFF &          sample_b)
+            tb_g := cast(f32x8) (maskFF & simd.shr(sample_b,  shift8))
+            tb_b := cast(f32x8) (maskFF & simd.shr(sample_b,  shift16))
+            tb_a := cast(f32x8) (maskFF & simd.shr(sample_b,  shift24))
+
+            tc_r := cast(f32x8) (maskFF &          sample_c)
+            tc_g := cast(f32x8) (maskFF & simd.shr(sample_c,  shift8))
+            tc_b := cast(f32x8) (maskFF & simd.shr(sample_c,  shift16))
+            tc_a := cast(f32x8) (maskFF & simd.shr(sample_c,  shift24))
+
+            td_r := cast(f32x8) (maskFF &          sample_d)
+            td_g := cast(f32x8) (maskFF & simd.shr(sample_d,  shift8))
+            td_b := cast(f32x8) (maskFF & simd.shr(sample_d,  shift16))
+            td_a := cast(f32x8) (maskFF & simd.shr(sample_d,  shift24))
+
+            pixel_r := cast(f32x8) (maskFF &          original_pixel)
+            pixel_g := cast(f32x8) (maskFF & simd.shr(original_pixel,  shift8))
+            pixel_b := cast(f32x8) (maskFF & simd.shr(original_pixel,  shift16))
+            pixel_a := cast(f32x8) (maskFF & simd.shr(original_pixel,  shift24))
+
+            // t00 = srgb_255_to_linear_1(t00)
+            // t01 = srgb_255_to_linear_1(t01)
+            // t10 = srgb_255_to_linear_1(t10)
+            // t11 = srgb_255_to_linear_1(t11)
+            ta_a *= inv_255
+            ta_r = square(ta_r * inv_255)
+            ta_g = square(ta_g * inv_255)
+            ta_b = square(ta_b * inv_255)
+
+            tb_a *= inv_255
+            tb_r = square(tb_r * inv_255)
+            tb_g = square(tb_g * inv_255)
+            tb_b = square(tb_b * inv_255)
+
+            tc_a *= inv_255
+            tc_r = square(tc_r * inv_255)
+            tc_g = square(tc_g * inv_255)
+            tc_b = square(tc_b * inv_255)
+
+            td_a *= inv_255
+            td_r = square(td_r * inv_255)
+            td_g = square(td_g * inv_255)
+            td_b = square(td_b * inv_255)
+
+            // texel := blend_bilinear(t00, t01, t10, t11, f)
+            ifx := one - fx
+            ify := one - fy
+            l0  := ify * ifx
+            l1  := ify * fx
+            l2  :=  fy * ifx
+            l3  :=  fy * fx
+
+            texel_r := l0 * ta_r + l1 * tb_r + l2 * tc_r + l3 * td_r
+            texel_g := l0 * ta_g + l1 * tb_g + l2 * tc_g + l3 * td_g
+            texel_b := l0 * ta_b + l1 * tb_b + l2 * tc_b + l3 * td_b
+            texel_a := l0 * ta_a + l1 * tb_a + l2 * tc_a + l3 * td_a
+
+            texel_r *= color_r
+            texel_g *= color_g
+            texel_b *= color_b
+            texel_a *= color_a
+
+            texel_r = clamp_01(texel_r)
+            texel_g = clamp_01(texel_g)
+            texel_b = clamp_01(texel_b)
+
+            // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
+            pixel_r = square(pixel_r * inv_255)
+            pixel_g = square(pixel_g * inv_255)
+            pixel_b = square(pixel_b * inv_255)
+            pixel_a *= inv_255
+
+            inv_texel_a := (one - texel_a)
+            blended_r := inv_texel_a * pixel_r + texel_r
+            blended_g := inv_texel_a * pixel_g + texel_g
+            blended_b := inv_texel_a * pixel_b + texel_b
+            blended_a := inv_texel_a * pixel_a + texel_a
+
+            // blended = linear_1_to_srgb_255(blended)
+            blended_r  = one_255 * square_root(blended_r)
+            blended_g  = one_255 * square_root(blended_g)
+            blended_b  = one_255 * square_root(blended_b)
+            blended_a *= one_255
+
+            intr := cast(i32x8) blended_r
+            intg := cast(i32x8) blended_g
+            intb := cast(i32x8) blended_b
+            inta := cast(i32x8) blended_a
+            
+            mixed := intr | simd.shl(intg, shift8) | simd.shl(intb, shift16) | simd.shl(inta, shift24)
+
+            simd.masked_store(pixel, mixed, write_mask)
         }
     }
 }
@@ -677,7 +637,7 @@ draw_rectangle_quickly_hopefully :: proc(buffer: LoadedBitmap, origin, x_axis, y
 draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
     scoped_timed_block(.draw_rectangle_slowly)
     assert(texture.memory != nil)
-    
+
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a
@@ -686,24 +646,24 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
     normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-    // NOTE(viktor): normal_z_scale could be a parameter if we want people 
-    // to have control over the amount of scaling in the z direction that 
+    // NOTE(viktor): normal_z_scale could be a parameter if we want people
+    // to have control over the amount of scaling in the z direction that
     // the normals appear to have
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
-    
+
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
-        
+
     minimum := [2]i32{
         floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
         floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
-    
+
     maximum := [2]i32{
         ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
         ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
-    
+
     width_max      := buffer.width-1
     height_max     := buffer.height-1
     inv_width_max  := 1 / cast(f32) width_max
@@ -716,7 +676,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
 
     maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
     minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
-    
+
     for y in minimum.y..=maximum.y {
         for x in minimum.x..=maximum.x {
             pixel_p := vec_cast(f32, x, y)
@@ -725,7 +685,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
             edge1 := dot(delta - x_axis         , -perpendicular(y_axis))
             edge2 := dot(delta - x_axis - y_axis,  perpendicular(x_axis))
             edge3 := dot(delta - y_axis         ,  perpendicular(y_axis))
-            
+
             if edge0 < 0 && edge1 < 0 && edge2 < 0 && edge3 < 0 {
                 Card :: true
                 when Card {
@@ -733,50 +693,50 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                     z_difference    := pixels_to_meters * (cast(f32) y - origin_y)
                 } else {
                     screen_space_uv := vec_cast(f32, x, y) * {inv_width_max, inv_height_max}
-                    z_difference: f32 
+                    z_difference: f32
                 }
 
                 u := dot(delta, x_axis) * inv_x_len_squared
                 v := dot(delta, y_axis) * inv_y_len_squared
-                
+
                 // TODO(viktor): this epsilon should not exists
                 EPSILON :: 0.000001
                 assert(u + EPSILON >= 0 && u - EPSILON <= 1)
                 assert(v + EPSILON >= 0 && v - EPSILON <= 1)
-                
+
                 // TODO(viktor): formalize texture boundaries
                 t := v2{u,v} * vec_cast(f32, texture.width-2, texture.height-2)
                 s := vec_cast(i32, t)
                 f := t - vec_cast(f32, s)
-                
+
                 assert(s.x >= 0 && s.x < texture.width)
                 assert(s.y >= 0 && s.y < texture.height)
 
                 t00, t01, t10, t11 := sample_bilinear(texture, s)
-                
+
                 t00 = srgb_255_to_linear_1(t00)
                 t01 = srgb_255_to_linear_1(t01)
                 t10 = srgb_255_to_linear_1(t10)
                 t11 = srgb_255_to_linear_1(t11)
-                
+
                 texel := blend_bilinear(t00, t01, t10, t11, f)
-                
+
                 if normal_map.memory != nil {
                     normal := blend_bilinear(sample_bilinear(normal_map, s), f)
                     normal = unscale_and_bias(normal)
                     normal.xy = normal.x * normal_x_axis + normal.y * normal_y_axis
                     normal.z *= normal_z_scale
                     normal = normalize(normal)
-                    
+
                     // NOTE(viktor): the eye-vector is always assumed to be [0, 0, 1]
                     // This is just a simplified version of the reflection -e + 2 * dot(e, n) * n
                     bounce_direction := 2 * normal.z * normal.xyz
                     bounce_direction.z -= 2
                     // TODO(viktor): eventually we need to support two mappings
-                    // one for top-down view(which we do not do now) and one 
+                    // one for top-down view(which we do not do now) and one
                     // for sideways, which is happening here.
                     bounce_direction.z = -bounce_direction.z
-                    
+
                     far_map: EnvironmentMap
                     t_environment := bounce_direction.y
                     t_far_map: f32
@@ -789,7 +749,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                         t_far_map = (t_environment - 0.5) * 2
                     }
                     t_far_map = square(t_far_map)
-                    
+
                     light_color := v3{} // TODO(viktor): how do we sample from the middle environment m?ap
                     if t_far_map > 0 {
                         distance_from_map_in_z := far_map.pz - pz
@@ -810,11 +770,11 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
 
                 dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
                 pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-                
-                
+
+
                 blended := (1 - texel.a) * pixel + texel
                 blended = linear_1_to_srgb_255(blended)
-                
+
                 dst^ = vec_cast(u8, blended)
             }
         }
@@ -824,12 +784,12 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
 draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
     rounded_center := floor(center)
     rounded_size   := floor(size)
-    
+
     left   := rounded_center.x - rounded_size.x / 2
     top	   := rounded_center.y - rounded_size.y / 2
     right  := left + rounded_size.x
     bottom := top  + rounded_size.y
-    
+
     if left < 0 do left = 0
     if top  < 0 do top  = 0
     if right  > buffer.width  do right  = buffer.width
@@ -854,7 +814,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4){
 sample :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (result: v4) {
     texel := texture.memory[texture.start + p.y * texture.pitch + p.x]
     result = vec_cast(f32, texel)
-    
+
     return result
 }
 
@@ -863,11 +823,11 @@ sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00,
     s01 = sample(texture, p + {1, 0})
     s10 = sample(texture, p + {0, 1})
     s11 = sample(texture, p + {1, 1})
-    
+
     return s00, s01, s10, s11
 }
 
-/* 
+/*
     NOTE(viktor):
 
     screen_space_uv tells us where the ray is being cast _from_ in
@@ -876,58 +836,58 @@ sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00,
     sample_direction tells us what direction the cast is going
     it does not have to be normalized, but y _must be positive_.
 
-    roughness says which LODs of Map we sample from. 
-    
+    roughness says which LODs of Map we sample from.
+
     distance_from_map_in_z says how far the map is from the sample
     point in z, given in meters
 */
 sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
     assert(environment_map.LOD[0].memory != nil)
-    
+
     // NOTE(viktor): pick which LOD to sample from
     lod_index := cast(i32) (roughness * cast(f32) (len(environment_map.LOD)-1) + 0.5)
     lod := environment_map.LOD[lod_index]
     lod_size := vec_cast(f32, lod.width, lod.height)
-    
-    // NOTE(viktor): compute the distance to the map and the 
+
+    // NOTE(viktor): compute the distance to the map and the
     // scaling factor for meters-to-UVs
     uvs_per_meter: f32 = 0.1 // TODO(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
     offset := c * sample_direction.xz
-    
+
     // NOTE(viktor): Find the intersection point
     uv := screen_space_uv + offset
     uv = clamp_01(uv)
-    
+
     // NOTE(viktor): bilinear sample
     t        := uv * (lod_size - 2)
     index    := vec_cast(i32, t)
     fraction := t - vec_cast(f32, index)
-    
+
     assert(index.x >= 0 && index.x < lod.width)
     assert(index.y >= 0 && index.y < lod.height)
-    
+
     l00, l01, l10, l11 := sample_bilinear(lod, index)
-    
+
     l00 = srgb_255_to_linear_1(l00)
     l01 = srgb_255_to_linear_1(l01)
     l10 = srgb_255_to_linear_1(l10)
     l11 = srgb_255_to_linear_1(l11)
 
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
-    
+
     when false {
         // NOTE(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
         texel^ = 255
     }
-            
+
     return result
 }
 
 blend_bilinear :: #force_inline proc(s00, s01, s10, s11: v4, t: v2) -> (result: v4) {
     result = lerp( lerp(s00, s01, t.x), lerp(s10, s11, t.x), t.y )
-    
+
     return result
 }
 
@@ -937,7 +897,7 @@ unscale_and_bias :: #force_inline proc(normal: v4) -> (result: v4) {
 
     result.xyz = -1 + 2 * (normal.xyz * inv_255)
     result.w = inv_255 * normal.w
-    
+
     return result
 }
 
@@ -948,31 +908,31 @@ srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
     result.g = square(srgb.g)
     result.b = square(srgb.b)
     result.a = srgb.a
-    
+
     return result
-} 
+}
 @(require_results)
 srgb_255_to_linear_1 :: #force_inline proc(srgb: v4) -> (result: v4) {
     inv_255: f32 = 1.0 / 255.0
     result = srgb * inv_255
     result = srgb_to_linear(result)
-    
+
     return result
 }
-                
+
 @(require_results)
 linear_to_srgb :: #force_inline proc(linear: v4) -> (result: v4) {
     result.r = square_root(linear.r)
     result.g = square_root(linear.g)
     result.b = square_root(linear.b)
     result.a = linear.a
-    
+
     return result
-} 
+}
 @(require_results)
 linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     result = linear_to_srgb(linear)
     result *= 255
-    
+
     return result
 }
