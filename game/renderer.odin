@@ -443,23 +443,21 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
 
     n_x_axis := x_axis * inv_x_len_squared
     n_y_axis := y_axis * inv_y_len_squared
-
-    // TODO(viktor): formalize texture boundaries
-    texture_width_x4  := cast(f32x8) (texture.width-2)
-    texture_height_x4 := cast(f32x8) (texture.height-2)
     
     LANES :: 8
     f32x8 :: #simd[8]f32
     i32x8 :: #simd[8]i32
     u32x8 :: #simd[8]u32
     
+    // TODO(viktor): formalize texture boundaries
+    texture_width_x4  := cast(f32x8) (texture.width-2)
+    texture_height_x4 := cast(f32x8) (texture.height-2)
+
     inv_255 := cast(f32x8) (1.0 / 255.0)
-    one_255 := cast(f32x8) 255
+    max_color_value := cast(f32x8) (255 * 255)
     one     := cast(f32x8) 1
     zero    := cast(f32x8) 0
     eight   := cast(f32x8) 8
-
-    one_plus_epsilon := cast(f32x8) 1.00000001
 
     maskFF  := cast(i32x8) 0xff
 
@@ -522,7 +520,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
             sample_b: i32x8 = ---
             sample_c: i32x8 = ---
             sample_d: i32x8 = ---
-
+            
             // t00, t01, t10, t11 := sample_bilinear(texture, s)
             for i in 0..<LANES {
                 fetch_x := (cast([^]i32)&sx)[i]
@@ -562,25 +560,21 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
             // t01 = srgb_255_to_linear_1(t01)
             // t10 = srgb_255_to_linear_1(t10)
             // t11 = srgb_255_to_linear_1(t11)
-            ta_a *= inv_255
-            ta_r = square(ta_r * inv_255)
-            ta_g = square(ta_g * inv_255)
-            ta_b = square(ta_b * inv_255)
+            ta_r = square(ta_r)
+            ta_g = square(ta_g)
+            ta_b = square(ta_b)
 
-            tb_a *= inv_255
-            tb_r = square(tb_r * inv_255)
-            tb_g = square(tb_g * inv_255)
-            tb_b = square(tb_b * inv_255)
+            tb_r = square(tb_r)
+            tb_g = square(tb_g)
+            tb_b = square(tb_b)
 
-            tc_a *= inv_255
-            tc_r = square(tc_r * inv_255)
-            tc_g = square(tc_g * inv_255)
-            tc_b = square(tc_b * inv_255)
+            tc_r = square(tc_r)
+            tc_g = square(tc_g)
+            tc_b = square(tc_b)
 
-            td_a *= inv_255
-            td_r = square(td_r * inv_255)
-            td_g = square(td_g * inv_255)
-            td_b = square(td_b * inv_255)
+            td_r = square(td_r)
+            td_g = square(td_g)
+            td_b = square(td_b)
 
             // texel := blend_bilinear(t00, t01, t10, t11, f)
             ifx := one - fx
@@ -595,32 +589,30 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
             texel_b := l0 * ta_b + l1 * tb_b + l2 * tc_b + l3 * td_b
             texel_a := l0 * ta_a + l1 * tb_a + l2 * tc_a + l3 * td_a
 
-            texel_r *= color_r
-            texel_g *= color_g
-            texel_b *= color_b
-            texel_a *= color_a
+            texel_r *= color_r 
+            texel_g *= color_g 
+            texel_b *= color_b 
+            texel_a *= color_a 
 
-            texel_r = clamp_01(texel_r)
-            texel_g = clamp_01(texel_g)
-            texel_b = clamp_01(texel_b)
+            texel_r = clamp(texel_r, zero, max_color_value)
+            texel_g = clamp(texel_g, zero, max_color_value)
+            texel_b = clamp(texel_b, zero, max_color_value)
 
             // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-            pixel_r = square(pixel_r * inv_255)
-            pixel_g = square(pixel_g * inv_255)
-            pixel_b = square(pixel_b * inv_255)
-            pixel_a *= inv_255
+            pixel_r = square(pixel_r)
+            pixel_g = square(pixel_g)
+            pixel_b = square(pixel_b)
 
-            inv_texel_a := (one - texel_a)
+            inv_texel_a := (one - (inv_255 * texel_a))
             blended_r := inv_texel_a * pixel_r + texel_r
             blended_g := inv_texel_a * pixel_g + texel_g
             blended_b := inv_texel_a * pixel_b + texel_b
             blended_a := inv_texel_a * pixel_a + texel_a
 
             // blended = linear_1_to_srgb_255(blended)
-            blended_r  = one_255 * square_root(blended_r)
-            blended_g  = one_255 * square_root(blended_g)
-            blended_b  = one_255 * square_root(blended_b)
-            blended_a *= one_255
+            blended_r  = square_root(blended_r)
+            blended_g  = square_root(blended_g)
+            blended_b  = square_root(blended_b)
 
             intr := cast(i32x8) blended_r
             intg := cast(i32x8) blended_g
