@@ -530,10 +530,10 @@ when !true {
     
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
-    camera_bounds := rectangle_min_max(
+    camera_bounds := Rectangle3{
         V3(screen_bounds.min, -0.5 * state.typical_floor_height), 
         V3(screen_bounds.max, 4 * state.typical_floor_height),
-    )
+    }
 
     {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
@@ -794,7 +794,7 @@ when false {
     }
 
 }
-    render_to_output(render_group, buffer)
+    tiled_render_to_output(render_group, buffer)
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
@@ -908,7 +908,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     // TODO(viktor): how do we want to control our ground chunk resolution?
     // TODO(viktor): Need to be able to set an orthographic display mode here
     render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4), {1920, 1080})
-    defer render_to_output(render_group, ground_buffer.bitmap)
+    defer tiled_render_to_output(render_group, ground_buffer.bitmap)
     
     clear(render_group, Red)
         

@@ -496,7 +496,7 @@ entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
             a_rect := rectangle_center_diameter(a.p + a_volume.offset, a_volume.dim + epsilon)
             b_rect := rectangle_center_diameter(b.p + b_volume.offset, b_volume.dim)
             
-            if rectangle_intersect(a_rect, b_rect) {
+            if rectangle_intersects(a_rect, b_rect) {
                 result = true
                 break outer
             }
