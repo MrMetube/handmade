@@ -11,7 +11,7 @@ when #config(BUILD, false) {
 
 pedantic :: "-vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style"
 flags    :: "-vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows"
-debug    :: "-debug -define:INTERNAL=true -o:speed"
+debug    :: "-debug -define:INTERNAL=true -o:none"
 
 src_path :: `.\build.odin`
 
@@ -40,7 +40,7 @@ main :: proc() {
         }
         
         fmt.fprint(lock, "WAITING FOR PDB")
-
+        
         if !run_command_sync(`C:\Odin\odin.exe`, fmt.tprintf(`odin build game -build-mode:dll -out:.\build\game.dll -pdb-name:.\build\game-%d.pdb %s %s `, random_number(), flags, debug)) {
             os.exit(1)
         }
@@ -176,6 +176,7 @@ is_running :: proc(exe_name: string) -> (running: b32) {
     return false
 }
 
+// TODO(viktor): accept []string instead
 run_command_sync :: proc(program, args: string) -> (success: b32) {
     log.info("Running: [", program,"]", args)
     startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }

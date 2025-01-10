@@ -8,12 +8,13 @@ import win "core:sys/windows"
 
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
+    - Threading (launch a thread)
+
     - Fullscreen support
 
     - Saved game locations
     - Getting a handle to our own executable file
     - Asset loading path
-    - Threading (launch a thread)
     - Raw Input (support for multiple keyboards)
     - ClipCursor() (for multimonitor support)
     - QueryCancelAutoplay
@@ -87,31 +88,72 @@ ThreadContext :: struct {
     placeholder: i32,
 }
 
+WorkQueueEntry :: struct {
+    string_to_print: string
+}
+
+entry_to_print: u32
+entry_count: u32
+work_entries: [256]WorkQueueEntry
+
+ThreadInfo :: struct {
+    logical_thread_index: u32
+}
+
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
-    thread_proc :: proc "stdcall" (data: rawptr) -> win.DWORD {
+    thread_proc :: proc "stdcall" (parameter: rawptr) -> win.DWORD {
         context = runtime.default_context()
-        string_to_print := (cast(^string) data)^
-        fmt.println(string_to_print)
-        return 0
+        
+        info := cast(^ThreadInfo) parameter
+        
+        for {
+            if entry_to_print < entry_count {
+                index := entry_to_print
+                entry_to_print += 1
+                
+                fmt.println("thread", info.logical_thread_index, "printed:", work_entries[entry_to_print])
+            }
+            win.Sleep(1000)
+        }
     }
     
-    parameter := "Thread started"
-    thread_id: win.DWORD
-    thread_handle := win.CreateThread(nil, 0, thread_proc, &parameter, 0, &thread_id)
+    infos: [15]ThreadInfo
+    for &it, it_index in infos {
+        it.logical_thread_index = auto_cast it_index
         
+        thread_id: win.DWORD
+        thread_handle := win.CreateThread(nil, 0, thread_proc, &it, 0, &thread_id)
+    }
+    
+    push_string :: proc(s: string) {
+        work_entries[entry_count].string_to_print = s
+        entry_count += 1
+    }
+    
+    push_string("String 0")
+    push_string("String 1")
+    push_string("String 2")
+    push_string("String 3")
+    push_string("String 4")
+    push_string("String 5")
+    push_string("String 6")
+    push_string("String 7")
+    push_string("String 8")
+    push_string("String 9")
+    
     // ---------------------- ---------------------- ----------------------
     // ----------------------  Platform Setup
     // ---------------------- ---------------------- ----------------------
 
     state: State
     {
-        exe_path_buffer : [win.MAX_PATH_WIDE]u16
-        size_of_filename := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
+        exe_path_buffer: [win.MAX_PATH_WIDE]u16
+        size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
         exe_path_and_name := win.wstring_to_utf8(raw_data(exe_path_buffer[:size_of_filename]), cast(int) size_of_filename) or_else ""
-        one_past_last_slash : u32
+        one_past_last_slash: u32
         for r, i in exe_path_and_name {
             if r == '\\' {
                 one_past_last_slash = cast(u32) i + 1
@@ -468,7 +510,7 @@ main :: proc() {
             if game_lib_is_valid {
                 game_update_and_render(&game_memory, offscreen_buffer, new_input)
                 handle_debug_cycle_counters :: proc(game_memory: ^GameMemory) {
-                    when INTERNAL {
+                    when false && INTERNAL {
                         title := "Debug Game Cycle Counts"
                         longest_name_length := len(title)
                         for counter, name in game_memory.counters {
