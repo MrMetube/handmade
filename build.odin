@@ -178,7 +178,7 @@ is_running :: proc(exe_name: string) -> (running: b32) {
 
 run_command_sync :: proc(program, args: string) -> (success: b32) {
     log.info("Running: [", program,"]", args)
-    startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW)}
+    startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }
     process_info := win.PROCESS_INFORMATION{}
      
     os.set_current_directory("D:\\handmade")

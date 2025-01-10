@@ -5,6 +5,7 @@ import "base:runtime"
 
 import "core:fmt"
 import win "core:sys/windows"
+
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
     - Fullscreen support
@@ -47,42 +48,38 @@ GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEM
 // ---------------------- ---------------------- ----------------------
 
 SoundOutput :: struct {
-    samples_per_second   : u32,
-    num_channels         : u32,
-    bytes_per_sample     : u32,
-    buffer_size          : u32,
-    running_sample_index : u32,
-    safety_bytes         : u32,
-}
-
-WindowsColor :: struct{
-    b, g, r, pad: u8,
+    samples_per_second  : u32,
+    num_channels        : u32,
+    bytes_per_sample    : u32,
+    buffer_size         : u32,
+    running_sample_index: u32,
+    safety_bytes        : u32,
 }
 
 Color :: [4]u8
 
 OffscreenBuffer :: struct {
-    info   : win.BITMAPINFO,
-    memory : []Color,
+    info  :               win.BITMAPINFO,
+    memory:               []Color,
     width, height, pitch: i32,
 }
 
 State :: struct {
-    exe_path : string,
+    exe_path: string,
 
-    game_memory_block : []u8,
-    replay_buffers: [4]ReplayBuffer,
+    game_memory_block: []u8,
+    replay_buffers:    [4]ReplayBuffer,
 
-    input_record_handle : win.HANDLE,
-    input_record_index  : i32,
-    input_replay_handle : win.HANDLE,
-    input_replay_index  : i32,
+    input_record_handle: win.HANDLE,
+    input_record_index : i32,
+    input_replay_handle: win.HANDLE,
+    input_replay_index : i32,
 }
 
 ReplayBuffer :: struct {
-    filename: win.wstring,
-    filehandle: win.HANDLE,
-    memory_map: win.HANDLE,
+    filename:     win.wstring,
+    filehandle:   win.HANDLE,
+    memory_map:   win.HANDLE,
     memory_block: []u8,
 }
 
@@ -94,6 +91,17 @@ main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
+    thread_proc :: proc "stdcall" (data: rawptr) -> win.DWORD {
+        context = runtime.default_context()
+        string_to_print := (cast(^string) data)^
+        fmt.println(string_to_print)
+        return 0
+    }
+    
+    parameter := "Thread started"
+    thread_id: win.DWORD
+    thread_handle := win.CreateThread(nil, 0, thread_proc, &parameter, 0, &thread_id)
+        
     // ---------------------- ---------------------- ----------------------
     // ----------------------  Platform Setup
     // ---------------------- ---------------------- ----------------------
@@ -118,7 +126,7 @@ main :: proc() {
     
     // NOTE: We store a thread context in the context to know which thread is calling into the platform layer
     // TODO(viktor): Once there are multiple threads each call into the threads game code needs its own thread context
-    main_thread_context : ThreadContext
+    main_thread_context: ThreadContext
     main_thread_context.placeholder = 123
     context.user_ptr = &main_thread_context
     
@@ -130,7 +138,7 @@ main :: proc() {
     // ---------------------- Windows Setup
     // ---------------------- ---------------------- ----------------------
 
-    window : win.HWND
+    window: win.HWND
     {
         instance := cast(win.HINSTANCE) win.GetModuleHandleW(nil)
         window_class := win.WNDCLASSW{
@@ -206,11 +214,11 @@ main :: proc() {
     // ---------------------- Sound Setup
     // ---------------------- ---------------------- ----------------------
 
-    sound_output : SoundOutput
+    sound_output: SoundOutput
     sound_output.samples_per_second = 48000
-    sound_output.num_channels = 2
-    sound_output.bytes_per_sample = size_of(Sample)
-    sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample
+    sound_output.num_channels       = 2
+    sound_output.bytes_per_sample   = size_of(Sample)
+    sound_output.buffer_size        = sound_output.samples_per_second * sound_output.bytes_per_sample
     // TODO: actually computre this variance and set a reasonable value
     sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32)sound_output.samples_per_second * cast(f32)sound_output.bytes_per_sample)
 
@@ -223,8 +231,8 @@ main :: proc() {
     sound_is_valid: b32
 
     when false &&  INTERNAL {
-        audio_latency_bytes: u32
-        audio_latency_seconds: f32
+        audio_latency_bytes    : u32
+        audio_latency_seconds  : f32
         debug_last_time_markers: [36]DebugTimeMarker
     }
 
@@ -236,7 +244,7 @@ main :: proc() {
 
     init_xInput()
 
-    input : [2]GameInput
+    input: [2]GameInput
     old_input, new_input := input[0], input[1]
 
 
@@ -254,13 +262,13 @@ main :: proc() {
 
     context.allocator = {}
 
-    game_memory : GameMemory
+    game_memory: GameMemory
     {
         base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
 
         permanent_storage_size := megabytes(256)
         transient_storage_size := gigabytes(1)
-        total_size:= cast(uint) (permanent_storage_size + transient_storage_size)
+        total_size := cast(uint) (permanent_storage_size + transient_storage_size)
 
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         // TODO(viktor): why limit ourselves?
@@ -271,11 +279,11 @@ main :: proc() {
         // into game transient and cache transient, and only
         // the former need be saved for state playback.
         for &buffer, index in state.replay_buffers {
-            buffer.filename = get_record_replay_filepath(state, cast(i32) index)
+            buffer.filename   = get_record_replay_filepath(state, cast(i32) index)
             buffer.filehandle = win.CreateFileW(buffer.filename, win.GENERIC_READ|win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
         
-            size_high:= cast(win.DWORD)(total_size >> 32)
-            size_low := cast(win.DWORD)total_size
+            size_high := cast(win.DWORD)(total_size >> 32)
+            size_low  := cast(win.DWORD)total_size
             buffer.memory_map = win.CreateFileMappingW(buffer.filehandle, nil, win.PAGE_READWRITE, size_high, size_low, nil)
 
             buffer_storage_ptr := cast([^]u8) win.MapViewOfFile(buffer.memory_map, win.FILE_MAP_ALL_ACCESS, 0, 0, total_size)
@@ -532,7 +540,7 @@ main :: proc() {
 
                 audio_card_is_low_latency := safe_write_cursor < expected_frame_boundary_byte
 
-                target_cursor : win.DWORD
+                target_cursor: win.DWORD
                 if audio_card_is_low_latency {
                     target_cursor = expected_frame_boundary_byte + expected_sound_bytes_per_frame
                 } else {
@@ -863,7 +871,11 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     // TODO: probably clear this to black
 }
 
-display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32, fix_windows_colors: b32 = true){
+display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32, fix_windows_colors: b32 = true){    
+    WindowsColor :: struct{
+        b, g, r, pad: u8,
+    }
+
     // TODO(viktor): can we avoid this without forcing the game to have to handle the windows color component order?
     if fix_windows_colors {
         for y in 0..<buffer.height {
