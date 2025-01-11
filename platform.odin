@@ -4,6 +4,7 @@ import "base:intrinsics"
 import "base:runtime"
 
 import "core:fmt"
+import "core:simd/x86"
 import win "core:sys/windows"
 
 /*
@@ -92,60 +93,64 @@ ThreadContext :: struct {
 
 
 
-WorkQueue :: struct {
-    count, capacity:  u32, 
-    todo, completed:  u32,
+WorkQueue :: struct { // TODO(viktor): polymorphism?
     semaphore_handle: win.HANDLE,
+    
+    count:            u32, 
+    todo, completed:  u32,
+    
+    entries:          [256]WorkQueueEntryStorage
 }
 
-work_queue_add_entry :: proc(queue: ^WorkQueue) {
-    intrinsics.volatile_store(&queue.count, queue.count+1)
-    // intrinsics.atomic_compare_exchange_strong(&queue.count, queue.count, queue.count+1)
+// TODO(viktor): polymorphism?
+WorkQueueEntry :: struct/* ($D: typeid) */ {
+    data:  rawptr,// $D,
+    valid: b32,
+}
+
+WorkQueueEntryStorage :: struct {
+    user_pointer: rawptr, // TODO(viktor): polymorphism?
+}
+
+@(enable_target_feature="sse")
+// TODO(viktor): polymorphism?
+work_queue_add_entry :: proc(queue: ^WorkQueue, pointer: rawptr) {
+    queue.entries[queue.count].user_pointer = pointer
+    
+    x86._mm_sfence()
+    intrinsics.atomic_compare_exchange_strong(&queue.count, queue.count, queue.count+1)
+    
     win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
 }
 
-work_queue_get_next_available_index :: proc(queue: ^WorkQueue) -> (result: u32) {
-    result = queue.count
-    
-    return result
-}
-// TODO(viktor): scoped version?
-work_queue_get_next_entry :: proc(queue: ^WorkQueue) -> (index: u32, ok: b32) {
-    if queue.todo < queue.count {
-        index = queue.todo
-        
-        _, ok = auto_cast intrinsics.atomic_compare_exchange_strong(&queue.todo, queue.todo, queue.todo+1)
+work_queue_complete_current_and_get_next_entry :: proc(queue: ^WorkQueue, completed: WorkQueueEntry) -> (result: WorkQueueEntry) {
+    if completed.valid {
+        intrinsics.atomic_compare_exchange_strong(&queue.completed, queue.completed, queue.completed+1)
     }
     
-    return index, ok
-}
-
-work_queue_mark_entry_completed :: proc(queue: ^WorkQueue, index: u32) {
-    intrinsics.atomic_compare_exchange_strong(&queue.completed, queue.completed, queue.completed+1)
+    if queue.todo < queue.count {
+        index, ok_ := intrinsics.atomic_compare_exchange_strong(&queue.todo, queue.todo, queue.todo+1)
+        result.valid = cast(b32) ok_
+        
+        result.data = queue.entries[index].user_pointer
+    }
+    
+    return result
 }
 
 work_queue_still_in_progress :: proc(queue: ^WorkQueue) -> (result: b32) {
-    result = queue.completed == queue.count
+    result = queue.completed != queue.count
     
     return result
 }
 
-do_worker_work :: #force_inline proc(queue: ^WorkQueue, logical_thread_index: u32) -> (did_some_work: b32) {
-    index, ok := work_queue_get_next_entry(queue)
-    if ok {
-        string_entry := work_entries[index]
-        fmt.println("thread", logical_thread_index, "printed:", string_entry.string_to_print)
-        
-        work_queue_mark_entry_completed(queue, index)
-    }
-    return ok
+// TODO(viktor): polymorphism
+do_worker_work :: #force_inline proc(entry: WorkQueueEntry, logical_thread_index: u32) {
+    assert(auto_cast entry.valid)
+    
+    fmt.println("thread", logical_thread_index, "printed:", (cast(^string)entry.data)^)
 }
 
-
-// TODO(viktor): what is common and what is platform only?
-StringEntry :: struct {
-    string_to_print: string
-}
 
 ThreadInfo :: struct {
     // TODO(viktor): should context be here?
@@ -157,28 +162,25 @@ thread_proc :: proc "stdcall" (parameter: rawptr) -> win.DWORD {
     context = runtime.default_context()
     
     info := cast(^ThreadInfo) parameter
-    
+    entry: WorkQueueEntry
     for {
-        if !do_worker_work(info.queue, info.logical_thread_index) {
+        entry = work_queue_complete_current_and_get_next_entry(info.queue, entry)
+        if entry.valid { 
+            do_worker_work(entry, info.logical_thread_index)
+        } else {
             INFINITE :: transmute(win.DWORD) i32(-1)
             win.WaitForSingleObjectEx(info.queue.semaphore_handle, INFINITE, false)
         }
     }
 }
 
-work_entries: [256]StringEntry
 
 
-push_string :: proc(queue: ^WorkQueue, string_to_print: string) {
-    index := work_queue_get_next_available_index(queue)
-    defer work_queue_add_entry(queue)
-    
-    string_entry := work_entries[index]
-    string_entry.string_to_print = string_to_print
+push_string :: proc(queue: ^WorkQueue, string_to_print: ^string) {
+    work_queue_add_entry(queue, string_to_print)
 }
 
 main :: proc() {
-    when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
     infos: [7]ThreadInfo
@@ -190,35 +192,62 @@ main :: proc() {
     
     for &it, it_index in infos {
         it.logical_thread_index = auto_cast it_index
+        it.queue = &queue
         
         thread_id: win.DWORD
         thread_handle := win.CreateThread(nil, 0, thread_proc, &it, 0, &thread_id)
     }
     
-    push_string(&queue, "String 0")
-    push_string(&queue, "String 1")
-    push_string(&queue, "String 2")
-    push_string(&queue, "String 3")
-    push_string(&queue, "String 4")
-    push_string(&queue, "String 5")
-    push_string(&queue, "String 6")
-    push_string(&queue, "String 7")
-    push_string(&queue, "String 8")
-    push_string(&queue, "String 9")
-
-    push_string(&queue, "String 10")
-    push_string(&queue, "String 11")
-    push_string(&queue, "String 12")
-    push_string(&queue, "String 13")
-    push_string(&queue, "String 14")
-    push_string(&queue, "String 15")
-    push_string(&queue, "String 16")
-    push_string(&queue, "String 17")
-    push_string(&queue, "String 18")
-    push_string(&queue, "String 19")
+    String_0 := "String 0"
+    String_1 := "String 1"
+    String_2 := "String 2"
+    String_3 := "String 3"
+    String_4 := "String 4"
+    String_5 := "String 5"
+    String_6 := "String 6"
+    String_7 := "String 7"
+    String_8 := "String 8"
+    String_9 := "String 9"
     
+    String_10 := "String 10"
+    String_11 := "String 11"
+    String_12 := "String 12"
+    String_13 := "String 13"
+    String_14 := "String 14"
+    String_15 := "String 15"
+    String_16 := "String 16"
+    String_17 := "String 17"
+    String_18 := "String 18"
+    String_19 := "String 19"
+    // TODO(viktor): IMPORTANT(viktor): this sucks! how can i pass a slice/string?
+    push_string(&queue, &String_0)
+    push_string(&queue, &String_1)
+    push_string(&queue, &String_2)
+    push_string(&queue, &String_3)
+    push_string(&queue, &String_4)
+    push_string(&queue, &String_5)
+    push_string(&queue, &String_6)
+    push_string(&queue, &String_7)
+    push_string(&queue, &String_8)
+    push_string(&queue, &String_9)
+
+    push_string(&queue, &String_10)
+    push_string(&queue, &String_11)
+    push_string(&queue, &String_12)
+    push_string(&queue, &String_13)
+    push_string(&queue, &String_14)
+    push_string(&queue, &String_15)
+    push_string(&queue, &String_16)
+    push_string(&queue, &String_17)
+    push_string(&queue, &String_18)
+    push_string(&queue, &String_19)
+    
+    entry: WorkQueueEntry
     for work_queue_still_in_progress(&queue) {
-        do_worker_work(&queue, len(infos))
+        entry = work_queue_complete_current_and_get_next_entry(&queue, entry)
+        if entry.valid {
+            do_worker_work(entry, len(infos))
+        }
     }
     
     // ---------------------- ---------------------- ----------------------

@@ -16,6 +16,16 @@ INTERNAL :: #config(INTERNAL, false)
         - World
         - Texture
       - Optimization    
+
+    - Asset streaming
+
+    - Debug code
+      - Fonts
+      - Logging
+      - Diagramming
+      - (a little gui) switches / sliders / etc
+      - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
+      - Thread visualization 
       
     - Z !
       - debug drawing of Z levels and inclusion of Z to make sure
@@ -24,6 +34,7 @@ INTERNAL :: #config(INTERNAL, false)
         collisions coming onto and off of stairs, for example
       - make sure flying things can go over walls
       - how is going "up" and "down" rendered?
+
     - Collision detection
       - Clean up predicate proliferation! Can we make a nice clean
       set of flags/rules so that it's easy to understand how
@@ -35,23 +46,16 @@ INTERNAL :: #config(INTERNAL, false)
         - Entry/Exit
       - Whats the plan for robustness / shape definition ?
       - "Things pushing other things"
+
     - Implement multiple sim regions per frame
       - per-entity clocking
       - sim region merging?  for multiple players?
       - simple zoomed out view for testing
-      
-    - Debug code
-      - Fonts
-      - Logging
-      - Diagramming
-      - (a little gui) switches / sliders / etc
-      - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
-
+            
     - Audio
       - Sound effects triggers
       - Ambient sounds
       - Music
-    - Asset streaming
 
     - Rudimentary worldgen (no quality just "what sorts of things" we do
       - Map displays

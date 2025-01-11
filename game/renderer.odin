@@ -249,24 +249,46 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-tiled_render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
+TileRenderWork :: struct {
+    group:  ^RenderGroup, 
+    target: LoadedBitmap,
+    
+    clip_rect: Rectangle2i, 
+}
+
+do_tile_render_work :: proc(data: rawptr) {
+    data := cast(^TileRenderWork) data
+    
+    render_to_output(data.group, data.target, data.clip_rect, true)
+    render_to_output(data.group, data.target, data.clip_rect, false)
+}
+
+tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
     scoped_timed_block(.render_to_output)
     
-    tile_count := [2]i32{4, 4}
+    tile_count :: [2]i32{4, 4}
+    work: [tile_count.x * tile_count.y]TileRenderWork
+    
     // TODO(viktor): round to LANES??
     tile_size  := [2]i32{target.width, target.height} / tile_count
     
+    work_index: i32
     for y in 0..<tile_count.y {
         for x in 0..<tile_count.x {
+            it := &work[work_index]
+            
+            it.group = group
+            it.target = target
+            
             // TODO(viktor): correct buffers with overflow!!
-            clip_rect: Rectangle2i
-            clip_rect.min = tile_size * {x, y} + 4
-            clip_rect.max = clip_rect.min + tile_size - 4
-        
-            render_to_output(group, target, clip_rect, true)
-            render_to_output(group, target, clip_rect, false)
+            it.clip_rect.min = tile_size * {x, y} + 4
+            it.clip_rect.max = it.clip_rect.min + tile_size - 4
+            
+            render_queue->add_entry(do_tile_render_work, it)
         }
     }
+    
+    render_queue->complete_all_work()
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {
