@@ -43,6 +43,7 @@ GlobalPause := false
 
 GLOBAL_debug_show_cursor: b32
 GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
+semaphore_handle: win.HANDLE
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Types
@@ -88,39 +89,105 @@ ThreadContext :: struct {
     placeholder: i32,
 }
 
-WorkQueueEntry :: struct {
+
+
+
+WorkQueue :: struct {
+    count, capacity:  u32, 
+    todo, completed:  u32,
+    semaphore_handle: win.HANDLE,
+}
+
+work_queue_add_entry :: proc(queue: ^WorkQueue) {
+    intrinsics.volatile_store(&queue.count, queue.count+1)
+    // intrinsics.atomic_compare_exchange_strong(&queue.count, queue.count, queue.count+1)
+    win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
+}
+
+work_queue_get_next_available_index :: proc(queue: ^WorkQueue) -> (result: u32) {
+    result = queue.count
+    
+    return result
+}
+// TODO(viktor): scoped version?
+work_queue_get_next_entry :: proc(queue: ^WorkQueue) -> (index: u32, ok: b32) {
+    if queue.todo < queue.count {
+        index = queue.todo
+        
+        _, ok = auto_cast intrinsics.atomic_compare_exchange_strong(&queue.todo, queue.todo, queue.todo+1)
+    }
+    
+    return index, ok
+}
+
+work_queue_mark_entry_completed :: proc(queue: ^WorkQueue, index: u32) {
+    intrinsics.atomic_compare_exchange_strong(&queue.completed, queue.completed, queue.completed+1)
+}
+
+work_queue_still_in_progress :: proc(queue: ^WorkQueue) -> (result: b32) {
+    result = queue.completed == queue.count
+    
+    return result
+}
+
+do_worker_work :: #force_inline proc(queue: ^WorkQueue, logical_thread_index: u32) -> (did_some_work: b32) {
+    index, ok := work_queue_get_next_entry(queue)
+    if ok {
+        string_entry := work_entries[index]
+        fmt.println("thread", logical_thread_index, "printed:", string_entry.string_to_print)
+        
+        work_queue_mark_entry_completed(queue, index)
+    }
+    return ok
+}
+
+
+// TODO(viktor): what is common and what is platform only?
+StringEntry :: struct {
     string_to_print: string
 }
 
-entry_to_print: u32
-entry_count: u32
-work_entries: [256]WorkQueueEntry
-
 ThreadInfo :: struct {
-    logical_thread_index: u32
+    // TODO(viktor): should context be here?
+    logical_thread_index: u32,
+    queue:                ^WorkQueue,
+}
+
+thread_proc :: proc "stdcall" (parameter: rawptr) -> win.DWORD {
+    context = runtime.default_context()
+    
+    info := cast(^ThreadInfo) parameter
+    
+    for {
+        if !do_worker_work(info.queue, info.logical_thread_index) {
+            INFINITE :: transmute(win.DWORD) i32(-1)
+            win.WaitForSingleObjectEx(info.queue.semaphore_handle, INFINITE, false)
+        }
+    }
+}
+
+work_entries: [256]StringEntry
+
+
+push_string :: proc(queue: ^WorkQueue, string_to_print: string) {
+    index := work_queue_get_next_available_index(queue)
+    defer work_queue_add_entry(queue)
+    
+    string_entry := work_entries[index]
+    string_entry.string_to_print = string_to_print
 }
 
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
-    thread_proc :: proc "stdcall" (parameter: rawptr) -> win.DWORD {
-        context = runtime.default_context()
-        
-        info := cast(^ThreadInfo) parameter
-        
-        for {
-            if entry_to_print < entry_count {
-                index := entry_to_print
-                entry_to_print += 1
-                
-                fmt.println("thread", info.logical_thread_index, "printed:", work_entries[entry_to_print])
-            }
-            win.Sleep(1000)
-        }
+    infos: [7]ThreadInfo
+    thread_count := cast(win.LONG) len(infos)
+    
+    queue := WorkQueue{
+        semaphore_handle = win.CreateSemaphoreW(nil, 0, thread_count, nil)
     }
     
-    infos: [15]ThreadInfo
     for &it, it_index in infos {
         it.logical_thread_index = auto_cast it_index
         
@@ -128,21 +195,31 @@ main :: proc() {
         thread_handle := win.CreateThread(nil, 0, thread_proc, &it, 0, &thread_id)
     }
     
-    push_string :: proc(s: string) {
-        work_entries[entry_count].string_to_print = s
-        entry_count += 1
-    }
+    push_string(&queue, "String 0")
+    push_string(&queue, "String 1")
+    push_string(&queue, "String 2")
+    push_string(&queue, "String 3")
+    push_string(&queue, "String 4")
+    push_string(&queue, "String 5")
+    push_string(&queue, "String 6")
+    push_string(&queue, "String 7")
+    push_string(&queue, "String 8")
+    push_string(&queue, "String 9")
+
+    push_string(&queue, "String 10")
+    push_string(&queue, "String 11")
+    push_string(&queue, "String 12")
+    push_string(&queue, "String 13")
+    push_string(&queue, "String 14")
+    push_string(&queue, "String 15")
+    push_string(&queue, "String 16")
+    push_string(&queue, "String 17")
+    push_string(&queue, "String 18")
+    push_string(&queue, "String 19")
     
-    push_string("String 0")
-    push_string("String 1")
-    push_string("String 2")
-    push_string("String 3")
-    push_string("String 4")
-    push_string("String 5")
-    push_string("String 6")
-    push_string("String 7")
-    push_string("String 8")
-    push_string("String 9")
+    for work_queue_still_in_progress(&queue) {
+        do_worker_work(&queue, len(infos))
+    }
     
     // ---------------------- ---------------------- ----------------------
     // ----------------------  Platform Setup
