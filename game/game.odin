@@ -213,12 +213,14 @@ PlatformWorkQueue :: struct {}
 
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
+    scoped_timed_block(.game_update_and_render)
+    
+    PLATFORM_add_entry         = memory.PLATFORM_add_entry
+    PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
     when INTERNAL {
         DEBUG_GLOBAL_memory = memory
     }
-    
-    scoped_timed_block(.game_update_and_render)
-    
+        
     ground_buffer_size :: 256
     
     // ---------------------- ---------------------- ----------------------
@@ -232,9 +234,6 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         // initialize the permanent arena first and allocate the state out of it
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
         
-        PLATFORM_add_entry         = memory.PLATFORM_add_entry
-        PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
-
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , v2{  22, 14})
         state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , v2{  16, 60})
@@ -448,13 +447,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         
         make_sphere_normal_map(tran_state.test_normal, 0)
         make_sphere_diffuse_map(tran_state.test_diffuse)
-        
-        PLATFORM_add_entry         = memory.PLATFORM_add_entry
-        PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
     }
-    
-    assert(PLATFORM_add_entry         != nil)
-    assert(PLATFORM_complete_all_work != nil)
     
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Input
@@ -518,6 +511,13 @@ when !true {
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Update and Render
     // ---------------------- ---------------------- ----------------------
+    
+    when false {
+        // NOTE(viktor): enable this to test weird screen sizes
+        buffer := buffer
+        buffer.width  = 1279
+        buffer.height = 719
+    }
     
     screen_size   := vec_cast(f32, buffer.width, buffer.height)
     screen_center := screen_size * 0.5

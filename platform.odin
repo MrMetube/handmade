@@ -299,7 +299,7 @@ main :: proc() {
             GLOBAL_debug_show_cursor = true
         }
 
-        resize_DIB_section(&GLOBAL_back_buffer, 960, 540)
+        resize_DIB_section(&GLOBAL_back_buffer, 1920, 1080)
 
         if win.RegisterClassW(&window_class) == 0 {
             return // TODO Logging
@@ -1025,7 +1025,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     }
 
     bytes_per_pixel :: 4
-    buffer.pitch = align32(buffer.width) -1
+    buffer.pitch = align16(buffer.width)
     bitmap_memory_size := buffer.pitch * buffer.height * bytes_per_pixel
     buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]

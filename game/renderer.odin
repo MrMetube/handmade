@@ -266,13 +266,13 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 }
 
 tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
-    assert(cast(uintpointer) raw_data(target.memory) & (4*8 - 1) == 0)
+    assert(cast(uintpointer) raw_data(target.memory) & (4*4 - 1) == 0)
     
-    tile_count :: [2]i32{4, 4}
+    tile_count :: [2]i32{4,4}
     work: [tile_count.x * tile_count.y]TileRenderWork
     
     tile_size  := [2]i32{target.width, target.height} / tile_count
-    tile_size.x = ((tile_size.x + 7) / 8) * tile_count.x
+    tile_size.x = ((tile_size.x + 3) / 4) * 4
     
     work_index: i32
     for y in 0..<tile_count.y {
@@ -285,11 +285,14 @@ tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderG
             it.clip_rect.min = tile_size * {x, y}
             it.clip_rect.max = it.clip_rect.min + tile_size
             
-            if it.clip_rect.max.x > target.width {
+            if x == tile_count.x-1 {
                 it.clip_rect.max.x = target.width
             }
+            if y == tile_count.y-1 {
+                it.clip_rect.max.y = target.height
+            }
             
-            when !true {
+            when false {
                 do_tile_render_work(it)
             } else {
                 PLATFORM_add_entry(render_queue, do_tile_render_work, it)
@@ -489,72 +492,68 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
     }
 
     if rectangle_has_area(fill_rect) {
-        maskFF       := cast(i32x8) 0xff
-        maskFFFFFFFF := cast(u32x8) 0xffffffff
+        // TODO(viktor): properly go to 8 wide
+        maskFF       := cast(i32x4) 0xff
+        maskFFFFFFFF := cast(u32x4) 0xffffffff
         
         clip_mask       := maskFFFFFFFF
         start_clip_mask := clip_mask
         end_clip_mask   := clip_mask
         
-        if fill_rect.min.x & 7 != 0 {
-            fill_rect.min.x = fill_rect.min.x &~ 7
-            alignment      := fill_rect.min.x & 7
-            start_clip_mask = simd.shl(clip_mask, cast(u32x8) (alignment * 4))
+        if fill_rect.min.x & 3 != 0 {
+            fill_rect.min.x = fill_rect.min.x &~ 3
+            alignment      := fill_rect.min.x & 3
+            start_clip_mask = simd.shl(clip_mask, cast(u32x4) (alignment * 4))
         }
         
-        if fill_rect.max.x & 7 != 0 {
-            fill_rect.max.x = (fill_rect.max.x &~ 7) + 8
-            alignment      := (8 - (fill_rect.max.x & 7)) & 7
-            end_clip_mask   = simd.shl(clip_mask, cast(u32x8) (alignment * 4))
+        if fill_rect.max.x & 3 != 0 {
+            fill_rect.max.x = (fill_rect.max.x &~ 3) + 4
+            alignment      := (4 - (fill_rect.max.x & 3)) & 3
+            end_clip_mask   = simd.shr(clip_mask, cast(u32x4) (alignment * 4))
         }
         
-        inv_x_len_squared := 1 / length_squared(x_axis)
-        inv_y_len_squared := 1 / length_squared(y_axis)
+        normal_x_axis := x_axis * 1 / length_squared(x_axis)
+        normal_y_axis := y_axis * 1 / length_squared(y_axis)
         
-        normal_x_axis := x_axis * inv_x_len_squared
-        normal_y_axis := y_axis * inv_y_len_squared
-        
-        f32x8 :: #simd[8]f32
-        i32x8 :: #simd[8]i32
-        u32x8 :: #simd[8]u32
+        f32x4 :: #simd[4]f32
+        i32x4 :: #simd[4]i32
+        u32x4 :: #simd[4]u32
         
         // TODO(viktor): formalize texture boundaries
-        texture_width_x4  := cast(f32x8) (texture.width-2)
-        texture_height_x4 := cast(f32x8) (texture.height-2)
+        texture_width_x4  := cast(f32x4) (texture.width-2)
+        texture_height_x4 := cast(f32x4) (texture.height-2)
 
-        inv_255 := cast(f32x8) (1.0 / 255.0)
-        max_color_value := cast(f32x8) (255 * 255)
-        one     := cast(f32x8) 1
-        two     := cast(f32x8) 2
-        zero    := cast(f32x8) 0
-        zero_i  := cast(i32x8) 0
-        eight   := cast(f32x8) 8
+        inv_255 := cast(f32x4) (1.0 / 255.0)
+        max_color_value := cast(f32x4) (255 * 255)
+        one    := cast(f32x4) 1
+        two    := cast(f32x4) 2
+        zero   := cast(f32x4) 0
+        zero_i := cast(i32x4) 0
+        four   := cast(f32x4) 4
 
 
-        shift8  := cast(u32x8)  8
-        shift16 := cast(u32x8) 16
-        shift24 := cast(u32x8) 24
+        shift8  := cast(u32x4)  8
+        shift16 := cast(u32x4) 16
+        shift24 := cast(u32x4) 24
 
-        color_r := cast(f32x8) color.r
-        color_g := cast(f32x8) color.g
-        color_b := cast(f32x8) color.b
-        color_a := cast(f32x8) color.a
+        color_r := cast(f32x4) color.r
+        color_g := cast(f32x4) color.g
+        color_b := cast(f32x4) color.b
+        color_a := cast(f32x4) color.a
 
-        origin_x := cast(f32x8) origin.x
-
-        normal_x_axis_x := cast(f32x8) normal_x_axis.x
-        normal_x_axis_y := cast(f32x8) normal_x_axis.y
-        normal_y_axis_x := cast(f32x8) normal_y_axis.x
-        normal_y_axis_y := cast(f32x8) normal_y_axis.y
+        normal_x_axis_x := cast(f32x4) normal_x_axis.x
+        normal_x_axis_y := cast(f32x4) normal_x_axis.y
+        normal_y_axis_x := cast(f32x4) normal_y_axis.x
+        normal_y_axis_y := cast(f32x4) normal_y_axis.y
         
-        texture_start := cast(i32x8) texture.start
-        texture_pitch := cast(i32x8) texture.pitch
+        texture_start := cast(i32x4) texture.start
+        texture_pitch := cast(i32x4) texture.pitch
 
-        u_step := normal_x_axis_x * eight
-        v_step := normal_y_axis_x * eight
+        u_step := normal_x_axis_x * four
+        v_step := normal_y_axis_x * four
         
-        delta_x := cast(f32x8) fill_rect.min.x - origin_x + f32x8{ 0, 1, 2, 3, 4, 5, 6, 7}
-        delta_y := cast(f32x8) fill_rect.min.y - cast(f32x8) origin.y
+        delta_x := cast(f32x4) fill_rect.min.x - cast(f32x4) origin.x + f32x4{ 0, 1, 2, 3}
+        delta_y := cast(f32x4) fill_rect.min.y - cast(f32x4) origin.y
         
         delta_x_n_x_axis_x := delta_x * normal_x_axis_x
         delta_x_n_y_axis_x := delta_x * normal_y_axis_x
@@ -577,27 +576,25 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
 
             clip_mask = start_clip_mask
             
-            for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
+            for x := fill_rect.min.x; x < fill_rect.max.x; x += 4 {
                 defer {
                     u += u_step
                     v += v_step
-                }
-                
-                defer {
-                    if x + 8 + 4 < fill_rect.max.x {
+                    
+                    if x + 4 + 4 < fill_rect.max.x {
                         clip_mask = maskFFFFFFFF
                     } else {
                         clip_mask = end_clip_mask
                     }
                 }
-
+                
                 // u >= 0 && u <= 1 && v >= 0 && v <= 1
-                write_mask := transmute(i32x8) (clip_mask & simd.lanes_ge(u, zero) & simd.lanes_le(u, one) & simd.lanes_ge(v, zero) & simd.lanes_le(v, one))
+                write_mask := transmute(i32x4) (clip_mask & simd.lanes_ge(u, zero) & simd.lanes_le(u, one) & simd.lanes_ge(v, zero) & simd.lanes_le(v, one))
 
                 // TODO(viktor): recheck later if this helps
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
                 {
-                    #no_bounds_check pixel := cast(^[8][4]u8) &buffer.memory[buffer.start + y * buffer.pitch + x]
+                    #no_bounds_check pixel := cast(^[4][4]u8) &buffer.memory[buffer.start + y * buffer.pitch + x]
                     original_pixel := simd.masked_load(pixel, zero_i, write_mask)
                     
                     u = clamp_01(u)
@@ -606,11 +603,11 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     tx := u * texture_width_x4
                     ty := v * texture_height_x4
 
-                    sx := cast(i32x8) tx
-                    sy := cast(i32x8) ty
+                    sx := cast(i32x4) tx
+                    sy := cast(i32x4) ty
 
-                    fx := tx - cast(f32x8) sx
-                    fy := ty - cast(f32x8) sy
+                    fx := tx - cast(f32x4) sx
+                    fy := ty - cast(f32x4) sy
 
                     // t00, t01, t10, t11 := sample_bilinear(texture, s)
                     fetch := texture_start + sy * texture_pitch + sx
@@ -619,49 +616,41 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     fetch_1 := (cast([^]i32)&fetch)[1]
                     fetch_2 := (cast([^]i32)&fetch)[2]
                     fetch_3 := (cast([^]i32)&fetch)[3]
-                    fetch_4 := (cast([^]i32)&fetch)[4]
-                    fetch_5 := (cast([^]i32)&fetch)[5]
-                    fetch_6 := (cast([^]i32)&fetch)[6]
-                    fetch_7 := (cast([^]i32)&fetch)[7]
                     
                     texel_0 := cast([^]i32) &texture.memory[fetch_0]
                     texel_1 := cast([^]i32) &texture.memory[fetch_1]
                     texel_2 := cast([^]i32) &texture.memory[fetch_2]
                     texel_3 := cast([^]i32) &texture.memory[fetch_3]
-                    texel_4 := cast([^]i32) &texture.memory[fetch_4]
-                    texel_5 := cast([^]i32) &texture.memory[fetch_5]
-                    texel_6 := cast([^]i32) &texture.memory[fetch_6]
-                    texel_7 := cast([^]i32) &texture.memory[fetch_7]
                     
-                    sample_a := i32x8 { texel_0[0],                 texel_1[0],                 texel_2[0],                 texel_3[0],                 texel_4[0],                 texel_5[0],                 texel_6[0],                 texel_7[0]                 }
-                    sample_b := i32x8 { texel_0[1],                 texel_1[1],                 texel_2[1],                 texel_3[1],                 texel_4[1],                 texel_5[1],                 texel_6[1],                 texel_7[1]                 }
-                    sample_c := i32x8 { texel_0[texture.pitch],     texel_1[texture.pitch],     texel_2[texture.pitch],     texel_3[texture.pitch],     texel_4[texture.pitch],     texel_5[texture.pitch],     texel_6[texture.pitch],     texel_7[texture.pitch]     }
-                    sample_d := i32x8 { texel_0[texture.pitch + 1], texel_1[texture.pitch + 1], texel_2[texture.pitch + 1], texel_3[texture.pitch + 1], texel_4[texture.pitch + 1], texel_5[texture.pitch + 1], texel_6[texture.pitch + 1], texel_7[texture.pitch + 1] }
+                    sample_a := i32x4{ texel_0[0],                 texel_1[0],                 texel_2[0],                 texel_3[0],                }
+                    sample_b := i32x4{ texel_0[1],                 texel_1[1],                 texel_2[1],                 texel_3[1],                }
+                    sample_c := i32x4{ texel_0[texture.pitch],     texel_1[texture.pitch],     texel_2[texture.pitch],     texel_3[texture.pitch],    }
+                    sample_d := i32x4{ texel_0[texture.pitch + 1], texel_1[texture.pitch + 1], texel_2[texture.pitch + 1], texel_3[texture.pitch + 1] }
 
-                    ta_r := cast(f32x8) (maskFF &          sample_a           )
-                    ta_g := cast(f32x8) (maskFF & simd.shr(sample_a,  shift8) )
-                    ta_b := cast(f32x8) (maskFF & simd.shr(sample_a,  shift16))
-                    ta_a := cast(f32x8) (maskFF & simd.shr(sample_a,  shift24))
+                    ta_r := cast(f32x4) (maskFF &          sample_a           )
+                    ta_g := cast(f32x4) (maskFF & simd.shr(sample_a,  shift8) )
+                    ta_b := cast(f32x4) (maskFF & simd.shr(sample_a,  shift16))
+                    ta_a := cast(f32x4) (maskFF & simd.shr(sample_a,  shift24))
 
-                    tb_r := cast(f32x8) (maskFF &          sample_b           )
-                    tb_g := cast(f32x8) (maskFF & simd.shr(sample_b,  shift8) )
-                    tb_b := cast(f32x8) (maskFF & simd.shr(sample_b,  shift16))
-                    tb_a := cast(f32x8) (maskFF & simd.shr(sample_b,  shift24))
+                    tb_r := cast(f32x4) (maskFF &          sample_b           )
+                    tb_g := cast(f32x4) (maskFF & simd.shr(sample_b,  shift8) )
+                    tb_b := cast(f32x4) (maskFF & simd.shr(sample_b,  shift16))
+                    tb_a := cast(f32x4) (maskFF & simd.shr(sample_b,  shift24))
 
-                    tc_r := cast(f32x8) (maskFF &          sample_c           )
-                    tc_g := cast(f32x8) (maskFF & simd.shr(sample_c,  shift8) )
-                    tc_b := cast(f32x8) (maskFF & simd.shr(sample_c,  shift16))
-                    tc_a := cast(f32x8) (maskFF & simd.shr(sample_c,  shift24))
+                    tc_r := cast(f32x4) (maskFF &          sample_c           )
+                    tc_g := cast(f32x4) (maskFF & simd.shr(sample_c,  shift8) )
+                    tc_b := cast(f32x4) (maskFF & simd.shr(sample_c,  shift16))
+                    tc_a := cast(f32x4) (maskFF & simd.shr(sample_c,  shift24))
 
-                    td_r := cast(f32x8) (maskFF &          sample_d           )
-                    td_g := cast(f32x8) (maskFF & simd.shr(sample_d,  shift8) )
-                    td_b := cast(f32x8) (maskFF & simd.shr(sample_d,  shift16))
-                    td_a := cast(f32x8) (maskFF & simd.shr(sample_d,  shift24))
+                    td_r := cast(f32x4) (maskFF &          sample_d           )
+                    td_g := cast(f32x4) (maskFF & simd.shr(sample_d,  shift8) )
+                    td_b := cast(f32x4) (maskFF & simd.shr(sample_d,  shift16))
+                    td_a := cast(f32x4) (maskFF & simd.shr(sample_d,  shift24))
 
-                    pixel_r := cast(f32x8) (maskFF &          original_pixel           )
-                    pixel_g := cast(f32x8) (maskFF & simd.shr(original_pixel,  shift8) )
-                    pixel_b := cast(f32x8) (maskFF & simd.shr(original_pixel,  shift16))
-                    pixel_a := cast(f32x8) (maskFF & simd.shr(original_pixel,  shift24))
+                    pixel_r := cast(f32x4) (maskFF &          original_pixel           )
+                    pixel_g := cast(f32x4) (maskFF & simd.shr(original_pixel,  shift8) )
+                    pixel_b := cast(f32x4) (maskFF & simd.shr(original_pixel,  shift16))
+                    pixel_a := cast(f32x4) (maskFF & simd.shr(original_pixel,  shift24))
 
                     // t00 = srgb_255_to_linear_1(t00)
                     // t01 = srgb_255_to_linear_1(t01)
@@ -721,10 +710,10 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     blended_g  = square_root(blended_g)
                     blended_b  = square_root(blended_b)
 
-                    intr := cast(i32x8) blended_r
-                    intg := cast(i32x8) blended_g
-                    intb := cast(i32x8) blended_b
-                    inta := cast(i32x8) blended_a
+                    intr := cast(i32x4) blended_r
+                    intg := cast(i32x4) blended_g
+                    intb := cast(i32x4) blended_b
+                    inta := cast(i32x4) blended_a
                     
                     mixed := intr | simd.shl(intg, shift8) | simd.shl(intb, shift16) | simd.shl(inta, shift24)
 
