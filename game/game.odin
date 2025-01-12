@@ -132,8 +132,10 @@ TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
     
+    render_queue: ^PlatformWorkQueue,
+    
     test_diffuse: LoadedBitmap,
-    test_normal: LoadedBitmap,
+    test_normal:  LoadedBitmap,
     
     ground_buffers: []GroundBuffer,
     
@@ -203,6 +205,12 @@ PairwiseCollsionRule :: struct {
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(GameState{}.collision_rule_hash) & ( len(GameState{}.collision_rule_hash) - 1 ) == 0)
 
+// NOTE(viktor): Globals
+PLATFORM_add_entry:         PlatformAddEntry
+PLATFORM_complete_all_work: PlatformCompleteAllWork
+// NOTE(viktor): declaration of a platform struct, into which we should never need to look
+PlatformWorkQueue :: struct {}
+
 @(export)
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
     when INTERNAL {
@@ -223,6 +231,9 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         // TODO(viktor): formalize the world arena and others being after the GameState in permanent storage
         // initialize the permanent arena first and allocate the state out of it
         init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
+        
+        PLATFORM_add_entry         = memory.PLATFORM_add_entry
+        PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
 
         // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
         state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , v2{  22, 14})
@@ -401,6 +412,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
 
+        tran_state.render_queue = memory.high_priority_queue
+        
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
         for &ground_buffer in tran_state.ground_buffers {
@@ -435,7 +448,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         
         make_sphere_normal_map(tran_state.test_normal, 0)
         make_sphere_diffuse_map(tran_state.test_diffuse)
+        
+        PLATFORM_add_entry         = memory.PLATFORM_add_entry
+        PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
     }
+    
+    assert(PLATFORM_add_entry         != nil)
+    assert(PLATFORM_complete_all_work != nil)
     
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Input
@@ -569,6 +588,7 @@ when !true {
                     }
                     
                     if furthest != nil {
+                        // TODO(viktor): should this be a low priority queue
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
                 }
@@ -734,71 +754,72 @@ when false {
         }
     }
     
-when false {
-    map_color := [?]v4{Red, Green, Blue}
-   
-    for it, it_index in tran_state.envs {
-        lod := it.LOD[0]
-        checker_dim: [2]i32 = 32
-        
-        row_on: b32
-        for y: i32; y < lod.height; y += checker_dim.y {
-            on := row_on
-            for x: i32; x < lod.width; x += checker_dim.x {
-                color := map_color[it_index]
-                size := vec_cast(f32, checker_dim)
-                draw_rectangle(lod, vec_cast(f32, x, y) + size*0.5, size, on ? color : Black)
-                on = !on
+    when false {
+        map_color := [?]v4{Red, Green, Blue}
+    
+        for it, it_index in tran_state.envs {
+            lod := it.LOD[0]
+            checker_dim: [2]i32 = 32
+            
+            row_on: b32
+            for y: i32; y < lod.height; y += checker_dim.y {
+                on := row_on
+                for x: i32; x < lod.width; x += checker_dim.x {
+                    color := map_color[it_index]
+                    size := vec_cast(f32, checker_dim)
+                    draw_rectangle(lod, vec_cast(f32, x, y) + size*0.5, size, on ? color : Black)
+                    on = !on
+                }
+                row_on = !row_on
             }
-            row_on = !row_on
         }
-    }
-    tran_state.env_bottom.pz = -4
-    tran_state.env_middle.pz =  0
-    tran_state.env_top.pz    =  4
-    
-    state.time += input.delta_time
-    
-    angle :f32= state.time
-    when !true {
-        disp :f32= 0
-    } else {
-        disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
-    }
-    origin := screen_center
-    scale :: 100
-    x_axis := scale * v2{cos(angle), sin(angle)}
-    y_axis := perpendicular(x_axis)
-    
-    if entry := coordinate_system(render_group); entry != nil {
-        entry.origin = origin - x_axis*0.5 - y_axis*0.5 + disp
-        entry.x_axis = x_axis
-        entry.y_axis = y_axis
+        tran_state.env_bottom.pz = -4
+        tran_state.env_middle.pz =  0
+        tran_state.env_top.pz    =  4
         
-        assert(tran_state.test_diffuse.memory != nil)
-        entry.texture = tran_state.test_diffuse
-        entry.normal  = tran_state.test_normal
+        state.time += input.delta_time
         
-        entry.top    = tran_state.env_top
-        entry.middle = tran_state.env_middle
-        entry.bottom = tran_state.env_bottom
-    }
-
-    for it, it_index in tran_state.envs {
-        size := vec_cast(f32, it.LOD[0].width, it.LOD[0].height) / 2
+        angle :f32= state.time
+        when !true {
+            disp :f32= 0
+        } else {
+            disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
+        }
+        origin := screen_center
+        scale :: 100
+        x_axis := scale * v2{cos(angle), sin(angle)}
+        y_axis := perpendicular(x_axis)
         
         if entry := coordinate_system(render_group); entry != nil {
-            entry.x_axis = {size.x, 0}
-            entry.y_axis = {0, size.y}
-            entry.origin = 20 + (entry.x_axis + {20, 0}) * auto_cast it_index
+            entry.origin = origin - x_axis*0.5 - y_axis*0.5 + disp
+            entry.x_axis = x_axis
+            entry.y_axis = y_axis
             
-            entry.texture = it.LOD[0]
-            assert(it.LOD[0].memory != nil)
+            assert(tran_state.test_diffuse.memory != nil)
+            entry.texture = tran_state.test_diffuse
+            entry.normal  = tran_state.test_normal
+            
+            entry.top    = tran_state.env_top
+            entry.middle = tran_state.env_middle
+            entry.bottom = tran_state.env_bottom
         }
-    }
 
-}
-    tiled_render_to_output(render_group, buffer)
+        for it, it_index in tran_state.envs {
+            size := vec_cast(f32, it.LOD[0].width, it.LOD[0].height) / 2
+            
+            if entry := coordinate_system(render_group); entry != nil {
+                entry.x_axis = {size.x, 0}
+                entry.y_axis = {0, size.y}
+                entry.origin = 20 + (entry.x_axis + {20, 0}) * auto_cast it_index
+                
+                entry.texture = it.LOD[0]
+                assert(it.LOD[0].memory != nil)
+            }
+        }
+
+    }
+    
+    tiled_render_to_output(tran_state.render_queue, render_group, buffer)
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
@@ -912,7 +933,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     // TODO(viktor): how do we want to control our ground chunk resolution?
     // TODO(viktor): Need to be able to set an orthographic display mode here
     render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4), {1920, 1080})
-    defer tiled_render_to_output(render_group, ground_buffer.bitmap)
+    defer tiled_render_to_output(tran_state.render_queue, render_group, ground_buffer.bitmap)
     
     clear(render_group, Red)
         

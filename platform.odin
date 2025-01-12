@@ -4,7 +4,6 @@ import "base:intrinsics"
 import "base:runtime"
 
 import "core:fmt"
-import "core:simd/x86"
 import win "core:sys/windows"
 
 /*
@@ -27,28 +26,27 @@ import win "core:sys/windows"
     Just a partial list of stuff !!
 */
 
-// ---------------------- ---------------------- ----------------------
-// ---------------------- Globals
-// ---------------------- ---------------------- ----------------------
+//   
+//  Globals
+//   
 
-INTERNAL :: #config(INTERNAL, true)
-// TODO(viktor): this is a global for now
-Running : b32
+INTERNAL :: #config(INTERNAL, false)
 
-GLOBAL_back_buffer : OffscreenBuffer
+GLOBAL_Running: b32
+
+GLOBAL_back_buffer:  OffscreenBuffer
 GLOBAL_sound_buffer: ^IDirectSoundBuffer
 
-GLOBAL_perf_counter_frequency : win.LARGE_INTEGER
+GLOBAL_perf_counter_frequency: win.LARGE_INTEGER
 
 GlobalPause := false
 
 GLOBAL_debug_show_cursor: b32
 GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
-semaphore_handle: win.HANDLE
 
-// ---------------------- ---------------------- ----------------------
-// ---------------------- Types
-// ---------------------- ---------------------- ----------------------
+//   
+//  Types
+//   
 
 SoundOutput :: struct {
     samples_per_second  : u32,
@@ -91,102 +89,104 @@ ThreadContext :: struct {
 }
 
 
-
-
-WorkQueue :: struct { // TODO(viktor): polymorphism?
+PlatformWorkQueue :: struct { // TODO(viktor): polymorphism?
     semaphore_handle: win.HANDLE,
     
-    count:            u32, 
-    todo, completed:  u32,
+    completion_goal, 
+    completion_count: u32,
+     
+    next_entry_to_write, 
+    next_entry_to_read:  u32,
     
-    entries:          [256]WorkQueueEntryStorage
+    entries: [8000]PlatformWorkQueueEntry
 }
 
-// TODO(viktor): polymorphism?
-WorkQueueEntry :: struct/* ($D: typeid) */ {
-    data:  rawptr,// $D,
-    valid: b32,
+PlatformWorkQueueEntry :: struct {
+    callback: WorkQueueCallback,
+    data:     rawpointer, // TODO(viktor): polymorphism?
 }
 
-WorkQueueEntryStorage :: struct {
-    user_pointer: rawptr, // TODO(viktor): polymorphism?
-}
+add_entry :: proc(queue: ^PlatformWorkQueue, callback: WorkQueueCallback, data: rawpointer) {
+    old_next_entry := queue.next_entry_to_write
+    new_next_entry := (old_next_entry + 1) % len(queue.entries)
+    assert(new_next_entry != queue.next_entry_to_read) 
 
-@(enable_target_feature="sse")
-// TODO(viktor): polymorphism?
-work_queue_add_entry :: proc(queue: ^WorkQueue, pointer: rawptr) {
-    queue.entries[queue.count].user_pointer = pointer
+    entry := &queue.entries[old_next_entry] 
+    entry.data     = data
+    entry.callback = callback
     
-    x86._mm_sfence()
-    intrinsics.atomic_compare_exchange_strong(&queue.count, queue.count, queue.count+1)
+    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, queue.completion_goal+1)
+    assert(ok)
+    
+    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_write, old_next_entry, new_next_entry)
+    assert(ok)
     
     win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
 }
 
-work_queue_complete_current_and_get_next_entry :: proc(queue: ^WorkQueue, completed: WorkQueueEntry) -> (result: WorkQueueEntry) {
-    if completed.valid {
-        intrinsics.atomic_compare_exchange_strong(&queue.completed, queue.completed, queue.completed+1)
+do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b32) {
+    old_next_entry := queue.next_entry_to_read
+    new_next_entry := (old_next_entry + 1) % len(queue.entries)
+    
+    if old_next_entry != queue.next_entry_to_write {
+        index, ok := intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_read, old_next_entry, new_next_entry)
+    
+        if ok {
+            assert(index == old_next_entry)
+            
+            entry := &queue.entries[index]
+            entry.callback(entry.data)
+            
+            old_completion_count := queue.completion_count
+            new_completion_count := old_completion_count + 1
+            
+            intrinsics.atomic_add(&queue.completion_count, 1)
+        }
+    } else {
+        should_sleep = true
     }
     
-    if queue.todo < queue.count {
-        index, ok_ := intrinsics.atomic_compare_exchange_strong(&queue.todo, queue.todo, queue.todo+1)
-        result.valid = cast(b32) ok_
-        
-        result.data = queue.entries[index].user_pointer
+    return should_sleep
+}
+
+complete_all_work :: proc(queue: ^PlatformWorkQueue) {
+    for queue.completion_count != queue.completion_goal {
+        do_next_work_queue_entry(queue)
     }
-    
-    return result
+    intrinsics.atomic_signal_fence(.Acq_Rel)
+    intrinsics.atomic_thread_fence(.Acq_Rel)
+    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, 0)
+    assert(ok)
+    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.completion_count, queue.completion_count, 0)
+    assert(ok)
 }
 
-work_queue_still_in_progress :: proc(queue: ^WorkQueue) -> (result: b32) {
-    result = queue.completed != queue.count
-    
-    return result
-}
-
-// TODO(viktor): polymorphism
-do_worker_work :: #force_inline proc(entry: WorkQueueEntry, logical_thread_index: u32) {
-    assert(auto_cast entry.valid)
-    
-    fmt.println("thread", logical_thread_index, "printed:", (cast(^string)entry.data)^)
-}
-
-
-ThreadInfo :: struct {
-    // TODO(viktor): should context be here?
-    logical_thread_index: u32,
-    queue:                ^WorkQueue,
-}
-
-thread_proc :: proc "stdcall" (parameter: rawptr) -> win.DWORD {
+thread_proc :: proc "stdcall" (parameter: rawpointer) -> win.DWORD {
     context = runtime.default_context()
     
     info := cast(^ThreadInfo) parameter
-    entry: WorkQueueEntry
     for {
-        entry = work_queue_complete_current_and_get_next_entry(info.queue, entry)
-        if entry.valid { 
-            do_worker_work(entry, info.logical_thread_index)
-        } else {
+        if do_next_work_queue_entry(info.queue) { 
             INFINITE :: transmute(win.DWORD) i32(-1)
             win.WaitForSingleObjectEx(info.queue.semaphore_handle, INFINITE, false)
         }
     }
 }
 
-
-
-push_string :: proc(queue: ^WorkQueue, string_to_print: ^string) {
-    work_queue_add_entry(queue, string_to_print)
+ThreadInfo :: struct {
+    logical_thread_index: u32,
+    queue:                ^PlatformWorkQueue,
 }
 
+
 main :: proc() {
+    when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
     infos: [7]ThreadInfo
     thread_count := cast(win.LONG) len(infos)
     
-    queue := WorkQueue{
+    queue := PlatformWorkQueue{
         semaphore_handle = win.CreateSemaphoreW(nil, 0, thread_count, nil)
     }
     
@@ -219,40 +219,39 @@ main :: proc() {
     String_17 := "String 17"
     String_18 := "String 18"
     String_19 := "String 19"
-    // TODO(viktor): IMPORTANT(viktor): this sucks! how can i pass a slice/string?
-    push_string(&queue, &String_0)
-    push_string(&queue, &String_1)
-    push_string(&queue, &String_2)
-    push_string(&queue, &String_3)
-    push_string(&queue, &String_4)
-    push_string(&queue, &String_5)
-    push_string(&queue, &String_6)
-    push_string(&queue, &String_7)
-    push_string(&queue, &String_8)
-    push_string(&queue, &String_9)
-
-    push_string(&queue, &String_10)
-    push_string(&queue, &String_11)
-    push_string(&queue, &String_12)
-    push_string(&queue, &String_13)
-    push_string(&queue, &String_14)
-    push_string(&queue, &String_15)
-    push_string(&queue, &String_16)
-    push_string(&queue, &String_17)
-    push_string(&queue, &String_18)
-    push_string(&queue, &String_19)
     
-    entry: WorkQueueEntry
-    for work_queue_still_in_progress(&queue) {
-        entry = work_queue_complete_current_and_get_next_entry(&queue, entry)
-        if entry.valid {
-            do_worker_work(entry, len(infos))
-        }
+    do_worker_work : WorkQueueCallback : proc(data: rawpointer) {
+        fmt.println("thread", win.GetCurrentThreadId(), "printed:", (cast(^string)data)^)
     }
     
-    // ---------------------- ---------------------- ----------------------
-    // ----------------------  Platform Setup
-    // ---------------------- ---------------------- ----------------------
+    // TODO(viktor): IMPORTANT(viktor): this sucks! how can i pass a slice/string?
+    add_entry(&queue, do_worker_work, &String_0)
+    add_entry(&queue, do_worker_work, &String_1)
+    add_entry(&queue, do_worker_work, &String_2)
+    add_entry(&queue, do_worker_work, &String_3)
+    add_entry(&queue, do_worker_work, &String_4)
+    add_entry(&queue, do_worker_work, &String_5)
+    add_entry(&queue, do_worker_work, &String_6)
+    add_entry(&queue, do_worker_work, &String_7)
+    add_entry(&queue, do_worker_work, &String_8)
+    add_entry(&queue, do_worker_work, &String_9)
+
+    add_entry(&queue, do_worker_work, &String_10)
+    add_entry(&queue, do_worker_work, &String_11)
+    add_entry(&queue, do_worker_work, &String_12)
+    add_entry(&queue, do_worker_work, &String_13)
+    add_entry(&queue, do_worker_work, &String_14)
+    add_entry(&queue, do_worker_work, &String_15)
+    add_entry(&queue, do_worker_work, &String_16)
+    add_entry(&queue, do_worker_work, &String_17)
+    add_entry(&queue, do_worker_work, &String_18)
+    add_entry(&queue, do_worker_work, &String_19)
+    
+    complete_all_work(&queue)
+    
+    //   
+    //   Platform Setup
+    //   
 
     state: State
     {
@@ -278,13 +277,13 @@ main :: proc() {
     main_thread_context.placeholder = 123
     context.user_ptr = &main_thread_context
     
-    Running = true
+    GLOBAL_Running = true
 
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Windows Setup
-    // ---------------------- ---------------------- ----------------------
+    //   
+    //  Windows Setup
+    //   
 
     window: win.HWND
     {
@@ -334,9 +333,9 @@ main :: proc() {
 
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Video Setup
-    // ---------------------- ---------------------- ----------------------
+    //   
+    //  Video Setup
+    //   
 
     // TODO: how do we reliably query this on windows?
     game_update_hz: f32
@@ -351,16 +350,16 @@ main :: proc() {
             }
             win.ReleaseDC(window, device_context)
         }
-        // TODO why divide by 2
+
         game_update_hz = cast(f32) monitor_refresh_hz / 2
     }
     target_seconds_per_frame := 1 / game_update_hz
 
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Sound Setup
-    // ---------------------- ---------------------- ----------------------
+    //   
+    //  Sound Setup
+    //   
 
     sound_output: SoundOutput
     sound_output.samples_per_second = 48000
@@ -386,9 +385,9 @@ main :: proc() {
 
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Input Setup
-    // ---------------------- ---------------------- ----------------------
+    //   
+    //  Input Setup
+    //   
 
     init_xInput()
 
@@ -396,9 +395,9 @@ main :: proc() {
     old_input, new_input := input[0], input[1]
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Memory Setup
-    // ---------------------- ---------------------- ----------------------
+    //   
+    //  Memory Setup
+    //   
 
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
@@ -412,7 +411,7 @@ main :: proc() {
 
     game_memory: GameMemory
     {
-        base_address := cast(rawptr) cast(uintptr) terabytes(1) when INTERNAL else 0
+        base_address := cast(rawpointer) cast(uintptr) terabytes(1) when INTERNAL else 0
 
         permanent_storage_size := megabytes(256)
         transient_storage_size := gigabytes(1)
@@ -448,6 +447,11 @@ main :: proc() {
         game_memory.debug.read_entire_file  = DEBUG_read_entire_file
         game_memory.debug.write_entire_file = DEBUG_write_entire_file
         game_memory.debug.free_file_memory  = DEBUG_free_file_memory
+        
+        
+        game_memory.high_priority_queue        = &queue
+        game_memory.PLATFORM_add_entry         = add_entry
+        game_memory.PLATFORM_complete_all_work = complete_all_work
     }
 
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
@@ -456,9 +460,9 @@ main :: proc() {
 
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Timer Setup
-    // ---------------------- ---------------------- ----------------------
+    //   
+    //  Timer Setup
+    //   
 
     last_counter := get_wall_clock()
     flip_counter := get_wall_clock()
@@ -466,21 +470,30 @@ main :: proc() {
 
 
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Game Loop
-    // ---------------------- ---------------------- ----------------------
-    for Running {
-        // TODO: if this is too slow the audio and the whole game will lag
+    //   
+    //   
+    //   
+    //  
+    //  Game Loop
+    //  
+    //   
+    //   
+    //   
+    for GLOBAL_Running {
+        //   
+        //  Hot Reload
+        //   
         new_input.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
+            // TODO: if this is too slow the audio and the whole game will lag
             game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name, lock_name)
             
             new_input.reloaded_executable = true
         }
 
-        // ---------------------- ---------------------- ----------------------
-        // ---------------------- Input
-        // ---------------------- ---------------------- ----------------------
+        //   
+        //  Input
+        //   
         {
             new_input.delta_time = target_seconds_per_frame
             { // Mouse Input 
@@ -585,7 +598,7 @@ main :: proc() {
                     process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -Threshold ? 1 : 0)
                     process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  Threshold ? 1 : 0)
 
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do Running = false
+                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do GLOBAL_Running = false
                 } else {
                     new_controller.is_connected = false
                 }
@@ -595,9 +608,9 @@ main :: proc() {
         if GlobalPause do continue
 
 
-        // ---------------------- ---------------------- ----------------------
-        // ---------------------- Update, Sound and Render
-        // ---------------------- ---------------------- ----------------------
+        //   
+        //  Update, Sound and Render
+        //   
         {
             offscreen_buffer := LoadedBitmap{
                 memory = GLOBAL_back_buffer.memory,
@@ -615,6 +628,7 @@ main :: proc() {
 
             if game_lib_is_valid {
                 game_update_and_render(&game_memory, offscreen_buffer, new_input)
+                
                 handle_debug_cycle_counters :: proc(game_memory: ^GameMemory) {
                     when false && INTERNAL {
                         title := "Debug Game Cycle Counts"
@@ -733,9 +747,9 @@ main :: proc() {
             swap(&old_input, &new_input)
         }
 
-        // ---------------------- ---------------------- ----------------------
-        // ---------------------- Display Frame & Performance Counters
-        // ---------------------- ---------------------- ----------------------
+        //   
+        //  Display Frame & Performance Counters
+        //   
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
             if seconds_elapsed_for_frame < target_seconds_per_frame {
@@ -837,9 +851,9 @@ build_exe_path :: proc(state: State, filename: string) -> win.wstring {
 
 
 
-// ---------------------- ---------------------- ----------------------
-// ---------------------- Record and Replay
-// ---------------------- ---------------------- ----------------------
+//   
+//  Record and Replay
+//   
 
 get_record_replay_filepath :: proc(state: State, index:i32) -> win.wstring {
     return build_exe_path(state, fmt.tprintf("editloop_%d.input", index))
@@ -900,13 +914,13 @@ end_replaying_input :: proc(state: ^State) {
     state.input_replay_index = 0
 }
 
-// ---------------------- ---------------------- ----------------------
-// ---------------------- Sound Buffer
-// ---------------------- ---------------------- ----------------------
+//   
+//  Sound Buffer
+//   
 
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
-    region1, region2 : rawptr
+    region1, region2 : rawpointer
     region1_size, region2_size: win.DWORD
 
     if result := GLOBAL_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
@@ -946,7 +960,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 }
 
 clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
-    region1, region2 : rawptr
+    region1, region2 : rawpointer
     region1_size, region2_size: win.DWORD
 
     if result := GLOBAL_sound_buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
@@ -974,9 +988,9 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 
 
 
-// ---------------------- ---------------------- ----------------------
-// ---------------------- Window Drawing
-// ---------------------- ---------------------- ----------------------
+//   
+//  Window Drawing
+//   
 
 get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
     client_rect : win.RECT
@@ -1101,9 +1115,9 @@ toggle_fullscreen :: proc(window: win.HWND) {
 }
 
 
-// ---------------------- ---------------------- ----------------------
-// ---------------------- Windows Messages
-// ---------------------- ---------------------- ----------------------
+//   
+//  Windows Messages
+//   
 
 main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
     switch message {
@@ -1111,9 +1125,9 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         context = runtime.default_context()
         assert(false, "keyboard-event came in through a non-dispatched event")
     case win.WM_CLOSE: // TODO: Handle this with a message to the user
-        Running = false
+        GLOBAL_Running = false
     case win.WM_DESTROY: // TODO: handle this as an error - recreate window?
-        Running = false
+        GLOBAL_Running = false
     case win.WM_ACTIVATEAPP:
         LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
         LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color.
@@ -1155,7 +1169,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
     for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
         switch message.message {
         case win.WM_QUIT:
-            Running = false
+            GLOBAL_Running = false
         case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
             vk_code := message.wParam
 
@@ -1187,7 +1201,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
                 case win.VK_RIGHT:
                     process_win_keyboard_message(&keyboard_controller.button_right  , is_down)
                 case win.VK_ESCAPE:
-                    Running = false
+                    GLOBAL_Running = false
                     process_win_keyboard_message(&keyboard_controller.back          , is_down)
                 case win.VK_SPACE:
                     process_win_keyboard_message(&keyboard_controller.start         , is_down)
@@ -1206,7 +1220,7 @@ process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputC
                 case win.VK_P:
                     if is_down do GlobalPause = !GlobalPause
                 case win.VK_F4:
-                    if is_down && alt_down do Running = false
+                    if is_down && alt_down do GLOBAL_Running = false
                 case win.VK_RETURN:
                     if is_down && alt_down do toggle_fullscreen(message.hwnd)
                     

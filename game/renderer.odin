@@ -256,9 +256,9 @@ TileRenderWork :: struct {
     clip_rect: Rectangle2i, 
 }
 
-do_tile_render_work :: proc(data: rawptr) {
+do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     data := cast(^TileRenderWork) data
-    
+
     render_to_output(data.group, data.target, data.clip_rect, true)
     render_to_output(data.group, data.target, data.clip_rect, false)
 }
@@ -284,11 +284,13 @@ tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderG
             it.clip_rect.min = tile_size * {x, y} + 4
             it.clip_rect.max = it.clip_rect.min + tile_size - 4
             
-            render_queue->add_entry(do_tile_render_work, it)
+            PLATFORM_add_entry(render_queue, do_tile_render_work, it)
+            
+            work_index += 1
         }
     }
     
-    render_queue->complete_all_work()
+    PLATFORM_complete_all_work(render_queue)
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {

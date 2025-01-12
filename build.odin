@@ -18,6 +18,7 @@ src_path :: `.\build.odin`
 main :: proc() {
     // TODO(viktor): maybe automatically copypasta the copypasta files?
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
+    context.logger.lowest_level = .Warning
     
     exe_path := os.args[0]
     rebuild_yourself(exe_path)
@@ -51,6 +52,17 @@ main :: proc() {
     {// Platform
         
         { // copy over the common code
+            /* TODO(viktor):
+                use more sophisticated metaprogramming
+                
+            -custom-attribute:<string>
+                    Add a custom attribute which will be ignored if it is unknown.
+                    This can be used with metaprogramming tools.
+                    Examples:
+                            -custom-attribute:my_tag
+                            -custom-attribute:my_tag,the_other_thing
+                            -custom-attribute:my_tag -custom-attribute:the_other_thing
+             */
             common_game_path     := `.\game\common.odin`
             common_platform_path := `.\common.odin`
             file, ok := os.read_entire_file(common_game_path)

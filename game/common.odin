@@ -2,34 +2,36 @@ package game
 
 import "base:intrinsics"
 
+rawpointer :: rawptr
+
 Sample :: [2]i16
 
 GameSoundBuffer :: struct {
-    samples            : []Sample,
-    samples_per_second : u32,
+    samples           : []Sample,
+    samples_per_second: u32,
 }
 
 ByteColor :: [4]u8
 
 LoadedBitmap :: struct {
-    memory : []ByteColor,
+    memory :       []ByteColor,
     width, height: i32, 
     
     start, pitch: i32,
     
-    align_percentage: [2]f32,
+    align_percentage:  [2]f32,
     width_over_height: f32,
 }
 
 GameInputButton :: struct {
     half_transition_count: i32,
-    ended_down : b32,
+    ended_down :           b32,
 }
 
 GameInputController :: struct {
     // TODO: allow outputing vibration
     is_connected: b32,
-    is_analog: b32,
+    is_analog:    b32,
 
     stick_average: [2]f32,
 
@@ -42,7 +44,7 @@ GameInputController :: struct {
 
             start, back,
             shoulder_left, shoulder_right,
-            thumb_left   , thumb_right : GameInputButton,
+            thumb_left   , thumb_right:    GameInputButton,
         },
     },
 }
@@ -55,12 +57,13 @@ GameInput :: struct {
     using _mouse_buttons_array_and_enum : struct #raw_union {
         mouse_buttons: [5]GameInputButton,
         using _buttons_enum : struct {
-            mouse_left,	mouse_right, mouse_middle,
+            mouse_left,	mouse_right, 
+            mouse_middle,
             mouse_extra1, mouse_extra2 : GameInputButton,
         },
     },
     mouse_position: [2]i32,
-    mouse_wheel: i32,
+    mouse_wheel:    i32,
 
     controllers: [5]GameInputController,
 }
@@ -69,7 +72,7 @@ GameInput :: struct {
 when INTERNAL {
     DebugCycleCounter :: struct {
         cycle_count: i64,
-        hit_count: i64,
+        hit_count:   i64,
     }
 
     DebugCycleCounterName :: enum {
@@ -89,15 +92,26 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
 
-    debug: DEBUG_code,
+    high_priority_queue:        ^PlatformWorkQueue,
+    PLATFORM_add_entry:         PlatformAddEntry,
+    PLATFORM_complete_all_work: PlatformCompleteAllWork,
+    
+    debug:    DEBUG_code,
     counters: [DebugCycleCounterName]DebugCycleCounter,
 }
 
+// TODO(viktor): this should only be in platform.odin
+WorkQueueCallback         :: #type proc(data: rawpointer)
+PlatformWorkQueueCallback :: WorkQueueCallback
+
+PlatformAddEntry        :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
+PlatformCompleteAllWork :: #type proc(queue: ^PlatformWorkQueue)
+
 when INTERNAL { 
     DEBUG_code :: struct {
-        read_entire_file  : proc_DEBUG_read_entire_file,
-        write_entire_file : proc_DEBUG_write_entire_file,
-        free_file_memory  : proc_DEBUG_free_file_memory,
+        read_entire_file : proc_DEBUG_read_entire_file,
+        write_entire_file: proc_DEBUG_write_entire_file,
+        free_file_memory : proc_DEBUG_free_file_memory,
     }
 
     proc_DEBUG_read_entire_file  :: #type proc(filename: string) -> (result: []u8)
