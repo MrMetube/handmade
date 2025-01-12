@@ -45,6 +45,8 @@ Transform :: struct {
     
     scale:  f32,
     offset: v3,
+    
+    orthographic: b32,
 }
 
 EnvironmentMap :: struct {
@@ -86,28 +88,45 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
-make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, resolution_pixels: [2]i32) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
     result.push_buffer = push(arena, u8, max_push_buffer_size)
 
     result.push_buffer_size = 0
     result.global_alpha = 1
 
-    monitor_width_in_meters :: 0.635
-    result.transform.meters_to_pixels_for_monitor = cast(f32) resolution_pixels.x * monitor_width_in_meters
-    result.transform.screen_center = 0.5 * vec_cast(f32, resolution_pixels)
-        
-    pixels_to_meters : f32 = 1.0 / result.transform.meters_to_pixels_for_monitor
-    result.monitor_half_diameter_in_meters = 0.5 * vec_cast(f32, resolution_pixels) * pixels_to_meters
-
-    result.transform.distance_above_target = 8.0
-    result.transform.focal_length          = 0.6
-    
-    result.transform.scale                 = 1
-    result.transform.offset                = 0
-    
+    result.transform.scale  = 1
+    result.transform.offset = 0
 
     return result
+}
+
+
+perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
+    group.transform.orthographic = false
+    
+    group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
+    group.transform.meters_to_pixels_for_monitor = meters_to_pixels
+    // TODO(viktor): need to adjust this based on buffer size
+    pixels_to_meters := 1.0 / meters_to_pixels
+    group.monitor_half_diameter_in_meters = 0.5 * vec_cast(f32, pixel_size) * pixels_to_meters
+    
+    
+    group.transform.distance_above_target = distance_above_target
+    group.transform.focal_length          = focal_length
+}
+
+orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels: f32) {
+    group.transform.orthographic = true
+    
+    group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
+    group.transform.meters_to_pixels_for_monitor = meters_to_pixels
+    // TODO(viktor): need to adjust this based on buffer size
+    group.monitor_half_diameter_in_meters = 0.5 * meters_to_pixels
+    
+    
+    group.transform.distance_above_target = 10
+    group.transform.focal_length          = 10
 }
 
 get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
@@ -116,41 +135,47 @@ get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (re
     return result
 }
 get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
-    camera_half_diameter := unproject(group, group.monitor_half_diameter_in_meters, distance_from_camera)
+    camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters, distance_from_camera)
     result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
 
     return result
 }
 
-@(require_results)
-unproject :: #force_inline proc(group: ^RenderGroup, projected: v2, distance_from_camera: f32) -> (result: v2) {
-    result = projected * (distance_from_camera / group.transform.focal_length)
+unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
+    result = projected * (distance_from_camera / transform.focal_length)
 
     return result
 }
 
-
-get_render_entity_basis :: #force_inline proc(transform: Transform, base_p: v3) -> (position: v2, scale: f32, valid: b32) {
+project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -> (position: v2, scale: f32, valid: b32) {
     p := V3(base_p.xy, 0) + transform.offset
     near_clip_plane :: 0.2
     distance_above_target := transform.distance_above_target
-    base_z : f32//base_p.z
-    when false {
-        // TODO(viktor): how do we want to control the debug camera?
-        if true {
-            distance_above_target *= 5
-        }
-    }
     
-    distance_to_p_z := distance_above_target - p.z
-    // TODO(viktor): transform.scale is unused
-    if distance_to_p_z > near_clip_plane {
-        raw := V3(p.xy, 1)
-        projected := transform.focal_length * raw / distance_to_p_z
+    if !transform.orthographic {
+        base_z : f32//base_p.z
+        when false {
+            // TODO(viktor): how do we want to control the debug camera?
+            if true {
+                distance_above_target *= 5
+            }
+        }
+        
+        distance_to_p_z := distance_above_target - p.z
+        // TODO(viktor): transform.scale is unused
+        if distance_to_p_z > near_clip_plane {
+            raw := V3(p.xy, 1)
+            projected := transform.focal_length * raw / distance_to_p_z
 
-        position = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, scale * base_z}
-        scale    =                           projected.z  * transform.meters_to_pixels_for_monitor
-        valid    = true
+            position = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, scale * base_z}
+            scale    =                           projected.z  * transform.meters_to_pixels_for_monitor
+            valid    = true
+        }
+        
+    } else{
+        position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
+        scale = transform.meters_to_pixels_for_monitor
+        valid = true
     }
 
     return position, scale, valid
@@ -179,7 +204,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, hei
     align := bitmap.align_percentage * size
     p     := offset + v3{align.x, -align.y, 0}
 
-    basis_p, scale, valid := get_render_entity_basis(group.transform, offset)
+    basis_p, scale, valid := project_with_transform(group.transform, offset)
 
     if valid {
         element := push_render_element(group, RenderGroupEntryBitmap)
@@ -197,7 +222,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, hei
 
 push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}) {
     p := V3(offset.xy + size * 0.5, 0)
-    basis_p, scale, valid := get_render_entity_basis(group.transform, p)
+    basis_p, scale, valid := project_with_transform(group.transform, p)
     
     if valid {
         element := push_render_element(group, RenderGroupEntryRectangle)
@@ -283,6 +308,7 @@ tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderG
         - Actually ballpark the memory bandwidth for our DrawRectangleQuickly
         - Re-test some of our instruction choices
     */
+    
     tile_count :: [2]i32{4, 4}
     work: [tile_count.x * tile_count.y]TileRenderWork
     
@@ -499,17 +525,20 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         clip_mask       := maskFFFFFFFF
         start_clip_mask := clip_mask
         end_clip_mask   := clip_mask
-        
+
+        // TODO(viktor): IMPORTANT(viktor): there are blurry artifacts in the 
+        // rendered image, probably the fill rect
+                
         if fill_rect.min.x & 3 != 0 {
             alignment      := fill_rect.min.x & 3
             start_clip_mask = simd.shl(clip_mask, cast(u32x4) (alignment * 4))
-            fill_rect.min.x = fill_rect.min.x &~ 3
+            fill_rect.min.x = fill_rect.min.x & (~i32(3))
         }
         
         if fill_rect.max.x & 3 != 0 {
             alignment      := (4 - (fill_rect.max.x & 3)) & 3
             end_clip_mask   = simd.shr(clip_mask, cast(u32x4) (alignment * 4))
-            fill_rect.max.x = (fill_rect.max.x &~ 3) + 4
+            fill_rect.max.x = (fill_rect.max.x & (~i32(3))) + 4
         }
         
         normal_x_axis := x_axis * 1 / length_squared(x_axis)
@@ -581,10 +610,10 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     u += u_step
                     v += v_step
                     
-                    if x + 4 + 4 < fill_rect.max.x {
-                        clip_mask = maskFFFFFFFF
-                    } else {
+                    if x + 4 >= fill_rect.max.x {
                         clip_mask = end_clip_mask
+                    } else {
+                        clip_mask = maskFFFFFFFF
                     }
                 }
                 

@@ -153,8 +153,7 @@ complete_all_work :: proc(queue: ^PlatformWorkQueue) {
     for queue.completion_count != queue.completion_goal {
         do_next_work_queue_entry(queue)
     }
-    intrinsics.atomic_signal_fence(.Acq_Rel)
-    intrinsics.atomic_thread_fence(.Acq_Rel)
+    
     _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, 0)
     assert(ok)
     _, ok = intrinsics.atomic_compare_exchange_strong(&queue.completion_count, queue.completion_count, 0)

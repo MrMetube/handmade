@@ -527,7 +527,13 @@ when !true {
     
     // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
-    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4), {buffer.width, buffer.height})
+    
+    monitor_width_in_meters :: 0.635
+    buffer_size := [2]i32{buffer.width, buffer.height}
+    meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
+    
+    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4))
+    perspective(render_group, buffer_size, meters_to_pixels_for_monitor, 0.6, 8)
     
     clear(render_group, DarkGreen)
     
@@ -556,7 +562,7 @@ when !true {
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    if false {
+    {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -569,11 +575,13 @@ when !true {
                     furthest: ^GroundBuffer
                     // TODO(viktor): @Speed this is super inefficient. Fix it!
                     for &ground_buffer in tran_state.ground_buffers {
+                        offset := world_difference(world, ground_buffer.p, state.camera_p)
+            
+                        buffer_delta := world_difference(world, ground_buffer.p, state.camera_p)
                         if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
                             furthest = nil
                             break
-                        } else if is_valid(ground_buffer.p) {
-                            buffer_delta := world_difference(world, ground_buffer.p, state.camera_p)
+                        } else if abs(buffer_delta.z) == 0 && is_valid(ground_buffer.p) {
                             distance_from_camera := length_squared(buffer_delta.xy)
                             if distance_from_camera > furthest_distance {
                                 furthest_distance = distance_from_camera
@@ -940,22 +948,30 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     bitmap.align_percentage = 0.5
     bitmap.width_over_height = 1
     ground_buffer.p = p
+    
+    buffer_dim := state.world.chunk_dim_meters.xy
+    assert(buffer_dim.x == buffer_dim.y)
+    half_dim := buffer_dim * 0.5
 
-    // TODO(viktor): how do we want to control our ground chunk resolution?
-    // TODO(viktor): Need to be able to set an orthographic display mode here
-    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4), {1920, 1080})
+    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4))
+    orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32)bitmap.width / buffer_dim.x)
+
     defer tiled_render_to_output(tran_state.render_queue, render_group, ground_buffer.bitmap)
     
     clear(render_group, Red)
         
-    buffer_dim := state.world.chunk_dim_meters.xy
-    half_dim := buffer_dim * 0.5
-    
     chunk_z := p.chunk.z
     for offset_y in i32(-1) ..= 1 {
         for offset_x in i32(-1) ..= 1 {
             chunk_x := p.chunk.x + offset_x
             chunk_y := p.chunk.y + offset_y
+            
+            color: v4
+            if offset_y % 2 ==  offset_x % 2 {
+                color = {1,0,0,1}
+            } else {
+                color = {0,0,1,1}
+            }
             
             center := vec_cast(f32, offset_x, offset_y) * buffer_dim
             // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
@@ -965,7 +981,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             for _ in 0..<20 {
                 stamp  := random_choice(&series, state.grass[:])^
                 p := center + random_bilateral_2(&series, f32) * half_dim 
-                push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
+                push_bitmap(render_group, stamp, 3, offset = V3(p, 0), color = color)
             }
         }
     }
