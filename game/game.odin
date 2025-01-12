@@ -10,71 +10,74 @@ INTERNAL :: #config(INTERNAL, false)
     ARCHITECTURE EXPLORATION
     
     - Rendering
-      - Lighting
-      - Straighten out all coordinate systems!
-        - Screen
-        - World
-        - Texture
-      - Optimization    
+        - Straighten out all coordinate systems!
+            - Screen
+            - World
+            - Texture
+        - Particle systems
+        - Lighting
+        - Final Optimization    
 
     - Asset streaming
-
-    - Debug code
-      - Fonts
-      - Logging
-      - Diagramming
-      - (a little gui) switches / sliders / etc
-      - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
-      - Thread visualization 
-      
-    - Z !
-      - debug drawing of Z levels and inclusion of Z to make sure
-        that there are no bugs
-      - Concept of ground in the collision loop so it can handle 
-        collisions coming onto and off of stairs, for example
-      - make sure flying things can go over walls
-      - how is going "up" and "down" rendered?
-
-    - Collision detection
-      - Clean up predicate proliferation! Can we make a nice clean
-      set of flags/rules so that it's easy to understand how
-      things work in terms of special handling? This may involve
-        making the iteration handle everything instead of handling 
-        overlap outside and so on.
-      - transient collision rules
-        - allow non-transient rules to override transient once
-        - Entry/Exit
-      - Whats the plan for robustness / shape definition ?
-      - "Things pushing other things"
-
-    - Implement multiple sim regions per frame
-      - per-entity clocking
-      - sim region merging?  for multiple players?
-      - simple zoomed out view for testing
             
     - Audio
-      - Sound effects triggers
-      - Ambient sounds
-      - Music
+        - Sound effects triggers
+        - Ambient sounds
+        - Music
+
+    - Debug code
+        - Fonts
+        - Logging
+        - Diagramming
+        - (a little gui) switches / sliders / etc
+        - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
+        - Thread visualization 
+        
+    - Z !
+        - debug drawing of Z levels and inclusion of Z to make sure
+        that there are no bugs
+        - Concept of ground in the collision loop so it can handle 
+        collisions coming onto and off of stairs, for example
+        - make sure flying things can go over walls
+        - how is going "up" and "down" rendered?
+
+    - Collision detection
+        - Clean up predicate proliferation! Can we make a nice clean
+        set of flags/rules so that it's easy to understand how
+        things work in terms of special handling? This may involve
+            making the iteration handle everything instead of handling 
+            overlap outside and so on.
+        - transient collision rules
+            - allow non-transient rules to override transient once
+            - Entry/Exit
+        - Whats the plan for robustness / shape definition ?
+        - "Things pushing other things"
+
+    - Implement multiple sim regions per frame
+        - per-entity clocking
+        - sim region merging?  for multiple players?
+        - simple zoomed out view for testing
 
     - Rudimentary worldgen (no quality just "what sorts of things" we do
-      - Map displays
-      - Placement of background things
-      - Connectivity?
-      - Non-overlapping?
-    - AI
-      - Rudimentary monstar behaviour
-      * Pathfinding
-      - AI "storage"
-    - Metagame / save game?
-      - how do you enter a "save slot"?
-      - persistent unlocks/etc.
-      - Do we allow saved games? Probably yes, just only for "pausing"
-      * continuous save for crash recovery?
+        - Map displays
+        - Placement of background things
+        - Connectivity?
+        - Non-overlapping?
 
-    * Animation should probably lead into rendering
-      - Skeletal animation
-      - Particle systems
+    - AI
+        - Rudimentary monstar behaviour
+        * Pathfinding
+        - AI "storage"
+
+    - Metagame / save game?
+        - how do you enter a "save slot"?
+        - persistent unlocks/etc.
+        - Do we allow saved games? Probably yes, just only for "pausing"
+        * continuous save for crash recovery?
+
+        * Animation should probably lead into rendering
+            - Skeletal animation
+            - Particle systems
 
     PRODUCTION
     -> Game
@@ -86,7 +89,7 @@ White    :: v4{1,1,1, 1}
 Gray     :: v4{0.5,0.5,0.5, 1}
 Black    :: v4{0,0,0, 1}
 Blue     :: v4{0.08, 0.49, 0.72, 1}
-Yellow   :: v4{0.71, 0.71, 0.09, 1}
+Yellow   :: v4{0.91, 0.81, 0.09, 1}
 Orange   :: v4{1, 0.71, 0.2, 1}
 Green    :: v4{0, 0.59, 0.28, 1}
 Red      :: v4{1, 0.09, 0.24, 1}
@@ -272,7 +275,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         state.wall_collision          = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters, state.typical_floor_height})
         state.sword_collision         = make_simple_grounded_collision(state, {0.5, 1, 0.1})
         state.stairs_collision        = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters * 2, state.typical_floor_height + 0.1})
-        state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1.2})
+        state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1})
         state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1.5})
         state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 1})
         state.standart_room_collision = make_simple_grounded_collision(state, V3(vec_cast(f32, tiles_per_screen) * tile_size_in_meters, state.typical_floor_height * 0.9))
@@ -531,19 +534,17 @@ when !true {
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
             offset := world_difference(world, ground_buffer.p, state.camera_p)
-            // TODO(viktor): IMPORTANT(viktor): Remove once renderer is sped up, and there is no need for fair comparisons
-            if true || abs(offset.z) == 0 {
+            
+            if abs(offset.z) == 0 {
                 bitmap := ground_buffer.bitmap
                 bitmap.align_percentage = 0.5
                 
-                basis := push(&tran_state.arena, RenderBasis)
-                render_group.default_basis = basis
-                basis.p = offset
-                
                 ground_chunk_size := world.chunk_dim_meters.x
-                push_bitmap(render_group, bitmap, ground_chunk_size)
+                push_bitmap(render_group, bitmap, ground_chunk_size, offset)
                 
-                // push_rectangle_outline(render_group, ground_chunk_size, 0, Yellow)
+                when false {
+                    push_rectangle_outline(render_group, offset, ground_chunk_size, Yellow)
+                }
             }
         }
     }
@@ -555,7 +556,7 @@ when !true {
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    {
+    if false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -600,9 +601,6 @@ when !true {
     sim_origin := state.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
-    render_basis := push(&tran_state.arena, RenderBasis)
-    render_group.default_basis = render_basis
-    
     push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Red,   0.2)
     push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.bounds).xy,           Blue,  0.2)
     push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, Green, 0.2)
@@ -637,14 +635,11 @@ when !true {
             ddp: v3
             move_spec := default_move_spec()
             
-            basis := push(&tran_state.arena, RenderBasis)
-            render_group.default_basis = basis
-            
+            // 
+            // Pre-physics entity work
+            // 
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
-            case .Wall:
-                push_bitmap(render_group, state.wall, 1.5)
-    
             case .Hero:
                 for &con_hero in state.controlled_heroes {
                     if con_hero.storage_index == entity.storage_index {
@@ -656,10 +651,6 @@ when !true {
                         move_spec.drag = 8
                         move_spec.speed = 50
                         ddp = con_hero.ddp
-
-                        push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
-                        push_bitmap(render_group, state.player[entity.facing_index], 1.2)
-                        push_hitpoints(render_group, &entity, 1)
 
                         if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
                             sword := entity.sword.ptr
@@ -687,9 +678,6 @@ when !true {
                     make_entity_nonspatial(&entity)
                 }
                 
-                push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, state.sword, 0.1)
-
             case .Familiar: 
                 closest_hero: ^Entity
                 closest_hero_dsq := square(10)
@@ -704,17 +692,45 @@ when !true {
                         }
                     }
                 }
-when false {
-                if closest_hero != nil && closest_hero_dsq > 1 {
-                    mpss: f32 = 0.5
-                    ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
+                when false {
+                    if closest_hero != nil && closest_hero_dsq > 1 {
+                        mpss: f32 = 0.5
+                        ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
+                    }
                 }
-}
 
                 move_spec.normalize_accelaration = true
                 move_spec.drag = 8
                 move_spec.speed = 50
+                
+            // NOTE(viktor): nothing
+            case .Monster:
+            case .Wall:
+            case .Stairwell: 
+            case .Space: 
+            }
 
+            if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
+                move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
+            }
+
+            render_group.transform.offset = get_entity_ground_point(&entity)
+
+            // 
+            // Post-physics entity work
+            // 
+            switch entity.type {
+            case .Nil: // NOTE(viktor): nothing
+            case .Hero:
+                push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, state.player[entity.facing_index], 1.2)
+                push_hitpoints(render_group, &entity, 1)
+
+            case .Sword:
+                push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, state.sword, 0.1)
+
+            case .Familiar: 
                 entity.t_bob += dt
                 if entity.t_bob > Tau {
                     entity.t_bob -= Tau
@@ -731,9 +747,12 @@ when false {
                 push_bitmap(render_group, state.monster[1], 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
+            case .Wall:
+                push_bitmap(render_group, state.wall, 1.5)
+    
             case .Stairwell: 
                 push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
-                push_rectangle(render_group, {0, 0, state.typical_floor_height}, entity.walkable_dim, color = Orange * {1, 1, 1, 0.5})
+                push_rectangle(render_group, {0, 0, entity.walkable_height}, entity.walkable_dim, color = Orange * {1, 1, 1, 0.5})
             
             case .Space: 
                 when false {
@@ -742,14 +761,9 @@ when false {
                     }
                 }
             }
-
-            if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
-                move_entity(state, camera_sim_region, &entity, ddp, move_spec, input.delta_time)
-            }
-
-            basis.p = get_entity_ground_point(&entity)
         }
     }
+    render_group.transform.offset = 0
     
     when false {
         map_color := [?]v4{Red, Green, Blue}

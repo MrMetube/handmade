@@ -128,7 +128,7 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
     }
 }
 
-map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {}) -> WorldPosition {
+map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
     result := center
     result.offset += offset
 

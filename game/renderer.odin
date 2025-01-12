@@ -28,30 +28,28 @@ import "core:simd/x86"
 */
 
 RenderGroup :: struct {
-    push_buffer:      []u8,
-    push_buffer_size: u32,
-    default_basis:    ^RenderBasis,
-    global_alpha:     f32,
-
-    meters_to_pixels_for_monitor:    f32,
+    push_buffer:                     []u8,
+    push_buffer_size:                u32,
+    
+    transform:                       Transform,
+    global_alpha:                    f32,
     monitor_half_diameter_in_meters: v2,
-
-    game_camera:   Camera,
-    render_camera: Camera,
 }
 
-Camera :: struct {
+Transform :: struct {
+    meters_to_pixels_for_monitor: f32,
+    screen_center:                v2,
+    
     focal_length:          f32, // meters the player is sitting from their monitor
     distance_above_target: f32,
+    
+    scale:  f32,
+    offset: v3,
 }
 
 EnvironmentMap :: struct {
     pz:  f32,
     LOD: [4]LoadedBitmap,
-}
-
-RenderBasis :: struct {
-    p: v3,
 }
 
 // TODO(viktor): Why always prefix rendergroup?
@@ -60,35 +58,31 @@ RenderGroupEntryHeader :: struct {
     type: typeid,
 }
 
-RenderGroupEntryBasis :: struct {
-    basis:  ^RenderBasis,
-    offset: v3,
-}
-
 RenderGroupEntryClear :: struct {
-    color: v4,
+    color:  v4,
 }
 
 RenderGroupEntryBitmap :: struct {
-    using rendering_basis: RenderGroupEntryBasis,
-
-    size:   v2,
     color:  v4,
+    p:      v2,
+    size:   v2,
+    
     bitmap: LoadedBitmap,
 }
 
 RenderGroupEntryRectangle :: struct {
-    using rendering_basis: RenderGroupEntryBasis,
-
-    color: v4,
+    color:  v4,
+    p:     v2,
     size:  v2,
 }
 
 RenderGroupEntryCoordinateSystem :: struct {
+    color:  v4,
     origin, x_axis, y_axis: v2,
-    color:                  v4,
-    texture, normal:        LoadedBitmap,
 
+    pixels_to_meters: f32,
+    
+    texture, normal:        LoadedBitmap,
     top, middle, bottom:    EnvironmentMap,
 }
 
@@ -97,29 +91,27 @@ make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32, resolution_p
     result.push_buffer = push(arena, u8, max_push_buffer_size)
 
     result.push_buffer_size = 0
-
-    result.default_basis = push(arena, RenderBasis)
-    result.default_basis.p = {0,0,0}
-
     result.global_alpha = 1
 
-    monitor_width_in_meters                 :: 0.635
-    result.game_camera.focal_length          = 0.6
-    result.game_camera.distance_above_target = 8.0
+    monitor_width_in_meters :: 0.635
+    result.transform.meters_to_pixels_for_monitor = cast(f32) resolution_pixels.x * monitor_width_in_meters
+    result.transform.screen_center = 0.5 * vec_cast(f32, resolution_pixels)
+        
+    pixels_to_meters : f32 = 1.0 / result.transform.meters_to_pixels_for_monitor
+    result.monitor_half_diameter_in_meters = 0.5 * vec_cast(f32, resolution_pixels) * pixels_to_meters
 
-    result.render_camera = result.game_camera
-    // result.render_camera.distance_above_target = 38
-
-    result.meters_to_pixels_for_monitor = cast(f32) resolution_pixels.x * monitor_width_in_meters
-
-    pixels_to_meters := 1 / result.meters_to_pixels_for_monitor
-    result.monitor_half_diameter_in_meters = 0.5 * pixels_to_meters * vec_cast(f32, resolution_pixels)
+    result.transform.distance_above_target = 8.0
+    result.transform.focal_length          = 0.6
+    
+    result.transform.scale                 = 1
+    result.transform.offset                = 0
+    
 
     return result
 }
 
 get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
-    result = get_camera_rectangle_at_distance(group, group.game_camera.distance_above_target)
+    result = get_camera_rectangle_at_distance(group, group.transform.distance_above_target)
 
     return result
 }
@@ -132,24 +124,32 @@ get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, dist
 
 @(require_results)
 unproject :: #force_inline proc(group: ^RenderGroup, projected: v2, distance_from_camera: f32) -> (result: v2) {
-    result = projected * (distance_from_camera / group.game_camera.focal_length)
+    result = projected * (distance_from_camera / group.transform.focal_length)
 
     return result
 }
 
-get_render_entity_basis_p :: #force_inline proc(group: ^RenderGroup, entry: RenderGroupEntryBasis, screen_size:v2) -> (position: v2, scale: f32, valid: b32) {
-    near_clip_plane              :: 0.2
-    base_p                       := entry.basis.p
-    distance_to_p_z              := group.render_camera.distance_above_target - base_p.z
 
+get_render_entity_basis :: #force_inline proc(transform: Transform, base_p: v3) -> (position: v2, scale: f32, valid: b32) {
+    p := V3(base_p.xy, 0) + transform.offset
+    near_clip_plane :: 0.2
+    distance_above_target := transform.distance_above_target
+    base_z : f32//base_p.z
+    when false {
+        // TODO(viktor): how do we want to control the debug camera?
+        if true {
+            distance_above_target *= 5
+        }
+    }
+    
+    distance_to_p_z := distance_above_target - p.z
+    // TODO(viktor): transform.scale is unused
     if distance_to_p_z > near_clip_plane {
-        raw := V3(base_p.xy + entry.offset.xy, 1)
-        projected := group.render_camera.focal_length * raw / distance_to_p_z
+        raw := V3(p.xy, 1)
+        projected := transform.focal_length * raw / distance_to_p_z
 
-        screen_center := screen_size * 0.5
-
-        position = screen_center + projected.xy * group.meters_to_pixels_for_monitor
-        scale    =                 projected.z  * group.meters_to_pixels_for_monitor
+        position = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, scale * base_z}
+        scale    =                           projected.z  * transform.meters_to_pixels_for_monitor
         valid    = true
     }
 
@@ -173,35 +173,41 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset:= v3{}, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryBitmap) {
-    result = push_render_element(group, RenderGroupEntryBitmap)
-    alpha := v4{1,1,1, group.global_alpha}
+push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+    size  := v2{bitmap.width_over_height, 1} * height
+    // TODO(viktor): recheck alignments
+    align := bitmap.align_percentage * size
+    p     := offset + v3{align.x, -align.y, 0}
 
-    if result != nil {
-        result.basis      = group.default_basis
-        result.bitmap     = bitmap
-        result.offset     = offset
-        result.color      = color * alpha
-        result.size       = v2{bitmap.width_over_height, 1} * height
+    basis_p, scale, valid := get_render_entity_basis(group.transform, offset)
 
-        align := bitmap.align_percentage * result.size
-        result.offset.x -= align.x
-        result.offset.y += align.y
+    if valid {
+        element := push_render_element(group, RenderGroupEntryBitmap)
+        alpha := v4{1,1,1, group.global_alpha}
+
+        if element != nil {
+            element.bitmap = bitmap
+            
+            element.color  = color * alpha
+            element.p      = basis_p
+            element.size   = scale * size
+        }
     }
-
-    return result
 }
 
 push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}) {
-    entry := push_render_element(group, RenderGroupEntryRectangle)
-    alpha := v4{1,1,1, group.global_alpha}
+    p := V3(offset.xy + size * 0.5, 0)
+    basis_p, scale, valid := get_render_entity_basis(group.transform, p)
+    
+    if valid {
+        element := push_render_element(group, RenderGroupEntryRectangle)
+        alpha := v4{1,1,1, group.global_alpha}
 
-    if entry != nil {
-        entry.basis     = group.default_basis
-        entry.color     = color * alpha
-        entry.offset.xy = (offset.xy + entry.size * 0.5)
-        entry.offset.z  = offset.z
-        entry.size      = size
+        if element != nil {
+            element.color     = color * alpha
+            element.size      = scale * size
+            element.p         = basis_p - 0.5 * element.size
+        }
     }
 }
 
@@ -217,11 +223,14 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
-    result = push_render_element(group, RenderGroupEntryCoordinateSystem)
-
-    if result != nil {
-        result.color = color
-    }
+    // p, scale, valid := get_render_entity_basis_p(group.transform, entry, screen_size)
+    
+    // if valid {
+    //     result = push_render_element(group, RenderGroupEntryCoordinateSystem)
+    //     if result != nil {
+    //         result.color = color
+    //     }
+    // }
 
     return result
 }
@@ -266,9 +275,15 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 }
 
 tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
-    assert(cast(uintpointer) raw_data(target.memory) & (4*4 - 1) == 0)
-    
-    tile_count :: [2]i32{4,4}
+    assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
+    /* TODO(viktor):
+        - Make sure the tiles are all cache-aligned
+        - Can we get hyperthreads synced so they do interleaved lines?
+        - How big should the tiles be for performance?
+        - Actually ballpark the memory bandwidth for our DrawRectangleQuickly
+        - Re-test some of our instruction choices
+    */
+    tile_count :: [2]i32{4, 4}
     work: [tile_count.x * tile_count.y]TileRenderWork
     
     tile_size  := [2]i32{target.width, target.height} / tile_count
@@ -306,10 +321,7 @@ tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderG
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {
-    screen_size      := vec_cast(f32, target.width, target.height)
-    screen_center    := screen_size * 0.5
-    meters_to_pixels := screen_size.x / 20
-    pixels_to_meters := 1.0 / meters_to_pixels
+    null_pixels_to_meters :: 1
     
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
@@ -322,42 +334,30 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, screen_center, screen_size, entry.color, clip_rect, even)
+            draw_rectangle(target, group.transform.screen_center, group.transform.screen_center * 2, entry.color, clip_rect, even)
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
 
-            // TODO(viktor): handle invalid
-            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
-            draw_rectangle(target, p, scale * entry.size, entry.color, clip_rect, even)
+            draw_rectangle(target, entry.p, entry.size, entry.color, clip_rect, even)
 
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
 
-            // TODO(viktor): handle invalid
-            p, scale, valid := get_render_entity_basis_p(group, entry, screen_size)
             when true {
-                when true {
-                    // TODO(viktor): Brother ewww...
-                    EPSILON :: 0.00001
-                    if scale > EPSILON {
-                        draw_rectangle_quickly(target,
-                            p, {scale * entry.size.x, 0}, {0, scale * entry.size.y},
-                            entry.bitmap, entry.color,
-                            pixels_to_meters, clip_rect, even
-                        )
-                    }
-                } else {
-                    draw_rectangle_slowly(target,
-                        p, {scale * entry.size.x, 0}, {0, scale * entry.size.y},
-                        entry.bitmap, {}, entry.color,
-                        {}, {}, {},
-                        pixels_to_meters,
-                    )
-                }
+                draw_rectangle_quickly(target,
+                    entry.p, {entry.size.x, 0}, {0, entry.size.y},
+                    entry.bitmap, entry.color,
+                    null_pixels_to_meters, clip_rect, even
+                )
             } else {
-                draw_bitmap(target, entry.bitmap, p, clamp_01(entry.color))
+                draw_rectangle_slowly(target,
+                    entry.p, {entry.size.x, 0}, {0, entry.size.y},
+                    entry.bitmap, {}, entry.color,
+                    {}, {}, {},
+                    null_pixels_to_meters,
+                )
             }
 
         case RenderGroupEntryCoordinateSystem:
@@ -368,14 +368,14 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
                     entry.origin, entry.x_axis, entry.y_axis,
                     entry.texture, /* entry.normal, */ entry.color,
                     /* entry.top, entry.middle, entry.bottom, */
-                    pixels_to_meters, clip_rect, even
+                    null_pixels_to_meters, clip_rect, even
                 )
             } else {
                 draw_rectangle_slowly(target,
                     entry.origin, entry.x_axis, entry.y_axis,
                     entry.texture, entry.normal, entry.color,
                     entry.top, entry.middle, entry.bottom,
-                    pixels_to_meters,
+                    null_pixels_to_meters,
                 )
             }
 
@@ -501,15 +501,15 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         end_clip_mask   := clip_mask
         
         if fill_rect.min.x & 3 != 0 {
-            fill_rect.min.x = fill_rect.min.x &~ 3
             alignment      := fill_rect.min.x & 3
             start_clip_mask = simd.shl(clip_mask, cast(u32x4) (alignment * 4))
+            fill_rect.min.x = fill_rect.min.x &~ 3
         }
         
         if fill_rect.max.x & 3 != 0 {
-            fill_rect.max.x = (fill_rect.max.x &~ 3) + 4
             alignment      := (4 - (fill_rect.max.x & 3)) & 3
             end_clip_mask   = simd.shr(clip_mask, cast(u32x4) (alignment * 4))
+            fill_rect.max.x = (fill_rect.max.x &~ 3) + 4
         }
         
         normal_x_axis := x_axis * 1 / length_squared(x_axis)
@@ -594,7 +594,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                 // TODO(viktor): recheck later if this helps
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
                 {
-                    #no_bounds_check pixel := cast(^[4][4]u8) &buffer.memory[buffer.start + y * buffer.pitch + x]
+                    #no_bounds_check pixel := cast(^[4]ByteColor) &buffer.memory[buffer.start + y * buffer.pitch + x]
                     original_pixel := simd.masked_load(pixel, zero_i, write_mask)
                     
                     u = clamp_01(u)
