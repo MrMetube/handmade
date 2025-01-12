@@ -134,14 +134,15 @@ GameState :: struct {
 TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
-    
-    render_queue: ^PlatformWorkQueue,
-    
+
     test_diffuse: LoadedBitmap,
     test_normal:  LoadedBitmap,
     
     ground_buffers: []GroundBuffer,
     
+    high_priority_queue: ^PlatformWorkQueue,
+    low_priority_queue:  ^PlatformWorkQueue,
+        
     env_size: [2]i32,
     using _ : struct #raw_union {
         using _ : struct {
@@ -414,7 +415,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
 
-        tran_state.render_queue = memory.high_priority_queue
+        tran_state.high_priority_queue = memory.high_priority_queue
+        tran_state.low_priority_queue  = memory.low_priority_queue
         
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
@@ -533,7 +535,9 @@ when !true {
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
     render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4))
-    perspective(render_group, buffer_size, meters_to_pixels_for_monitor, 0.6, 8)
+    
+    focal_length, distance_above_ground : f32 = 0.6, 3
+    perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     clear(render_group, DarkGreen)
     
@@ -609,7 +613,7 @@ when !true {
     sim_origin := state.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
-    push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Red,   0.2)
+    push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Yellow,0.1)
     push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.bounds).xy,           Blue,  0.2)
     push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, Green, 0.2)
     
@@ -838,7 +842,7 @@ when !true {
 
     }
     
-    tiled_render_to_output(tran_state.render_queue, render_group, buffer)
+    tiled_render_to_output(tran_state.high_priority_queue, render_group, buffer)
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
@@ -949,14 +953,14 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
     bitmap.width_over_height = 1
     ground_buffer.p = p
     
-    buffer_dim := state.world.chunk_dim_meters.xy
-    assert(buffer_dim.x == buffer_dim.y)
-    half_dim := buffer_dim * 0.5
+    buffer_size := state.world.chunk_dim_meters.xy
+    assert(buffer_size.x == buffer_size.y)
+    half_dim := buffer_size * 0.5
 
     render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4))
-    orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32)bitmap.width / buffer_dim.x)
+    orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
 
-    defer tiled_render_to_output(tran_state.render_queue, render_group, ground_buffer.bitmap)
+    defer tiled_render_to_output(tran_state.low_priority_queue, render_group, ground_buffer.bitmap)
     
     clear(render_group, Red)
         
@@ -966,14 +970,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             chunk_x := p.chunk.x + offset_x
             chunk_y := p.chunk.y + offset_y
             
-            color: v4
-            if offset_y % 2 ==  offset_x % 2 {
-                color = {1,0,0,1}
-            } else {
-                color = {0,0,1,1}
-            }
-            
-            center := vec_cast(f32, offset_x, offset_y) * buffer_dim
+            center := vec_cast(f32, offset_x, offset_y) * buffer_size
             // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
             series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
             
@@ -981,7 +978,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
             for _ in 0..<20 {
                 stamp  := random_choice(&series, state.grass[:])^
                 p := center + random_bilateral_2(&series, f32) * half_dim 
-                push_bitmap(render_group, stamp, 3, offset = V3(p, 0), color = color)
+                push_bitmap(render_group, stamp, 3, offset = V3(p, 0))
             }
         }
     }

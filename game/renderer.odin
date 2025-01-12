@@ -299,8 +299,9 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     render_to_output(data.group, data.target, data.clip_rect, false)
 }
 
-tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
+tiled_render_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
+    
     /* TODO(viktor):
         - Make sure the tiles are all cache-aligned
         - Can we get hyperthreads synced so they do interleaved lines?
@@ -336,18 +337,46 @@ tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderG
             when false {
                 do_tile_render_work(it)
             } else {
-                PLATFORM_add_entry(render_queue, do_tile_render_work, it)
+                PLATFORM_add_entry(queue, do_tile_render_work, it)
             }
             
             work_index += 1
         }
     }
     
-    PLATFORM_complete_all_work(render_queue)
+    PLATFORM_complete_all_work(queue)
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {
     null_pixels_to_meters :: 1
+
+    // NOTE(viktor): assure that clear is first
+    for base_address: u32 = 0; base_address < group.push_buffer_size; {
+        header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
+        base_address += size_of(RenderGroupEntryHeader)
+
+        data := &group.push_buffer[base_address]
+
+        switch header.type {
+        case RenderGroupEntryClear:
+            entry := cast(^RenderGroupEntryClear) data
+            base_address += auto_cast size_of(entry^)
+
+            draw_rectangle(target, group.transform.screen_center, group.transform.screen_center * 4, entry.color, clip_rect, even)
+
+        case RenderGroupEntryRectangle:
+            entry := cast(^RenderGroupEntryRectangle) data
+            base_address += auto_cast size_of(entry^)
+        case RenderGroupEntryBitmap:
+            entry := cast(^RenderGroupEntryBitmap) data
+            base_address += auto_cast size_of(entry^)
+        case RenderGroupEntryCoordinateSystem:
+            entry := cast(^RenderGroupEntryCoordinateSystem) data
+            base_address += auto_cast size_of(entry^)
+        case:
+            fmt.panicf("Unhandled Entry: %v", header.type)
+        }
+    }
     
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
@@ -360,8 +389,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, group.transform.screen_center, group.transform.screen_center * 2, entry.color, clip_rect, even)
-        case RenderGroupEntryRectangle:
+            case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
 
@@ -496,7 +524,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
  */
     inverted_infinity_rectangle :: #force_inline proc() -> (result: Rectangle2i) {
         result.min = max(i32)
-        result.max = -max(i32)
+        result.max = min(i32)
         
         return result
     }
@@ -526,19 +554,22 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         start_clip_mask := clip_mask
         end_clip_mask   := clip_mask
 
-        // TODO(viktor): IMPORTANT(viktor): there are blurry artifacts in the 
-        // rendered image, probably the fill rect
-                
         if fill_rect.min.x & 3 != 0 {
             alignment      := fill_rect.min.x & 3
             start_clip_mask = simd.shl(clip_mask, cast(u32x4) (alignment * 4))
-            fill_rect.min.x = fill_rect.min.x & (~i32(3))
+            
+            when !false {
+                // TODO(viktor): IMPORTANT(viktor): there are blurry artifacts in the 
+                // rendered image, when the fill rect is aligned to 4 pixels / 16 bytes
+                fill_rect.min.x = fill_rect.min.x & ~i32(3) + 4
+            }
         }
         
         if fill_rect.max.x & 3 != 0 {
             alignment      := (4 - (fill_rect.max.x & 3)) & 3
             end_clip_mask   = simd.shr(clip_mask, cast(u32x4) (alignment * 4))
-            fill_rect.max.x = (fill_rect.max.x & (~i32(3))) + 4
+            
+            fill_rect.max.x = (fill_rect.max.x & ~i32(3)) + 4
         }
         
         normal_x_axis := x_axis * 1 / length_squared(x_axis)
@@ -548,12 +579,12 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         i32x4 :: #simd[4]i32
         u32x4 :: #simd[4]u32
         
-        // TODO(viktor): formalize texture boundaries
-        texture_width_x4  := cast(f32x4) (texture.width-2)
-        texture_height_x4 := cast(f32x4) (texture.height-2)
+        texture_width_x4  := cast(f32x4) (texture.width  - 2)
+        texture_height_x4 := cast(f32x4) (texture.height - 2)
 
         inv_255 := cast(f32x4) (1.0 / 255.0)
         max_color_value := cast(f32x4) (255 * 255)
+        half   := cast(f32x4) 0.5
         one    := cast(f32x4) 1
         two    := cast(f32x4) 2
         zero   := cast(f32x4) 0
@@ -578,37 +609,29 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         texture_start := cast(i32x4) texture.start
         texture_pitch := cast(i32x4) texture.pitch
 
-        u_step := normal_x_axis_x * four
-        v_step := normal_y_axis_x * four
-        
         delta_x := cast(f32x4) fill_rect.min.x - cast(f32x4) origin.x + f32x4{ 0, 1, 2, 3}
         delta_y := cast(f32x4) fill_rect.min.y - cast(f32x4) origin.y
         
-        delta_x_n_x_axis_x := delta_x * normal_x_axis_x
-        delta_x_n_y_axis_x := delta_x * normal_y_axis_x
-        
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
-        delta_y_n_x_axis_y_step := two * normal_x_axis_y
-        delta_y_n_y_axis_y_step := two * normal_y_axis_y
         
         scoped_timed_block_counted(.test_pixel, cast(i64) rectangle_clamped_area(fill_rect) / 2)
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
-            u := delta_x_n_x_axis_x + delta_y_n_x_axis_y
-            v := delta_x_n_y_axis_x + delta_y_n_y_axis_y
+            u := delta_x * normal_x_axis_x + delta_y_n_x_axis_y
+            v := delta_x * normal_y_axis_x + delta_y_n_y_axis_y
             defer {
-                delta_y_n_x_axis_y += delta_y_n_x_axis_y_step
-                delta_y_n_y_axis_y += delta_y_n_y_axis_y_step
+                delta_y_n_x_axis_y += normal_x_axis_y * two
+                delta_y_n_y_axis_y += normal_y_axis_y * two
             }
 
             clip_mask = start_clip_mask
             
             for x := fill_rect.min.x; x < fill_rect.max.x; x += 4 {
                 defer {
-                    u += u_step
-                    v += v_step
+                    u += normal_x_axis_x * four
+                    v += normal_y_axis_x * four
                     
                     if x + 4 >= fill_rect.max.x {
                         clip_mask = end_clip_mask
@@ -629,8 +652,10 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     u = clamp_01(u)
                     v = clamp_01(v)
 
-                    tx := u * texture_width_x4
-                    ty := v * texture_height_x4
+                    // NOTE(viktor): Bias texture coordinates to start on the 
+                    // boundary between the 0,0 and 1,1 pixels
+                    tx := u * texture_width_x4  + half
+                    ty := v * texture_height_x4 + half
 
                     sx := cast(i32x4) tx
                     sy := cast(i32x4) ty
@@ -638,7 +663,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     fx := tx - cast(f32x4) sx
                     fy := ty - cast(f32x4) sy
 
-                    // t00, t01, t10, t11 := sample_bilinear(texture, s)
+                    // NOTE(viktor): bilinear sample
                     fetch := texture_start + sy * texture_pitch + sx
                     
                     fetch_0 := (cast([^]i32)&fetch)[0]
@@ -681,10 +706,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     pixel_b := cast(f32x4) (maskFF & simd.shr(original_pixel,  shift16))
                     pixel_a := cast(f32x4) (maskFF & simd.shr(original_pixel,  shift24))
 
-                    // t00 = srgb_255_to_linear_1(t00)
-                    // t01 = srgb_255_to_linear_1(t01)
-                    // t10 = srgb_255_to_linear_1(t10)
-                    // t11 = srgb_255_to_linear_1(t11)
+                    // NOTE(viktor): srgb to linear
                     ta_r = square(ta_r)
                     ta_g = square(ta_g)
                     ta_b = square(ta_b)
@@ -701,7 +723,11 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     td_g = square(td_g)
                     td_b = square(td_b)
 
-                    // texel := blend_bilinear(t00, t01, t10, t11, f)
+                    pixel_r = square(pixel_r)
+                    pixel_g = square(pixel_g)
+                    pixel_b = square(pixel_b)
+
+                    // NOTE(viktor): bilinear blend
                     ifx := one - fx
                     ify := one - fy
                     l0  := ify * ifx
@@ -723,18 +749,14 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     texel_g = clamp(texel_g, zero, max_color_value)
                     texel_b = clamp(texel_b, zero, max_color_value)
 
-                    // pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
-                    pixel_r = square(pixel_r)
-                    pixel_g = square(pixel_g)
-                    pixel_b = square(pixel_b)
-
+                    // NOTE(viktor): blend with target pixel
                     inv_texel_a := (one - (inv_255 * texel_a))
                     blended_r := inv_texel_a * pixel_r + texel_r
                     blended_g := inv_texel_a * pixel_g + texel_g
                     blended_b := inv_texel_a * pixel_b + texel_b
                     blended_a := inv_texel_a * pixel_a + texel_a
 
-                    // blended = linear_1_to_srgb_255(blended)
+                    // NOTE(viktor): linear to srgb
                     blended_r  = square_root(blended_r)
                     blended_g  = square_root(blended_g)
                     blended_b  = square_root(blended_b)

@@ -94,6 +94,8 @@ GameMemory :: struct {
     transient_storage: []u8,
 
     high_priority_queue:        ^PlatformWorkQueue,
+    low_priority_queue:         ^PlatformWorkQueue,
+    
     PLATFORM_add_entry:         PlatformAddEntry,
     PLATFORM_complete_all_work: PlatformCompleteAllWork,
     

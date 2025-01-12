@@ -49,18 +49,18 @@ GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEM
 //   
 
 SoundOutput :: struct {
-    samples_per_second  : u32,
-    num_channels        : u32,
-    bytes_per_sample    : u32,
-    buffer_size         : u32,
+    samples_per_second:   u32,
+    num_channels:         u32,
+    bytes_per_sample:     u32,
+    buffer_size:          u32,
     running_sample_index: u32,
-    safety_bytes        : u32,
+    safety_bytes:         u32,
 }
 
 Color :: [4]u8
 
 OffscreenBuffer :: struct {
-    info  :               win.BITMAPINFO,
+    info:                 win.BITMAPINFO,
     memory:               []Color,
     width, height, pitch: i32,
 }
@@ -72,9 +72,9 @@ State :: struct {
     replay_buffers:    [4]ReplayBuffer,
 
     input_record_handle: win.HANDLE,
-    input_record_index : i32,
+    input_record_index:  i32,
     input_replay_handle: win.HANDLE,
-    input_replay_index : i32,
+    input_replay_index:  i32,
 }
 
 ReplayBuffer :: struct {
@@ -88,169 +88,19 @@ ThreadContext :: struct {
     placeholder: i32,
 }
 
-
-PlatformWorkQueue :: struct { // TODO(viktor): polymorphism?
-    semaphore_handle: win.HANDLE,
-    
-    completion_goal, 
-    completion_count: u32,
-     
-    next_entry_to_write, 
-    next_entry_to_read:  u32,
-    
-    entries: [8000]PlatformWorkQueueEntry
-}
-
-PlatformWorkQueueEntry :: struct {
-    callback: WorkQueueCallback,
-    data:     rawpointer, // TODO(viktor): polymorphism?
-}
-
-add_entry :: proc(queue: ^PlatformWorkQueue, callback: WorkQueueCallback, data: rawpointer) {
-    old_next_entry := queue.next_entry_to_write
-    new_next_entry := (old_next_entry + 1) % len(queue.entries)
-    assert(new_next_entry != queue.next_entry_to_read) 
-
-    entry := &queue.entries[old_next_entry] 
-    entry.data     = data
-    entry.callback = callback
-    
-    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, queue.completion_goal+1)
-    assert(ok)
-    
-    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_write, old_next_entry, new_next_entry)
-    assert(ok)
-    
-    win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
-}
-
-do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b32) {
-    old_next_entry := queue.next_entry_to_read
-    new_next_entry := (old_next_entry + 1) % len(queue.entries)
-    
-    if old_next_entry != queue.next_entry_to_write {
-        index, ok := intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_read, old_next_entry, new_next_entry)
-    
-        if ok {
-            assert(index == old_next_entry)
-            
-            entry := &queue.entries[index]
-            entry.callback(entry.data)
-            
-            old_completion_count := queue.completion_count
-            new_completion_count := old_completion_count + 1
-            
-            intrinsics.atomic_add(&queue.completion_count, 1)
-        }
-    } else {
-        should_sleep = true
-    }
-    
-    return should_sleep
-}
-
-complete_all_work :: proc(queue: ^PlatformWorkQueue) {
-    for queue.completion_count != queue.completion_goal {
-        do_next_work_queue_entry(queue)
-    }
-    
-    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, 0)
-    assert(ok)
-    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.completion_count, queue.completion_count, 0)
-    assert(ok)
-}
-
-thread_proc :: proc "stdcall" (parameter: rawpointer) -> win.DWORD {
-    context = runtime.default_context()
-    
-    info := cast(^ThreadInfo) parameter
-    for {
-        if do_next_work_queue_entry(info.queue) { 
-            INFINITE :: transmute(win.DWORD) i32(-1)
-            win.WaitForSingleObjectEx(info.queue.semaphore_handle, INFINITE, false)
-        }
-    }
-}
-
-ThreadInfo :: struct {
-    logical_thread_index: u32,
-    queue:                ^PlatformWorkQueue,
-}
-
-
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
-    infos: [7]ThreadInfo
-    thread_count := cast(win.LONG) len(infos)
+    high_queue: PlatformWorkQueue
+    init_work_queue(&high_queue, 8)
     
-    queue := PlatformWorkQueue{
-        semaphore_handle = win.CreateSemaphoreW(nil, 0, thread_count, nil)
-    }
-    
-    for &it, it_index in infos {
-        it.logical_thread_index = auto_cast it_index
-        it.queue = &queue
-        
-        thread_id: win.DWORD
-        thread_handle := win.CreateThread(nil, 0, thread_proc, &it, 0, &thread_id)
-    }
-    
-    String_0 := "String 0"
-    String_1 := "String 1"
-    String_2 := "String 2"
-    String_3 := "String 3"
-    String_4 := "String 4"
-    String_5 := "String 5"
-    String_6 := "String 6"
-    String_7 := "String 7"
-    String_8 := "String 8"
-    String_9 := "String 9"
-    
-    String_10 := "String 10"
-    String_11 := "String 11"
-    String_12 := "String 12"
-    String_13 := "String 13"
-    String_14 := "String 14"
-    String_15 := "String 15"
-    String_16 := "String 16"
-    String_17 := "String 17"
-    String_18 := "String 18"
-    String_19 := "String 19"
-    
-    do_worker_work : WorkQueueCallback : proc(data: rawpointer) {
-        fmt.println("thread", win.GetCurrentThreadId(), "printed:", (cast(^string)data)^)
-    }
-    
-    add_entry(&queue, do_worker_work, &String_0)
-    add_entry(&queue, do_worker_work, &String_1)
-    add_entry(&queue, do_worker_work, &String_2)
-    add_entry(&queue, do_worker_work, &String_3)
-    add_entry(&queue, do_worker_work, &String_4)
-    add_entry(&queue, do_worker_work, &String_5)
-    add_entry(&queue, do_worker_work, &String_6)
-    add_entry(&queue, do_worker_work, &String_7)
-    add_entry(&queue, do_worker_work, &String_8)
-    add_entry(&queue, do_worker_work, &String_9)
-
-    add_entry(&queue, do_worker_work, &String_10)
-    add_entry(&queue, do_worker_work, &String_11)
-    add_entry(&queue, do_worker_work, &String_12)
-    add_entry(&queue, do_worker_work, &String_13)
-    add_entry(&queue, do_worker_work, &String_14)
-    add_entry(&queue, do_worker_work, &String_15)
-    add_entry(&queue, do_worker_work, &String_16)
-    add_entry(&queue, do_worker_work, &String_17)
-    add_entry(&queue, do_worker_work, &String_18)
-    add_entry(&queue, do_worker_work, &String_19)
-    
-    complete_all_work(&queue)
+    low_queue: PlatformWorkQueue
+    init_work_queue(&low_queue,  2)
     
     //   
     //   Platform Setup
     //   
-
     state: State
     {
         exe_path_buffer: [win.MAX_PATH_WIDE]u16
@@ -448,7 +298,8 @@ main :: proc() {
         game_memory.debug.free_file_memory  = DEBUG_free_file_memory
         
         
-        game_memory.high_priority_queue        = &queue
+        game_memory.high_priority_queue        = &high_queue
+        game_memory.low_priority_queue         = &low_queue
         game_memory.PLATFORM_add_entry         = add_entry
         game_memory.PLATFORM_complete_all_work = complete_all_work
     }
