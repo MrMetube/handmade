@@ -511,7 +511,6 @@ when !true {
             if controller.button_right.ended_down {
                 con_hero.dsword =  {1, 0}
             }
-} else {
 }
         }
     }
@@ -544,9 +543,7 @@ when !true {
                 ground_chunk_size := world.chunk_dim_meters.x
                 push_bitmap(render_group, bitmap, ground_chunk_size)
                 
-                when false {
-                    push_rectangle_outline(render_group, ground_chunk_size, 0, Yellow)
-                }
+                // push_rectangle_outline(render_group, ground_chunk_size, 0, Yellow)
             }
         }
     }

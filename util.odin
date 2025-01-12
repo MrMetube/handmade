@@ -7,6 +7,14 @@ megabytes :: #force_inline proc(#any_int value: u64) -> u64 { return kilobytes(v
 gigabytes :: #force_inline proc(#any_int value: u64) -> u64 { return megabytes(value) * 1024 }
 terabytes :: #force_inline proc(#any_int value: u64) -> u64 { return gigabytes(value) * 1024 }
 
+align16 :: #force_inline proc "contextless" (value: $I) -> I {
+    return (value + 15) & (~I(15))
+}
+
+align32 :: #force_inline proc "contextless" (value: $I) -> I {
+    return (value + 31) & (~I(31))
+}
+
 swap :: #force_inline proc(a, b: ^$T) {
     b^, a^ = a^, b^
 }

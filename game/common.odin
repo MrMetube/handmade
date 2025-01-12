@@ -2,7 +2,8 @@ package game
 
 import "base:intrinsics"
 
-rawpointer :: rawptr
+rawpointer  :: rawptr
+uintpointer :: uintptr
 
 Sample :: [2]i16
 

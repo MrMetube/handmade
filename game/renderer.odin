@@ -257,6 +257,8 @@ TileRenderWork :: struct {
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    scoped_timed_block(.render_to_output)
+    
     data := cast(^TileRenderWork) data
 
     render_to_output(data.group, data.target, data.clip_rect, true)
@@ -264,13 +266,13 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 }
 
 tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
-    scoped_timed_block(.render_to_output)
+    assert(cast(uintpointer) raw_data(target.memory) & (4*8 - 1) == 0)
     
     tile_count :: [2]i32{4, 4}
     work: [tile_count.x * tile_count.y]TileRenderWork
     
-    // TODO(viktor): round to LANES??
     tile_size  := [2]i32{target.width, target.height} / tile_count
+    tile_size.x = ((tile_size.x + 7) / 8) * tile_count.x
     
     work_index: i32
     for y in 0..<tile_count.y {
@@ -280,11 +282,18 @@ tiled_render_to_output :: proc(render_queue: ^PlatformWorkQueue, group: ^RenderG
             it.group = group
             it.target = target
             
-            // TODO(viktor): correct buffers with overflow!!
-            it.clip_rect.min = tile_size * {x, y} + 4
-            it.clip_rect.max = it.clip_rect.min + tile_size - 4
+            it.clip_rect.min = tile_size * {x, y}
+            it.clip_rect.max = it.clip_rect.min + tile_size
             
-            PLATFORM_add_entry(render_queue, do_tile_render_work, it)
+            if it.clip_rect.max.x > target.width {
+                it.clip_rect.max.x = target.width
+            }
+            
+            when !true {
+                do_tile_render_work(it)
+            } else {
+                PLATFORM_add_entry(render_queue, do_tile_render_work, it)
+            }
             
             work_index += 1
         }
@@ -472,6 +481,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         if fill_rect.max.x < ceilp.x  do fill_rect.max.x = ceilp.x
         if fill_rect.max.y < ceilp.y  do fill_rect.max.y = ceilp.y
     }
+    clip_rect := clip_rect
     fill_rect = rectangle_intersection(fill_rect, clip_rect)
 
     if !even == (fill_rect.min.y & 1 != 0) {
@@ -479,13 +489,31 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
     }
 
     if rectangle_has_area(fill_rect) {
+        maskFF       := cast(i32x8) 0xff
+        maskFFFFFFFF := cast(u32x8) 0xffffffff
+        
+        clip_mask       := maskFFFFFFFF
+        start_clip_mask := clip_mask
+        end_clip_mask   := clip_mask
+        
+        if fill_rect.min.x & 7 != 0 {
+            fill_rect.min.x = fill_rect.min.x &~ 7
+            alignment      := fill_rect.min.x & 7
+            start_clip_mask = simd.shl(clip_mask, cast(u32x8) (alignment * 4))
+        }
+        
+        if fill_rect.max.x & 7 != 0 {
+            fill_rect.max.x = (fill_rect.max.x &~ 7) + 8
+            alignment      := (8 - (fill_rect.max.x & 7)) & 7
+            end_clip_mask   = simd.shl(clip_mask, cast(u32x8) (alignment * 4))
+        }
+        
         inv_x_len_squared := 1 / length_squared(x_axis)
         inv_y_len_squared := 1 / length_squared(y_axis)
         
         normal_x_axis := x_axis * inv_x_len_squared
         normal_y_axis := y_axis * inv_y_len_squared
         
-        LANES :: 8
         f32x8 :: #simd[8]f32
         i32x8 :: #simd[8]i32
         u32x8 :: #simd[8]u32
@@ -502,8 +530,6 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         zero_i  := cast(i32x8) 0
         eight   := cast(f32x8) 8
 
-        maskFF       := cast(i32x8) 0xff
-        maskFFFFFFFF := cast(u32x8) 0xffffffff
 
         shift8  := cast(u32x8)  8
         shift16 := cast(u32x8) 16
@@ -538,47 +564,41 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         delta_y_n_x_axis_y_step := two * normal_x_axis_y
         delta_y_n_y_axis_y_step := two * normal_y_axis_y
         
-        clip_mask := maskFFFFFFFF
-        first_col_clip_mask: u32x8
-        fill_width := fill_rect.max.x - fill_rect.min.x
-        {
-            alignment  := fill_width & (LANES - 1)
-            adjustment := (LANES - alignment) & (LANES - 1)
-            fill_width += adjustment
-            fill_rect.min.x = fill_rect.max.x - fill_width
-            
-            // TODO(viktor): why is this not a <<
-            first_col_clip_mask = simd.shl(clip_mask, cast(u32x8) (adjustment * 4))
-            first_col_clip_mask = maskFFFFFFFF
-        }
-        
         scoped_timed_block_counted(.test_pixel, cast(i64) rectangle_clamped_area(fill_rect) / 2)
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
-            defer {
-                delta_y_n_x_axis_y += delta_y_n_x_axis_y_step
-                delta_y_n_y_axis_y += delta_y_n_y_axis_y_step
-                clip_mask = maskFFFFFFFF
-            }
-            clip_mask = first_col_clip_mask
-
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
             u := delta_x_n_x_axis_x + delta_y_n_x_axis_y
             v := delta_x_n_y_axis_x + delta_y_n_y_axis_y
+            defer {
+                delta_y_n_x_axis_y += delta_y_n_x_axis_y_step
+                delta_y_n_y_axis_y += delta_y_n_y_axis_y_step
+            }
+
+            clip_mask = start_clip_mask
             
-        for x_base := fill_rect.min.x; x_base < fill_rect.max.x; x_base += LANES {
-                defer u += u_step
-                defer v += v_step
+            for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
+                defer {
+                    u += u_step
+                    v += v_step
+                }
+                
+                defer {
+                    if x + 8 + 4 < fill_rect.max.x {
+                        clip_mask = maskFFFFFFFF
+                    } else {
+                        clip_mask = end_clip_mask
+                    }
+                }
 
                 // u >= 0 && u <= 1 && v >= 0 && v <= 1
                 write_mask := transmute(i32x8) (clip_mask & simd.lanes_ge(u, zero) & simd.lanes_le(u, one) & simd.lanes_ge(v, zero) & simd.lanes_le(v, one))
 
                 // TODO(viktor): recheck later if this helps
-                // TODO(viktor): #no_alias #no_bounds_check #no_broadcast #no_capture
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
                 {
-                    pixel := cast(^[8][4]u8) &buffer.memory[buffer.start + y * buffer.pitch + x_base]
-                    original_pixel := simd.masked_load(pixel, zero_i, maskFFFFFFFF)
+                    #no_bounds_check pixel := cast(^[8][4]u8) &buffer.memory[buffer.start + y * buffer.pitch + x]
+                    original_pixel := simd.masked_load(pixel, zero_i, write_mask)
                     
                     u = clamp_01(u)
                     v = clamp_01(v)

@@ -224,7 +224,6 @@ main :: proc() {
         fmt.println("thread", win.GetCurrentThreadId(), "printed:", (cast(^string)data)^)
     }
     
-    // TODO(viktor): IMPORTANT(viktor): this sucks! how can i pass a slice/string?
     add_entry(&queue, do_worker_work, &String_0)
     add_entry(&queue, do_worker_work, &String_1)
     add_entry(&queue, do_worker_work, &String_2)
@@ -1026,8 +1025,9 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     }
 
     bytes_per_pixel :: 4
-    bitmap_memory_size := buffer.width * buffer.height * bytes_per_pixel
-    buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, uint(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+    buffer.pitch = align32(buffer.width) -1
+    bitmap_memory_size := buffer.pitch * buffer.height * bytes_per_pixel
+    buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]
 
     // TODO: probably clear this to black
@@ -1042,7 +1042,7 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
     if fix_windows_colors {
         for y in 0..<buffer.height {
             for x in 0..<buffer.width {
-                useful_color := &buffer.memory[y * buffer.width + x]
+                useful_color := &buffer.memory[y * buffer.pitch + x]
                 windows_color:= WindowsColor{
                     r = useful_color.r,
                     g = useful_color.g,
