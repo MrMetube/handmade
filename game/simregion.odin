@@ -71,7 +71,7 @@ SimRegion :: struct {
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
-begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
+begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     // TODO(viktor): make storedEntities part of world
     region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
@@ -119,7 +119,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^GameState, world: ^World, origin: W
     return region
 }
 
-end_sim :: proc(region: ^SimRegion, state: ^GameState) {
+end_sim :: proc(region: ^SimRegion, state: ^State) {
     // TODO(viktor): make storedEntities part of world
     for entity in region.entities[:region.entity_count] {
         assert(entity.storage_index != 0)
@@ -176,7 +176,7 @@ get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_in
 }
 }
 
-load_entity_reference :: #force_inline proc(state: ^GameState, region: ^SimRegion, ref: ^EntityReference) {
+load_entity_reference :: #force_inline proc(state: ^State, region: ^SimRegion, ref: ^EntityReference) {
     if ref.index != 0 {
         entry := get_hash_from_index(region, ref.index)
         if entry.ptr == nil {
@@ -195,7 +195,7 @@ store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
     }
 }
 
-add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
+add_entity :: #force_inline proc(state: ^State, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
     dest = add_entity_raw(state, region, storage_index, source)
     
     if dest != nil {
@@ -210,7 +210,7 @@ add_entity :: #force_inline proc(state: ^GameState, region: ^SimRegion, storage_
     return dest
 }
 
-add_entity_raw :: proc(state: ^GameState, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity) -> (entity: ^Entity) {
+add_entity_raw :: proc(state: ^State, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity) -> (entity: ^Entity) {
     assert(storage_index != 0)
     
     entry := get_hash_from_index(region, storage_index)
@@ -263,7 +263,7 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
 }
 
 
-move_entity :: proc(state: ^GameState, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
+move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
     assert(.Nonspatial not_in entity.flags)
     
     if entity.type == .Hero {
@@ -506,7 +506,7 @@ entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
     return result
 }
 
-can_collide :: proc(state:^GameState, a, b: ^Entity) -> (result: b32) {
+can_collide :: proc(state:^State, a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
         if a.storage_index > b.storage_index do swap(&a, &b)
@@ -540,7 +540,7 @@ get_stair_ground :: #force_inline proc(region: ^Entity, at_ground_point: v3) -> 
     return result
 }
 
-handle_overlap :: proc(state: ^GameState, mover, region: ^Entity, dt: f32, ground: ^f32) {
+handle_overlap :: proc(state: ^State, mover, region: ^Entity, dt: f32, ground: ^f32) {
     if region.type == .Stairwell {
         ground^ = get_stair_ground(region, get_entity_ground_point(mover))
     }
@@ -557,7 +557,7 @@ speculative_collide :: proc(mover, region: ^Entity, test_p: v3) -> (result: b32 
     return result
 }
 
-handle_collision :: proc(state: ^GameState, a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc(state: ^State, a, b: ^Entity) -> (stops_on_collision: b32) {
     a, b := a, b
     if a.type > b.type do swap(&a, &b)
     
@@ -577,7 +577,7 @@ handle_collision :: proc(state: ^GameState, a, b: ^Entity) -> (stops_on_collisio
     return stops_on_collision
 }
 
-can_overlap :: proc(state:^GameState, mover, region: ^Entity) -> (result: b32) {
+can_overlap :: proc(state:^State, mover, region: ^Entity) -> (result: b32) {
     if mover != region {
         if region.type == .Stairwell {
             result = true

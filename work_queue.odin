@@ -30,10 +30,9 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: win.LONG) {
     for _ in 0..<thread_count {
         win.CreateThread(nil, 0, thread_proc, queue, 0, &thread_id)
     }
-    
 }
 
-add_entry :: proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer) {
+enqueue_work :: proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
     assert(new_next_entry != queue.next_entry_to_read) 

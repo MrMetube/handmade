@@ -28,8 +28,9 @@ import "core:simd/x86"
 */
 
 RenderGroup :: struct {
-    push_buffer:                     []u8,
-    push_buffer_size:                u32,
+    assets:           ^Assets,
+    push_buffer:      []u8,
+    push_buffer_size: u32,
     
     transform:                       Transform,
     global_alpha:                    f32,
@@ -88,7 +89,7 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
-make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u64) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, assets: ^Assets,  max_push_buffer_size: u64) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
     
     max_push_buffer_size := max_push_buffer_size
@@ -99,6 +100,7 @@ make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u64) -> (result: 
 
     result.push_buffer_size = 0
     result.global_alpha = 1
+    result.assets = assets
 
     result.transform.scale  = 1
     result.transform.offset = 0
@@ -158,7 +160,7 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
         //
         // Debug camera
         //
-        when !false {
+        when false {
             // TODO(viktor): how do we want to control the debug camera?
             distance_above_target *= 5
         }
@@ -206,7 +208,16 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+push_bitmap :: proc { push_bitmap_by_asset_id, push_bitmap_raw }
+push_bitmap_by_asset_id :: #force_inline proc(group: ^RenderGroup, id: AssetId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+    bitmap := get_bitmap(group.assets, id)
+    if bitmap != nil {
+        push_bitmap(group, bitmap^, height, offset, color)
+    } else {
+        load_asset(group.assets, id)
+    }
+}
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
@@ -345,7 +356,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
             when false {
                 do_tile_render_work(it)
             } else {
-                PLATFORM_add_entry(queue, do_tile_render_work, it)
+                PLATFORM_enqueue_work(queue, do_tile_render_work, it)
             }
             
             work_index += 1

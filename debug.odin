@@ -55,8 +55,6 @@ when INTERNAL {
     }
 
     DEBUG_free_file_memory : proc_DEBUG_free_file_memory : proc(memory: []u8) {
-        fmt.println(get_thread_context())
-
         if memory != nil {
             win.VirtualFree(raw_data(memory), 0, win.MEM_RELEASE)
         }

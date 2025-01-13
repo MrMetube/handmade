@@ -96,7 +96,7 @@ GameMemory :: struct {
     high_priority_queue:        ^PlatformWorkQueue,
     low_priority_queue:         ^PlatformWorkQueue,
     
-    PLATFORM_add_entry:         PlatformAddEntry,
+    PLATFORM_enqueue_work:      PlatformEnqueueWork,
     PLATFORM_complete_all_work: PlatformCompleteAllWork,
     
     debug:    DEBUG_code,
@@ -105,8 +105,7 @@ GameMemory :: struct {
 
 // TODO(viktor): this should only be in platform.odin
 PlatformWorkQueueCallback :: #type proc(data: rawpointer)
-
-PlatformAddEntry        :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
+PlatformEnqueueWork     :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
 PlatformCompleteAllWork :: #type proc(queue: ^PlatformWorkQueue)
 
 when INTERNAL { 

@@ -95,7 +95,7 @@ Green    :: v4{0, 0.59, 0.28, 1}
 Red      :: v4{1, 0.09, 0.24, 1}
 DarkGreen:: v4{0, 0.07, 0.0353, 1}
 
-GameState :: struct {
+State :: struct {
     world_arena: Arena,
 
     typical_floor_height: f32,
@@ -108,14 +108,7 @@ GameState :: struct {
     stored_entities: [100_000]StoredEntity,
 
     world: ^World,
-
-    grass: [8]LoadedBitmap,
-    shadow, wall, sword, stair: LoadedBitmap,
-    player, monster: [2]LoadedBitmap,
     
-    shadow_focus: [2]i32,
-    player_focus, monster_focus: [2][2]i32,
-
     collision_rule_hash: [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
 
@@ -131,16 +124,11 @@ GameState :: struct {
     time: f32,
 }
 
-TaskWithMemory :: struct {
-    in_use: b32,
-    arena: Arena,
-    
-    memory_flush: TemporaryMemory,
-}
-
 TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
+    
+    assets: Assets,
     
     tasks: [4]TaskWithMemory,
 
@@ -161,7 +149,88 @@ TransientState :: struct {
     },
 }
 
+AssetId :: enum {
+    shadow, wall, sword, stair
+}
 
+Assets :: struct {
+    tran_state: ^TransientState,
+    arena: Arena,
+    read_entire_file: proc_DEBUG_read_entire_file,
+    
+    bitmaps: [AssetId]^LoadedBitmap,
+    // NOTE(viktor): Array'd assets
+    grass:           [8]LoadedBitmap,
+    player, monster: [2]LoadedBitmap,
+    // NOTE(viktor): structured assets
+}
+
+get_bitmap :: #force_inline proc(assets: ^Assets, id: AssetId) -> (result: ^LoadedBitmap) {
+    result = assets.bitmaps[id]
+    
+    return result
+}
+
+load_asset :: proc(assets: ^Assets, id: AssetId) {
+    if task := begin_task_with_memory(assets.tran_state); task != nil {
+        LoadAssetWork :: struct {
+            task:   ^TaskWithMemory,
+            assets: ^Assets,
+            
+            bitmap: ^LoadedBitmap,
+            
+            id:        AssetId,
+            file_name: string,
+            
+            custom_alignment:   b32,
+            top_down_alignment: v2,
+        }
+                
+        do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+            data := cast(^LoadAssetWork) data
+            
+            if data.custom_alignment {
+                data.bitmap^ = DEBUG_load_bmp_custom_alignment(data.assets.read_entire_file, data.file_name, data.top_down_alignment)
+            } else {
+                data.bitmap^ = DEBUG_load_bmp(data.assets.read_entire_file, data.file_name)
+            }
+            // TODO(viktor): FENCE!
+            data.assets.bitmaps[data.id] = data.bitmap
+            
+            end_task_with_memory(data.task)
+        }
+
+        work := push(&assets.arena, LoadAssetWork)
+        
+        work.assets = assets
+        work.id = id
+        work.task = task
+        work.bitmap = push(&assets.arena, LoadedBitmap)
+        
+        switch id {
+        case .shadow:
+            work.file_name = "../assets/shadow.bmp"
+            work.custom_alignment = true
+            work.top_down_alignment = {  22, 14}
+        case .sword:
+            work.file_name = "../assets/arrow.bmp"
+        case .wall:
+            work.file_name = "../assets/wall.bmp"
+        case .stair:
+            work.file_name = "../assets/stair.bmp"
+        }
+        
+        PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
+    }
+}
+
+
+TaskWithMemory :: struct {
+    in_use: b32,
+    arena: Arena,
+    
+    memory_flush: TemporaryMemory,
+}
 
 GroundBuffer :: struct {
     bitmap: LoadedBitmap,
@@ -216,10 +285,10 @@ PairwiseCollsionRule :: struct {
 }
 
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-#assert( len(GameState{}.collision_rule_hash) & ( len(GameState{}.collision_rule_hash) - 1 ) == 0)
+#assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
 
 // NOTE(viktor): Globals
-PLATFORM_add_entry:         PlatformAddEntry
+PLATFORM_enqueue_work:      PlatformEnqueueWork
 PLATFORM_complete_all_work: PlatformCompleteAllWork
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
 PlatformWorkQueue :: struct {}
@@ -228,7 +297,7 @@ PlatformWorkQueue :: struct {}
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
     scoped_timed_block(.game_update_and_render)
     
-    PLATFORM_add_entry         = memory.PLATFORM_add_entry
+    PLATFORM_enqueue_work         = memory.PLATFORM_enqueue_work
     PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
     when INTERNAL {
         DEBUG_GLOBAL_memory = memory
@@ -239,31 +308,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Permanent Initialization
     // ---------------------- ---------------------- ----------------------
-    assert(size_of(GameState) <= len(memory.permanent_storage), "The GameState cannot fit inside the permanent memory")
-    state := cast(^GameState) raw_data(memory.permanent_storage)
+    assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
+    state := cast(^State) raw_data(memory.permanent_storage)
     if !memory.is_initialized {
         // TODO(viktor): lets start partitioning our memory space
-        // TODO(viktor): formalize the world arena and others being after the GameState in permanent storage
+        // TODO(viktor): formalize the world arena and others being after the State in permanent storage
         // initialize the permanent arena first and allocate the state out of it
-        init_arena(&state.world_arena, memory.permanent_storage[size_of(GameState):])
-        
-        // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        state.shadow     = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/shadow.bmp"       , v2{  22, 14})
-        state.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , v2{  16, 60})
-        state.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", v2{  28, 60})
-        state.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , v2{  46, 44})
-        state.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , v2{  18, 44})
-        state.sword      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/arrow.bmp")
-        state.wall       = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/wall.bmp")
-        // state.stair      = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/stair.bmp")
-        state.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
-        state.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
-        state.grass[2] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp")
-        state.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
-        state.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
-        state.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
-        state.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")   
-        state.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
+        init_arena(&state.world_arena, memory.permanent_storage[size_of(State):])
         
         state.world = push_struct(&state.world_arena, World)
 
@@ -419,16 +470,34 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Transient Initialization
     // ---------------------- ---------------------- ----------------------
-    assert(size_of(TransientState) <= len(memory.transient_storage), "The GameState cannot fit inside the permanent memory")
+    assert(size_of(TransientState) <= len(memory.transient_storage), "The Transient State cannot fit inside the permanent memory")
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
-
+        
         for &task in tran_state.tasks {
             task.in_use = false
             
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
+        sub_arena(&tran_state.assets.arena, &tran_state.arena, megabytes(64))
+        tran_state.assets.read_entire_file = memory.debug.read_entire_file
+        tran_state.assets.tran_state = tran_state
+        
+        // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
+        tran_state.assets.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , v2{  16, 60})
+        tran_state.assets.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", v2{  28, 60})
+        tran_state.assets.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , v2{  46, 44})
+        tran_state.assets.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , v2{  18, 44})
+        
+        tran_state.assets.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
+        tran_state.assets.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
+        tran_state.assets.grass[2] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp")
+        tran_state.assets.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
+        tran_state.assets.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
+        tran_state.assets.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
+        tran_state.assets.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")   
+        tran_state.assets.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
         
         tran_state.high_priority_queue = memory.high_priority_queue
         tran_state.low_priority_queue  = memory.low_priority_queue
@@ -549,7 +618,7 @@ when !true {
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, megabytes(4))
+    render_group := make_render_group(&tran_state.arena, &tran_state.assets, megabytes(4))
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
@@ -751,13 +820,13 @@ when !true {
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
-                push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, state.player[entity.facing_index], 1.2)
+                push_bitmap(render_group, AssetId.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1.2)
                 push_hitpoints(render_group, &entity, 1)
 
             case .Sword:
-                push_bitmap(render_group, state.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, state.sword, 0.1)
+                push_bitmap(render_group, AssetId.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, AssetId.sword, 0.1)
 
             case .Familiar: 
                 entity.t_bob += dt
@@ -768,16 +837,16 @@ when !true {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, state.shadow, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
-                push_bitmap(render_group, state.player[entity.facing_index], 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
+                push_bitmap(render_group, AssetId.shadow, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                push_bitmap(render_group, state.shadow, 0.75, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, state.monster[1], 1.5)
+                push_bitmap(render_group, AssetId.shadow, 0.75, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, tran_state.assets.monster[1], 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Wall:
-                push_bitmap(render_group, state.wall, 1.5)
+                push_bitmap(render_group, AssetId.wall, 1.5)
     
             case .Stairwell: 
                 push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
@@ -997,7 +1066,7 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     end_task_with_memory(data.task)
 }
 
-fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
+fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buffer: ^GroundBuffer, p: WorldPosition){
     if task := begin_task_with_memory(tran_state); task != nil {
         work := push(&task.arena, FillGroundChunkWork)
         
@@ -1010,7 +1079,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
         assert(buffer_size.x == buffer_size.y)
         half_dim := buffer_size * 0.5
 
-        render_group := make_render_group(&task.arena, 0)
+        render_group := make_render_group(&task.arena, &tran_state.assets, 0)
         orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
 
         clear(render_group, Red)
@@ -1027,7 +1096,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
                 
                 // TODO(viktor): since the switch to y-is-up rendering this has seams near the edges
                 for _ in 0..<30 {
-                    stamp  := random_choice(&series, state.grass[:])^
+                    stamp  := random_choice(&series, tran_state.assets.grass[:])^
                     p := center + random_bilateral_2(&series, f32) * half_dim 
                     push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
                 }
@@ -1038,11 +1107,11 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground
         work.group  = render_group
         work.task   = task
         
-        PLATFORM_add_entry(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
+        PLATFORM_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
     }
 }
 
-make_null_collision :: proc(state: ^GameState) -> (result: ^EntityCollisionVolumeGroup) {
+make_null_collision :: proc(state: ^State) -> (result: ^EntityCollisionVolumeGroup) {
     result = push(&state.world_arena, EntityCollisionVolumeGroup)
 
     result^ = {}
@@ -1050,7 +1119,7 @@ make_null_collision :: proc(state: ^GameState) -> (result: ^EntityCollisionVolum
     return result
 }
 
-make_simple_grounded_collision :: proc(state: ^GameState, dim: v3) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_grounded_collision :: proc(state: ^State, dim: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&state.world_arena, EntityCollisionVolumeGroup)
     result.volumes = push(&state.world_arena, EntityCollisionVolume, 1)
@@ -1064,7 +1133,7 @@ make_simple_grounded_collision :: proc(state: ^GameState, dim: v3) -> (result: ^
     return result
 }
 
-get_low_entity :: #force_inline proc(state: ^GameState, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
+get_low_entity :: #force_inline proc(state: ^State, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
     if storage_index > 0 && storage_index <= state.stored_entity_count {
         entity = &state.stored_entities[storage_index]
     }
@@ -1072,7 +1141,7 @@ get_low_entity :: #force_inline proc(state: ^GameState, storage_index: StorageIn
     return entity
 }
 
-add_stored_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+add_stored_entity :: proc(state: ^State, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
     index = state.stored_entity_count
     state.stored_entity_count += 1
     assert(state.stored_entity_count < len(state.stored_entities))
@@ -1087,14 +1156,14 @@ add_stored_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition)
     return index, stored
 }
 
-add_grounded_entity :: proc(state: ^GameState, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+add_grounded_entity :: proc(state: ^State, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
     index, stored = add_stored_entity(state, type, p)
     stored.sim.collision = collision
 
     return index, stored
 }
 
-add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_sword :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_stored_entity(state, .Sword, null_position())
     
     entity.sim.collision = state.sword_collision
@@ -1103,7 +1172,7 @@ add_sword :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEnt
     return index, entity
 }
 
-add_wall :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_wall :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Wall, p, state.wall_collision)
 
     entity.sim.flags += {.Collides}
@@ -1111,7 +1180,7 @@ add_wall :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, e
     return index, entity
 }
 
-add_stairs :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_stairs :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Stairwell, p, state.stairs_collision)
 
     entity.sim.flags += {.Collides}
@@ -1121,7 +1190,7 @@ add_stairs :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex,
     return index, entity
 }
 
-add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_player :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Hero, state.camera_p, state.player_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
@@ -1138,7 +1207,7 @@ add_player :: proc(state: ^GameState) -> (index: StorageIndex, entity: ^StoredEn
     return index, entity
 }
 
-add_monster :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_monster :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Monster, p, state.monstar_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
@@ -1148,7 +1217,7 @@ add_monster :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex
     return index, entity
 }
 
-add_familiar :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_familiar :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Familiar, p, state.familiar_collision)
 
     entity.sim.flags += {.Moveable}
@@ -1156,7 +1225,7 @@ add_familiar :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageInde
     return index, entity
 }
 
-add_standart_room :: proc(state: ^GameState, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+add_standart_room :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(state, .Space, p, state.standart_room_collision)
 
     entity.sim.flags += { .Traversable }
@@ -1173,7 +1242,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     }
 }
 
-add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide: b32) {
+add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32) {
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do swap(&a, &b)
@@ -1205,7 +1274,7 @@ add_collision_rule :: proc(state:^GameState, a, b: StorageIndex, should_collide:
     }
 }
 
-clear_collision_rules :: proc(state:^GameState, storage_index: StorageIndex) {
+clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
     // TODO(viktor): need to make a better datastructute that allows for
     // the removal of collision rules without searching the entire table
     // NOTE(viktor): One way to make removal easy would be to always
@@ -1240,8 +1309,8 @@ game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBu
     // TODO: Allow sample offsets here for more robust platform options
 }
 
-DEBUG_load_bmp :: proc { DEBUG_load_bmp_centerer_alignment, DEBUG_load_bmp_custom_alignment }
-DEBUG_load_bmp_centerer_alignment :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> (result: LoadedBitmap) {
+DEBUG_load_bmp :: proc { DEBUG_load_bmp_centered_alignment, DEBUG_load_bmp_custom_alignment }
+DEBUG_load_bmp_centered_alignment :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> (result: LoadedBitmap) {
     result = DEBUG_load_bmp_custom_alignment(read_entire_file, file_name, 0)
     result.align_percentage = 0.5
     return result

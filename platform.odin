@@ -65,7 +65,7 @@ OffscreenBuffer :: struct {
     width, height, pitch: i32,
 }
 
-State :: struct {
+PlatformState :: struct {
     exe_path: string,
 
     game_memory_block: []u8,
@@ -84,10 +84,6 @@ ReplayBuffer :: struct {
     memory_block: []u8,
 }
 
-ThreadContext :: struct {
-    placeholder: i32,
-}
-
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
@@ -101,7 +97,7 @@ main :: proc() {
     //   
     //   Platform Setup
     //   
-    state: State
+    state: PlatformState
     {
         exe_path_buffer: [win.MAX_PATH_WIDE]u16
         size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
@@ -119,15 +115,7 @@ main :: proc() {
     desired_scheduler_ms :: 1
     sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
     
-    // NOTE: We store a thread context in the context to know which thread is calling into the platform layer
-    // TODO(viktor): Once there are multiple threads each call into the threads game code needs its own thread context
-    main_thread_context: ThreadContext
-    main_thread_context.placeholder = 123
-    context.user_ptr = &main_thread_context
-    
     GLOBAL_Running = true
-
-
 
     //   
     //  Windows Setup
@@ -300,7 +288,7 @@ main :: proc() {
         
         game_memory.high_priority_queue        = &high_queue
         game_memory.low_priority_queue         = &low_queue
-        game_memory.PLATFORM_add_entry         = add_entry
+        game_memory.PLATFORM_enqueue_work      = enqueue_work
         game_memory.PLATFORM_complete_all_work = complete_all_work
     }
 
@@ -664,14 +652,6 @@ main :: proc() {
     }
 }
 
-
-
-get_thread_context :: proc() -> ThreadContext {
-    return (cast(^ThreadContext)context.user_ptr)^
-}
-
-
-
 get_wall_clock :: #force_inline proc() -> i64 {
     result : win.LARGE_INTEGER
     win.QueryPerformanceCounter(&result)
@@ -699,7 +679,7 @@ get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
     return last_write_time
 }
 
-build_exe_path :: proc(state: State, filename: string) -> win.wstring {
+build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
     return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
 }
 
@@ -709,11 +689,11 @@ build_exe_path :: proc(state: State, filename: string) -> win.wstring {
 //  Record and Replay
 //   
 
-get_record_replay_filepath :: proc(state: State, index:i32) -> win.wstring {
+get_record_replay_filepath :: proc(state: PlatformState, index:i32) -> win.wstring {
     return build_exe_path(state, fmt.tprintf("editloop_%d.input", index))
 }
 
-begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
+begin_recording_input :: proc(state: ^PlatformState, input_recording_index: i32) {
     replay_buffer := state.replay_buffers[input_recording_index]
 
     if replay_buffer.memory_block != nil {
@@ -727,16 +707,16 @@ begin_recording_input :: proc(state: ^State, input_recording_index: i32) {
     }
 }
 
-record_input :: proc(state: ^State, input: ^GameInput) {
+record_input :: proc(state: ^PlatformState, input: ^GameInput) {
     bytes_written: u32
     win.WriteFile(state.input_record_handle, input, cast(u32) size_of(GameInput), &bytes_written, nil)
 }
 
-end_recording_input :: proc(state: ^State) {
+end_recording_input :: proc(state: ^PlatformState) {
     state.input_record_index = 0
 }
 
-begin_replaying_input :: proc(state: ^State, input_replaying_index: i32) {
+begin_replaying_input :: proc(state: ^PlatformState, input_replaying_index: i32) {
     replay_buffer := state.replay_buffers[input_replaying_index]
 
     if replay_buffer.memory_block != nil {
@@ -750,7 +730,7 @@ begin_replaying_input :: proc(state: ^State, input_replaying_index: i32) {
     }
 }
 
-replay_input :: proc(state: ^State, input: ^GameInput) {
+replay_input :: proc(state: ^PlatformState, input: ^GameInput) {
     bytes_read: u32
     win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(GameInput), &bytes_read, nil)
     if bytes_read != 0 {
@@ -764,7 +744,7 @@ replay_input :: proc(state: ^State, input: ^GameInput) {
     }
 }
 
-end_replaying_input :: proc(state: ^State) {
+end_replaying_input :: proc(state: ^PlatformState) {
     state.input_replay_index = 0
 }
 
@@ -1019,7 +999,7 @@ process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) 
     }
 }
 
-process_pending_messages :: proc(state: ^State, keyboard_controller: ^GameInputController) {
+process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^GameInputController) {
     message : win.MSG
     for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
         switch message.message {
