@@ -88,8 +88,13 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
-make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u32) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, max_push_buffer_size: u64) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
+    
+    max_push_buffer_size := max_push_buffer_size
+    if max_push_buffer_size == 0 {
+        max_push_buffer_size = arena_remaining_size(arena)
+    }
     result.push_buffer = push(arena, u8, max_push_buffer_size)
 
     result.push_buffer_size = 0
@@ -134,15 +139,10 @@ get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (re
 
     return result
 }
+
 get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
     camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters, distance_from_camera)
     result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
-
-    return result
-}
-
-unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
-    result = projected * (distance_from_camera / transform.focal_length)
 
     return result
 }
@@ -154,11 +154,13 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
     
     if !transform.orthographic {
         base_z : f32//base_p.z
-        when false {
+        
+        //
+        // Debug camera
+        //
+        when !false {
             // TODO(viktor): how do we want to control the debug camera?
-            if true {
-                distance_above_target *= 5
-            }
+            distance_above_target *= 5
         }
         
         distance_to_p_z := distance_above_target - p.z
@@ -179,6 +181,12 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
     }
 
     return position, scale, valid
+}
+
+unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
+    result = projected * (distance_from_camera / transform.focal_length)
+
+    return result
 }
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
@@ -291,15 +299,15 @@ TileRenderWork :: struct {
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    scoped_timed_block(.render_to_output)
-    
     data := cast(^TileRenderWork) data
+
+    scoped_timed_block(.render_to_output)
 
     render_to_output(data.group, data.target, data.clip_rect, true)
     render_to_output(data.group, data.target, data.clip_rect, false)
 }
 
-tiled_render_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
+tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
     
     /* TODO(viktor):
@@ -343,8 +351,23 @@ tiled_render_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, t
             work_index += 1
         }
     }
-    
+
     PLATFORM_complete_all_work(queue)
+}
+
+render_group_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
+    assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
+    
+    work := TileRenderWork{
+        group = group,
+        target = target,
+        clip_rect = {
+            min = 0,
+            max = {target.width, target.height},
+        },
+    }
+    
+    do_tile_render_work(&work)
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {
@@ -553,23 +576,29 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         clip_mask       := maskFFFFFFFF
         start_clip_mask := clip_mask
         end_clip_mask   := clip_mask
+        
+        start_clip_masks := [?]u32x4 {
+            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 0*4),
+            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 1*4),
+            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 2*4),
+            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 3*4),
+        }  
+              
+        end_clip_masks := [?]u32x4 {
+            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 0*4),
+            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 3*4),
+            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 2*4),
+            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 1*4),
+        }
 
         if fill_rect.min.x & 3 != 0 {
-            alignment      := fill_rect.min.x & 3
-            start_clip_mask = simd.shl(clip_mask, cast(u32x4) (alignment * 4))
-            
-            when !false {
-                // TODO(viktor): IMPORTANT(viktor): there are blurry artifacts in the 
-                // rendered image, when the fill rect is aligned to 4 pixels / 16 bytes
-                fill_rect.min.x = fill_rect.min.x & ~i32(3) + 4
-            }
+            start_clip_mask = start_clip_masks[fill_rect.min.x & 3]
+            fill_rect.min.x = fill_rect.min.x & (~i32(3))
         }
-        
+
         if fill_rect.max.x & 3 != 0 {
-            alignment      := (4 - (fill_rect.max.x & 3)) & 3
-            end_clip_mask   = simd.shr(clip_mask, cast(u32x4) (alignment * 4))
-            
-            fill_rect.max.x = (fill_rect.max.x & ~i32(3)) + 4
+            end_clip_mask = end_clip_masks[fill_rect.max.x & 3]
+            fill_rect.max.x = (fill_rect.max.x & (~i32(3))) + 4
         }
         
         normal_x_axis := x_axis * 1 / length_squared(x_axis)
@@ -645,8 +674,8 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
 
                 // TODO(viktor): recheck later if this helps
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
-                {
-                    #no_bounds_check pixel := cast(^[4]ByteColor) &buffer.memory[buffer.start + y * buffer.pitch + x]
+                #no_bounds_check {
+                    pixel := cast(^[4]ByteColor) &buffer.memory[buffer.start + y * buffer.pitch + x]
                     original_pixel := simd.masked_load(pixel, zero_i, write_mask)
                     
                     u = clamp_01(u)

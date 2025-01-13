@@ -4,7 +4,7 @@ import "base:runtime"
 import "base:intrinsics"
 import win "core:sys/windows"
 
-PlatformWorkQueue :: struct { // TODO(viktor): polymorphism?
+PlatformWorkQueue :: struct {
     semaphore_handle: win.HANDLE,
     
     completion_goal, 
@@ -13,12 +13,12 @@ PlatformWorkQueue :: struct { // TODO(viktor): polymorphism?
     next_entry_to_write, 
     next_entry_to_read:  u32,
     
-    entries: [8000]PlatformWorkQueueEntry
+    entries: [4096]PlatformWorkQueueEntry,
 }
 
 PlatformWorkQueueEntry :: struct {
-    callback: WorkQueueCallback,
-    data:     rawpointer, // TODO(viktor): polymorphism?
+    callback: PlatformWorkQueueCallback,
+    data:     rawpointer,
 }
 
 init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: win.LONG) {
@@ -33,7 +33,7 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: win.LONG) {
     
 }
 
-add_entry :: proc(queue: ^PlatformWorkQueue, callback: WorkQueueCallback, data: rawpointer) {
+add_entry :: proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
     assert(new_next_entry != queue.next_entry_to_read) 

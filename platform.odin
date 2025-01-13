@@ -339,6 +339,10 @@ main :: proc() {
             game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name, lock_name)
             
             new_input.reloaded_executable = true
+            
+            // NOTE(viktor): clear out the queue, as they may call into unloaded game code
+            low_queue  = { semaphore_handle = low_queue.semaphore_handle  }
+            high_queue = { semaphore_handle = high_queue.semaphore_handle }
         }
 
         //   

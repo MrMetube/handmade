@@ -104,8 +104,7 @@ GameMemory :: struct {
 }
 
 // TODO(viktor): this should only be in platform.odin
-WorkQueueCallback         :: #type proc(data: rawpointer)
-PlatformWorkQueueCallback :: WorkQueueCallback
+PlatformWorkQueueCallback :: #type proc(data: rawpointer)
 
 PlatformAddEntry        :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
 PlatformCompleteAllWork :: #type proc(queue: ^PlatformWorkQueue)

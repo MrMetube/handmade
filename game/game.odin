@@ -131,9 +131,18 @@ GameState :: struct {
     time: f32,
 }
 
+TaskWithMemory :: struct {
+    in_use: b32,
+    arena: Arena,
+    
+    memory_flush: TemporaryMemory,
+}
+
 TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
+    
+    tasks: [4]TaskWithMemory,
 
     test_diffuse: LoadedBitmap,
     test_normal:  LoadedBitmap,
@@ -142,7 +151,7 @@ TransientState :: struct {
     
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
-        
+    
     env_size: [2]i32,
     using _ : struct #raw_union {
         using _ : struct {
@@ -155,9 +164,9 @@ TransientState :: struct {
 
 
 GroundBuffer :: struct {
+    bitmap: LoadedBitmap,
     // NOTE(viktor): An invalid position tells us that this ground buffer has not been filled
     p: WorldPosition, // NOTE(viktor): this is the center of the bitmap
-    bitmap: LoadedBitmap,
 }
 
 EntityType :: enum u32 {
@@ -415,6 +424,12 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
 
+        for &task in tran_state.tasks {
+            task.in_use = false
+            
+            sub_arena(&task.arena, &tran_state.arena, megabytes(2))
+        }
+        
         tran_state.high_priority_queue = memory.high_priority_queue
         tran_state.low_priority_queue  = memory.low_priority_queue
         
@@ -534,9 +549,9 @@ when !true {
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4))
+    render_group := make_render_group(&tran_state.arena, megabytes(4))
     
-    focal_length, distance_above_ground : f32 = 0.6, 3
+    focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     clear(render_group, DarkGreen)
@@ -585,11 +600,13 @@ when !true {
                         if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
                             furthest = nil
                             break
-                        } else if abs(buffer_delta.z) == 0 && is_valid(ground_buffer.p) {
-                            distance_from_camera := length_squared(buffer_delta.xy)
-                            if distance_from_camera > furthest_distance {
-                                furthest_distance = distance_from_camera
-                                furthest = &ground_buffer
+                        } else if is_valid(ground_buffer.p) {
+                            if abs(buffer_delta.z) <= 4 {
+                                distance_from_camera := length_squared(buffer_delta.xy)
+                                if distance_from_camera > furthest_distance {
+                                    furthest_distance = distance_from_camera
+                                    furthest = &ground_buffer
+                                }
                             }
                         } else {
                             furthest_distance = max(f32)
@@ -842,7 +859,7 @@ when !true {
 
     }
     
-    tiled_render_to_output(tran_state.high_priority_queue, render_group, buffer)
+    tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer)
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
@@ -854,6 +871,28 @@ when !true {
     
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
+}
+
+begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
+    for &task in tran_state.tasks {
+        if !task.in_use {
+            result = &task
+            
+            task.memory_flush = begin_temporary_memory(&task.arena)
+            result.in_use = true
+            
+            break
+        }
+    }
+    
+    return result
+}
+end_task_with_memory :: #force_inline proc (task: ^TaskWithMemory) {
+    end_temporary_memory(task.memory_flush)
+    
+    // TODO(viktor): maybe place a read/write barrier here
+    
+    task.in_use = false
 }
 
 make_pyramid_normal_map :: proc(bitmap: LoadedBitmap, roughness: f32) {
@@ -935,7 +974,7 @@ make_sphere_diffuse_map :: proc(buffer: LoadedBitmap, c := v2{1,1}) {
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
     result = {
-        memory = push(arena, ByteColor, cast(u64) (dim.x * dim.y), clear_to_zero),
+        memory = push(arena, ByteColor, cast(u64) (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
         height = dim.y,
         pitch  = dim.x,
@@ -944,43 +983,62 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true)
     return result
 }
 
+FillGroundChunkWork :: struct {
+    task: ^TaskWithMemory,
+    group: ^RenderGroup,
+    buffer: LoadedBitmap,
+}
+
+do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    data := cast(^FillGroundChunkWork) data
+
+    render_group_to_output(data.group, data.buffer)
+    
+    end_task_with_memory(data.task)
+}
+
 fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^GameState, ground_buffer: ^GroundBuffer, p: WorldPosition){
-    ground_memory := begin_temporary_memory(&tran_state.arena)
-    defer end_temporary_memory(ground_memory)
-    
-    bitmap := &ground_buffer.bitmap
-    bitmap.align_percentage = 0.5
-    bitmap.width_over_height = 1
-    ground_buffer.p = p
-    
-    buffer_size := state.world.chunk_dim_meters.xy
-    assert(buffer_size.x == buffer_size.y)
-    half_dim := buffer_size * 0.5
-
-    render_group := make_render_group(&tran_state.arena, cast(u32) megabytes(4))
-    orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
-
-    defer tiled_render_to_output(tran_state.low_priority_queue, render_group, ground_buffer.bitmap)
-    
-    clear(render_group, Red)
+    if task := begin_task_with_memory(tran_state); task != nil {
+        work := push(&task.arena, FillGroundChunkWork)
         
-    chunk_z := p.chunk.z
-    for offset_y in i32(-1) ..= 1 {
-        for offset_x in i32(-1) ..= 1 {
-            chunk_x := p.chunk.x + offset_x
-            chunk_y := p.chunk.y + offset_y
+        bitmap := &ground_buffer.bitmap
+        bitmap.align_percentage = 0.5
+        bitmap.width_over_height = 1
+        ground_buffer.p = p
+        
+        buffer_size := state.world.chunk_dim_meters.xy
+        assert(buffer_size.x == buffer_size.y)
+        half_dim := buffer_size * 0.5
+
+        render_group := make_render_group(&task.arena, 0)
+        orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
+
+        clear(render_group, Red)
             
-            center := vec_cast(f32, offset_x, offset_y) * buffer_size
-            // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
-            series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
-            
-            // TODO(viktor): since the switch to y-is-up rendering this has seams near the edges
-            for _ in 0..<20 {
-                stamp  := random_choice(&series, state.grass[:])^
-                p := center + random_bilateral_2(&series, f32) * half_dim 
-                push_bitmap(render_group, stamp, 3, offset = V3(p, 0))
+        chunk_z := p.chunk.z
+        for offset_y in i32(-1) ..= 1 {
+            for offset_x in i32(-1) ..= 1 {
+                chunk_x := p.chunk.x + offset_x
+                chunk_y := p.chunk.y + offset_y
+                
+                center := vec_cast(f32, offset_x, offset_y) * buffer_size
+                // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
+                series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
+                
+                // TODO(viktor): since the switch to y-is-up rendering this has seams near the edges
+                for _ in 0..<30 {
+                    stamp  := random_choice(&series, state.grass[:])^
+                    p := center + random_bilateral_2(&series, f32) * half_dim 
+                    push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
+                }
             }
         }
+        
+        work.buffer = bitmap^
+        work.group  = render_group
+        work.task   = task
+        
+        PLATFORM_add_entry(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
     }
 }
 
