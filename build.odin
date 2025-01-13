@@ -10,9 +10,11 @@ import "base:runtime"
 
 when #config(BUILD, false) {
 
-pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style"
-flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows"
-debug    :: " -debug -define:INTERNAL=true -o:none"
+pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
+flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows "
+debug    :: " -debug -define:INTERNAL=true "
+
+optimizations :: " -o:none " when true else " -o:speed "
 
 src_path :: `.\build.odin`
 
@@ -48,6 +50,7 @@ main :: proc() {
             fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number()), 
             flags, 
             debug, 
+            optimizations,
             // pedantic
         ) {
             os.exit(1)
@@ -64,6 +67,7 @@ main :: proc() {
             debug_build, 
             flags, 
             debug, 
+            optimizations,
             // pedantic,
         ) {
             os.exit(1)

@@ -46,7 +46,7 @@ Transform :: struct {
     focal_length:          f32, // meters the player is sitting from their monitor
     distance_above_target: f32,
     
-    scale:  f32,
+    Sword:  f32,
     offset: v3,
     
     orthographic: b32,
@@ -105,7 +105,7 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets,  max_push_buffer_size:
     result.global_alpha = 1
     result.assets = assets
 
-    result.transform.scale  = 1
+    result.transform.Sword  = 1
     result.transform.offset = 0
 
     return result
@@ -170,12 +170,11 @@ push_bitmap_by_asset_id :: #force_inline proc(group: ^RenderGroup, id: BitmapId,
         group.missing_asset_count += 1
     }
 }
-// TODO(viktor): better zero value for BitmapId
 push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
-    p     := offset + v3{align.x, -align.y, 0}
+    p     := offset - v3{align.x, -align.y, 0}
 
     basis_p, scale, valid := project_with_transform(group.transform, p)
 
@@ -322,6 +321,9 @@ TileRenderWork :: struct {
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     data := cast(^TileRenderWork) data
 
+    assert(data.group != nil)
+    assert(data.target.memory != nil)
+    
     scoped_timed_block(.render_to_output)
 
     render_to_output(data.group, data.target, data.clip_rect, true)

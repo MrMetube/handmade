@@ -495,20 +495,18 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 }
             }
             
-            when !true {
-                con_hero.dsword = {}
-                if controller.button_up.ended_down {
-                    con_hero.dsword =  {0, 1}
-                }
-                if controller.button_down.ended_down {
-                    con_hero.dsword = -{0, 1}
-                }
-                if controller.button_left.ended_down {
-                    con_hero.dsword = -{1, 0}
-                }
-                if controller.button_right.ended_down {
-                    con_hero.dsword =  {1, 0}
-                }
+            con_hero.dsword = {}
+            if controller.button_up.ended_down {
+                con_hero.dsword =  {0, 1}
+            }
+            if controller.button_down.ended_down {
+                con_hero.dsword = -{0, 1}
+            }
+            if controller.button_left.ended_down {
+                con_hero.dsword = -{1, 0}
+            }
+            if controller.button_right.ended_down {
+                con_hero.dsword =  {1, 0}
             }
         }
     }
@@ -731,13 +729,13 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1.2)
                 push_hitpoints(render_group, &entity, 1)
 
             case .Sword:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.sword), 0.1)
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Sword), 0.1)
 
             case .Familiar: 
                 entity.t_bob += dt
@@ -748,16 +746,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
                 push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.75, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, tran_state.assets.monster[1], 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Wall:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.wall), 1.5)
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Rock), 1.5)
     
             case .Stairwell: 
                 push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
@@ -871,7 +869,7 @@ begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWit
 end_task_with_memory :: #force_inline proc (task: ^TaskWithMemory) {
     end_temporary_memory(task.memory_flush)
     
-    // TODO(viktor): maybe place a read/write barrier here
+    complete_previous_writes_before_future_writes()
     
     task.in_use = false
 }
@@ -1005,11 +1003,10 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
                 // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
                 series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
                 
-                // TODO(viktor): since the switch to y-is-up rendering this has seams near the edges
-                for _ in 0..<30 {
-                    stamp  := random_choice(&series, tran_state.assets.grass[:])^
+                for _ in 0..<4 {
+                    stamp := random_asset_from(tran_state.assets, &series, .Grass)
                     p := center + random_bilateral_2(&series, f32) * half_dim 
-                    push_bitmap_raw(render_group, stamp, 5, offset = V3(p, 0))
+                    push_bitmap_by_asset_id(render_group, stamp, 5, offset = V3(p, 0))
                 }
             }
         }
@@ -1019,9 +1016,11 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
             work.group  = render_group
             work.task   = task
             ground_buffer.p = p
+            
+            PLATFORM_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
+        } else {
+            end_task_with_memory(task)
         }
-                
-        PLATFORM_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
     }
 }
 

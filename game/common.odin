@@ -18,6 +18,7 @@ LoadedBitmap :: struct {
     memory :       []ByteColor,
     width, height: i32, 
     
+    // TODO(viktor): start may always be 0, can it be removed?
     start, pitch: i32,
     
     align_percentage:  [2]f32,
