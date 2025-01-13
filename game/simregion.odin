@@ -1,7 +1,5 @@
 package game
 
-import "core:fmt"
-
 Entity :: struct {
     // NOTE(viktor): these are only for the sim region
     storage_index: StorageIndex,

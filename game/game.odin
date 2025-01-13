@@ -1,6 +1,5 @@
 package game
 
-import "core:fmt"
 import "base:intrinsics"
 
 INTERNAL :: #config(INTERNAL, false)
@@ -8,6 +7,8 @@ INTERNAL :: #config(INTERNAL, false)
 /*
     TODO(viktor):
     ARCHITECTURE EXPLORATION
+    
+    - Asset streaming
     
     - Rendering
         - Straighten out all coordinate systems!
@@ -18,8 +19,6 @@ INTERNAL :: #config(INTERNAL, false)
         - Lighting
         - Final Optimization    
 
-    - Asset streaming
-            
     - Audio
         - Sound effects triggers
         - Ambient sounds
@@ -96,6 +95,8 @@ Red      :: v4{1, 0.09, 0.24, 1}
 DarkGreen:: v4{0, 0.07, 0.0353, 1}
 
 State :: struct {
+    is_initialized: b32,
+
     world_arena: Arena,
 
     typical_floor_height: f32,
@@ -128,7 +129,7 @@ TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
     
-    assets: Assets,
+    assets: ^Assets,
     
     tasks: [4]TaskWithMemory,
 
@@ -147,152 +148,6 @@ TransientState :: struct {
         },
         envs: [3]EnvironmentMap,
     },
-}
-
-Assets :: struct {
-    tran_state: ^TransientState,
-    arena: Arena,
-    read_entire_file: proc_DEBUG_read_entire_file,
-    
-    slots: [AssetId]AssetSlot,
-    // NOTE(viktor): Array'd assets
-    grass:           [8]LoadedBitmap,
-    player, monster: [2]LoadedBitmap,
-    // NOTE(viktor): structured assets
-}
-
-AssetBitmapInfo :: struct {
-    width, height: i32, 
-    
-    align_percentage:  [2]f32,
-    width_over_height: f32,
-    
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
-}
-
-AssetGroup :: struct {
-    id: u32,
- 
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
-}
-
-AssetTag :: struct {
-    id:    u32,
-    value: f32,
-}
-
-pick_best :: proc(infos: []AssetBitmapInfo, tags:[]AssetTag, match_vector, weight_vector: []f32) -> (result: i32) {
-    best_diff := max(f32)
-    
-    for info, index in infos {
-        total_weight_diff: f32
-        
-        for tag_index := info.first_tag_index; tag_index < info.one_past_last_tag_index; tag_index += 1 {
-            tag := &tags[tag_index]
-            difference :f32= match_vector[tag.id] - tag.value
-            weighted   := weight_vector[tag.id] * abs(difference)
-            total_weight_diff += weighted
-        }
-        
-        if total_weight_diff < best_diff {
-            best_diff = total_weight_diff
-            result = auto_cast index
-        }
-    }
-    
-    return result
-}
-
-AssetId :: enum {
-    null,
-    shadow, wall, sword, stair
-}
-
-AssetState :: enum {
-    Unloaded, 
-    Queued, 
-    Loaded, 
-    Locked,
-}
-
-AssetSlot :: struct {
-    state:      AssetState,
-    bitmap:     ^LoadedBitmap,
-}
-
-get_bitmap :: #force_inline proc(assets: ^Assets, id: AssetId) -> (result: ^LoadedBitmap) {
-    result = assets.slots[id].bitmap
-    
-    return result
-}
-
-load_asset :: proc(assets: ^Assets, id: AssetId) {
-    assert(id != .null)
-    
-    if _, ok := atomic_compare_exchange(&assets.slots[id].state, AssetState.Unloaded, AssetState.Queued); ok {
-        if task := begin_task_with_memory(assets.tran_state); task != nil {
-            LoadAssetWork :: struct {
-                task:   ^TaskWithMemory,
-                assets: ^Assets,
-                
-                bitmap:      ^LoadedBitmap,
-                final_state: AssetState, 
-                
-                id:        AssetId,
-                file_name: string,
-                
-                custom_alignment:   b32,
-                top_down_alignment: v2,
-            }
-                    
-            do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-                data := cast(^LoadAssetWork) data
-                
-                if data.custom_alignment {
-                    data.bitmap^ = DEBUG_load_bmp_custom_alignment(data.assets.read_entire_file, data.file_name, data.top_down_alignment)
-                } else {
-                    data.bitmap^ = DEBUG_load_bmp(data.assets.read_entire_file, data.file_name)
-                }
-                
-                complete_previous_writes_before_future_writes()
-                
-                slot := &data.assets.slots[data.id]
-                slot.bitmap = data.bitmap
-                slot.state  = data.final_state
-                
-                end_task_with_memory(data.task)
-            }
-
-            work := push(&assets.arena, LoadAssetWork)
-            
-            work.assets      = assets
-            work.id          = id
-            work.task        = task
-            work.bitmap      = push(&assets.arena, LoadedBitmap, alignment = 16)
-            work.final_state = .Loaded
-            
-            switch id {
-            case .null: unreachable()
-            case .shadow:
-                work.file_name = "../assets/shadow.bmp"
-                work.custom_alignment = true
-                work.top_down_alignment = {  22, 14}
-            case .sword:
-                work.file_name = "../assets/arrow.bmp"
-            case .wall:
-                work.file_name = "../assets/wall.bmp"
-            case .stair:
-                work.file_name = "../assets/stair.bmp"
-            }
-            
-            PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
-        } else {
-            _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
-            assert(auto_cast ok)
-        }
-    }
 }
 
 TaskWithMemory :: struct {
@@ -360,6 +215,8 @@ PairwiseCollsionRule :: struct {
 // NOTE(viktor): Globals
 PLATFORM_enqueue_work:      PlatformEnqueueWork
 PLATFORM_complete_all_work: PlatformCompleteAllWork
+DEBUG_read_entire_file:     DebugReadEntireFile
+
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
 PlatformWorkQueue :: struct {}
 
@@ -367,10 +224,13 @@ PlatformWorkQueue :: struct {}
 game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
     scoped_timed_block(.game_update_and_render)
     
-    PLATFORM_enqueue_work         = memory.PLATFORM_enqueue_work
+    PLATFORM_enqueue_work      = memory.PLATFORM_enqueue_work
     PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
+    
     when INTERNAL {
+        // NOTE(viktor): used by performance counters
         DEBUG_GLOBAL_memory = memory
+        DEBUG_read_entire_file = memory.debug.read_entire_file
     }
         
     ground_buffer_size :: 256
@@ -380,7 +240,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     // ---------------------- ---------------------- ----------------------
     assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
     state := cast(^State) raw_data(memory.permanent_storage)
-    if !memory.is_initialized {
+    if !state.is_initialized {
         // TODO(viktor): lets start partitioning our memory space
         // TODO(viktor): formalize the world arena and others being after the State in permanent storage
         // initialize the permanent arena first and allocate the state out of it
@@ -534,7 +394,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             add_familiar(state, chunk_position_from_tile_positon(world, familiar_p.x, familiar_p.y, familiar_p.z))
         }
         
-        memory.is_initialized = true
+        state.is_initialized = true
     }
 
     // ---------------------- ---------------------- ----------------------
@@ -544,33 +404,16 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
+
+        tran_state.high_priority_queue = memory.high_priority_queue
+        tran_state.low_priority_queue  = memory.low_priority_queue
         
         for &task in tran_state.tasks {
             task.in_use = false
-            
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
-        sub_arena(&tran_state.assets.arena, &tran_state.arena, megabytes(64))
-        tran_state.assets.read_entire_file = memory.debug.read_entire_file
-        tran_state.assets.tran_state = tran_state
-        
-        // DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/structuredArt.bmp")
-        tran_state.assets.player[0]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_left.bmp" , v2{  16, 60})
-        tran_state.assets.player[1]  = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/soldier_right.bmp", v2{  28, 60})
-        tran_state.assets.monster[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_left.bmp"     , v2{  46, 44})
-        tran_state.assets.monster[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/orc_right.bmp"    , v2{  18, 44})
-        
-        tran_state.assets.grass[0] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass11.bmp")
-        tran_state.assets.grass[1] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass12.bmp")
-        tran_state.assets.grass[2] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass21.bmp")
-        tran_state.assets.grass[3] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass22.bmp")
-        tran_state.assets.grass[4] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass31.bmp")
-        tran_state.assets.grass[5] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/grass32.bmp")
-        tran_state.assets.grass[6] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower1.bmp")   
-        tran_state.assets.grass[7] = DEBUG_load_bmp(memory.debug.read_entire_file, "../assets/flower2.bmp")
-        
-        tran_state.high_priority_queue = memory.high_priority_queue
-        tran_state.low_priority_queue  = memory.low_priority_queue
+
+        tran_state.assets = make_game_assets(&tran_state.arena, megabytes(64), tran_state)
         
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
@@ -616,6 +459,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
 
     for controller, controller_index in input.controllers {
         con_hero := &state.controlled_heroes[controller_index]
+
         if con_hero.storage_index == 0 {
             if controller.start.ended_down {
                 player_index, _ := add_player(state)
@@ -644,26 +488,28 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     con_hero.ddp.y -= 1
                 }
             }
-when false {
-            if controller.start.ended_down {
-                con_hero.dz = 2
+            
+            when false {
+                if controller.start.ended_down {
+                    con_hero.dz = 2
+                }
             }
-}
-when !true {
-            con_hero.dsword = {}
-            if controller.button_up.ended_down {
-                con_hero.dsword =  {0, 1}
+            
+            when !true {
+                con_hero.dsword = {}
+                if controller.button_up.ended_down {
+                    con_hero.dsword =  {0, 1}
+                }
+                if controller.button_down.ended_down {
+                    con_hero.dsword = -{0, 1}
+                }
+                if controller.button_left.ended_down {
+                    con_hero.dsword = -{1, 0}
+                }
+                if controller.button_right.ended_down {
+                    con_hero.dsword =  {1, 0}
+                }
             }
-            if controller.button_down.ended_down {
-                con_hero.dsword = -{0, 1}
-            }
-            if controller.button_left.ended_down {
-                con_hero.dsword = -{1, 0}
-            }
-            if controller.button_right.ended_down {
-                con_hero.dsword =  {1, 0}
-            }
-}
         }
     }
 
@@ -678,9 +524,6 @@ when !true {
         buffer.height = 719
     }
     
-    screen_size   := vec_cast(f32, buffer.width, buffer.height)
-    screen_center := screen_size * 0.5
-    
     // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
     
@@ -688,7 +531,7 @@ when !true {
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, &tran_state.assets, megabytes(4))
+    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4))
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
@@ -733,8 +576,6 @@ when !true {
                     furthest: ^GroundBuffer
                     // TODO(viktor): @Speed this is super inefficient. Fix it!
                     for &ground_buffer in tran_state.ground_buffers {
-                        offset := world_difference(world, ground_buffer.p, state.camera_p)
-            
                         buffer_delta := world_difference(world, ground_buffer.p, state.camera_p)
                         if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
                             furthest = nil
@@ -890,13 +731,13 @@ when !true {
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
-                push_bitmap(render_group, AssetId.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.5, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1.2)
                 push_hitpoints(render_group, &entity, 1)
 
             case .Sword:
-                push_bitmap(render_group, AssetId.shadow, 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, AssetId.sword, 0.1)
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.sword), 0.1)
 
             case .Familiar: 
                 entity.t_bob += dt
@@ -907,16 +748,16 @@ when !true {
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, AssetId.shadow, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
                 push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                push_bitmap(render_group, AssetId.shadow, 0.75, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.shadow), 0.75, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, tran_state.assets.monster[1], 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Wall:
-                push_bitmap(render_group, AssetId.wall, 1.5)
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.wall), 1.5)
     
             case .Stairwell: 
                 push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
@@ -1026,6 +867,7 @@ begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWit
     
     return result
 }
+
 end_task_with_memory :: #force_inline proc (task: ^TaskWithMemory) {
     end_temporary_memory(task.memory_flush)
     
@@ -1148,7 +990,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
         assert(buffer_size.x == buffer_size.y)
         half_dim := buffer_size * 0.5
 
-        render_group := make_render_group(&task.arena, &tran_state.assets, 0)
+        render_group := make_render_group(&task.arena, tran_state.assets, 0)
         orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
 
         clear(render_group, Red)
@@ -1167,7 +1009,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
                 for _ in 0..<30 {
                     stamp  := random_choice(&series, tran_state.assets.grass[:])^
                     p := center + random_bilateral_2(&series, f32) * half_dim 
-                    push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
+                    push_bitmap_raw(render_group, stamp, 5, offset = V3(p, 0))
                 }
             }
         }
@@ -1379,115 +1221,4 @@ clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
 @(export)
 game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
     // TODO: Allow sample offsets here for more robust platform options
-}
-
-DEBUG_load_bmp :: proc { DEBUG_load_bmp_centered_alignment, DEBUG_load_bmp_custom_alignment }
-DEBUG_load_bmp_centered_alignment :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string) -> (result: LoadedBitmap) {
-    result = DEBUG_load_bmp_custom_alignment(read_entire_file, file_name, 0)
-    result.align_percentage = 0.5
-    return result
-}
-DEBUG_load_bmp_custom_alignment :: proc (read_entire_file: proc_DEBUG_read_entire_file, file_name: string, topdown_alignment_value: v2) -> (result: LoadedBitmap) {
-    contents := read_entire_file(file_name)
-    
-    BMPHeader :: struct #packed {
-        file_type      : [2]u8,
-        file_size      : u32,
-        reserved_1     : u16,
-        reserved_2     : u16,
-        bitmap_offset  : u32,
-        size           : u32,
-        width          : i32,
-        height         : i32,
-        planes         : u16,
-        bits_per_pixel : u16,
-
-        compression           : u32,
-        size_of_bitmap        : u32,
-        horizontal_resolution : i32,
-        vertical_resolution   : i32,
-        colors_used           : u32,
-        colors_important      : u32,
-
-        red_mask   : u32,
-        green_mask : u32,
-        blue_mask  : u32,
-    }
-
-    // NOTE: If you are using this generically for some reason,
-    // please remember that BMP files CAN GO IN EITHER DIRECTION and
-    // the height will be negative for top-down.
-    // (Also, there can be compression, etc., etc ... DON'T think this
-    // a complete implementation)
-    // NOTE: pixels listed bottom up
-    if len(contents) > 0 {
-        header := cast(^BMPHeader) &contents[0]
-
-        assert(header.bits_per_pixel == 32)
-        assert(header.height >= 0)
-        assert(header.compression == 3)
-
-        red_mask   := header.red_mask
-        green_mask := header.green_mask
-        blue_mask  := header.blue_mask
-        alpha_mask := ~(red_mask | green_mask | blue_mask)
-
-        red_shift   := intrinsics.count_trailing_zeros(red_mask)
-        green_shift := intrinsics.count_trailing_zeros(green_mask)
-        blue_shift  := intrinsics.count_trailing_zeros(blue_mask)
-        alpha_shift := intrinsics.count_trailing_zeros(alpha_mask)
-        assert(red_shift   != 32)
-        assert(green_shift != 32)
-        assert(blue_shift  != 32)
-        assert(alpha_shift != 32)
-        
-        raw_pixels := (cast([^]u32) &contents[header.bitmap_offset])[:header.width * header.height]
-        pixels     := transmute([]ByteColor) raw_pixels
-        for y in 0..<header.height {
-            for x in 0..<header.width {
-                c := raw_pixels[y * header.width + x]
-                p := &pixels[y * header.width + x]
-                
-                texel := vec_cast(f32, 
-                    vec_cast(u8, 
-                        ((c & red_mask)   >> red_shift),
-                        ((c & green_mask) >> green_shift),
-                        ((c & blue_mask)  >> blue_shift),
-                        ((c & alpha_mask) >> alpha_shift),
-                    ),
-                )
-                
-                texel = srgb_255_to_linear_1(texel)
-                
-                texel.rgb = texel.rgb * texel.a
-                
-                texel = linear_1_to_srgb_255(texel)
-                
-                p^ = vec_cast(u8, texel + 0.5)
-            }
-        }
-        
-        meters_to_pixels :: 42.0
-        pixels_to_meters :: 1.0 / meters_to_pixels
-
-        result = {
-            memory = pixels, 
-            width  = header.width, 
-            height = header.height, 
-            start  = 0,
-            pitch  = header.width,
-            width_over_height = safe_ratio_0(cast(f32) header.width, cast(f32) header.height),
-        }
-        
-        align := topdown_alignment_value - vec_cast(f32, i32(0), result.height-1)
-        result.align_percentage = safe_ratio_0(align, vec_cast(f32, result.width, result.height))
-
-        when false {
-            result.start = header.width * (header.height-1)
-            result.pitch = -result.pitch
-        }
-        return result
-    }
-    
-    return {}
 }

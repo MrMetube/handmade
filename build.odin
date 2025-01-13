@@ -1,5 +1,6 @@
 package main
 
+
 import "core:os"
 import win "core:sys/windows"
 import "core:fmt"
@@ -9,16 +10,16 @@ import "base:runtime"
 
 when #config(BUILD, false) {
 
-pedantic :: "-vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style"
-flags    :: "-vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows"
-debug    :: "-debug -define:INTERNAL=true -o:none"
+pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style"
+flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows"
+debug    :: " -debug -define:INTERNAL=true -o:none"
 
 src_path :: `.\build.odin`
 
 main :: proc() {
     // TODO(viktor): maybe automatically copypasta the copypasta files?
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
-    context.logger.lowest_level = .Warning
+    context.logger.lowest_level = .Info
     
     exe_path := os.args[0]
     rebuild_yourself(exe_path)
@@ -42,7 +43,13 @@ main :: proc() {
         
         fmt.fprint(lock, "WAITING FOR PDB")
         
-        if !run_command_sync(`C:\Odin\odin.exe`, fmt.tprintf(`odin build game -build-mode:dll -out:.\build\game.dll -pdb-name:.\build\game-%d.pdb %s %s `, random_number(), flags, debug)) {
+        if !run_command_sync(`C:\Odin\odin.exe`, 
+            `odin build game -build-mode:dll -out:.\build\game.dll`, 
+            fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number()), 
+            flags, 
+            debug, 
+            // pedantic
+        ) {
             os.exit(1)
         }
     }
@@ -50,39 +57,15 @@ main :: proc() {
     if is_running(debug_build) do os.exit(0)
 
     {// Platform
-        
-        { // copy over the common code
-            /* TODO(viktor):
-                use more sophisticated metaprogramming
+        copy_over_common_code()
                 
-            -custom-attribute:<string>
-                    Add a custom attribute which will be ignored if it is unknown.
-                    This can be used with metaprogramming tools.
-                    Examples:
-                            -custom-attribute:my_tag
-                            -custom-attribute:my_tag,the_other_thing
-                            -custom-attribute:my_tag -custom-attribute:the_other_thing
-             */
-            common_game_path     := `.\game\common.odin`
-            common_platform_path := `.\common.odin`
-            file, ok := os.read_entire_file(common_game_path)
-            if !ok {
-                log.error("common.odin file could not be read")
-                os.exit(1)
-            }
-            
-            if os.exists(common_platform_path) do os.remove(common_platform_path)
-            common, err := os.open(common_platform_path, os.O_CREATE)
-            
-            common_code, _ := strings.replace(cast(string) file, "package game", "", 1)
-            if err != nil do log.error(os.error_string(err))
-            
-            fmt.fprintfln(common, common_platform_header, common_game_path)
-            fmt.fprint(common, common_code)
-            os.close(common)
-        }
-        
-        if !run_command_sync(`C:\Odin\odin.exe`, fmt.tprintf(`odin build . -out:.\build\%v %s %s`, debug_build, flags, debug)) {
+        if !run_command_sync(`C:\Odin\odin.exe`, 
+            `odin build . -out:.\build\`, 
+            debug_build, 
+            flags, 
+            debug, 
+            // pedantic,
+        ) {
             os.exit(1)
         }
     }
@@ -90,9 +73,43 @@ main :: proc() {
     os.exit(0)
 }
 
+copy_over_common_code :: proc() {
+    /* TODO(viktor):
+        use more sophisticated metaprogramming
+        
+        -custom-attribute:<string>
+                Add a custom attribute which will be ignored if it is unknown.
+                This can be used with metaprogramming tools.
+                Examples:
+                        -custom-attribute:my_tag
+                        -custom-attribute:my_tag,the_other_thing
+                        -custom-attribute:my_tag -custom-attribute:the_other_thing
+     */
+    common_game_path     := `.\game\common.odin`
+    common_platform_path := `.\common.odin`
+    file, ok := os.read_entire_file(common_game_path)
+    if !ok {
+        log.error("common.odin file could not be read")
+        os.exit(1)
+    }
+    
+    if os.exists(common_platform_path) do os.remove(common_platform_path)
+    common, err := os.open(common_platform_path, os.O_CREATE)
+    
+    common_code, _ := strings.replace(cast(string) file, "package game", "", 1)
+    if err != nil do log.error(os.error_string(err))
+    
+    fmt.fprintfln(common, common_platform_header, common_game_path)
+    fmt.fprint(common, common_code)
+    os.close(common)
+}
+
+
+
+
 rebuild_yourself :: proc(exe_path: string) {
     log.Level_Headers = {
-        0..<10 = "[DEBUG] ",
+         0..<10 = "[DEBUG] ",
         10..<20 = "[INFO ] ",
         20..<30 = "[WARN ] ",
         30..<40 = "[ERROR] ",
@@ -108,7 +125,7 @@ rebuild_yourself :: proc(exe_path: string) {
         
         delete_all_like(temp_path)
         
-        if !run_command_sync(`C:\Odin\odin.exe`, fmt.tprintf("odin build %s -file -out:%s -define:BUILD=true", src_path, temp_path)) {
+        if !run_command_sync(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file -define:BUILD=true ") {
             os.exit(1)
         } 
         
@@ -116,7 +133,7 @@ rebuild_yourself :: proc(exe_path: string) {
         if err := os.rename(exe_path,  old_path); err != nil do fmt.println(os.error_string(err))
         if err := os.rename(temp_path, exe_path); err != nil do fmt.println(os.error_string(err))
         
-        if !run_command_sync(exe_path, "") {
+        if !run_command_sync(exe_path) {
             os.exit(1)
         }
         
@@ -188,22 +205,28 @@ is_running :: proc(exe_name: string) -> (running: b32) {
     return false
 }
 
-// TODO(viktor): accept []string instead
-run_command_sync :: proc(program, args: string) -> (success: b32) {
-    log.info("Running: [", program,"]", args)
+run_command_sync :: proc(program: string, args: ..string) -> (success: b32) {
     startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }
     process_info := win.PROCESS_INFORMATION{}
      
     os.set_current_directory("D:\\handmade")
     working_directory := win.utf8_to_wstring(os.get_current_directory())
     
+    joined_args := strings.join(args, "")
+    
+    if len(args) == 0 {
+        log.info("Running:", program,)
+    } else {
+        log.info("Running:", joined_args)
+    }
+    
     if win.CreateProcessW(
         win.utf8_to_wstring(program), 
-        win.utf8_to_wstring(args), 
+        win.utf8_to_wstring(joined_args), 
         nil, nil, 
         win.FALSE, 0, 
         nil, working_directory, 
-        &startup_info, &process_info
+        &startup_info, &process_info,
     ) {
         
         win.WaitForSingleObject(process_info.hProcess, win.INFINITE)

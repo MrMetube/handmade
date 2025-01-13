@@ -1,7 +1,5 @@
 package game
 
-import "core:fmt"
-
 World :: struct {
     chunk_dim_meters: v3,
 

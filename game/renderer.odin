@@ -72,7 +72,7 @@ RenderGroupEntryBitmap :: struct {
     p:      v2,
     size:   v2,
     
-    id:     AssetId,
+    id:     BitmapId,
     bitmap: LoadedBitmap,
 }
 
@@ -161,22 +161,23 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_bitmap :: proc { push_bitmap_by_asset_id, push_bitmap_raw }
-push_bitmap_by_asset_id :: #force_inline proc(group: ^RenderGroup, id: AssetId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+push_bitmap_by_asset_id :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
     bitmap := get_bitmap(group.assets, id)
     if bitmap != nil {
         push_bitmap(group, bitmap^, height, offset, color, id)
     } else {
-        load_asset(group.assets, id)
+        load_bitmap(group.assets, id)
         group.missing_asset_count += 1
     }
 }
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: AssetId = .null) {
+// TODO(viktor): better zero value for BitmapId
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
     p     := offset + v3{align.x, -align.y, 0}
 
-    basis_p, scale, valid := project_with_transform(group.transform, offset)
+    basis_p, scale, valid := project_with_transform(group.transform, p)
 
     if valid {
         element := push_render_element(group, RenderGroupEntryBitmap)
@@ -420,7 +421,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
                 draw_rectangle_quickly(target,
                     entry.p, {entry.size.x, 0}, {0, entry.size.y},
                     entry.bitmap, entry.color,
-                    null_pixels_to_meters, clip_rect, even
+                    null_pixels_to_meters, clip_rect, even,
                 )
             } else {
                 draw_rectangle_slowly(target,
@@ -439,7 +440,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
                     entry.origin, entry.x_axis, entry.y_axis,
                     entry.texture, /* entry.normal, */ entry.color,
                     /* entry.top, entry.middle, entry.bottom, */
-                    null_pixels_to_meters, clip_rect, even
+                    null_pixels_to_meters, clip_rect, even,
                 )
             } else {
                 draw_rectangle_slowly(target,
@@ -464,7 +465,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
         }
     }
 }
-
+/* 
 draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, color: v4) {
     rounded_center := round(center)
 
@@ -514,7 +515,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
         }
     }
 }
-
+ */
 @(
     enable_target_feature="sse,sse2" ,
     // optimization_mode="none",

@@ -88,7 +88,6 @@ when INTERNAL {
 }
 
 GameMemory :: struct {
-    is_initialized: b32,
     // NOTE: REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
@@ -110,14 +109,14 @@ PlatformCompleteAllWork :: #type proc(queue: ^PlatformWorkQueue)
 
 when INTERNAL { 
     DEBUG_code :: struct {
-        read_entire_file : proc_DEBUG_read_entire_file,
-        write_entire_file: proc_DEBUG_write_entire_file,
-        free_file_memory : proc_DEBUG_free_file_memory,
+        read_entire_file : DebugReadEntireFile,
+        write_entire_file: DebugWriteEntireFile,
+        free_file_memory : DebugFreeFileMemory,
     }
 
-    proc_DEBUG_read_entire_file  :: #type proc(filename: string) -> (result: []u8)
-    proc_DEBUG_write_entire_file :: #type proc(filename: string, memory: []u8) -> b32
-    proc_DEBUG_free_file_memory  :: #type proc(memory: []u8)
+    DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
+    DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
+    DebugFreeFileMemory  :: #type proc(memory: []u8)
     
     DEBUG_GLOBAL_memory : ^GameMemory
     

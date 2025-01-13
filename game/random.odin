@@ -1,7 +1,6 @@
 package game
 
 import "base:intrinsics"
-import "core:fmt"
 
 RandomSeries :: struct {
     index: u32,

@@ -22,9 +22,7 @@ PlatformWorkQueueEntry :: struct {
 }
 
 init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: win.LONG) {
-    high_queue := PlatformWorkQueue{
-        semaphore_handle = win.CreateSemaphoreW(nil, 0, thread_count, nil)
-    }
+    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, thread_count, nil)
         
     thread_id: win.DWORD
     for _ in 0..<thread_count {
@@ -62,9 +60,6 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
             
             entry := &queue.entries[index]
             entry.callback(entry.data)
-            
-            old_completion_count := queue.completion_count
-            new_completion_count := old_completion_count + 1
             
             intrinsics.atomic_add(&queue.completion_count, 1)
         }
