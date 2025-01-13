@@ -149,81 +149,151 @@ TransientState :: struct {
     },
 }
 
-AssetId :: enum {
-    shadow, wall, sword, stair
-}
-
 Assets :: struct {
     tran_state: ^TransientState,
     arena: Arena,
     read_entire_file: proc_DEBUG_read_entire_file,
     
-    bitmaps: [AssetId]^LoadedBitmap,
+    slots: [AssetId]AssetSlot,
     // NOTE(viktor): Array'd assets
     grass:           [8]LoadedBitmap,
     player, monster: [2]LoadedBitmap,
     // NOTE(viktor): structured assets
 }
 
+AssetBitmapInfo :: struct {
+    width, height: i32, 
+    
+    align_percentage:  [2]f32,
+    width_over_height: f32,
+    
+    first_tag_index: u32,
+    one_past_last_tag_index: u32,
+}
+
+AssetGroup :: struct {
+    id: u32,
+ 
+    first_tag_index: u32,
+    one_past_last_tag_index: u32,
+}
+
+AssetTag :: struct {
+    id:    u32,
+    value: f32,
+}
+
+pick_best :: proc(infos: []AssetBitmapInfo, tags:[]AssetTag, match_vector, weight_vector: []f32) -> (result: i32) {
+    best_diff := max(f32)
+    
+    for info, index in infos {
+        total_weight_diff: f32
+        
+        for tag_index := info.first_tag_index; tag_index < info.one_past_last_tag_index; tag_index += 1 {
+            tag := &tags[tag_index]
+            difference :f32= match_vector[tag.id] - tag.value
+            weighted   := weight_vector[tag.id] * abs(difference)
+            total_weight_diff += weighted
+        }
+        
+        if total_weight_diff < best_diff {
+            best_diff = total_weight_diff
+            result = auto_cast index
+        }
+    }
+    
+    return result
+}
+
+AssetId :: enum {
+    null,
+    shadow, wall, sword, stair
+}
+
+AssetState :: enum {
+    Unloaded, 
+    Queued, 
+    Loaded, 
+    Locked,
+}
+
+AssetSlot :: struct {
+    state:      AssetState,
+    bitmap:     ^LoadedBitmap,
+}
+
 get_bitmap :: #force_inline proc(assets: ^Assets, id: AssetId) -> (result: ^LoadedBitmap) {
-    result = assets.bitmaps[id]
+    result = assets.slots[id].bitmap
     
     return result
 }
 
 load_asset :: proc(assets: ^Assets, id: AssetId) {
-    if task := begin_task_with_memory(assets.tran_state); task != nil {
-        LoadAssetWork :: struct {
-            task:   ^TaskWithMemory,
-            assets: ^Assets,
-            
-            bitmap: ^LoadedBitmap,
-            
-            id:        AssetId,
-            file_name: string,
-            
-            custom_alignment:   b32,
-            top_down_alignment: v2,
-        }
+    assert(id != .null)
+    
+    if _, ok := atomic_compare_exchange(&assets.slots[id].state, AssetState.Unloaded, AssetState.Queued); ok {
+        if task := begin_task_with_memory(assets.tran_state); task != nil {
+            LoadAssetWork :: struct {
+                task:   ^TaskWithMemory,
+                assets: ^Assets,
                 
-        do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-            data := cast(^LoadAssetWork) data
-            
-            if data.custom_alignment {
-                data.bitmap^ = DEBUG_load_bmp_custom_alignment(data.assets.read_entire_file, data.file_name, data.top_down_alignment)
-            } else {
-                data.bitmap^ = DEBUG_load_bmp(data.assets.read_entire_file, data.file_name)
+                bitmap:      ^LoadedBitmap,
+                final_state: AssetState, 
+                
+                id:        AssetId,
+                file_name: string,
+                
+                custom_alignment:   b32,
+                top_down_alignment: v2,
             }
-            // TODO(viktor): FENCE!
-            data.assets.bitmaps[data.id] = data.bitmap
-            
-            end_task_with_memory(data.task)
-        }
+                    
+            do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+                data := cast(^LoadAssetWork) data
+                
+                if data.custom_alignment {
+                    data.bitmap^ = DEBUG_load_bmp_custom_alignment(data.assets.read_entire_file, data.file_name, data.top_down_alignment)
+                } else {
+                    data.bitmap^ = DEBUG_load_bmp(data.assets.read_entire_file, data.file_name)
+                }
+                
+                complete_previous_writes_before_future_writes()
+                
+                slot := &data.assets.slots[data.id]
+                slot.bitmap = data.bitmap
+                slot.state  = data.final_state
+                
+                end_task_with_memory(data.task)
+            }
 
-        work := push(&assets.arena, LoadAssetWork)
-        
-        work.assets = assets
-        work.id = id
-        work.task = task
-        work.bitmap = push(&assets.arena, LoadedBitmap)
-        
-        switch id {
-        case .shadow:
-            work.file_name = "../assets/shadow.bmp"
-            work.custom_alignment = true
-            work.top_down_alignment = {  22, 14}
-        case .sword:
-            work.file_name = "../assets/arrow.bmp"
-        case .wall:
-            work.file_name = "../assets/wall.bmp"
-        case .stair:
-            work.file_name = "../assets/stair.bmp"
+            work := push(&assets.arena, LoadAssetWork)
+            
+            work.assets      = assets
+            work.id          = id
+            work.task        = task
+            work.bitmap      = push(&assets.arena, LoadedBitmap, alignment = 16)
+            work.final_state = .Loaded
+            
+            switch id {
+            case .null: unreachable()
+            case .shadow:
+                work.file_name = "../assets/shadow.bmp"
+                work.custom_alignment = true
+                work.top_down_alignment = {  22, 14}
+            case .sword:
+                work.file_name = "../assets/arrow.bmp"
+            case .wall:
+                work.file_name = "../assets/wall.bmp"
+            case .stair:
+                work.file_name = "../assets/stair.bmp"
+            }
+            
+            PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
+        } else {
+            _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
+            assert(auto_cast ok)
         }
-        
-        PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
     }
 }
-
 
 TaskWithMemory :: struct {
     in_use: b32,
@@ -1073,7 +1143,6 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
         bitmap := &ground_buffer.bitmap
         bitmap.align_percentage = 0.5
         bitmap.width_over_height = 1
-        ground_buffer.p = p
         
         buffer_size := state.world.chunk_dim_meters.xy
         assert(buffer_size.x == buffer_size.y)
@@ -1103,10 +1172,13 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
             }
         }
         
-        work.buffer = bitmap^
-        work.group  = render_group
-        work.task   = task
-        
+        if all_assets_valid(render_group) {
+            work.buffer = bitmap^
+            work.group  = render_group
+            work.task   = task
+            ground_buffer.p = p
+        }
+                
         PLATFORM_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
     }
 }

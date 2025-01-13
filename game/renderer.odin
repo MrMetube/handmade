@@ -28,7 +28,9 @@ import "core:simd/x86"
 */
 
 RenderGroup :: struct {
-    assets:           ^Assets,
+    assets:              ^Assets,
+    missing_asset_count: i32,
+    
     push_buffer:      []u8,
     push_buffer_size: u32,
     
@@ -70,6 +72,7 @@ RenderGroupEntryBitmap :: struct {
     p:      v2,
     size:   v2,
     
+    id:     AssetId,
     bitmap: LoadedBitmap,
 }
 
@@ -108,7 +111,6 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets,  max_push_buffer_size:
     return result
 }
 
-
 perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
     group.transform.orthographic = false
     
@@ -136,61 +138,6 @@ orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, mete
     group.transform.focal_length          = 10
 }
 
-get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
-    result = get_camera_rectangle_at_distance(group, group.transform.distance_above_target)
-
-    return result
-}
-
-get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
-    camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters, distance_from_camera)
-    result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
-
-    return result
-}
-
-project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -> (position: v2, scale: f32, valid: b32) {
-    p := V3(base_p.xy, 0) + transform.offset
-    near_clip_plane :: 0.2
-    distance_above_target := transform.distance_above_target
-    
-    if !transform.orthographic {
-        base_z : f32//base_p.z
-        
-        //
-        // Debug camera
-        //
-        when false {
-            // TODO(viktor): how do we want to control the debug camera?
-            distance_above_target *= 5
-        }
-        
-        distance_to_p_z := distance_above_target - p.z
-        // TODO(viktor): transform.scale is unused
-        if distance_to_p_z > near_clip_plane {
-            raw := V3(p.xy, 1)
-            projected := transform.focal_length * raw / distance_to_p_z
-
-            position = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, scale * base_z}
-            scale    =                           projected.z  * transform.meters_to_pixels_for_monitor
-            valid    = true
-        }
-        
-    } else{
-        position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
-        scale = transform.meters_to_pixels_for_monitor
-        valid = true
-    }
-
-    return position, scale, valid
-}
-
-unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
-    result = projected * (distance_from_camera / transform.focal_length)
-
-    return result
-}
-
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
     size := cast(u32) size_of(T) + header_size
@@ -208,16 +155,22 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
+all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
+    result = group.missing_asset_count == 0
+    return result
+}
+
 push_bitmap :: proc { push_bitmap_by_asset_id, push_bitmap_raw }
 push_bitmap_by_asset_id :: #force_inline proc(group: ^RenderGroup, id: AssetId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
     bitmap := get_bitmap(group.assets, id)
     if bitmap != nil {
-        push_bitmap(group, bitmap^, height, offset, color)
+        push_bitmap(group, bitmap^, height, offset, color, id)
     } else {
         load_asset(group.assets, id)
+        group.missing_asset_count += 1
     }
 }
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: AssetId = .null) {
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
@@ -231,6 +184,7 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap,
 
         if element != nil {
             element.bitmap = bitmap
+            element.id     = asset_id
             
             element.color  = color * alpha
             element.p      = basis_p
@@ -300,6 +254,61 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     if entry != nil {
         entry.color = color
     }
+}
+
+get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
+    result = get_camera_rectangle_at_distance(group, group.transform.distance_above_target)
+
+    return result
+}
+
+get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
+    camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters, distance_from_camera)
+    result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
+
+    return result
+}
+
+project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -> (position: v2, scale: f32, valid: b32) {
+    p := V3(base_p.xy, 0) + transform.offset
+    near_clip_plane :: 0.2
+    distance_above_target := transform.distance_above_target
+    
+    if !transform.orthographic {
+        base_z : f32//base_p.z
+        
+        //
+        // Debug camera
+        //
+        when false {
+            // TODO(viktor): how do we want to control the debug camera?
+            distance_above_target *= 5
+        }
+        
+        distance_to_p_z := distance_above_target - p.z
+        // TODO(viktor): transform.scale is unused
+        if distance_to_p_z > near_clip_plane {
+            raw := V3(p.xy, 1)
+            projected := transform.focal_length * raw / distance_to_p_z
+
+            position = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, scale * base_z}
+            scale    =                           projected.z  * transform.meters_to_pixels_for_monitor
+            valid    = true
+        }
+        
+    } else{
+        position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
+        scale = transform.meters_to_pixels_for_monitor
+        valid = true
+    }
+
+    return position, scale, valid
+}
+
+unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
+    result = projected * (distance_from_camera / transform.focal_length)
+
+    return result
 }
 
 TileRenderWork :: struct {
@@ -384,7 +393,6 @@ render_group_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
 render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {
     null_pixels_to_meters :: 1
 
-    // NOTE(viktor): assure that clear is first
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
         base_address += size_of(RenderGroupEntryHeader)
@@ -396,34 +404,9 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, group.transform.screen_center, group.transform.screen_center * 4, entry.color, clip_rect, even)
+            draw_rectangle(target, group.transform.screen_center, group.transform.screen_center * 2, entry.color, clip_rect, even)
 
         case RenderGroupEntryRectangle:
-            entry := cast(^RenderGroupEntryRectangle) data
-            base_address += auto_cast size_of(entry^)
-        case RenderGroupEntryBitmap:
-            entry := cast(^RenderGroupEntryBitmap) data
-            base_address += auto_cast size_of(entry^)
-        case RenderGroupEntryCoordinateSystem:
-            entry := cast(^RenderGroupEntryCoordinateSystem) data
-            base_address += auto_cast size_of(entry^)
-        case:
-            fmt.panicf("Unhandled Entry: %v", header.type)
-        }
-    }
-    
-    for base_address: u32 = 0; base_address < group.push_buffer_size; {
-        header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
-        base_address += size_of(RenderGroupEntryHeader)
-
-        data := &group.push_buffer[base_address]
-
-        switch header.type {
-        case RenderGroupEntryClear:
-            entry := cast(^RenderGroupEntryClear) data
-            base_address += auto_cast size_of(entry^)
-
-            case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
 

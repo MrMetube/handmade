@@ -9,6 +9,18 @@ megabytes :: #force_inline proc(#any_int value: u64) -> u64 { return kilobytes(v
 gigabytes :: #force_inline proc(#any_int value: u64) -> u64 { return megabytes(value) * 1024 }
 terabytes :: #force_inline proc(#any_int value: u64) -> u64 { return gigabytes(value) * 1024 }
 
+atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
+    ok_: bool
+    was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
+    ok = cast(b32) ok_
+    return was, ok
+}
+
+complete_previous_writes_before_future_writes :: #force_inline proc "contextless" () {
+    // TODO(viktor): what should that actually be
+    intrinsics.atomic_thread_fence(.Seq_Cst)
+}
+
 swap :: proc(a, b: ^$T) {
     b^, a^ = a^, b^
 }
