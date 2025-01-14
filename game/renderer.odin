@@ -54,7 +54,7 @@ Transform :: struct {
 
 EnvironmentMap :: struct {
     pz:  f32,
-    LOD: [4]LoadedBitmap,
+    LOD: [4]Bitmap,
 }
 
 // TODO(viktor): Why always prefix rendergroup?
@@ -73,7 +73,7 @@ RenderGroupEntryBitmap :: struct {
     size:   v2,
     
     id:     BitmapId,
-    bitmap: LoadedBitmap,
+    bitmap: Bitmap,
 }
 
 RenderGroupEntryRectangle :: struct {
@@ -88,7 +88,7 @@ RenderGroupEntryCoordinateSystem :: struct {
 
     pixels_to_meters: f32,
     
-    texture, normal:        LoadedBitmap,
+    texture, normal:        Bitmap,
     top, middle, bottom:    EnvironmentMap,
 }
 
@@ -160,17 +160,16 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
     return result
 }
 
-push_bitmap :: proc { push_bitmap_by_asset_id, push_bitmap_raw }
-push_bitmap_by_asset_id :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
     bitmap := get_bitmap(group.assets, id)
     if bitmap != nil {
-        push_bitmap(group, bitmap^, height, offset, color, id)
+        push_bitmap_raw(group, bitmap^, height, offset, color, id)
     } else {
         load_bitmap(group.assets, id)
         group.missing_asset_count += 1
     }
 }
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: LoadedBitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
@@ -313,7 +312,7 @@ unproject_with_transform :: #force_inline proc(transform: Transform, projected: 
 
 TileRenderWork :: struct {
     group:  ^RenderGroup, 
-    target: LoadedBitmap,
+    target: Bitmap,
     
     clip_rect: Rectangle2i, 
 }
@@ -330,7 +329,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     render_to_output(data.group, data.target, data.clip_rect, false)
 }
 
-tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: LoadedBitmap) {
+tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap) {
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
     
     /* TODO(viktor):
@@ -378,7 +377,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
     PLATFORM_complete_all_work(queue)
 }
 
-render_group_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
+render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
     
     work := TileRenderWork{
@@ -393,7 +392,7 @@ render_group_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap) {
     do_tile_render_work(&work)
 }
 
-render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: Rectangle2i, even: b32) {
+render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i, even: b32) {
     null_pixels_to_meters :: 1
 
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
@@ -468,7 +467,7 @@ render_to_output :: proc(group: ^RenderGroup, target: LoadedBitmap, clip_rect: R
     }
 }
 /* 
-draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, color: v4) {
+draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     rounded_center := round(center)
 
     left   := rounded_center.x - bitmap.width  / 2
@@ -522,7 +521,7 @@ draw_bitmap :: proc(buffer: LoadedBitmap, bitmap: LoadedBitmap, center: v2, colo
     enable_target_feature="sse,sse2" ,
     // optimization_mode="none",
 )
-draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture: LoadedBitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
+draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
     scoped_timed_block(.draw_rectangle_quickly)
     assert(texture.memory != nil)
     assert(texture.width  >= 0)
@@ -633,7 +632,6 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
         normal_y_axis_x := cast(f32x4) normal_y_axis.x
         normal_y_axis_y := cast(f32x4) normal_y_axis.y
         
-        texture_start := cast(i32x4) texture.start
         texture_pitch := cast(i32x4) texture.pitch
 
         delta_x := cast(f32x4) fill_rect.min.x - cast(f32x4) origin.x + f32x4{ 0, 1, 2, 3}
@@ -673,7 +671,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                 // TODO(viktor): recheck later if this helps
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
                 #no_bounds_check {
-                    pixel := cast(^[4]ByteColor) &buffer.memory[buffer.start + y * buffer.pitch + x]
+                    pixel := cast(^[4]ByteColor) &buffer.memory[y * buffer.pitch + x]
                     original_pixel := simd.masked_load(pixel, zero_i, write_mask)
                     
                     u = clamp_01(u)
@@ -691,7 +689,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
                     fy := ty - cast(f32x4) sy
 
                     // NOTE(viktor): bilinear sample
-                    fetch := texture_start + sy * texture_pitch + sx
+                    fetch := sy * texture_pitch + sx
                     
                     fetch_0 := (cast([^]i32)&fetch)[0]
                     fetch_1 := (cast([^]i32)&fetch)[1]
@@ -802,7 +800,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
     }
 }
 
-draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, texture, normal_map: LoadedBitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
+draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture, normal_map: Bitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
     scoped_timed_block(.draw_rectangle_slowly)
     assert(texture.memory != nil)
 
@@ -936,7 +934,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
                 texel *= color
                 texel.rgb = clamp_01(texel.rgb)
 
-                dst := &buffer.memory[buffer.start + y * buffer.pitch + x]
+                dst := &buffer.memory[y * buffer.pitch + x]
                 pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
 
 
@@ -949,7 +947,7 @@ draw_rectangle_slowly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2, 
     }
 }
 
-draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4, clip_rect: Rectangle2i, even: b32){
+draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rect: Rectangle2i, even: b32){
     rounded_center := floor(center)
     rounded_size   := floor(size)
 
@@ -966,7 +964,7 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4, cl
     for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
         for x in fill_rect.min.x..<fill_rect.max.x {
             // TODO(viktor): should use pitch here
-            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
+            dst := &buffer.memory[y*buffer.pitch + x]
             src := color * 255
 
             dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
@@ -979,14 +977,14 @@ draw_rectangle :: proc(buffer: LoadedBitmap, center: v2, size: v2, color: v4, cl
 }
 
 // TODO(viktor): should sample return a pointer instead?
-sample :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (result: v4) {
-    texel := texture.memory[texture.start + p.y * texture.pitch + p.x]
+sample :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
+    texel := texture.memory[p.y * texture.pitch + p.x]
     result = vec_cast(f32, texel)
 
     return result
 }
 
-sample_bilinear :: #force_inline proc(texture: LoadedBitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
+sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
     s00 = sample(texture, p + {0, 0})
     s01 = sample(texture, p + {1, 0})
     s10 = sample(texture, p + {0, 1})

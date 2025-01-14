@@ -97,26 +97,6 @@ abs_vec_3 :: #force_inline proc(a: [3]$E) -> [3]E where intrinsics.type_is_numer
 }
 
 
-// TODO convert all of these to platform-efficient versions
-sign :: proc{ sign_i, sign_u, sign_vi, sign_vu }
-
-@(require_results)
-sign_i :: #force_inline proc(i: i32) -> i32 {
-    return i < 0 ? -1 : 1
-}
-@(require_results)
-sign_u :: #force_inline proc(i: u32) -> i32 {
-    return cast(i32) i < 0 ? -1 : 1
-}
-@(require_results)
-sign_vi :: #force_inline proc(a: [2]i32) -> [2]i32 {
-    return {sign(a.x), sign(a.y)}
-}
-@(require_results)
-sign_vu :: #force_inline proc(a: [2]u32) -> [2]i32 {
-    return {sign(a.x), sign(a.y)}
-}
-
 mod :: proc {
     mod_d,
     mod_ds,

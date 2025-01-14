@@ -166,6 +166,11 @@ safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
     return result
 }
 
+sign :: proc{ sign_i, sign_f }
+@(require_results) sign_i  :: #force_inline proc(i: i32) -> i32 { return i >= 0 ? 1 : -1 }
+@(require_results) sign_f  :: #force_inline proc(x: f32) -> f32 { return x >= 0 ? 1 : -1 }
+
+
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Vector operations
 // ---------------------- ---------------------- ----------------------

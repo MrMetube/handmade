@@ -2,21 +2,25 @@ package game
 
 import "base:intrinsics"
 
+Sound :: struct {
+    samples: []Sample,
+}
+
 Assets :: struct {
     tran_state: ^TransientState,
     arena: Arena,
     
     bitmaps:      []AssetSlot,
     bitmap_infos: []AssetBitmapInfo,
+    sounds:       []AssetSlot,
+    sound_infos:  []AssetSoundInfo,
 
-    sounds:  []AssetSlot,
     types:   [AssetTypeId]AssetType,
     assets:  []Asset,
+    
     tags:    []AssetTag,
+    tag_ranges: [AssetTagId]f32,
     
-    
-    // NOTE(viktor): structured assets
-    monster: [2]LoadedBitmap,
     
     // TODO(viktor): These should go away once we actually load an asset file
     DEBUG_used_bitmap_count: u32,
@@ -26,12 +30,16 @@ Assets :: struct {
     DEBUG_asset: ^Asset,
 }
 
+AssetId  :: union { SoundId, BitmapId }
+SoundId  :: distinct u32
+BitmapId :: distinct u32
+
 Asset :: struct {
     // TODO(viktor): should this just be a slice into the assets.tags?
     first_tag_index:         u32,
     one_past_last_tag_index: u32,
     
-    slot_id:                 u32, // TODO(viktor): either BitmapId or SoundId
+    id: AssetId,
 }
 
 AssetType :: struct {
@@ -41,36 +49,28 @@ AssetType :: struct {
     one_past_last_index: u32,
 }
 
-SoundId  :: distinct u32
-BitmapId :: distinct u32
-
 AssetTypeId :: enum {
     None,
-    
-    Shadow, 
-    Wall, 
-    Arrow, 
-    Stair, 
-    
-    Rock,
-    Grass,
-    
-    Head,
-    Body,
-    Cape,
-    Sword,
+    // NOTE(viktor): plain assets
+    Shadow, Wall, Arrow, Stair, 
+    // NOTE(viktor): variant assets
+    Rock,Grass,
+    // NOTE(viktor): structured assets
+    Head, Body, Cape, Sword,
+    Monster,
 }
 
 AssetState :: enum {
-    Unloaded, 
-    Queued, 
-    Loaded, 
-    Locked, 
+    Unloaded, Queued, Loaded, Locked, 
 }
 
 AssetSlot :: struct {
-    state:      AssetState,
-    bitmap:     ^LoadedBitmap,
+    state:  AssetState,
+
+    using _ : struct #raw_union {
+        bitmap: ^Bitmap,
+        sound:  ^Sound,
+    }
 }
 
 AssetTagId :: enum {
@@ -89,86 +89,34 @@ AssetBitmapInfo :: struct {
     file_name:        string,
 }
 
+AssetSoundInfo :: struct {
+    file_name:        string,
+}
+
 AssetVector :: [AssetTagId]f32
-
-AssetGroup :: struct {
-    id: u32,
- 
-    first_tag_index: u32,
-    one_past_last_tag_index: u32,
-}
-
-DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percentage: v2) -> (result: BitmapId) {
-    assert(assets.DEBUG_used_bitmap_count < auto_cast len(assets.bitmap_infos))
-    
-    id := cast(BitmapId) assets.DEBUG_used_bitmap_count
-    assets.DEBUG_used_bitmap_count += 1
-    
-    info := &assets.bitmap_infos[id]
-    info.align_percentage = align_percentage
-    info.file_name        = file_name
-    
-    return id
-}
-
-begin_asset_type :: proc(assets: ^Assets, id: AssetTypeId) {
-    assert(assets.DEBUG_asset_type == nil)
-    assert(assets.DEBUG_asset == nil)
-    
-    assets.DEBUG_asset_type = &assets.types[id]
-    assets.DEBUG_asset_type.first_asset_index   = auto_cast assets.DEBUG_used_asset_count
-    assets.DEBUG_asset_type.one_past_last_index = assets.DEBUG_asset_type.first_asset_index
-}
-
-add_bitmap_asset :: proc(assets: ^Assets, filename: string, align_percentage: v2 = {0.5, 0.5}) {
-    assert(assets.DEBUG_asset_type != nil)
-    
-    asset := &assets.assets[assets.DEBUG_asset_type.one_past_last_index]
-    assets.DEBUG_asset_type.one_past_last_index += 1
-    asset.first_tag_index = assets.DEBUG_used_asset_count
-    asset.one_past_last_tag_index = asset.first_tag_index
-    asset.slot_id = cast(u32) DEBUG_add_bitmap_info(assets, filename, align_percentage)
-    
-    assets.DEBUG_asset = asset
-}
-
-add_tag :: proc(assets: ^Assets, id: AssetTagId, value: f32) {
-    assert(assets.DEBUG_asset_type != nil)
-    assert(assets.DEBUG_asset != nil)
-    
-    assets.DEBUG_asset.one_past_last_tag_index += 1
-    
-    tag := &assets.tags[assets.DEBUG_used_asset_count]
-    assets.DEBUG_used_asset_count += 1
-    
-    tag.id = id
-    tag.value = value
-}
-
-end_asset_type :: proc(assets: ^Assets) {
-    assert(assets.DEBUG_asset_type != nil)
-    
-    assets.DEBUG_used_asset_count = assets.DEBUG_asset_type.one_past_last_index
-    assets.DEBUG_asset_type = nil
-    assets.DEBUG_asset = nil
-}
 
 make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets)
-    
     sub_arena(&assets.arena, arena, memory_size)
-    
     assets.tran_state = tran_state
     
     assets.bitmaps      = push(arena, AssetSlot,       256*len(AssetTypeId))
     assets.bitmap_infos = push(arena, AssetBitmapInfo, len(assets.bitmaps))
     
+    assets.sounds      = push(arena, AssetSlot, 1)
+    assets.sound_infos = push(arena, AssetSoundInfo, len(assets.sounds))
+    
+    assets.tags    = push(arena, AssetTag,  1024*len(AssetTypeId))
+    assets.assets  = push(arena, Asset,     len(assets.bitmaps) + len(assets.sounds))
+    
     assets.DEBUG_used_bitmap_count = 1
     assets.DEBUG_used_asset_count  = 1
     
-    assets.sounds  = push(arena, AssetSlot, 1)
-    assets.tags    = push(arena, AssetTag,  1024*len(AssetTypeId))
-    assets.assets  = push(arena, Asset,     len(assets.bitmaps) + len(assets.sounds))
+    for &range in assets.tag_ranges {
+        range = 100_000_000
+    }
+    
+    assets.tag_ranges[.FacingDirection] = Tau
     
     begin_asset_type(assets, .Shadow)
     add_bitmap_asset(assets, "../assets/shadow.bmp", {0.5, -0.4})
@@ -209,7 +157,7 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     // add_bitmap_asset(result, "../assets/rocks8a.bmp")
     // add_bitmap_asset(result, "../assets/rocks8b.bmp")
     // add_bitmap_asset(result, "../assets/rocks8c.bmp")
-        
+    
     begin_asset_type(assets, .Cape)
     add_bitmap_asset(assets, "../assets/cape_left.bmp",  {0.36, 0.01})
     add_tag(assets, .FacingDirection, Pi)
@@ -238,13 +186,17 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     add_tag(assets, .FacingDirection, 0)
     end_asset_type(assets)
         
-    assets.monster[0] = DEBUG_load_bmp("../assets/orc_left.bmp"     , v2{0.7 , 0    }) 
-    assets.monster[1] = DEBUG_load_bmp("../assets/orc_right.bmp"    , v2{0.27, 0    }) 
-
+    begin_asset_type(assets, .Monster)
+    add_bitmap_asset(assets, "../assets/orc_left.bmp"     , v2{0.7 , 0})
+    add_tag(assets, .FacingDirection, Pi)
+    add_bitmap_asset(assets, "../assets/orc_right.bmp"    , v2{0.27, 0})
+    add_tag(assets, .FacingDirection, 0)
+    end_asset_type(assets)
+        
     return assets
 }
 
-get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^LoadedBitmap) {
+get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
     result = assets.bitmaps[id].bitmap
     
     return result
@@ -255,13 +207,13 @@ get_first_bitmap_id :: proc(assets: ^Assets, id: AssetTypeId) -> (result: Bitmap
     
     if type.first_asset_index != type.one_past_last_index {
         asset := assets.assets[type.first_asset_index]
-        result = cast(BitmapId) asset.slot_id
+        result = asset.id.(BitmapId)
     }
     
     return result
 }
 
-best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: BitmapId) {
+best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: AssetId) {
     type := assets.types[id]
 
     if type.first_asset_index != type.one_past_last_index {
@@ -271,34 +223,86 @@ best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, we
     
             total_weight_diff: f32
             for tag in assets.tags[asset.first_tag_index:asset.one_past_last_tag_index] {
-                difference := match_vector[ tag.id] - tag.value
-                weighted   := weight_vector[tag.id] * abs(difference)
+                a := match_vector[tag.id]
+                b := tag.value
+                
+                range := assets.tag_ranges[tag.id]
+                d1 := abs((a - range * sign(a)) - b)
+                d2 := abs(a - b)
+                
+                difference := min(d1, d2)
+                weighted := weight_vector[tag.id] * difference
                 
                 total_weight_diff += weighted
             }
             
             if total_weight_diff < best_diff {
                 best_diff = total_weight_diff
-                result = cast(BitmapId) asset.slot_id
+                result = asset.id
             }
         }
     }
     
     return result
 }
-random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
+
+random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: AssetId) {
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
         choices := assets.assets[type.first_asset_index:type.one_past_last_index]
         choice := random_choice(series, choices)
-        result = cast(BitmapId) choice.slot_id
+        result = choice.id
     }
     
     return result
 }
 
-load_sound :: proc(assets: ^Assets, id: SoundId) {}
+load_sound :: proc(assets: ^Assets, id: SoundId) {
+    if id != 0 {
+        if _, ok := atomic_compare_exchange(&assets.sounds[id].state, AssetState.Unloaded, AssetState.Queued); ok {
+            if task := begin_task_with_memory(assets.tran_state); task != nil {
+                LoadSoundWork :: struct {
+                    task:   ^TaskWithMemory,
+                    assets: ^Assets,
+                    
+                    sound: ^Sound,
+                    final_state: AssetState, 
+                    
+                    id: SoundId,
+                }
+                        
+                do_load_sound_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+                    work := cast(^LoadSoundWork) data
+                 
+                    info := work.assets.sound_infos[work.id]
+                    work.sound^ = DEBUG_load_wav(info.file_name)
+                    
+                    complete_previous_writes_before_future_writes()
+                    
+                    slot := &work.assets.sounds[work.id]
+                    slot.sound = work.sound
+                    slot.state = work.final_state
+                    
+                    end_task_with_memory(work.task)
+                }
+
+                work := push(&assets.arena, LoadSoundWork)
+                
+                work.assets      = assets
+                work.id          = id
+                work.task        = task
+                work.sound       = push(&assets.arena, Sound)
+                work.final_state = .Loaded
+                
+                PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_sound_work, work)
+            } else {
+                _, ok = atomic_compare_exchange(&assets.sounds[id].state, AssetState.Queued, AssetState.Unloaded)
+                assert(auto_cast ok)
+            }
+        }
+    }
+}
 
 load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
     if id != 0 {
@@ -308,10 +312,10 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                     task:   ^TaskWithMemory,
                     assets: ^Assets,
                     
-                    bitmap:      ^LoadedBitmap,
+                    bitmap:      ^Bitmap,
                     final_state: AssetState, 
                     
-                    id:        BitmapId,
+                    id: BitmapId,
                 }
                         
                 do_load_bitmap_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
@@ -334,7 +338,7 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 work.assets      = assets
                 work.id          = id
                 work.task        = task
-                work.bitmap      = push(&assets.arena, LoadedBitmap, alignment = 16)
+                work.bitmap      = push(&assets.arena, Bitmap, alignment = 16)
                 work.final_state = .Loaded
                 
                 PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_bitmap_work, work)
@@ -346,32 +350,139 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
     }
 }
 
+DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percentage: v2) -> (result: BitmapId) {
+    assert(assets.DEBUG_used_bitmap_count < auto_cast len(assets.bitmap_infos))
+    
+    id := cast(BitmapId) assets.DEBUG_used_bitmap_count
+    assets.DEBUG_used_bitmap_count += 1
+    
+    info := &assets.bitmap_infos[id]
+    info.align_percentage = align_percentage
+    info.file_name        = file_name
+    
+    return id
+}
 
-DEBUG_load_bmp :: proc (file_name: string, alignment_percentage: v2 = 0.5) -> (result: LoadedBitmap) {
+begin_asset_type :: proc(assets: ^Assets, id: AssetTypeId) {
+    assert(assets.DEBUG_asset_type == nil)
+    assert(assets.DEBUG_asset == nil)
+    
+    assets.DEBUG_asset_type = &assets.types[id]
+    assets.DEBUG_asset_type.first_asset_index   = auto_cast assets.DEBUG_used_asset_count
+    assets.DEBUG_asset_type.one_past_last_index = assets.DEBUG_asset_type.first_asset_index
+}
+
+add_bitmap_asset :: proc(assets: ^Assets, filename: string, align_percentage: v2 = {0.5, 0.5}) {
+    assert(assets.DEBUG_asset_type != nil)
+    
+    asset := &assets.assets[assets.DEBUG_asset_type.one_past_last_index]
+    assets.DEBUG_asset_type.one_past_last_index += 1
+    asset.first_tag_index = assets.DEBUG_used_asset_count
+    asset.one_past_last_tag_index = asset.first_tag_index
+    asset.id = DEBUG_add_bitmap_info(assets, filename, align_percentage)
+    
+    assets.DEBUG_asset = asset
+}
+
+add_tag :: proc(assets: ^Assets, id: AssetTagId, value: f32) {
+    assert(assets.DEBUG_asset_type != nil)
+    assert(assets.DEBUG_asset != nil)
+    
+    assets.DEBUG_asset.one_past_last_tag_index += 1
+    
+    tag := &assets.tags[assets.DEBUG_used_asset_count]
+    assets.DEBUG_used_asset_count += 1
+    
+    tag.id = id
+    tag.value = value
+}
+
+end_asset_type :: proc(assets: ^Assets) {
+    assert(assets.DEBUG_asset_type != nil)
+    
+    assets.DEBUG_used_asset_count = assets.DEBUG_asset_type.one_past_last_index
+    assets.DEBUG_asset_type = nil
+    assets.DEBUG_asset = nil
+}
+
+DEBUG_load_wav :: proc (file_name: string) -> (result: Sound) {
+    contents := DEBUG_read_entire_file(file_name)
+    
+    WAVE_Header :: struct #packed {
+        riff: u32,
+        size:    u32,
+        wave_id: u32,
+    }
+    
+    WAVE_Format :: enum u32 {
+        PCM        = 0x0001,
+        IEEE_FLOAT = 0x0003,
+        ALAW       = 0x0006,
+        MULAW      = 0x0007,
+        EXTENSIBLE = 0xfffe,
+    }
+    
+    WAVE_Chunk_ID :: enum u32 {
+        fmt_ = 'f' << 0 | 'm' << 8 | 't' << 16 | ' ' << 24, // 544501094
+        RIFF = 'R' << 0 | 'I' << 8 | 'F' << 16 | 'F' << 24, // 1179011410
+        WAVE = 'W' << 0 | 'A' << 8 | 'V' << 16 | 'E' << 24, // 1163280727
+    }
+    
+    WAVE_Chunk :: struct #packed {
+        chunk: u32,
+        size:  u32,
+    }
+    
+    WAVE_fmt :: struct #packed {
+        format_tag: u16,
+        n_channels: u16,
+        n_samples_per_seconds: u32,
+        avg_bytes_per_sec: u32,
+        block_align: u16,
+        bits_per_sample: u16,
+        cb_size: u16,
+        valid_bits_per_sample: u16,
+        channel_mask: u32,
+        sub_format: [16]u8,
+    }
+
+    if len(contents) > 0 {
+        header := cast(^WAVE_Header) &contents[0]
+        
+        assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
+        assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
+        
+        unimplemented("TODO: DEBUG_load_wav")
+    }
+    
+    return result
+}
+
+DEBUG_load_bmp :: proc (file_name: string, alignment_percentage: v2 = 0.5) -> (result: Bitmap) {
     contents := DEBUG_read_entire_file(file_name)
     
     BMPHeader :: struct #packed {
-        file_type      : [2]u8,
-        file_size      : u32,
-        reserved_1     : u16,
-        reserved_2     : u16,
-        bitmap_offset  : u32,
-        size           : u32,
-        width          : i32,
-        height         : i32,
-        planes         : u16,
-        bits_per_pixel : u16,
+        file_type     : [2]u8,
+        file_size     : u32,
+        reserved_1    : u16,
+        reserved_2    : u16,
+        bitmap_offset : u32,
+        size          : u32,
+        width         : i32,
+        height        : i32,
+        planes        : u16,
+        bits_per_pixel: u16,
 
-        compression           : u32,
-        size_of_bitmap        : u32,
-        horizontal_resolution : i32,
-        vertical_resolution   : i32,
-        colors_used           : u32,
-        colors_important      : u32,
+        compression          : u32,
+        size_of_bitmap       : u32,
+        horizontal_resolution: i32,
+        vertical_resolution  : i32,
+        colors_used          : u32,
+        colors_important     : u32,
 
-        red_mask   : u32,
-        green_mask : u32,
-        blue_mask  : u32,
+        red_mask  ,
+        green_mask,
+        blue_mask : u32,
     }
 
     // NOTE: If you are using this generically for some reason,
@@ -431,16 +542,11 @@ DEBUG_load_bmp :: proc (file_name: string, alignment_percentage: v2 = 0.5) -> (r
             memory = pixels, 
             width  = header.width, 
             height = header.height, 
-            start  = 0,
             pitch  = header.width,
             width_over_height = safe_ratio_0(cast(f32) header.width, cast(f32) header.height),
             align_percentage = alignment_percentage,
         }
 
-        when false {
-            result.start = header.width * (header.height-1)
-            result.pitch = -result.pitch
-        }
         return result
     }
     

@@ -137,8 +137,8 @@ main :: proc() {
         }
         
         // resize_DIB_section(&GLOBAL_back_buffer, 2560, 1440)
-        // resize_DIB_section(&GLOBAL_back_buffer, 1920, 1080)
-        resize_DIB_section(&GLOBAL_back_buffer, 1280, 720)
+        resize_DIB_section(&GLOBAL_back_buffer, 1920, 1080)
+        // resize_DIB_section(&GLOBAL_back_buffer, 1280, 720)
 
         if win.RegisterClassW(&window_class) == 0 {
             return // TODO Logging
@@ -455,7 +455,7 @@ main :: proc() {
         //  Update, Sound and Render
         //   
         {
-            offscreen_buffer := LoadedBitmap{
+            offscreen_buffer := Bitmap{
                 memory = GLOBAL_back_buffer.memory,
                 width  = GLOBAL_back_buffer.width,
                 height = GLOBAL_back_buffer.height,

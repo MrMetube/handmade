@@ -1,6 +1,7 @@
 package game
 
 import "base:intrinsics"
+import "core:fmt"
 
 INTERNAL :: #config(INTERNAL, false)
 
@@ -8,7 +9,14 @@ INTERNAL :: #config(INTERNAL, false)
     TODO(viktor):
     ARCHITECTURE EXPLORATION
     
+    - Audio
+        - Sound effects triggers
+        - Ambient sounds
+        - Music
+
     - Asset streaming
+      - File format
+      - Memory management
     
     - Rendering
         - Straighten out all coordinate systems!
@@ -18,11 +26,6 @@ INTERNAL :: #config(INTERNAL, false)
         - Particle systems
         - Lighting
         - Final Optimization    
-
-    - Audio
-        - Sound effects triggers
-        - Ambient sounds
-        - Music
 
     - Debug code
         - Fonts
@@ -133,8 +136,8 @@ TransientState :: struct {
     
     tasks: [4]TaskWithMemory,
 
-    test_diffuse: LoadedBitmap,
-    test_normal:  LoadedBitmap,
+    test_diffuse: Bitmap,
+    test_normal:  Bitmap,
     
     ground_buffers: []GroundBuffer,
     
@@ -158,7 +161,7 @@ TaskWithMemory :: struct {
 }
 
 GroundBuffer :: struct {
-    bitmap: LoadedBitmap,
+    bitmap: Bitmap,
     // NOTE(viktor): An invalid position tells us that this ground buffer has not been filled
     p: WorldPosition, // NOTE(viktor): this is the center of the bitmap
 }
@@ -221,7 +224,7 @@ DEBUG_read_entire_file:     DebugReadEntireFile
 PlatformWorkQueue :: struct {}
 
 @(export)
-game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input: GameInput){
+game_update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput){
     scoped_timed_block(.game_update_and_render)
     
     PLATFORM_enqueue_work      = memory.PLATFORM_enqueue_work
@@ -296,7 +299,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         created_stair: b32
         for room in u32(0) ..< 200 {
-            when !false {
+            when false {
                 choice := random_choice(&series, 3)
             } else {
                 choice := 3
@@ -347,8 +350,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         ))
                     } else if need_to_place_stair {
                         add_stairs(state, chunk_position_from_tile_positon(world, 
-                            room % 2 == 0 ? 5 : 10 + screen_col * tiles_per_screen.x, 
-                            3                      + screen_row * tiles_per_screen.y, 
+                            room % 2 == 0 ? 5 : 10 - screen_col * tiles_per_screen.x, 
+                            3                      - screen_row * tiles_per_screen.y, 
                             stair_down ? tile_z-1 : tile_z,
                         ))
                         need_to_place_stair = false
@@ -545,7 +548,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 bitmap.align_percentage = 0.5
                 
                 ground_chunk_size := world.chunk_dim_meters.x
-                push_bitmap(render_group, bitmap, ground_chunk_size, offset)
+                push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
                 
                 when false {
                     push_rectangle_outline(render_group, offset, ground_chunk_size, Yellow)
@@ -733,18 +736,18 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 .FacingDirection = 1
             }
             
-            head_id : BitmapId = best_match_asset_from(tran_state.assets, .Head, match_vector, weight_vector)
-            body_id : BitmapId = best_match_asset_from(tran_state.assets, .Body, match_vector, weight_vector)
-            cape_id : BitmapId = best_match_asset_from(tran_state.assets, .Cape, match_vector, weight_vector)
-            sword_id: BitmapId = best_match_asset_from(tran_state.assets, .Sword, match_vector, weight_vector)
+            head_id  := best_match_asset_from(tran_state.assets, .Head, match_vector, weight_vector).(BitmapId)
+            body_id  := best_match_asset_from(tran_state.assets, .Body, match_vector, weight_vector).(BitmapId)
+            cape_id  := best_match_asset_from(tran_state.assets, .Cape, match_vector, weight_vector).(BitmapId)
+            sword_id := best_match_asset_from(tran_state.assets, .Sword, match_vector, weight_vector).(BitmapId)
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
                 push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, cape_id,  2)
-                push_bitmap(render_group, body_id,  2)
-                push_bitmap(render_group, head_id,  2)
-                push_bitmap(render_group, sword_id, 2)
+                push_bitmap(render_group, cape_id,  1.6)
+                push_bitmap(render_group, body_id,  1.6)
+                push_bitmap(render_group, head_id,  1.6)
+                push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
 
             case .Arrow:
@@ -764,8 +767,10 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 push_bitmap(render_group, head_id, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
+                monster_id := best_match_asset_from(tran_state.assets, .Monster, match_vector, weight_vector).(BitmapId)
+
                 push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, tran_state.assets.monster[1], 1.5)
+                push_bitmap(render_group, monster_id, 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Wall:
@@ -888,7 +893,7 @@ end_task_with_memory :: #force_inline proc (task: ^TaskWithMemory) {
     task.in_use = false
 }
 
-make_pyramid_normal_map :: proc(bitmap: LoadedBitmap, roughness: f32) {
+make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
     for y in 0..<bitmap.height {
         for x in 0..<bitmap.width {
             inv_x := bitmap.width - x
@@ -910,13 +915,13 @@ make_pyramid_normal_map :: proc(bitmap: LoadedBitmap, roughness: f32) {
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
-            dst := &bitmap.memory[bitmap.start + y*bitmap.pitch + x]
+            dst := &bitmap.memory[y*bitmap.pitch + x]
             dst^ = vec_cast(u8, color)
         }
     }
 }
 
-make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32, c:= v2{1,1}) {
+make_sphere_normal_map :: proc(buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
     inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
     
     for y in 0..<buffer.height {
@@ -935,13 +940,13 @@ make_sphere_normal_map :: proc(buffer: LoadedBitmap, roughness: f32, c:= v2{1,1}
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
-            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
+            dst := &buffer.memory[y*buffer.pitch + x]
             dst^ = vec_cast(u8, color)
         }
     }
 }
 
-make_sphere_diffuse_map :: proc(buffer: LoadedBitmap, c := v2{1,1}) {
+make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
     inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
     
     for y in 0..<buffer.height {
@@ -959,13 +964,13 @@ make_sphere_diffuse_map :: proc(buffer: LoadedBitmap, c := v2{1,1}) {
             base_color: v3 = 0
             color := V4(alpha * base_color, alpha)
             
-            dst := &buffer.memory[buffer.start + y*buffer.pitch + x]
+            dst := &buffer.memory[y*buffer.pitch + x]
             dst^ = vec_cast(u8, color)
         }
     }
 }
 
-make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: LoadedBitmap) {
+make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
         memory = push(arena, ByteColor, cast(u64) (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
@@ -979,7 +984,7 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true)
 FillGroundChunkWork :: struct {
     task: ^TaskWithMemory,
     group: ^RenderGroup,
-    buffer: LoadedBitmap,
+    buffer: Bitmap,
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
@@ -1018,9 +1023,9 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
                 series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
                 
                 for _ in 0..<4 {
-                    stamp := random_asset_from(tran_state.assets, .Grass, &series)
+                    stamp := random_asset_from(tran_state.assets, .Grass, &series).(BitmapId)
                     p := center + random_bilateral_2(&series, f32) * half_dim 
-                    push_bitmap_by_asset_id(render_group, stamp, 5, offset = V3(p, 0))
+                    push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
                 }
             }
         }

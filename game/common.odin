@@ -13,13 +13,11 @@ GameSoundBuffer :: struct {
 }
 
 ByteColor :: [4]u8
-
-LoadedBitmap :: struct {
+Bitmap :: struct {
     memory :       []ByteColor,
     width, height: i32, 
     
-    // TODO(viktor): start may always be 0, can it be removed?
-    start, pitch: i32,
+    pitch: i32,
     
     align_percentage:  [2]f32,
     width_over_height: f32,
