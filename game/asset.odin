@@ -16,12 +16,14 @@ Assets :: struct {
     
     
     // NOTE(viktor): structured assets
-    player, monster: [2]LoadedBitmap,
-        
+    monster: [2]LoadedBitmap,
+    
     // TODO(viktor): These should go away once we actually load an asset file
     DEBUG_used_bitmap_count: u32,
     DEBUG_used_asset_count: u32,
+    DEBUG_used_tag_count: u32,
     DEBUG_asset_type: ^AssetType,
+    DEBUG_asset: ^Asset,
 }
 
 Asset :: struct {
@@ -32,9 +34,9 @@ Asset :: struct {
     slot_id:                 u32, // TODO(viktor): either BitmapId or SoundId
 }
 
-// TODO(viktor): should this just be a slice into the assets.assets?
 AssetType :: struct {
     // NOTE(viktor): A range within the assets.assets
+    // TODO(viktor): should this just be a slice into the assets.assets?
     first_asset_index:   u32,
     one_past_last_index: u32,
 }
@@ -47,11 +49,16 @@ AssetTypeId :: enum {
     
     Shadow, 
     Wall, 
-    Sword, 
+    Arrow, 
     Stair, 
     
     Rock,
     Grass,
+    
+    Head,
+    Body,
+    Cape,
+    Sword,
 }
 
 AssetState :: enum {
@@ -67,12 +74,13 @@ AssetSlot :: struct {
 }
 
 AssetTagId :: enum {
-    Smoothness,
-    Flatness,
+    // Smoothness,
+    // Flatness,
+    FacingDirection, // NOTE(viktor): angle in radians
 }
 
 AssetTag :: struct {
-    id:    u32, // NOTE(viktor): tag id
+    id:    AssetTagId,
     value: f32,
 }
 
@@ -80,6 +88,8 @@ AssetBitmapInfo :: struct {
     align_percentage: [2]f32,
     file_name:        string,
 }
+
+AssetVector :: [AssetTagId]f32
 
 AssetGroup :: struct {
     id: u32,
@@ -103,6 +113,7 @@ DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percenta
 
 begin_asset_type :: proc(assets: ^Assets, id: AssetTypeId) {
     assert(assets.DEBUG_asset_type == nil)
+    assert(assets.DEBUG_asset == nil)
     
     assets.DEBUG_asset_type = &assets.types[id]
     assets.DEBUG_asset_type.first_asset_index   = auto_cast assets.DEBUG_used_asset_count
@@ -114,77 +125,83 @@ add_bitmap_asset :: proc(assets: ^Assets, filename: string, align_percentage: v2
     
     asset := &assets.assets[assets.DEBUG_asset_type.one_past_last_index]
     assets.DEBUG_asset_type.one_past_last_index += 1
-    asset.first_tag_index = 0
-    asset.one_past_last_tag_index = 0
+    asset.first_tag_index = assets.DEBUG_used_asset_count
+    asset.one_past_last_tag_index = asset.first_tag_index
     asset.slot_id = cast(u32) DEBUG_add_bitmap_info(assets, filename, align_percentage)
+    
+    assets.DEBUG_asset = asset
+}
+
+add_tag :: proc(assets: ^Assets, id: AssetTagId, value: f32) {
+    assert(assets.DEBUG_asset_type != nil)
+    assert(assets.DEBUG_asset != nil)
+    
+    assets.DEBUG_asset.one_past_last_tag_index += 1
+    
+    tag := &assets.tags[assets.DEBUG_used_asset_count]
+    assets.DEBUG_used_asset_count += 1
+    
+    tag.id = id
+    tag.value = value
 }
 
 end_asset_type :: proc(assets: ^Assets) {
     assert(assets.DEBUG_asset_type != nil)
+    
     assets.DEBUG_used_asset_count = assets.DEBUG_asset_type.one_past_last_index
     assets.DEBUG_asset_type = nil
+    assets.DEBUG_asset = nil
 }
 
-make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (result: ^Assets) {
-    result = push(arena, Assets)
+make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
+    assets = push(arena, Assets)
     
-    sub_arena(&result.arena, arena, memory_size)
+    sub_arena(&assets.arena, arena, memory_size)
     
-    result.tran_state = tran_state
+    assets.tran_state = tran_state
     
-    result.bitmaps      = push(arena, AssetSlot,       256*len(AssetTypeId))
-    result.bitmap_infos = push(arena, AssetBitmapInfo, len(result.bitmaps))
+    assets.bitmaps      = push(arena, AssetSlot,       256*len(AssetTypeId))
+    assets.bitmap_infos = push(arena, AssetBitmapInfo, len(assets.bitmaps))
     
-    result.DEBUG_used_bitmap_count = 1
-    result.DEBUG_used_asset_count  = 1
+    assets.DEBUG_used_bitmap_count = 1
+    assets.DEBUG_used_asset_count  = 1
     
-    result.sounds  = push(arena, AssetSlot, 1)
-    result.tags    = push(arena, AssetTag,  0)
-    result.assets  = push(arena, Asset,     len(result.bitmaps) + len(result.sounds))
+    assets.sounds  = push(arena, AssetSlot, 1)
+    assets.tags    = push(arena, AssetTag,  1024*len(AssetTypeId))
+    assets.assets  = push(arena, Asset,     len(assets.bitmaps) + len(assets.sounds))
     
-    begin_asset_type(result, .Shadow)
-    add_bitmap_asset(result, "../assets/shadow.bmp", {0.5, -0.4})
-    end_asset_type(result)
-    // TODO(viktor): this order depends on the enums order for some reason?!
-    
-    begin_asset_type(result, .Rock)
-    add_bitmap_asset(result, "../assets/rocks1.bmp")
-    add_bitmap_asset(result, "../assets/rocks2.bmp")
-    add_bitmap_asset(result, "../assets/rocks3.bmp")
-    add_bitmap_asset(result, "../assets/rocks4.bmp")
-    add_bitmap_asset(result, "../assets/rocks5.bmp")
-    add_bitmap_asset(result, "../assets/rocks7.bmp")
-    end_asset_type(result)
-    
-    begin_asset_type(result, .Sword)
-    add_bitmap_asset(result, "../assets/arrow.bmp" )
-    end_asset_type(result)
-    
-    begin_asset_type(result, .Stair)
-    add_bitmap_asset(result, "../assets/stair.bmp")
-    end_asset_type(result)
-    
-    for &type, index in result.types {
-        type.first_asset_index   = auto_cast index
-        type.one_past_last_index = auto_cast index+1
+    begin_asset_type(assets, .Shadow)
+    add_bitmap_asset(assets, "../assets/shadow.bmp", {0.5, -0.4})
+    end_asset_type(assets)
         
-        asset := &result.assets[type.first_asset_index]
-        asset.first_tag_index         = 0
-        asset.one_past_last_tag_index = 0
-        asset.slot_id                 = type.first_asset_index
-    }
+    begin_asset_type(assets, .Arrow)
+    add_bitmap_asset(assets, "../assets/arrow.bmp" )
+    end_asset_type(assets)
+    
+    begin_asset_type(assets, .Stair)
+    add_bitmap_asset(assets, "../assets/stair.bmp")
+    end_asset_type(assets)
+
+    begin_asset_type(assets, .Rock)
+    add_bitmap_asset(assets, "../assets/rocks1.bmp")
+    add_bitmap_asset(assets, "../assets/rocks2.bmp")
+    add_bitmap_asset(assets, "../assets/rocks3.bmp")
+    add_bitmap_asset(assets, "../assets/rocks4.bmp")
+    add_bitmap_asset(assets, "../assets/rocks5.bmp")
+    add_bitmap_asset(assets, "../assets/rocks7.bmp")
+    end_asset_type(assets)
     
     // TODO(viktor): alignment percentages for these
-    begin_asset_type(result, .Grass)
-    add_bitmap_asset(result, "../assets/grass11.bmp")
-    add_bitmap_asset(result, "../assets/grass12.bmp")
-    add_bitmap_asset(result, "../assets/grass21.bmp")
-    add_bitmap_asset(result, "../assets/grass22.bmp")
-    add_bitmap_asset(result, "../assets/grass31.bmp")
-    add_bitmap_asset(result, "../assets/grass32.bmp")
-    add_bitmap_asset(result, "../assets/flower1.bmp")
-    add_bitmap_asset(result, "../assets/flower2.bmp")
-    end_asset_type(result)
+    begin_asset_type(assets, .Grass)
+    add_bitmap_asset(assets, "../assets/grass11.bmp")
+    add_bitmap_asset(assets, "../assets/grass12.bmp")
+    add_bitmap_asset(assets, "../assets/grass21.bmp")
+    add_bitmap_asset(assets, "../assets/grass22.bmp")
+    add_bitmap_asset(assets, "../assets/grass31.bmp")
+    add_bitmap_asset(assets, "../assets/grass32.bmp")
+    add_bitmap_asset(assets, "../assets/flower1.bmp")
+    add_bitmap_asset(assets, "../assets/flower2.bmp")
+    end_asset_type(assets)
     
     // add_bitmap_asset(result, "../assets/rocks6a.bmp")
     // add_bitmap_asset(result, "../assets/rocks6b.bmp")
@@ -192,12 +209,39 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     // add_bitmap_asset(result, "../assets/rocks8a.bmp")
     // add_bitmap_asset(result, "../assets/rocks8b.bmp")
     // add_bitmap_asset(result, "../assets/rocks8c.bmp")
-    result.player[0]  = DEBUG_load_bmp("../assets/soldier_left.bmp" , v2{0.36, 0.017}) 
-    result.player[1]  = DEBUG_load_bmp("../assets/soldier_right.bmp", v2{0.62, 0.017}) 
-    result.monster[0] = DEBUG_load_bmp("../assets/orc_left.bmp"     , v2{0.7 , 0    }) 
-    result.monster[1] = DEBUG_load_bmp("../assets/orc_right.bmp"    , v2{0.27, 0    }) 
+        
+    begin_asset_type(assets, .Cape)
+    add_bitmap_asset(assets, "../assets/cape_left.bmp",  {0.36, 0.01})
+    add_tag(assets, .FacingDirection, Pi)
+    add_bitmap_asset(assets, "../assets/cape_right.bmp", {0.63, 0.01})
+    add_tag(assets, .FacingDirection, 0)
+    end_asset_type(assets)
+                        
+    begin_asset_type(assets, .Head)
+    add_bitmap_asset(assets, "../assets/head_left.bmp",  {0.36, 0.01})
+    add_tag(assets, .FacingDirection, Pi)
+    add_bitmap_asset(assets, "../assets/head_right.bmp", {0.63, 0.01})
+    add_tag(assets, .FacingDirection, 0)
+    end_asset_type(assets)
+                
+    begin_asset_type(assets, .Body)
+    add_bitmap_asset(assets, "../assets/body_left.bmp",  {0.36, 0.01})
+    add_tag(assets, .FacingDirection, Pi)
+    add_bitmap_asset(assets, "../assets/body_right.bmp", {0.63, 0.01})
+    add_tag(assets, .FacingDirection, 0)
+    end_asset_type(assets)
+                
+    begin_asset_type(assets, .Sword)
+    add_bitmap_asset(assets, "../assets/sword_left.bmp",  {0.36, 0.01})
+    add_tag(assets, .FacingDirection, Pi)
+    add_bitmap_asset(assets, "../assets/sword_right.bmp", {0.63, 0.01})
+    add_tag(assets, .FacingDirection, 0)
+    end_asset_type(assets)
+        
+    assets.monster[0] = DEBUG_load_bmp("../assets/orc_left.bmp"     , v2{0.7 , 0    }) 
+    assets.monster[1] = DEBUG_load_bmp("../assets/orc_right.bmp"    , v2{0.27, 0    }) 
 
-    return result
+    return assets
 }
 
 get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^LoadedBitmap) {
@@ -207,17 +251,42 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Loa
 }
 
 get_first_bitmap_id :: proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
-    type := &assets.types[id]
+    type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
-        asset := &assets.assets[type.first_asset_index]
+        asset := assets.assets[type.first_asset_index]
         result = cast(BitmapId) asset.slot_id
     }
     
     return result
 }
 
-random_asset_from :: proc(assets: ^Assets, series: ^RandomSeries, id: AssetTypeId) -> (result: BitmapId) {
+best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: BitmapId) {
+    type := assets.types[id]
+
+    if type.first_asset_index != type.one_past_last_index {
+        
+        best_diff := max(f32)
+        for asset, asset_index in assets.assets[type.first_asset_index:type.one_past_last_index] {
+    
+            total_weight_diff: f32
+            for tag in assets.tags[asset.first_tag_index:asset.one_past_last_tag_index] {
+                difference := match_vector[ tag.id] - tag.value
+                weighted   := weight_vector[tag.id] * abs(difference)
+                
+                total_weight_diff += weighted
+            }
+            
+            if total_weight_diff < best_diff {
+                best_diff = total_weight_diff
+                result = cast(BitmapId) asset.slot_id
+            }
+        }
+    }
+    
+    return result
+}
+random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
@@ -227,30 +296,6 @@ random_asset_from :: proc(assets: ^Assets, series: ^RandomSeries, id: AssetTypeI
     }
     
     return result
-}
-
-when false {
-    pick_best :: proc(infos: []AssetBitmapInfo, tags:[]AssetTag, match_vector, weight_vector: []f32) -> (result: i32) {
-        best_diff := max(f32)
-        
-        for info, index in infos {
-            total_weight_diff: f32
-            
-            for tag_index := info.first_tag_index; tag_index < info.one_past_last_tag_index; tag_index += 1 {
-                tag := &tags[tag_index]
-                difference :f32= match_vector[tag.id] - tag.value
-                weighted   := weight_vector[tag.id] * abs(difference)
-                total_weight_diff += weighted
-            }
-            
-            if total_weight_diff < best_diff {
-                best_diff = total_weight_diff
-                result = auto_cast index
-            }
-        }
-        
-        return result
-    }
 }
 
 load_sound :: proc(assets: ^Assets, id: SoundId) {}

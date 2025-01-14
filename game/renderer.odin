@@ -46,7 +46,7 @@ Transform :: struct {
     focal_length:          f32, // meters the player is sitting from their monitor
     distance_above_target: f32,
     
-    Sword:  f32,
+    scale:  f32,
     offset: v3,
     
     orthographic: b32,
@@ -105,7 +105,7 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets,  max_push_buffer_size:
     result.global_alpha = 1
     result.assets = assets
 
-    result.transform.Sword  = 1
+    result.transform.scale  = 1
     result.transform.offset = 0
 
     return result
@@ -588,6 +588,7 @@ draw_rectangle_quickly :: proc(buffer: LoadedBitmap, origin, x_axis, y_axis: v2,
             transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 1*4),
         }
 
+        // TODO(viktor): IMPORTANT(viktor): fix this clipping
         if fill_rect.min.x & 3 != 0 {
             start_clip_mask = start_clip_masks[fill_rect.min.x & 3]
             fill_rect.min.x = fill_rect.min.x & (~i32(3))

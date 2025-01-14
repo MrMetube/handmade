@@ -135,9 +135,10 @@ main :: proc() {
         when INTERNAL {
             GLOBAL_debug_show_cursor = true
         }
-
+        
+        // resize_DIB_section(&GLOBAL_back_buffer, 2560, 1440)
         // resize_DIB_section(&GLOBAL_back_buffer, 1920, 1080)
-        resize_DIB_section(&GLOBAL_back_buffer, 960, 540)
+        resize_DIB_section(&GLOBAL_back_buffer, 1280, 720)
 
         if win.RegisterClassW(&window_class) == 0 {
             return // TODO Logging

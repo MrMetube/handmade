@@ -17,9 +17,9 @@ Entity :: struct {
     hit_point_max: u32,
     hit_points: [16]HitPoint,
     
-    sword: EntityReference,
+    arrow: EntityReference,
     
-    facing_index: i32,
+    facing_direction: f32,
     t_bob: f32,
     // TODO(viktor): generation index so we know how " to date" this entity is
     
@@ -128,7 +128,7 @@ end_sim :: proc(region: ^SimRegion, state: ^State) {
         stored.sim.flags -= {.Simulated}
         assert(.Simulated not_in stored.sim.flags)
         
-        store_entity_reference(&stored.sim.sword)
+        store_entity_reference(&stored.sim.arrow)
         // TODO(viktor): Save state back to stored entity, once high entities do state decompression
         
         new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p)
@@ -224,7 +224,7 @@ add_entity_raw :: proc(state: ^State, region: ^SimRegion, storage_index: Storage
             // TODO(viktor): this should really be a decompression not a copy
             entity^ = source.sim
             
-            load_entity_reference(state, region, &entity.sword)
+            load_entity_reference(state, region, &entity.arrow)
             
             assert(.Simulated not_in entity.flags)
             entity.flags += { .Simulated }
@@ -479,10 +479,8 @@ move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3,
         entity.distance_limit = distance_remaining
     }
     
-    if entity.dp.x < 0  {
-        entity.facing_index = 0
-    } else if entity.dp.x > 0 {
-        entity.facing_index = 1
+    if entity.dp.x != 0  {
+        entity.facing_direction = atan2(entity.dp.y, entity.dp.x)
     } else {
         // NOTE(viktor): leave the facing direction what it was
     }
@@ -559,14 +557,14 @@ handle_collision :: proc(state: ^State, a, b: ^Entity) -> (stops_on_collision: b
     a, b := a, b
     if a.type > b.type do swap(&a, &b)
     
-    if b.type == .Sword {
+    if b.type == .Arrow {
         add_collision_rule(state, a.storage_index, b.storage_index, false)
         stops_on_collision = false
     } else {
         stops_on_collision = true
     }
     
-    if a.type == .Monster && b.type == .Sword {
+    if a.type == .Monster && b.type == .Arrow {
         if a.hit_point_max > 0 {
             a.hit_point_max -= 1
         }

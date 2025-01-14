@@ -114,7 +114,7 @@ State :: struct {
     first_free_collision_rule: ^PairwiseCollsionRule,
 
     null_collision, 
-    sword_collision, 
+    arrow_collision, 
     stairs_collision, 
     player_collision, 
     monstar_collision, 
@@ -168,7 +168,7 @@ EntityType :: enum u32 {
     
     Space,
     
-    Hero, Wall, Familiar, Monster, Sword, Stairwell,
+    Hero, Wall, Familiar, Monster, Arrow, Stairwell,
 }
 
 HitPointPartCount :: 4
@@ -193,7 +193,7 @@ ControlledHero :: struct {
 
     // NOTE(viktor): these are the controller requests for simulation
     ddp: v3,
-    dsword: v2,
+    darrow: v2,
     dz: f32,
 }
 
@@ -264,7 +264,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         tile_size_in_meters :: 1.5
         state.null_collision          = make_null_collision(state)
         state.wall_collision          = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters, state.typical_floor_height})
-        state.sword_collision         = make_simple_grounded_collision(state, {0.5, 1, 0.1})
+        state.arrow_collision         = make_simple_grounded_collision(state, {0.5, 1, 0.1})
         state.stairs_collision        = make_simple_grounded_collision(state, {tile_size_in_meters, tile_size_in_meters * 2, state.typical_floor_height + 0.1})
         state.player_collision        = make_simple_grounded_collision(state, {0.75, 0.4, 1})
         state.monstar_collision       = make_simple_grounded_collision(state, {0.75, 0.75, 1.5})
@@ -468,7 +468,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         } else {
             con_hero.dz     = {}
             con_hero.ddp    = {}
-            con_hero.dsword = {}
+            con_hero.darrow = {}
 
             if controller.is_analog {
                 // NOTE(viktor): Use analog movement tuning
@@ -495,18 +495,18 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 }
             }
             
-            con_hero.dsword = {}
+            con_hero.darrow = {}
             if controller.button_up.ended_down {
-                con_hero.dsword =  {0, 1}
+                con_hero.darrow =  {0, 1}
             }
             if controller.button_down.ended_down {
-                con_hero.dsword = -{0, 1}
+                con_hero.darrow = -{0, 1}
             }
             if controller.button_left.ended_down {
-                con_hero.dsword = -{1, 0}
+                con_hero.darrow = -{1, 0}
             }
             if controller.button_right.ended_down {
-                con_hero.dsword =  {1, 0}
+                con_hero.darrow =  {1, 0}
             }
         }
     }
@@ -561,7 +561,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    {
+    if false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -659,14 +659,14 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                         move_spec.speed = 50
                         ddp = con_hero.ddp
 
-                        if con_hero.dsword.x != 0 || con_hero.dsword.y != 0 {
-                            sword := entity.sword.ptr
-                            if sword != nil && .Nonspatial in sword.flags {
+                        if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
+                            arrow := entity.arrow.ptr
+                            if arrow != nil && .Nonspatial in arrow.flags {
                                 dp: v3
-                                dp.xy = 5 * con_hero.dsword
-                                sword.distance_limit = 5
-                                add_collision_rule(state, entity.storage_index, sword.storage_index, false)
-                                make_entity_spatial(sword, entity.p, dp)
+                                dp.xy = 5 * con_hero.darrow
+                                arrow.distance_limit = 5
+                                add_collision_rule(state, entity.storage_index, arrow.storage_index, false)
+                                make_entity_spatial(arrow, entity.p, dp)
                             }
 
                         }
@@ -675,7 +675,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                     }
                 }
 
-            case .Sword:
+            case .Arrow:
                 move_spec.normalize_accelaration = false
                 move_spec.drag = 0
                 move_spec.speed = 0
@@ -726,16 +726,30 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
             // 
             // Post-physics entity work
             // 
+            match_vector  := AssetVector {
+                .FacingDirection = entity.facing_direction
+            }
+            weight_vector := AssetVector {
+                .FacingDirection = 1
+            }
+            
+            head_id : BitmapId = best_match_asset_from(tran_state.assets, .Head, match_vector, weight_vector)
+            body_id : BitmapId = best_match_asset_from(tran_state.assets, .Body, match_vector, weight_vector)
+            cape_id : BitmapId = best_match_asset_from(tran_state.assets, .Cape, match_vector, weight_vector)
+            sword_id: BitmapId = best_match_asset_from(tran_state.assets, .Sword, match_vector, weight_vector)
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
                 push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1.2)
+                push_bitmap(render_group, cape_id,  2)
+                push_bitmap(render_group, body_id,  2)
+                push_bitmap(render_group, head_id,  2)
+                push_bitmap(render_group, sword_id, 2)
                 push_hitpoints(render_group, &entity, 1)
 
-            case .Sword:
+            case .Arrow:
                 push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Sword), 0.1)
+                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Arrow), 0.1)
 
             case .Familiar: 
                 entity.t_bob += dt
@@ -747,7 +761,7 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: LoadedBitmap, input:
                 z := (coeff) * 0.3 + 0.3
 
                 push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
-                push_bitmap(render_group, tran_state.assets.player[entity.facing_index], 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
+                push_bitmap(render_group, head_id, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
                 push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
@@ -1004,7 +1018,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
                 series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
                 
                 for _ in 0..<4 {
-                    stamp := random_asset_from(tran_state.assets, &series, .Grass)
+                    stamp := random_asset_from(tran_state.assets, .Grass, &series)
                     p := center + random_bilateral_2(&series, f32) * half_dim 
                     push_bitmap_by_asset_id(render_group, stamp, 5, offset = V3(p, 0))
                 }
@@ -1076,10 +1090,10 @@ add_grounded_entity :: proc(state: ^State, type: EntityType, p: WorldPosition, c
     return index, stored
 }
 
-add_sword :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_stored_entity(state, .Sword, null_position())
+add_arrow :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_stored_entity(state, .Arrow, null_position())
     
-    entity.sim.collision = state.sword_collision
+    entity.sim.collision = state.arrow_collision
     entity.sim.flags += {.Moveable}
 
     return index, entity
@@ -1110,8 +1124,8 @@ add_player :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity
 
     init_hitpoints(entity, 3)
 
-    sword_index, _ := add_sword(state)
-    entity.sim.sword.index = sword_index
+    arrow_index, _ := add_arrow(state)
+    entity.sim.arrow.index = arrow_index
 
     if state.camera_following_index == 0 {
         state.camera_following_index = index
