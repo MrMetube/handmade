@@ -88,12 +88,27 @@ main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
-    high_queue: PlatformWorkQueue
-    init_work_queue(&high_queue, 8)
-    
-    low_queue: PlatformWorkQueue
-    init_work_queue(&low_queue,  2)
-    
+        
+    when !ODIN_DISABLE_ASSERT {
+        my_assertion_failure :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+            runtime.print_caller_location(loc)
+            runtime.print_string(" ")
+            runtime.print_string(prefix)
+            if len(message) > 0 {
+                runtime.print_string(": ")
+                runtime.print_string(message)
+            }
+            runtime.print_byte('\n')
+            
+            when ODIN_DEBUG {
+                runtime.debug_trap()
+            }
+            runtime.trap()
+        }
+        
+        context.assertion_failure_proc =  my_assertion_failure
+    }
+
     //   
     //   Platform Setup
     //   
@@ -116,6 +131,12 @@ main :: proc() {
     sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
     
     GLOBAL_Running = true
+
+    high_queue: PlatformWorkQueue
+    init_work_queue(&high_queue, 8)
+    
+    low_queue: PlatformWorkQueue
+    init_work_queue(&low_queue,  2)
 
     //   
     //  Windows Setup
@@ -470,7 +491,7 @@ main :: proc() {
             }
 
             if game_lib_is_valid {
-                game_update_and_render(&game_memory, offscreen_buffer, new_input)
+                update_and_render(&game_memory, offscreen_buffer, new_input)
                 
                 handle_debug_cycle_counters :: proc(game_memory: ^GameMemory) {
                     when false && INTERNAL {
@@ -491,7 +512,7 @@ main :: proc() {
                             counter.cycle_count = 0
                             counter.hit_count = 0
                             // 4.8 GHz with 144 fps -> 33.333.333 cycles per frame
-                            // game_update_and_render:
+                            // update_and_render:
                             //  5 Jan 2025             18.476.474
                         }
                     }
@@ -565,7 +586,7 @@ main :: proc() {
                     samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)],
                 }
                 if game_lib_is_valid {
-                    game_output_sound_samples(&game_memory, sound_buffer)
+                    output_sound_samples(&game_memory, sound_buffer)
                 }
 
                 when false &&  INTERNAL {

@@ -126,6 +126,10 @@ State :: struct {
     wall_collision: ^EntityCollisionVolumeGroup,
     
     time: f32,
+    
+    // t_sine: f32
+    test_sound: Sound,
+    test_sample_index: u32,
 }
 
 TransientState :: struct {
@@ -224,9 +228,9 @@ DEBUG_read_entire_file:     DebugReadEntireFile
 PlatformWorkQueue :: struct {}
 
 @(export)
-game_update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput){
-    scoped_timed_block(.game_update_and_render)
-    
+update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput){
+    scoped_timed_block(.update_and_render)
+
     PLATFORM_enqueue_work      = memory.PLATFORM_enqueue_work
     PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
     
@@ -274,6 +278,8 @@ game_update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameI
         state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 1})
         state.standart_room_collision = make_simple_grounded_collision(state, V3(vec_cast(f32, tiles_per_screen) * tile_size_in_meters, state.typical_floor_height * 0.9))
 
+        state.test_sound = DEBUG_load_wav(`../assets/raw/Fantasy RPG Music Pack/Ambient 1.wav`)
+        
         //
         // "World Gen"
         //
@@ -1236,7 +1242,36 @@ clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
+// TODO: Allow sample offsets here for more robust platform options
 @(export)
-game_output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
-    // TODO: Allow sample offsets here for more robust platform options
+output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
+    assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
+    state := cast(^State) raw_data(memory.permanent_storage)
+ 
+    sample_index: u32
+    for sample_out_index in 0..<len(sound_buffer.samples){
+        test_sound_sample_index := state.test_sample_index + sample_index % auto_cast len(state.test_sound.channels[0])
+        sample_value := state.test_sound.channels[0][test_sound_sample_index]
+        sample_index += 1
+        
+        sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
+    }
+    
+    state.test_sample_index += sample_index
+    
+    when false {
+        tone_hz :: 300
+        tone_volumne :: 1000
+        wave_period := sound_buffer.samples_per_second / tone_hz
+
+        for sample_out_index in 0..<len(sound_buffer.samples){
+            sample_value := cast(i16) (sin(state.t_sine) * tone_volumne)
+
+            sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
+            state.t_sine += Tau / f32(wave_period)
+            if state.t_sine > Tau {
+                state.t_sine -= Tau
+            }
+        }
+    }
 }

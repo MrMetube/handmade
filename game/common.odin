@@ -76,7 +76,7 @@ when INTERNAL {
     }
 
     DebugCycleCounterName :: enum {
-        game_update_and_render,
+        update_and_render,
         render_to_output,
         draw_rectangle_slowly,
         draw_rectangle_quickly,

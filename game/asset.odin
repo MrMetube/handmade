@@ -3,7 +3,8 @@ package game
 import "base:intrinsics"
 
 Sound :: struct {
-    samples: []Sample,
+    channel_count: u32,
+    channels: [2][]i16, // 1 or 2 channels of samples
 }
 
 Assets :: struct {
@@ -414,7 +415,7 @@ DEBUG_load_wav :: proc (file_name: string) -> (result: Sound) {
         wave_id: u32,
     }
     
-    WAVE_Format :: enum u32 {
+    WAVE_Format :: enum u16 {
         PCM        = 0x0001,
         IEEE_FLOAT = 0x0003,
         ALAW       = 0x0006,
@@ -423,18 +424,20 @@ DEBUG_load_wav :: proc (file_name: string) -> (result: Sound) {
     }
     
     WAVE_Chunk_ID :: enum u32 {
-        fmt_ = 'f' << 0 | 'm' << 8 | 't' << 16 | ' ' << 24, // 544501094
-        RIFF = 'R' << 0 | 'I' << 8 | 'F' << 16 | 'F' << 24, // 1179011410
-        WAVE = 'W' << 0 | 'A' << 8 | 'V' << 16 | 'E' << 24, // 1163280727
+        None = 0,
+        RIFF = 'R' << 0 | 'I' << 8 | 'F' << 16 | 'F' << 24,
+        WAVE = 'W' << 0 | 'A' << 8 | 'V' << 16 | 'E' << 24,
+        fmt_ = 'f' << 0 | 'm' << 8 | 't' << 16 | ' ' << 24,
+        data = 'd' << 0 | 'a' << 8 | 't' << 16 | 'a' << 24,
     }
     
     WAVE_Chunk :: struct #packed {
-        chunk: u32,
+        id:    WAVE_Chunk_ID,
         size:  u32,
     }
     
     WAVE_fmt :: struct #packed {
-        format_tag: u16,
+        format_tag: WAVE_Format,
         n_channels: u16,
         n_samples_per_seconds: u32,
         avg_bytes_per_sec: u32,
@@ -446,13 +449,103 @@ DEBUG_load_wav :: proc (file_name: string) -> (result: Sound) {
         sub_format: [16]u8,
     }
 
+    RiffIterator :: struct {
+        at:    [^]u8,
+        stop:  rawpointer,
+    }
+    
     if len(contents) > 0 {
-        header := cast(^WAVE_Header) &contents[0]
+        headers := cast([^]WAVE_Header) &contents[0]
+        header := headers[0]
+        behind_header := cast([^]u8) &headers[1]
         
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
         assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
         
-        unimplemented("TODO: DEBUG_load_wav")
+        parse_chunk_at :: #force_inline proc(at: rawpointer, stop: rawpointer) -> (result: RiffIterator) {
+            result.at    = cast([^]u8) at
+            result.stop  = stop
+            
+            return result
+        }
+        
+        is_valid_riff_iter :: #force_inline proc(it: RiffIterator) -> (result: b32) {
+            at := cast(uintpointer) it.at
+            stop := cast(uintpointer) it.stop
+            result = at < stop 
+            
+            return result
+        }
+        
+        next_chunk :: #force_inline proc(it: RiffIterator) -> (result: RiffIterator) {
+            chunk := cast(^WAVE_Chunk)it.at
+            size := chunk.size
+            if size % 2 != 0 {
+                size += 1
+            }
+            result.at = cast([^]u8) &it.at[size + size_of(WAVE_Chunk)]
+            result.stop = it.stop
+            return result
+        }
+        
+        get_chunk_data :: #force_inline proc(it: RiffIterator) -> (result: rawpointer) {
+            result = &it.at[size_of(WAVE_Chunk)]
+            return result
+        }
+        
+        get_chunk_size :: #force_inline proc(it: RiffIterator) -> (result: u32) {
+            chunk := cast(^WAVE_Chunk)it.at
+            result = chunk.size
+            
+            return result
+        }
+        
+        get_type :: #force_inline proc(it: RiffIterator) -> (result: WAVE_Chunk_ID) {
+            chunk := cast(^WAVE_Chunk)it.at
+            result = chunk.id
+            return result
+        }
+        
+        channel_count: u32
+        sample_data: [^]i16
+        sample_data_size: u32
+        
+        for it := parse_chunk_at(behind_header, cast(rawpointer) &behind_header[header.size - 4]); is_valid_riff_iter(it); it = next_chunk(it) {
+            #partial switch get_type(it) {
+            case .fmt_: 
+                fmt := cast(^WAVE_fmt) get_chunk_data(it)
+                assert(fmt.format_tag == .PCM)
+                assert(fmt.n_samples_per_seconds == 48000)
+                assert(fmt.bits_per_sample == 16)
+                assert(fmt.block_align == size_of(u16) * fmt.n_channels)
+                channel_count = cast(u32) fmt.n_channels
+            case .data: 
+                sample_data = cast([^]i16) get_chunk_data(it)
+                sample_data_size = get_chunk_size(it)
+            }
+        }
+        
+        assert(sample_data != nil)
+        assert(channel_count != 0)
+        assert(sample_data_size != 0)
+        
+        sample_count := sample_data_size / (size_of(u16) * channel_count)
+        if channel_count == 1 {
+            result.channels[0] = sample_data[:sample_count]
+            result.channels[1] = nil
+        } else if channel_count == 2 {
+            result.channels[0] = sample_data[:sample_count]
+            result.channels[1] = sample_data[sample_count:sample_count*2]
+            
+            for index:u32 ; index < sample_count; index += 1 {
+                source := sample_data[2*index]
+                sample_data[2*index] = sample_data[index]
+                sample_data[index]   = source
+            }
+        } else {
+            assert(false, "invalid channel count in WAV file")
+        }
+        result.channel_count = channel_count
     }
     
     return result
