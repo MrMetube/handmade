@@ -250,7 +250,7 @@ main :: proc() {
 
     init_xInput()
 
-    input: [2]GameInput
+    input: [2]Input
     old_input, new_input := input[0], input[1]
 
 
@@ -388,7 +388,7 @@ main :: proc() {
 
                 process_pending_messages(&state, new_keyboard_controller)
             }
-            max_controller_count: u32 = min(XUSER_MAX_COUNT, len(GameInput{}.controllers) - 1)
+            max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
             // TODO: Need to not poll disconnected controllers to avoid xinput frame rate hit
             // on older libraries.
             // TODO: should we poll this more frequently
@@ -407,7 +407,7 @@ main :: proc() {
                     // TODO: see if dwPacketNumber increments too rapidly
                     pad := controller_state.Gamepad
 
-                    process_Xinput_button :: proc(new_state: ^GameInputButton, old_state: GameInputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
+                    process_Xinput_button :: proc(new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
                         new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
                         new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
                     }
@@ -729,9 +729,9 @@ begin_recording_input :: proc(state: ^PlatformState, input_recording_index: i32)
     }
 }
 
-record_input :: proc(state: ^PlatformState, input: ^GameInput) {
+record_input :: proc(state: ^PlatformState, input: ^Input) {
     bytes_written: u32
-    win.WriteFile(state.input_record_handle, input, cast(u32) size_of(GameInput), &bytes_written, nil)
+    win.WriteFile(state.input_record_handle, input, cast(u32) size_of(Input), &bytes_written, nil)
 }
 
 end_recording_input :: proc(state: ^PlatformState) {
@@ -752,9 +752,9 @@ begin_replaying_input :: proc(state: ^PlatformState, input_replaying_index: i32)
     }
 }
 
-replay_input :: proc(state: ^PlatformState, input: ^GameInput) {
+replay_input :: proc(state: ^PlatformState, input: ^Input) {
     bytes_read: u32
-    win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(GameInput), &bytes_read, nil)
+    win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
     if bytes_read != 0 {
         // NOTE: there is still input
     } else {
@@ -762,7 +762,7 @@ replay_input :: proc(state: ^PlatformState, input: ^GameInput) {
         replay_index := state.input_replay_index
         end_replaying_input(state)
         begin_replaying_input(state, replay_index)
-        win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(GameInput), &bytes_read, nil)
+        win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
     }
 }
 
@@ -1014,14 +1014,14 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     return result
 }
 
-process_win_keyboard_message :: proc(new_state: ^GameInputButton, is_down: b32) {
+process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
     if is_down != new_state.ended_down {
         new_state.ended_down = is_down
         new_state.half_transition_count += 1
     }
 }
 
-process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^GameInputController) {
+process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^InputController) {
     message : win.MSG
     for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
         switch message.message {

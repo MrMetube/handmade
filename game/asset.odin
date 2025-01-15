@@ -2,11 +2,6 @@ package game
 
 import "base:intrinsics"
 
-Sound :: struct {
-    channel_count: u32,
-    channels: [2][]i16, // 1 or 2 channels of samples
-}
-
 Assets :: struct {
     tran_state: ^TransientState,
     arena: Arena,
@@ -90,8 +85,6 @@ AssetSlot :: struct {
 }
 
 AssetTagId :: enum {
-    // Smoothness,
-    // Flatness,
     FacingDirection, // NOTE(viktor): angle in radians
 }
 
@@ -106,7 +99,12 @@ AssetBitmapInfo :: struct {
 }
 
 AssetSoundInfo :: struct {
-    file_name:        string,
+    file_name:       string,
+    
+    first_sample_index: u32,
+    sample_count:       u32,
+    
+    next_id_to_play: SoundId,
 }
 
 AssetVector :: [AssetTagId]f32
@@ -241,13 +239,31 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     add_sound_asset(assets, "../assets/woosh1.wav")
     add_sound_asset(assets, "../assets/woosh2.wav")
     end_asset_type(assets)
-        
+    
+    
+    sec :: 48000
+    section :: 10 * sec
+    total_sample_count :: 6_418_285
+    last: ^Asset
+    
     begin_asset_type(assets, .Music)
-    add_sound_asset(assets, "../assets/Light Ambience 1.wav")
-    add_sound_asset(assets, "../assets/Light Ambience 2.wav")
-    add_sound_asset(assets, "../assets/Light Ambience 3.wav")
-    add_sound_asset(assets, "../assets/Light Ambience 4.wav")
-    add_sound_asset(assets, "../assets/Light Ambience 5.wav")
+    for first_sample_index: u32; first_sample_index < total_sample_count; first_sample_index += section {
+        sample_count :u32= total_sample_count - first_sample_index
+        if sample_count > section {
+            sample_count = section
+        }
+        
+        this := add_sound_asset(assets, "../assets/Light Ambience 1.wav", first_sample_index, sample_count)
+        if last != nil {
+            get_sound_info(assets, last.id.(SoundId)).next_id_to_play = this.id.(SoundId)
+        }
+        last = this
+    }
+    
+    // add_sound_asset(assets, "../assets/Light Ambience 2.wav")
+    // add_sound_asset(assets, "../assets/Light Ambience 3.wav")
+    // add_sound_asset(assets, "../assets/Light Ambience 4.wav")
+    // add_sound_asset(assets, "../assets/Light Ambience 5.wav")
     end_asset_type(assets)
     
     
@@ -261,6 +277,20 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bit
 
 get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
     result = assets.sounds[id].sound
+    return result
+}
+get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^AssetSoundInfo) {
+    result = &assets.sound_infos[id]
+    return result
+}
+
+
+is_valid_bitmap :: #force_inline proc(id: BitmapId) -> (result: b32) {
+    result = id != 0
+    return result
+}
+is_valid_sound :: #force_inline proc(id: SoundId) -> (result: b32) {
+    result = id != 0
     return result
 }
 
@@ -344,8 +374,13 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
     return result
 }
 
+
+
+prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id) }
+prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id) }
+
 load_sound :: proc(assets: ^Assets, id: SoundId) {
-    if id != 0 {
+    if is_valid_sound(id) {
         if _, ok := atomic_compare_exchange(&assets.sounds[id].state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
                 LoadSoundWork :: struct {
@@ -362,7 +397,7 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                     work := cast(^LoadSoundWork) data
                  
                     info := work.assets.sound_infos[work.id]
-                    work.sound^ = DEBUG_load_wav(info.file_name)
+                    work.sound^ = DEBUG_load_wav(info.file_name, info.first_sample_index, info.sample_count)
                     
                     complete_previous_writes_before_future_writes()
                     
@@ -391,7 +426,7 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
 }
 
 load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
-    if id != 0 {
+    if is_valid_bitmap(id) {
         if _, ok := atomic_compare_exchange(&assets.bitmaps[id].state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
                 LoadBitmapWork :: struct {
@@ -470,26 +505,34 @@ DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percenta
     return id
 }
 
-add_sound_asset :: proc(assets: ^Assets, filename: string) {
+add_sound_asset :: proc(assets: ^Assets, filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (asset: ^Asset) {
     assert(assets.DEBUG_asset_type != nil)
     
-    asset := &assets.assets[assets.DEBUG_asset_type.one_past_last_index]
+    asset = &assets.assets[assets.DEBUG_asset_type.one_past_last_index]
     assets.DEBUG_asset_type.one_past_last_index += 1
+    
     asset.first_tag_index = assets.DEBUG_used_asset_count
     asset.one_past_last_tag_index = asset.first_tag_index
-    asset.id = DEBUG_add_sound_info(assets, filename)
+    
+    asset.id = DEBUG_add_sound_info(assets, filename, first_sample_index, sample_count)
     
     assets.DEBUG_asset = asset
+    
+    return asset
 }
 
-DEBUG_add_sound_info :: proc(assets: ^Assets, file_name: string) -> (result: SoundId) {
+DEBUG_add_sound_info :: proc(assets: ^Assets, file_name: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (result: SoundId) {
     assert(assets.DEBUG_used_sound_count < auto_cast len(assets.sound_infos))
     
     id := cast(SoundId) assets.DEBUG_used_sound_count
     assets.DEBUG_used_sound_count += 1
     
     info := &assets.sound_infos[id]
-    info.file_name = file_name
+    info^ = {
+        file_name          = file_name,
+        first_sample_index = first_sample_index,
+        sample_count       = sample_count,
+    }
     
     return id
 }
@@ -515,7 +558,7 @@ end_asset_type :: proc(assets: ^Assets) {
     assets.DEBUG_asset = nil
 }
 
-DEBUG_load_wav :: proc (file_name: string) -> (result: Sound) {
+DEBUG_load_wav :: proc (file_name: string, section_first_sample_index, section_sample_count: u32) -> (result: Sound) {
     contents := DEBUG_read_entire_file(file_name)
     
     WAVE_Header :: struct #packed {
@@ -654,7 +697,14 @@ DEBUG_load_wav :: proc (file_name: string) -> (result: Sound) {
         } else {
             assert(false, "invalid channel count in WAV file")
         }
+        
         result.channel_count = channel_count
+        if section_sample_count != 0 {
+            assert(section_first_sample_index + section_sample_count <= auto_cast len(result.channels[0]))
+            
+            result.channels[0] = result.channels[0][section_first_sample_index:][:section_sample_count]
+            result.channels[1] = result.channels[1][section_first_sample_index:][:section_sample_count]
+        }
     }
     
     return result

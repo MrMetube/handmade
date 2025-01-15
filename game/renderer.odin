@@ -517,9 +517,8 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     }
 }
  */
-@(
-    enable_target_feature="sse,sse2" ,
-    // optimization_mode="none",
+ @( enable_target_feature="sse,sse2",
+    optimization_mode="favor_size",
 )
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
     scoped_timed_block(.draw_rectangle_quickly)

@@ -8,13 +8,13 @@ uintpointer :: uintptr
 Sample :: [2]i16
 
 GameSoundBuffer :: struct {
-    samples           : []Sample,
+    samples:            []Sample,
     samples_per_second: u32,
 }
 
 ByteColor :: [4]u8
 Bitmap :: struct {
-    memory :       []ByteColor,
+    memory:        []ByteColor,
     width, height: i32, 
     
     pitch: i32,
@@ -23,12 +23,12 @@ Bitmap :: struct {
     width_over_height: f32,
 }
 
-GameInputButton :: struct {
+InputButton :: struct {
     half_transition_count: i32,
-    ended_down :           b32,
+    ended_down:            b32,
 }
 
-GameInputController :: struct {
+InputController :: struct {
     // TODO: allow outputing vibration
     is_connected: b32,
     is_analog:    b32,
@@ -36,7 +36,7 @@ GameInputController :: struct {
     stick_average: [2]f32,
 
     using _buttons_array_and_enum : struct #raw_union {
-        buttons: [18]GameInputButton,
+        buttons: [18]InputButton,
         using _buttons_enum : struct {
             stick_up , stick_down , stick_left , stick_right ,
             button_up, button_down, button_left, button_right,
@@ -44,30 +44,30 @@ GameInputController :: struct {
 
             start, back,
             shoulder_left, shoulder_right,
-            thumb_left   , thumb_right:    GameInputButton,
+            thumb_left   , thumb_right:    InputButton,
         },
     },
 }
-#assert(size_of(GameInputController{}._buttons_array_and_enum.buttons) == size_of(GameInputController{}._buttons_array_and_enum._buttons_enum))
+#assert(size_of(InputController{}._buttons_array_and_enum.buttons) == size_of(InputController{}._buttons_array_and_enum._buttons_enum))
 
-GameInput :: struct {
+Input :: struct {
     delta_time: f32,
     reloaded_executable: b32,
 
     using _mouse_buttons_array_and_enum : struct #raw_union {
-        mouse_buttons: [5]GameInputButton,
+        mouse_buttons: [5]InputButton,
         using _buttons_enum : struct {
             mouse_left,	mouse_right, 
             mouse_middle,
-            mouse_extra1, mouse_extra2 : GameInputButton,
+            mouse_extra1, mouse_extra2 : InputButton,
         },
     },
     mouse_position: [2]i32,
     mouse_wheel:    i32,
 
-    controllers: [5]GameInputController,
+    controllers: [5]InputController,
 }
-#assert(size_of(GameInput{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(GameInput{}._mouse_buttons_array_and_enum._buttons_enum))
+#assert(size_of(Input{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(Input{}._mouse_buttons_array_and_enum._buttons_enum))
 
 when INTERNAL {
     DebugCycleCounter :: struct {

@@ -101,12 +101,14 @@ State :: struct {
     is_initialized: b32,
 
     world_arena: Arena,
+    
+    mixer: Mixer,
 
     typical_floor_height: f32,
     // TODO(viktor): should we allow split-screen?
     camera_following_index: StorageIndex,
     camera_p : WorldPosition,
-    controlled_heroes: [len(GameInput{}.controllers)]ControlledHero,
+    controlled_heroes: [len(Input{}.controllers)]ControlledHero,
 
     stored_entity_count: StorageIndex,
     stored_entities: [100_000]StoredEntity,
@@ -129,16 +131,6 @@ State :: struct {
     
     time: f32,
     
-    first_playing_sound: ^PlayingSound,
-    first_free_playing_sound: ^PlayingSound,
-}
-
-PlayingSound :: struct {
-    next: ^PlayingSound,
-    
-    id: SoundId,
-    volume: [2]f32,
-    samples_played: i32,
 }
 
 TransientState :: struct {
@@ -236,26 +228,8 @@ DEBUG_read_entire_file:     DebugReadEntireFile
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
 PlatformWorkQueue :: struct {}
 
-play_sound :: proc(state: ^State, id: SoundId, volume: [2]f32 = 1) {
-    if state.first_free_playing_sound == nil {
-        // TODO(viktor): do not use the world arena here
-        state.first_free_playing_sound = push(&state.world_arena, PlayingSound)
-    }
-    
-    playing_sound := state.first_free_playing_sound
-    state.first_free_playing_sound = playing_sound.next
-    
-    playing_sound^ = {
-        id = id,
-        volume = volume,
-        next = state.first_playing_sound
-    }
-    
-    state.first_playing_sound = playing_sound
-}
-
 @(export)
-update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput){
+update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     scoped_timed_block(.update_and_render)
 
     PLATFORM_enqueue_work      = memory.PLATFORM_enqueue_work
@@ -278,22 +252,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
         // TODO(viktor): lets start partitioning our memory space
         // TODO(viktor): formalize the world arena and others being after the State in permanent storage
         // initialize the permanent arena first and allocate the state out of it
+        // TODO(viktor): use a sub arena here
         init_arena(&state.world_arena, memory.permanent_storage[size_of(State):])
         
-        state.world = push_struct(&state.world_arena, World)
-        
         state.general_entropy = seed_random_series(500)
-        
-        add_stored_entity(state, .Nil, null_position())
-        state.typical_floor_height = 3
-        
-        world := state.world
-        // TODO(viktor): REMOVE THIS
-        pixels_to_meters :: 1.0 / 42.0
-        chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
-        init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
-        
-
         tiles_per_screen :: [2]i32{15, 7}
 
         tile_size_in_meters :: 1.5
@@ -309,7 +271,18 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
         //
         // "World Gen"
         //
+        
+        state.world = push_struct(&state.world_arena, World)
+        
+        add_stored_entity(state, .Nil, null_position())
+        state.typical_floor_height = 3
 
+        world := state.world
+        // TODO(viktor): REMOVE THIS
+        pixels_to_meters :: 1.0 / 42.0
+        chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
+        init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
+        
         chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
             tile_size_in_meters  :: 1.5
             tile_depth_in_meters :: 3
@@ -410,7 +383,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
             }
         }
 
-
         new_camera_p := chunk_position_from_tile_positon(
             world,
             screen_base.x * tiles_per_screen.x + tiles_per_screen.x/2,
@@ -428,6 +400,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
             familiar_p.y += random_between_i32(&series, 0, 7)
             add_familiar(state, chunk_position_from_tile_positon(world, familiar_p.x, familiar_p.y, familiar_p.z))
         }
+         
+        // TODO(viktor): do not use the world arena here
+        init_mixer(&state.mixer, &state.world_arena)
         
         state.is_initialized = true
     }
@@ -450,7 +425,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
 
         tran_state.assets = make_game_assets(&tran_state.arena, megabytes(64), tran_state)
         
-        play_sound(state, random_sound_from(tran_state.assets, .Music, &state.general_entropy))
+        play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
@@ -547,7 +522,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
             }
             
             if con_hero.darrow != 0 {
-                play_sound(state, random_sound_from(tran_state.assets, .Hit, &state.general_entropy), 0.2)
+                play_sound(&state.mixer, random_sound_from(tran_state.assets, .Hit, &state.general_entropy), 0.2)
             }
         }
     }
@@ -914,88 +889,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
 // TODO: Allow sample offsets here for more robust platform options
 @(export)
 output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
-    assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
-    state := cast(^State) raw_data(memory.permanent_storage)
-    assert(size_of(TransientState) <= len(memory.transient_storage), "The Transient State cannot fit inside the permanent memory")
+    state      := cast(^State)          raw_data(memory.permanent_storage)
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     
-    mixer_memory := begin_temporary_memory(&tran_state.arena)
-    defer end_temporary_memory(mixer_memory)
-    
-    // NOTE(viktor): clear out the summation channels
-    real_channel_0 := push(&tran_state.arena, f32, len(sound_buffer.samples), clear_to_zero = true)
-    real_channel_1 := push(&tran_state.arena, f32, len(sound_buffer.samples), clear_to_zero = true)
-
-    // NOTE(viktor): Sum all sounds
-    in_pointer := &state.first_playing_sound
-    for playing_sound_pointer := &state.first_playing_sound; playing_sound_pointer^ != nil;  {
-        playing_sound := playing_sound_pointer^
-        
-        assert(playing_sound.samples_played >= 0)
-        
-        channel_0_cursor: u32
-        channel_1_cursor: u32
-        
-        sound := get_sound(tran_state.assets, playing_sound.id)
-        samples_in_sound: i32
-        
-        if sound != nil {
-            // TODO(viktor): handle stereo
-            volume_0 := playing_sound.volume[0]
-            volume_1 := playing_sound.volume[1]
-            
-            samples_to_mix := cast(i32) len(sound_buffer.samples)
-            samples_in_sound = cast(i32) len(sound.channels[0])
-            samples_remaining_sound := samples_in_sound - playing_sound.samples_played
-            if samples_to_mix > samples_remaining_sound {
-                samples_to_mix = samples_remaining_sound
-            }
-            
-            for sample_index in playing_sound.samples_played..< playing_sound.samples_played + samples_to_mix {
-                dest_0 := &real_channel_0[channel_0_cursor]
-                dest_1 := &real_channel_1[channel_1_cursor]
-                
-                sample_value := cast(f32) sound.channels[0][sample_index]
-                
-                dest_0^ += volume_0 * sample_value
-                dest_1^ += volume_1 * sample_value
-                
-                channel_0_cursor += 1
-                channel_1_cursor += 1
-            }
-            
-            playing_sound.samples_played += samples_to_mix
-        } else {
-            load_sound(tran_state.assets, playing_sound.id)
-        }
-        
-        if sound != nil && playing_sound.samples_played == samples_in_sound {
-            playing_sound_pointer^         = playing_sound.next
-            playing_sound.next             = state.first_free_playing_sound
-            state.first_free_playing_sound = playing_sound
-        } else {
-            playing_sound_pointer = &playing_sound.next
-        }
-    }
-    
-    { // NOTE(viktor): convert to 16bit and write into output sound buffer
-        source_0 := real_channel_0
-        source_1 := real_channel_1
-        
-        source_0_cursor: u32
-        source_1_cursor: u32
-        for sample_index in 0..<len(sound_buffer.samples) {
-            dest := &sound_buffer.samples[sample_index]
-            
-            dest^ = {
-                cast(i16) (source_0[source_0_cursor] + 0.5),
-                cast(i16) (source_1[source_1_cursor] + 0.5),
-            } 
-            
-            source_0_cursor += 1
-            source_1_cursor += 1
-        }
-    }
+    output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
 }
 
 begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
@@ -1202,6 +1099,8 @@ get_low_entity :: #force_inline proc(state: ^State, storage_index: StorageIndex)
 }
 
 add_stored_entity :: proc(state: ^State, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+    assert(state.world != nil)
+    
     index = state.stored_entity_count
     state.stored_entity_count += 1
     assert(state.stored_entity_count < len(state.stored_entities))
@@ -1335,7 +1234,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
 }
 
 clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
-    // TODO(viktor): need to make a better datastructute that allows for
+    // TODO(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
     // NOTE(viktor): One way to make removal easy would be to always
     // add _both_ orders of the pairs of storage indices to the

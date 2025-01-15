@@ -48,6 +48,6 @@ init_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
 game_lib : win.HMODULE
 
 @(private="file")
-proc_update_and_render    :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: GameInput)
+proc_update_and_render    :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: Input)
 @(private="file")
 proc_output_sound_samples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
