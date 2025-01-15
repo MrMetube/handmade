@@ -562,7 +562,7 @@ DEBUG_load_wav :: proc (file_name: string, section_first_sample_index, section_s
     contents := DEBUG_read_entire_file(file_name)
     
     WAVE_Header :: struct #packed {
-        riff: u32,
+        riff:    u32,
         size:    u32,
         wave_id: u32,
     }
@@ -584,26 +584,26 @@ DEBUG_load_wav :: proc (file_name: string, section_first_sample_index, section_s
     }
     
     WAVE_Chunk :: struct #packed {
-        id:    WAVE_Chunk_ID,
-        size:  u32,
+        id:   WAVE_Chunk_ID,
+        size: u32,
     }
     
     WAVE_fmt :: struct #packed {
-        format_tag: WAVE_Format,
-        n_channels: u16,
+        format_tag:            WAVE_Format,
+        n_channels:            u16,
         n_samples_per_seconds: u32,
-        avg_bytes_per_sec: u32,
-        block_align: u16,
-        bits_per_sample: u16,
-        cb_size: u16,
+        avg_bytes_per_sec:     u32,
+        block_align:           u16,
+        bits_per_sample:       u16,
+        cb_size:               u16,
         valid_bits_per_sample: u16,
-        channel_mask: u32,
-        sub_format: [16]u8,
+        channel_mask:          u32,
+        sub_format:            [16]u8,
     }
 
     RiffIterator :: struct {
-        at:    [^]u8,
-        stop:  rawpointer,
+        at:   [^]u8,
+        stop: rawpointer,
     }
     
     if len(contents) > 0 {
@@ -658,8 +658,8 @@ DEBUG_load_wav :: proc (file_name: string, section_first_sample_index, section_s
             return result
         }
         
-        channel_count: u32
-        sample_data: [^]i16
+        channel_count:    u32
+        sample_data:      [^]i16
         sample_data_size: u32
         
         for it := parse_chunk_at(behind_header, cast(rawpointer) &behind_header[header.size - 4]); is_valid_riff_iter(it); it = next_chunk(it) {
@@ -700,10 +700,22 @@ DEBUG_load_wav :: proc (file_name: string, section_first_sample_index, section_s
         
         result.channel_count = channel_count
         if section_sample_count != 0 {
-            assert(section_first_sample_index + section_sample_count <= auto_cast len(result.channels[0]))
+            assert(section_first_sample_index + section_sample_count <= sample_count)
             
             result.channels[0] = result.channels[0][section_first_sample_index:][:section_sample_count]
             result.channels[1] = result.channels[1][section_first_sample_index:][:section_sample_count]
+        }
+        
+        if section_first_sample_index + section_sample_count == sample_count {
+            // TODO(viktor): all sounds have to be padded with their subsequent sound
+            // out to 8 samples past their end
+            for &channel in result.channels {
+                channel = (raw_data(channel))[:sample_count+8]
+                
+                for sample_index in sample_count..<sample_count+8 {
+                    channel[sample_index] = 0
+                } 
+            }
         }
     }
     
@@ -714,27 +726,27 @@ DEBUG_load_bmp :: proc (file_name: string, alignment_percentage: v2 = 0.5) -> (r
     contents := DEBUG_read_entire_file(file_name)
     
     BMPHeader :: struct #packed {
-        file_type     : [2]u8,
-        file_size     : u32,
-        reserved_1    : u16,
-        reserved_2    : u16,
-        bitmap_offset : u32,
-        size          : u32,
-        width         : i32,
-        height        : i32,
-        planes        : u16,
+        file_type:      [2]u8,
+        file_size:      u32,
+        reserved_1:     u16,
+        reserved_2:     u16,
+        bitmap_offset:  u32,
+        size:           u32,
+        width:          i32,
+        height:         i32,
+        planes:         u16,
         bits_per_pixel: u16,
 
-        compression          : u32,
-        size_of_bitmap       : u32,
+        compression:           u32,
+        size_of_bitmap:        u32,
         horizontal_resolution: i32,
-        vertical_resolution  : i32,
-        colors_used          : u32,
-        colors_important     : u32,
+        vertical_resolution:   i32,
+        colors_used:           u32,
+        colors_important:      u32,
 
-        red_mask  ,
+        red_mask,
         green_mask,
-        blue_mask : u32,
+        blue_mask: u32,
     }
 
     // NOTE: If you are using this generically for some reason,

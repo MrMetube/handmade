@@ -260,7 +260,8 @@ main :: proc() {
     game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
     // TODO: make this like sixty seconds?
     // TODO: pool with bitmap alloc
-    MaxPossibleOverlap :: 4*size_of(Sample)
+    // TODO(viktor): remove MaxPossibleOverlap
+    MaxPossibleOverlap :: 8*size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 
     context.allocator = {}
@@ -579,8 +580,10 @@ main :: proc() {
 
                 sound_buffer := GameSoundBuffer{
                     samples_per_second = sound_output.samples_per_second,
-                    samples = samples[:(bytes_to_write/sound_output.bytes_per_sample)],
+                    samples = samples[:align8(bytes_to_write/sound_output.bytes_per_sample)],
                 }
+                bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
+                
                 if game_lib_is_valid {
                     output_sound_samples(&game_memory, sound_buffer)
                 }

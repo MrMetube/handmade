@@ -256,6 +256,17 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         // TODO(viktor): use a sub arena here
         init_arena(&state.world_arena, memory.permanent_storage[size_of(State):])
         
+        state.world = push_struct(&state.world_arena, World)
+        
+        add_stored_entity(state, .Nil, null_position())
+        state.typical_floor_height = 3
+
+        world := state.world
+        // TODO(viktor): REMOVE THIS
+        pixels_to_meters :: 1.0 / 42.0
+        chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
+        init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
+        
         state.general_entropy = seed_random_series(500)
         tiles_per_screen :: [2]i32{15, 7}
 
@@ -272,17 +283,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         //
         // "World Gen"
         //
-        
-        state.world = push_struct(&state.world_arena, World)
-        
-        add_stored_entity(state, .Nil, null_position())
-        state.typical_floor_height = 3
-
-        world := state.world
-        // TODO(viktor): REMOVE THIS
-        pixels_to_meters :: 1.0 / 42.0
-        chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
-        init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
         
         chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
             tile_size_in_meters  :: 1.5

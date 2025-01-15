@@ -2,6 +2,10 @@ package game
 
 import "base:intrinsics"
 
+// 
+// Common Definitions
+// 
+
 rawpointer  :: rawptr
 uintpointer :: uintptr
 
@@ -143,4 +147,52 @@ when INTERNAL {
         }
     }
     
+}
+
+
+// 
+// Utilities
+// 
+
+kilobytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return value * 1024 }
+megabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return kilobytes(value) * 1024 }
+gigabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return megabytes(value) * 1024 }
+terabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return gigabytes(value) * 1024 }
+
+atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
+    ok_: bool
+    was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
+    ok = cast(b32) ok_
+    return was, ok
+}
+
+complete_previous_writes_before_future_writes :: #force_inline proc "contextless" () {
+    // TODO(viktor): what should that actually be
+    intrinsics.atomic_thread_fence(.Seq_Cst)
+}
+
+align2     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  1) &~  1 }
+align4     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  3) &~  3 }
+align8     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  7) &~  7 }
+align16    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 15) &~ 15 }
+align32    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 31) &~ 31 }
+align_pow2 :: #force_inline proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
+
+swap :: #force_inline proc "contextless" (a, b: ^$T) {
+    b^, a^ = a^, b^
+}
+
+safe_truncate :: proc{
+    safe_truncate_u64,
+    safe_truncate_i64,
+}
+
+safe_truncate_u64 :: #force_inline proc(value: u64) -> u32 {
+    assert(value <= 0xFFFFFFFF)
+    return cast(u32) value
+}
+
+safe_truncate_i64 :: #force_inline proc(value: i64) -> i32 {
+    assert(value <= 0x7FFFFFFF)
+    return cast(i32) value
 }
