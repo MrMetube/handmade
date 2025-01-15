@@ -25,6 +25,7 @@ Assets :: struct {
     
     // TODO(viktor): These should go away once we actually load an asset file
     DEBUG_used_bitmap_count: u32,
+    DEBUG_used_sound_count: u32,
     DEBUG_used_asset_count: u32,
     DEBUG_used_tag_count: u32,
     DEBUG_asset_type: ^AssetType,
@@ -52,13 +53,27 @@ AssetType :: struct {
 
 AssetTypeId :: enum {
     None,
-    // NOTE(viktor): plain assets
+    
+    //
+    // NOTE(viktor): Bitmaps
+    //
+    
     Shadow, Wall, Arrow, Stair, 
-    // NOTE(viktor): variant assets
-    Rock,Grass,
-    // NOTE(viktor): structured assets
+    
+    // variant
+    Rock, Grass,
+    
+    // structured
     Head, Body, Cape, Sword,
     Monster,
+    
+    //
+    // NOTE(viktor): Sounds
+    //
+    
+    // variant
+    Blop, Drop, Woosh, Hit,
+    Music,
 }
 
 AssetState :: enum {
@@ -104,7 +119,7 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     assets.bitmaps      = push(arena, AssetSlot,       256*len(AssetTypeId))
     assets.bitmap_infos = push(arena, AssetBitmapInfo, len(assets.bitmaps))
     
-    assets.sounds      = push(arena, AssetSlot, 1)
+    assets.sounds      = push(arena, AssetSlot,      256*len(AssetTypeId))
     assets.sound_infos = push(arena, AssetSoundInfo, len(assets.sounds))
     
     assets.tags    = push(arena, AssetTag,  1024*len(AssetTypeId))
@@ -119,6 +134,10 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     
     assets.tag_ranges[.FacingDirection] = Tau
     
+    // 
+    // NOTE(Viktor): Bitmaps
+    // 
+        
     begin_asset_type(assets, .Shadow)
     add_bitmap_asset(assets, "../assets/shadow.bmp", {0.5, -0.4})
     end_asset_type(assets)
@@ -193,27 +212,85 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     add_bitmap_asset(assets, "../assets/orc_right.bmp"    , v2{0.27, 0})
     add_tag(assets, .FacingDirection, 0)
     end_asset_type(assets)
+    
+    // 
+    // NOTE(viktor): Sounds
+    // 
+    
+    begin_asset_type(assets, .Blop)
+    add_sound_asset(assets, "../assets/blop0.wav")
+    add_sound_asset(assets, "../assets/blop1.wav")
+    add_sound_asset(assets, "../assets/blop2.wav")
+    end_asset_type(assets)
         
+    begin_asset_type(assets, .Drop)
+    add_sound_asset(assets, "../assets/drop0.wav")
+    add_sound_asset(assets, "../assets/drop1.wav")
+    add_sound_asset(assets, "../assets/drop2.wav")
+    end_asset_type(assets)
+        
+    begin_asset_type(assets, .Hit)
+    add_sound_asset(assets, "../assets/hit0.wav")
+    add_sound_asset(assets, "../assets/hit1.wav")
+    add_sound_asset(assets, "../assets/hit2.wav")
+    add_sound_asset(assets, "../assets/hit3.wav")
+    end_asset_type(assets)
+                
+    begin_asset_type(assets, .Woosh)
+    add_sound_asset(assets, "../assets/woosh0.wav")
+    add_sound_asset(assets, "../assets/woosh1.wav")
+    add_sound_asset(assets, "../assets/woosh2.wav")
+    end_asset_type(assets)
+        
+    begin_asset_type(assets, .Music)
+    add_sound_asset(assets, "../assets/Light Ambience 1.wav")
+    add_sound_asset(assets, "../assets/Light Ambience 2.wav")
+    add_sound_asset(assets, "../assets/Light Ambience 3.wav")
+    add_sound_asset(assets, "../assets/Light Ambience 4.wav")
+    add_sound_asset(assets, "../assets/Light Ambience 5.wav")
+    end_asset_type(assets)
+    
+    
     return assets
 }
 
 get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
     result = assets.bitmaps[id].bitmap
-    
     return result
 }
 
-get_first_bitmap_id :: proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
+get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
+    result = assets.sounds[id].sound
+    return result
+}
+
+first_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: SoundId) {
+    result = first_asset_from(assets, id).(SoundId)
+    return result
+}
+first_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
+    result = first_asset_from(assets, id).(BitmapId)
+    return result
+}
+first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: AssetId) {
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
         asset := assets.assets[type.first_asset_index]
-        result = asset.id.(BitmapId)
+        result = asset.id
     }
     
     return result
 }
 
+best_match_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: SoundId) {
+    result = best_match_asset_from(assets, id, match_vector, weight_vector).(SoundId)
+    return result
+}
+best_match_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: BitmapId) {
+    result = best_match_asset_from(assets, id, match_vector, weight_vector).(BitmapId)
+    return result
+}
 best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: AssetId) {
     type := assets.types[id]
 
@@ -247,6 +324,14 @@ best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, we
     return result
 }
 
+random_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: SoundId) {
+    result = random_asset_from(assets, id, series).(SoundId)
+    return result
+}
+random_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
+    result = random_asset_from(assets, id, series).(BitmapId)
+    return result
+}
 random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: AssetId) {
     type := assets.types[id]
     
@@ -351,19 +436,6 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
     }
 }
 
-DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percentage: v2) -> (result: BitmapId) {
-    assert(assets.DEBUG_used_bitmap_count < auto_cast len(assets.bitmap_infos))
-    
-    id := cast(BitmapId) assets.DEBUG_used_bitmap_count
-    assets.DEBUG_used_bitmap_count += 1
-    
-    info := &assets.bitmap_infos[id]
-    info.align_percentage = align_percentage
-    info.file_name        = file_name
-    
-    return id
-}
-
 begin_asset_type :: proc(assets: ^Assets, id: AssetTypeId) {
     assert(assets.DEBUG_asset_type == nil)
     assert(assets.DEBUG_asset == nil)
@@ -383,6 +455,43 @@ add_bitmap_asset :: proc(assets: ^Assets, filename: string, align_percentage: v2
     asset.id = DEBUG_add_bitmap_info(assets, filename, align_percentage)
     
     assets.DEBUG_asset = asset
+}
+
+DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percentage: v2) -> (result: BitmapId) {
+    assert(assets.DEBUG_used_bitmap_count < auto_cast len(assets.bitmap_infos))
+    
+    id := cast(BitmapId) assets.DEBUG_used_bitmap_count
+    assets.DEBUG_used_bitmap_count += 1
+    
+    info := &assets.bitmap_infos[id]
+    info.align_percentage = align_percentage
+    info.file_name        = file_name
+    
+    return id
+}
+
+add_sound_asset :: proc(assets: ^Assets, filename: string) {
+    assert(assets.DEBUG_asset_type != nil)
+    
+    asset := &assets.assets[assets.DEBUG_asset_type.one_past_last_index]
+    assets.DEBUG_asset_type.one_past_last_index += 1
+    asset.first_tag_index = assets.DEBUG_used_asset_count
+    asset.one_past_last_tag_index = asset.first_tag_index
+    asset.id = DEBUG_add_sound_info(assets, filename)
+    
+    assets.DEBUG_asset = asset
+}
+
+DEBUG_add_sound_info :: proc(assets: ^Assets, file_name: string) -> (result: SoundId) {
+    assert(assets.DEBUG_used_sound_count < auto_cast len(assets.sound_infos))
+    
+    id := cast(SoundId) assets.DEBUG_used_sound_count
+    assets.DEBUG_used_sound_count += 1
+    
+    info := &assets.sound_infos[id]
+    info.file_name = file_name
+    
+    return id
 }
 
 add_tag :: proc(assets: ^Assets, id: AssetTagId, value: f32) {

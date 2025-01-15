@@ -6,7 +6,7 @@ RandomSeries :: struct {
     index: u32,
 }
 
-random_seed :: proc(seed: u32) -> (result: RandomSeries) {
+seed_random_series :: proc(seed: u32) -> (result: RandomSeries) {
     result = { index = seed % len(random_number_table) }
     return result
 }

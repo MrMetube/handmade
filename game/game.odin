@@ -124,12 +124,21 @@ State :: struct {
     familiar_collision, 
     standart_room_collision,
     wall_collision: ^EntityCollisionVolumeGroup,
+
+    general_entropy: RandomSeries,
     
     time: f32,
     
-    // t_sine: f32
-    test_sound: Sound,
-    test_sample_index: u32,
+    first_playing_sound: ^PlayingSound,
+    first_free_playing_sound: ^PlayingSound,
+}
+
+PlayingSound :: struct {
+    next: ^PlayingSound,
+    
+    id: SoundId,
+    volume: [2]f32,
+    samples_played: i32,
 }
 
 TransientState :: struct {
@@ -227,6 +236,24 @@ DEBUG_read_entire_file:     DebugReadEntireFile
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
 PlatformWorkQueue :: struct {}
 
+play_sound :: proc(state: ^State, id: SoundId, volume: [2]f32 = 1) {
+    if state.first_free_playing_sound == nil {
+        // TODO(viktor): do not use the world arena here
+        state.first_free_playing_sound = push(&state.world_arena, PlayingSound)
+    }
+    
+    playing_sound := state.first_free_playing_sound
+    state.first_free_playing_sound = playing_sound.next
+    
+    playing_sound^ = {
+        id = id,
+        volume = volume,
+        next = state.first_playing_sound
+    }
+    
+    state.first_playing_sound = playing_sound
+}
+
 @(export)
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput){
     scoped_timed_block(.update_and_render)
@@ -254,9 +281,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
         init_arena(&state.world_arena, memory.permanent_storage[size_of(State):])
         
         state.world = push_struct(&state.world_arena, World)
-
+        
+        state.general_entropy = seed_random_series(500)
+        
         add_stored_entity(state, .Nil, null_position())
-
         state.typical_floor_height = 3
         
         world := state.world
@@ -278,8 +306,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
         state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 1})
         state.standart_room_collision = make_simple_grounded_collision(state, V3(vec_cast(f32, tiles_per_screen) * tile_size_in_meters, state.typical_floor_height * 0.9))
 
-        state.test_sound = DEBUG_load_wav(`../assets/raw/Fantasy RPG Music Pack/Ambient 1.wav`)
-        
         //
         // "World Gen"
         //
@@ -300,7 +326,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
         door_top, door_bottom: b32
         stair_up, stair_down: b32
 
-        series := random_seed(0)
+        series := seed_random_series(0)
         screen_base: [3]i32
         screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
         created_stair: b32
@@ -424,6 +450,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
 
         tran_state.assets = make_game_assets(&tran_state.arena, megabytes(64), tran_state)
         
+        play_sound(state, random_sound_from(tran_state.assets, .Music, &state.general_entropy))
+        
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
         for &ground_buffer in tran_state.ground_buffers {
@@ -516,6 +544,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
             }
             if controller.button_right.ended_down {
                 con_hero.darrow =  {1, 0}
+            }
+            
+            if con_hero.darrow != 0 {
+                play_sound(state, random_sound_from(tran_state.assets, .Hit, &state.general_entropy), 0.2)
             }
         }
     }
@@ -742,14 +774,14 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
                 .FacingDirection = 1
             }
             
-            head_id  := best_match_asset_from(tran_state.assets, .Head, match_vector, weight_vector).(BitmapId)
-            body_id  := best_match_asset_from(tran_state.assets, .Body, match_vector, weight_vector).(BitmapId)
-            cape_id  := best_match_asset_from(tran_state.assets, .Cape, match_vector, weight_vector).(BitmapId)
-            sword_id := best_match_asset_from(tran_state.assets, .Sword, match_vector, weight_vector).(BitmapId)
+            head_id  := best_match_bitmap_from(tran_state.assets, .Head, match_vector, weight_vector)
+            body_id  := best_match_bitmap_from(tran_state.assets, .Body, match_vector, weight_vector)
+            cape_id  := best_match_bitmap_from(tran_state.assets, .Cape, match_vector, weight_vector)
+            sword_id := best_match_bitmap_from(tran_state.assets, .Sword, match_vector, weight_vector)
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, cape_id,  1.6)
                 push_bitmap(render_group, body_id,  1.6)
                 push_bitmap(render_group, head_id,  1.6)
@@ -757,8 +789,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
                 push_hitpoints(render_group, &entity, 1)
 
             case .Arrow:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Arrow), 0.1)
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Arrow), 0.1)
 
             case .Familiar: 
                 entity.t_bob += dt
@@ -769,18 +801,18 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
                 push_bitmap(render_group, head_id, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                monster_id := best_match_asset_from(tran_state.assets, .Monster, match_vector, weight_vector).(BitmapId)
+                monster_id := best_match_bitmap_from(tran_state.assets, .Monster, match_vector, weight_vector)
 
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, monster_id, 1.5)
                 push_hitpoints(render_group, &entity, 1.6)
             
             case .Wall:
-                push_bitmap(render_group, get_first_bitmap_id(tran_state.assets, AssetTypeId.Rock), 1.5)
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Rock), 1.5)
     
             case .Stairwell: 
                 push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
@@ -874,6 +906,96 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: GameInput)
     
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
+}
+
+// NOTE: at the moment this has to be a really fast function. It shall not be slower than a
+// millisecond or so.
+// TODO: reduce the pressure on the performance of this function by measuring
+// TODO: Allow sample offsets here for more robust platform options
+@(export)
+output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
+    assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
+    state := cast(^State) raw_data(memory.permanent_storage)
+    assert(size_of(TransientState) <= len(memory.transient_storage), "The Transient State cannot fit inside the permanent memory")
+    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
+    
+    mixer_memory := begin_temporary_memory(&tran_state.arena)
+    defer end_temporary_memory(mixer_memory)
+    
+    // NOTE(viktor): clear out the summation channels
+    real_channel_0 := push(&tran_state.arena, f32, len(sound_buffer.samples), clear_to_zero = true)
+    real_channel_1 := push(&tran_state.arena, f32, len(sound_buffer.samples), clear_to_zero = true)
+
+    // NOTE(viktor): Sum all sounds
+    in_pointer := &state.first_playing_sound
+    for playing_sound_pointer := &state.first_playing_sound; playing_sound_pointer^ != nil;  {
+        playing_sound := playing_sound_pointer^
+        
+        assert(playing_sound.samples_played >= 0)
+        
+        channel_0_cursor: u32
+        channel_1_cursor: u32
+        
+        sound := get_sound(tran_state.assets, playing_sound.id)
+        samples_in_sound: i32
+        
+        if sound != nil {
+            // TODO(viktor): handle stereo
+            volume_0 := playing_sound.volume[0]
+            volume_1 := playing_sound.volume[1]
+            
+            samples_to_mix := cast(i32) len(sound_buffer.samples)
+            samples_in_sound = cast(i32) len(sound.channels[0])
+            samples_remaining_sound := samples_in_sound - playing_sound.samples_played
+            if samples_to_mix > samples_remaining_sound {
+                samples_to_mix = samples_remaining_sound
+            }
+            
+            for sample_index in playing_sound.samples_played..< playing_sound.samples_played + samples_to_mix {
+                dest_0 := &real_channel_0[channel_0_cursor]
+                dest_1 := &real_channel_1[channel_1_cursor]
+                
+                sample_value := cast(f32) sound.channels[0][sample_index]
+                
+                dest_0^ += volume_0 * sample_value
+                dest_1^ += volume_1 * sample_value
+                
+                channel_0_cursor += 1
+                channel_1_cursor += 1
+            }
+            
+            playing_sound.samples_played += samples_to_mix
+        } else {
+            load_sound(tran_state.assets, playing_sound.id)
+        }
+        
+        if sound != nil && playing_sound.samples_played == samples_in_sound {
+            playing_sound_pointer^         = playing_sound.next
+            playing_sound.next             = state.first_free_playing_sound
+            state.first_free_playing_sound = playing_sound
+        } else {
+            playing_sound_pointer = &playing_sound.next
+        }
+    }
+    
+    { // NOTE(viktor): convert to 16bit and write into output sound buffer
+        source_0 := real_channel_0
+        source_1 := real_channel_1
+        
+        source_0_cursor: u32
+        source_1_cursor: u32
+        for sample_index in 0..<len(sound_buffer.samples) {
+            dest := &sound_buffer.samples[sample_index]
+            
+            dest^ = {
+                cast(i16) (source_0[source_0_cursor] + 0.5),
+                cast(i16) (source_1[source_1_cursor] + 0.5),
+            } 
+            
+            source_0_cursor += 1
+            source_1_cursor += 1
+        }
+    }
 }
 
 begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
@@ -1026,10 +1148,10 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
                 
                 center := vec_cast(f32, offset_x, offset_y) * buffer_size
                 // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
-                series := random_seed(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
+                series := seed_random_series(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
                 
                 for _ in 0..<4 {
-                    stamp := random_asset_from(tran_state.assets, .Grass, &series).(BitmapId)
+                    stamp := random_bitmap_from(tran_state.assets, .Grass, &series)
                     p := center + random_bilateral_2(&series, f32) * half_dim 
                     push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
                 }
@@ -1234,43 +1356,6 @@ clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
                 state.first_free_collision_rule = removed_rule
             } else {
                 rule = &(rule^.next_in_hash)
-            }
-        }
-    }
-}
-
-// NOTE: at the moment this has to be a really fast function. It shall not be slower than a
-// millisecond or so.
-// TODO: reduce the pressure on the performance of this function by measuring
-// TODO: Allow sample offsets here for more robust platform options
-@(export)
-output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
-    assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
-    state := cast(^State) raw_data(memory.permanent_storage)
- 
-    sample_index: u32
-    for sample_out_index in 0..<len(sound_buffer.samples){
-        test_sound_sample_index := state.test_sample_index + sample_index % auto_cast len(state.test_sound.channels[0])
-        sample_value := state.test_sound.channels[0][test_sound_sample_index]
-        sample_index += 1
-        
-        sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
-    }
-    
-    state.test_sample_index += sample_index
-    
-    when false {
-        tone_hz :: 300
-        tone_volumne :: 1000
-        wave_period := sound_buffer.samples_per_second / tone_hz
-
-        for sample_out_index in 0..<len(sound_buffer.samples){
-            sample_value := cast(i16) (sin(state.t_sine) * tone_volumne)
-
-            sound_buffer.samples[sample_out_index] = {sample_value, sample_value}
-            state.t_sine += Tau / f32(wave_period)
-            if state.t_sine > Tau {
-                state.t_sine -= Tau
             }
         }
     }
