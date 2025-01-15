@@ -456,13 +456,16 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         tran_state.is_initialized = true
     }
     
-    if input.reloaded_executable {
-        for &ground_buffer in tran_state.ground_buffers {
-            ground_buffer.p = null_position()
+    when false {
+        // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
+        if input.reloaded_executable {
+            for &ground_buffer in tran_state.ground_buffers {
+                ground_buffer.p = null_position()
+            }
+            
+            make_sphere_normal_map(tran_state.test_normal, 0)
+            make_sphere_diffuse_map(tran_state.test_diffuse)
         }
-        
-        make_sphere_normal_map(tran_state.test_normal, 0)
-        make_sphere_diffuse_map(tran_state.test_diffuse)
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -470,7 +473,13 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     // ---------------------- ---------------------- ----------------------
 
     world := state.world
-
+    
+    when false {
+        // NOTE(viktor): test sound panning with the mouse 
+        music_volume := vec_cast(f32, input.mouse_position) / vec_cast(f32, buffer.width, buffer.height)
+        change_volume(&state.mixer, state.music, 0.01, music_volume)
+    }
+    
     for controller, controller_index in input.controllers {
         con_hero := &state.controlled_heroes[controller_index]
 
@@ -520,11 +529,14 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             }
             if controller.button_left.ended_down {
                 con_hero.darrow = -{1, 0}
-                change_volume(&state.mixer, state.music, 3, {1,0})
+                // change_volume(&state.mixer, state.music, 3, {1,0})
+                change_pitch(&state.mixer, state.music, state.music.d_sample - 0.1)
+                
             }
             if controller.button_right.ended_down {
                 con_hero.darrow =  {1, 0}
-                change_volume(&state.mixer, state.music, 3, {0,1})
+                // change_volume(&state.mixer, state.music, 3, {0,1})
+                change_pitch(&state.mixer, state.music, state.music.d_sample + 0.1)
             }
             
             if con_hero.darrow != 0 {
@@ -583,7 +595,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    if false {
+    when false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -615,7 +627,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                     }
                     
                     if furthest != nil {
-                        // TODO(viktor): should this be a low priority queue
                         fill_ground_chunk(tran_state, state, furthest, chunk_center)
                     }
                 }

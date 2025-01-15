@@ -53,6 +53,10 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
         dwBufferBytes = buffer_size_in_bytes,
         lpwfxFormat   = &wave_format,
     }
+    when INTERNAL {
+        // TODO(viktor): should this be a setting?
+        actual_sound_buffer_description.dwFlags |= DSBCAPS_GLOBALFOCUS
+    }
     
     if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &GLOBAL_sound_buffer, nil); win.FAILED(result) {
         // TODO Diagnostics

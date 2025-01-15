@@ -257,7 +257,7 @@ main :: proc() {
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
-    game_lib_is_valid, game_dll_write_time := init_game_lib(game_dll_name, temp_dll_name, lock_name)
+    game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
     // TODO: make this like sixty seconds?
     // TODO: pool with bitmap alloc
     samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -339,14 +339,15 @@ main :: proc() {
         //   
         new_input.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
+            // NOTE(viktor): clear out the queue, as they may call into unloaded game code
+            complete_all_work(&high_queue)
+            complete_all_work(&low_queue)
+            
             // TODO: if this is too slow the audio and the whole game will lag
-            game_lib_is_valid, game_dll_write_time = init_game_lib(game_dll_name, temp_dll_name, lock_name)
+            unload_game_lib()
+            game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
             
             new_input.reloaded_executable = true
-            
-            // NOTE(viktor): clear out the queue, as they may call into unloaded game code
-            low_queue  = { semaphore_handle = low_queue.semaphore_handle , entries = low_queue.entries  }
-            high_queue = { semaphore_handle = high_queue.semaphore_handle, entries = high_queue.entries }
         }
 
         //   

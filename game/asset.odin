@@ -500,7 +500,7 @@ DEBUG_add_bitmap_info :: proc(assets: ^Assets, file_name: string, align_percenta
     
     info := &assets.bitmap_infos[id]
     info.align_percentage = align_percentage
-    info.file_name        = file_name
+    info.file_name        = push_string(&assets.arena, file_name)
     
     return id
 }
@@ -529,7 +529,7 @@ DEBUG_add_sound_info :: proc(assets: ^Assets, file_name: string, first_sample_in
     
     info := &assets.sound_infos[id]
     info^ = {
-        file_name          = file_name,
+        file_name          = push_string(&assets.arena, file_name),
         first_sample_index = first_sample_index,
         sample_count       = sample_count,
     }

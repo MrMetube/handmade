@@ -15,7 +15,8 @@ PlayingSound :: struct {
     next: ^PlayingSound,
     id:   SoundId,
     
-    samples_played: i32,
+    samples_played: f32,
+    d_sample:       f32, 
     
     current_volume:   [2]f32,
     target_volume:    [2]f32,
@@ -28,7 +29,7 @@ init_mixer :: proc(mixer: ^Mixer, arena: ^Arena) {
     }
 }
 
-play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1) {
+play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
     if mixer.first_free_playing_sound == nil {
         mixer.first_free_playing_sound = push(mixer.permanent_arena, PlayingSound)
     }
@@ -41,6 +42,8 @@ play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1) {
         id = id,
         next = mixer.first_playing_sound,
         
+        d_sample = pitch,
+        
         current_volume   = volume,
         target_volume    = volume,
         d_current_volume = 0,
@@ -49,7 +52,7 @@ play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1) {
     mixer.first_playing_sound = playing_sound
 }
 
-change_volume :: proc(mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2]f32, ) {
+change_volume :: proc(mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2]f32) {
     if fade_duration_in_seconds <= 0 {
         sound.current_volume = volume
         sound.target_volume  = volume
@@ -57,6 +60,10 @@ change_volume :: proc(mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seco
         sound.target_volume  = volume
         sound.d_current_volume = (sound.target_volume - sound.current_volume) / fade_duration_in_seconds
     }
+}
+
+change_pitch :: proc(mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
+    sound.d_sample = pitch
 }
 
 output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
@@ -75,7 +82,6 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
     for playing_sound_pointer := &mixer.first_playing_sound; playing_sound_pointer^ != nil;  {
         playing_sound := playing_sound_pointer^
         
-        
         channel_cursor: [ChannelCount]u32
         
         sound := get_sound(assets, playing_sound.id)
@@ -90,13 +96,14 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 volume   := playing_sound.current_volume
                 d_volume := seconds_per_sample * playing_sound.d_current_volume
                 
-                assert(playing_sound.samples_played >= 0)
+                d_sample := playing_sound.d_sample
                 
-                samples_to_mix := total_samples_to_mix
+                samples_to_mix   := total_samples_to_mix
                 samples_in_sound := cast(u32) len(sound.channels[0])
                 
                 assert(playing_sound.samples_played >= 0)
-                samples_remaining_sound := samples_in_sound - cast(u32) playing_sound.samples_played
+                real_samples_remaining_sound := (cast(f32) samples_in_sound - playing_sound.samples_played) / d_sample
+                samples_remaining_sound := cast(u32) (real_samples_remaining_sound + 0.5)
                 if samples_to_mix > samples_remaining_sound {
                     samples_to_mix = samples_remaining_sound
                 }
@@ -114,17 +121,27 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 }
                 
                 // TODO(viktor): handle stereo
-                for sample_index in cast(u32) playing_sound.samples_played..< cast(u32) playing_sound.samples_played + samples_to_mix {
-                    dest_0 := &real_channel_0[channel_cursor[0]]
-                    dest_1 := &real_channel_1[channel_cursor[1]]
+                sample_p := playing_sound.samples_played
+                // TODO(viktor): actually handle the bounds
+                for _ in 0..<samples_to_mix {
+                    sample_index := floor(sample_p)
+                    fract := sample_p - cast(f32) sample_index
+                
+                    if sample_index+1 < auto_cast len(sound.channels[0]) && channel_cursor[0] < auto_cast len(real_channel_0) && channel_cursor[1] < auto_cast len(real_channel_1) {
+                        sample_value_0 := cast(f32) sound.channels[0][sample_index]
+                        sample_value_1 := cast(f32) sound.channels[0][sample_index+1]
+                        
+                        sample_value := lerp(sample_value_0, sample_value_1, fract)
+                        
+                        dest_0 := &real_channel_0[channel_cursor[0]]
+                        dest_1 := &real_channel_1[channel_cursor[1]]
                     
-                    sample_value := cast(f32) sound.channels[0][sample_index]
-                    
-                    dest_0^ += volume[0] * sample_value
-                    dest_1^ += volume[1] * sample_value
-                    
-                    volume += d_volume
-                    
+                        
+                        dest_0^ += volume[0] * sample_value
+                        dest_1^ += volume[1] * sample_value
+                    }
+                    volume     += d_volume
+                    sample_p   += d_sample
                     channel_cursor += 1
                 }
                 
@@ -139,11 +156,11 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 }
                 
                 assert(total_samples_to_mix >= samples_to_mix)
-                playing_sound.samples_played += cast(i32) samples_to_mix
-                total_samples_to_mix         -= samples_to_mix
+                playing_sound.samples_played = sample_p
+                total_samples_to_mix        -= samples_to_mix
 
                 // TODO(viktor): make playback seamless!
-                if cast(u32) playing_sound.samples_played == samples_in_sound {
+                if cast(u32) (playing_sound.samples_played + 0.5) >= samples_in_sound {
                     if is_valid_sound(info.next_id_to_play) {
                         playing_sound.id = info.next_id_to_play
                         playing_sound.samples_played = 0
