@@ -26,6 +26,24 @@ import win "core:sys/windows"
     Just a partial list of stuff !!
 */
 
+// 
+// Config
+// 
+
+HighPriorityWorkQueueThreadCount :: 8
+LowPriorityWorkQueueThreadCount  :: 2
+
+
+// Resolution := [2]i32 {2560, 1440}
+Resolution := [2]i32 {1920, 1080}
+// Resolution := [2]i32 {1280, 720}
+
+MonitorRefreshHz: u32 = 30
+
+
+PermanentStorageSize := megabytes(256)
+TransientStorageSize := gigabytes(1)
+
 //   
 //  Globals
 //   
@@ -88,26 +106,7 @@ main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
-        
-    when !ODIN_DISABLE_ASSERT {
-        my_assertion_failure :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-            runtime.print_caller_location(loc)
-            runtime.print_string(" ")
-            runtime.print_string(prefix)
-            if len(message) > 0 {
-                runtime.print_string(": ")
-                runtime.print_string(message)
-            }
-            runtime.print_byte('\n')
-            
-            when ODIN_DEBUG {
-                runtime.debug_trap()
-            }
-            runtime.trap()
-        }
-        
-        context.assertion_failure_proc =  my_assertion_failure
-    }
+    context.assertion_failure_proc = my_assertion_failure
 
     //   
     //   Platform Setup
@@ -133,10 +132,10 @@ main :: proc() {
     GLOBAL_Running = true
 
     high_queue: PlatformWorkQueue
-    init_work_queue(&high_queue, 8)
+    init_work_queue(&high_queue, HighPriorityWorkQueueThreadCount)
     
     low_queue: PlatformWorkQueue
-    init_work_queue(&low_queue,  2)
+    init_work_queue(&low_queue,  LowPriorityWorkQueueThreadCount)
 
     //   
     //  Windows Setup
@@ -157,9 +156,7 @@ main :: proc() {
             GLOBAL_debug_show_cursor = true
         }
         
-        // resize_DIB_section(&GLOBAL_back_buffer, 2560, 1440)
-        resize_DIB_section(&GLOBAL_back_buffer, 1920, 1080)
-        // resize_DIB_section(&GLOBAL_back_buffer, 1280, 720)
+        resize_DIB_section(&GLOBAL_back_buffer, Resolution.x, Resolution.y)
 
         if win.RegisterClassW(&window_class) == 0 {
             return // TODO Logging
@@ -199,18 +196,17 @@ main :: proc() {
     // TODO: how do we reliably query this on windows?
     game_update_hz: f32
     {
-        monitor_refresh_hz: u32 = 60
         when false {
             device_context := win.GetDC(window)
             VRefresh :: 116
             refresh_rate := win.GetDeviceCaps(device_context, VRefresh)
             if refresh_rate > 1 {
-                monitor_refresh_hz = cast(u32) refresh_rate
+                MonitorRefreshHz = cast(u32) refresh_rate
             }
             win.ReleaseDC(window, device_context)
         }
 
-        game_update_hz = cast(f32) monitor_refresh_hz / 2
+        game_update_hz = cast(f32) MonitorRefreshHz / 2
     }
     target_seconds_per_frame := 1 / game_update_hz
 
@@ -237,8 +233,8 @@ main :: proc() {
     sound_is_valid: b32
 
     when false &&  INTERNAL {
-        audio_latency_bytes    : u32
-        audio_latency_seconds  : f32
+        audio_latency_bytes:     u32
+        audio_latency_seconds:   f32
         debug_last_time_markers: [36]DebugTimeMarker
     }
 
@@ -272,9 +268,7 @@ main :: proc() {
     {
         base_address := cast(rawpointer) cast(uintptr) terabytes(1) when INTERNAL else 0
 
-        permanent_storage_size := megabytes(256)
-        transient_storage_size := gigabytes(1)
-        total_size := cast(uint) (permanent_storage_size + transient_storage_size)
+        total_size := cast(uint) (PermanentStorageSize + TransientStorageSize)
 
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         // TODO(viktor): why limit ourselves?
@@ -300,8 +294,8 @@ main :: proc() {
             }
         }
 
-        game_memory.permanent_storage = storage_ptr[0:][:permanent_storage_size]
-        game_memory.transient_storage = storage_ptr[permanent_storage_size:][:transient_storage_size]
+        game_memory.permanent_storage = storage_ptr[0:][:PermanentStorageSize]
+        game_memory.transient_storage = storage_ptr[PermanentStorageSize:][:TransientStorageSize]
 
         game_memory.debug.read_entire_file  = DEBUG_read_entire_file
         game_memory.debug.write_entire_file = DEBUG_write_entire_file
@@ -351,8 +345,8 @@ main :: proc() {
             new_input.reloaded_executable = true
             
             // NOTE(viktor): clear out the queue, as they may call into unloaded game code
-            low_queue  = { semaphore_handle = low_queue.semaphore_handle  }
-            high_queue = { semaphore_handle = high_queue.semaphore_handle }
+            low_queue  = { semaphore_handle = low_queue.semaphore_handle , entries = low_queue.entries  }
+            high_queue = { semaphore_handle = high_queue.semaphore_handle, entries = high_queue.entries }
         }
 
         //   
@@ -1088,4 +1082,20 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
             win.DispatchMessageW(&message)
         }
     }
+}
+
+my_assertion_failure :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+    runtime.print_caller_location(loc)
+    runtime.print_string(" ")
+    runtime.print_string(prefix)
+    if len(message) > 0 {
+        runtime.print_string(": ")
+        runtime.print_string(message)
+    }
+    runtime.print_byte('\n')
+    
+    when ODIN_DEBUG {
+        runtime.debug_trap()
+    }
+    runtime.trap()
 }

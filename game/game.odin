@@ -103,7 +103,8 @@ State :: struct {
     world_arena: Arena,
     
     mixer: Mixer,
-
+    music: ^PlayingSound,
+    
     typical_floor_height: f32,
     // TODO(viktor): should we allow split-screen?
     camera_following_index: StorageIndex,
@@ -426,6 +427,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         tran_state.assets = make_game_assets(&tran_state.arena, megabytes(64), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+        state.music = state.mixer.first_playing_sound
         
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
@@ -510,15 +512,19 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             con_hero.darrow = {}
             if controller.button_up.ended_down {
                 con_hero.darrow =  {0, 1}
+                change_volume(&state.mixer, state.music, 4, {1,1})
             }
             if controller.button_down.ended_down {
                 con_hero.darrow = -{0, 1}
+                change_volume(&state.mixer, state.music, 10, {0,0})
             }
             if controller.button_left.ended_down {
                 con_hero.darrow = -{1, 0}
+                change_volume(&state.mixer, state.music, 3, {1,0})
             }
             if controller.button_right.ended_down {
                 con_hero.darrow =  {1, 0}
+                change_volume(&state.mixer, state.music, 3, {0,1})
             }
             
             if con_hero.darrow != 0 {
