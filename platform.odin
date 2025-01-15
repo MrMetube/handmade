@@ -260,7 +260,8 @@ main :: proc() {
     game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
     // TODO: make this like sixty seconds?
     // TODO: pool with bitmap alloc
-    samples := cast([^][2]i16) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    MaxPossibleOverlap :: 4*size_of(Sample)
+    samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
 
     context.allocator = {}
 

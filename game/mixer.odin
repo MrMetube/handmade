@@ -1,5 +1,8 @@
 package game
 
+import "core:simd"
+import "core:simd/x86"
+
 Mixer :: struct {
     permanent_arena:          ^Arena,
     first_playing_sound:      ^PlayingSound,
@@ -66,14 +69,23 @@ change_pitch :: proc(mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
     sound.d_sample = pitch
 }
 
+@(enable_target_feature="sse2")
 output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
     mixer_memory := begin_temporary_memory(temporary_arena)
     defer end_temporary_memory(mixer_memory)
+
+    total_samples_to_mix := cast(u32) len(sound_buffer.samples)
+    buffer_size := align_4(total_samples_to_mix)
+    sample_count_4 := buffer_size / 4
+    real_channel_0 := push(temporary_arena, f32x4, sample_count_4, clear_to_zero = false, alignment = 16)
+    real_channel_1 := push(temporary_arena, f32x4, sample_count_4, clear_to_zero = false, alignment = 16)
     
     // NOTE(viktor): clear out the summation channels
-    real_channel_0 := push(temporary_arena, f32, len(sound_buffer.samples), clear_to_zero = true)
-    real_channel_1 := push(temporary_arena, f32, len(sound_buffer.samples), clear_to_zero = true)
-
+    #no_bounds_check for i in 0..<sample_count_4 {
+        real_channel_0[i] = 0
+        real_channel_1[i] = 0
+    }
+    
     seconds_per_sample := 1.0 / cast(f32) sound_buffer.samples_per_second
     ChannelCount :: 2
     
@@ -86,7 +98,6 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         
         sound := get_sound(assets, playing_sound.id)
         
-        total_samples_to_mix := cast(u32) len(sound_buffer.samples)
         sound_finished: b32
         for total_samples_to_mix != 0 && !sound_finished {
             if sound != nil {
@@ -124,22 +135,28 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 sample_p := playing_sound.samples_played
                 // TODO(viktor): actually handle the bounds
                 for _ in 0..<samples_to_mix {
+                    real_channel_0 := (cast([^]f32) &real_channel_0[0])[:buffer_size]
+                    real_channel_1 := (cast([^]f32) &real_channel_1[0])[:buffer_size]
+                    
                     sample_index := floor(sample_p)
                     fract := sample_p - cast(f32) sample_index
                 
-                    if sample_index+1 < auto_cast len(sound.channels[0]) && channel_cursor[0] < auto_cast len(real_channel_0) && channel_cursor[1] < auto_cast len(real_channel_1) {
-                        sample_value_0 := cast(f32) sound.channels[0][sample_index]
-                        sample_value_1 := cast(f32) sound.channels[0][sample_index+1]
-                        
-                        sample_value := lerp(sample_value_0, sample_value_1, fract)
-                        
-                        dest_0 := &real_channel_0[channel_cursor[0]]
-                        dest_1 := &real_channel_1[channel_cursor[1]]
-                    
-                        
-                        dest_0^ += volume[0] * sample_value
-                        dest_1^ += volume[1] * sample_value
+                    when false {
+                        // sample_value_0 := cast(f32) sound.channels[0][sample_index]
+                        // sample_value_1 := cast(f32) sound.channels[0][sample_index+1]
+                            
+                        // sample_value := lerp(sample_value_0, sample_value_1, fract)
+                    } else {
+                        sample_value := cast(f32) sound.channels[0][sample_index]
                     }
+                        
+                    dest_0 := &real_channel_0[channel_cursor[0]]
+                    dest_1 := &real_channel_1[channel_cursor[1]]
+                
+                    
+                    dest_0^ += volume[0] * sample_value
+                    dest_1^ += volume[1] * sample_value
+                    
                     volume     += d_volume
                     sample_p   += d_sample
                     channel_cursor += 1
@@ -186,18 +203,21 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         source_0 := real_channel_0
         source_1 := real_channel_1
         
-        source_0_cursor: u32
-        source_1_cursor: u32
-        for sample_index in 0..<len(sound_buffer.samples) {
-            dest := &sound_buffer.samples[sample_index]
+        source_cursor: u32
+        for sample_index: u32; sample_index < sample_count_4; sample_index += 4 {
+            dest := cast(^x86.__m128i) &sound_buffer.samples[sample_index]
             
-            dest^ = {
-                cast(i16) (source_0[source_0_cursor] + 0.5),
-                cast(i16) (source_1[source_1_cursor] + 0.5),
-            } 
+            l := x86._mm_cvtps_epi32(source_0[source_cursor])
+            r := x86._mm_cvtps_epi32(source_1[source_cursor])
             
-            source_0_cursor += 1
-            source_1_cursor += 1
+            lr0 := x86._mm_unpacklo_epi32(l, r)
+            lr1 := x86._mm_unpackhi_epi32(l, r)
+            
+            s := x86._mm_packs_epi32(lr0, lr1)
+            
+            dest^ = s
+            
+            source_cursor += 1
         }
     }
 }

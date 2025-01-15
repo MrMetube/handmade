@@ -8,6 +8,7 @@ uintpointer :: uintptr
 Sample :: [2]i16
 
 GameSoundBuffer :: struct {
+    // NOTE(viktor): samples length must be padded to a multiple of 4 samples
     samples:            []Sample,
     samples_per_second: u32,
 }

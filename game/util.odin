@@ -4,6 +4,11 @@ import "base:intrinsics"
 import "core:math"
 import "core:simd"
 
+f32x4 :: #simd[4]f32
+u32x4 :: #simd[4]u32
+i32x4 :: #simd[4]i32
+i16x8 :: #simd[8]i16
+
 kilobytes :: #force_inline proc(#any_int value: u64) -> u64 { return value * 1024 }
 megabytes :: #force_inline proc(#any_int value: u64) -> u64 { return kilobytes(value) * 1024 }
 gigabytes :: #force_inline proc(#any_int value: u64) -> u64 { return megabytes(value) * 1024 }
@@ -19,6 +24,14 @@ atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new:
 complete_previous_writes_before_future_writes :: #force_inline proc "contextless" () {
     // TODO(viktor): what should that actually be
     intrinsics.atomic_thread_fence(.Seq_Cst)
+}
+
+align_2    :: #force_inline proc(value: $T) -> (result: T) { return align_pow2(value, 2)  }
+align_4    :: #force_inline proc(value: $T) -> (result: T) { return align_pow2(value, 4)  }
+align_16   :: #force_inline proc(value: $T) -> (result: T) { return align_pow2(value, 16) }
+align_pow2 :: #force_inline proc(value: $T, alignment: T) -> (result: T) {
+    result = (value + (alignment-1)) &~ (alignment-1)
+    return result
 }
 
 swap :: proc(a, b: ^$T) {

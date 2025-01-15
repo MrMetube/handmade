@@ -573,19 +573,19 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         end_clip_mask   := clip_mask
         
         start_clip_masks := [?]u32x4 {
-            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 0*4),
-            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 1*4),
-            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 2*4),
-            transmute(simd.u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 3*4),
+            transmute(u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 0*4),
+            transmute(u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 1*4),
+            transmute(u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 2*4),
+            transmute(u32x4) x86._mm_slli_si128(transmute(simd.i64x2) start_clip_mask, 3*4),
         }  
               
         end_clip_masks := [?]u32x4 {
-            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 0*4),
-            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 3*4),
-            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 2*4),
-            transmute(simd.u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 1*4),
+            transmute(u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 0*4),
+            transmute(u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 3*4),
+            transmute(u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 2*4),
+            transmute(u32x4) x86._mm_srli_si128(transmute(simd.i64x2) end_clip_mask, 1*4),
         }
-
+        
         // TODO(viktor): IMPORTANT(viktor): fix this clipping
         if fill_rect.min.x & 3 != 0 {
             start_clip_mask = start_clip_masks[fill_rect.min.x & 3]
@@ -600,22 +600,13 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         normal_x_axis := x_axis * 1 / length_squared(x_axis)
         normal_y_axis := y_axis * 1 / length_squared(y_axis)
         
-        f32x4 :: #simd[4]f32
-        i32x4 :: #simd[4]i32
-        u32x4 :: #simd[4]u32
-        
         texture_width_x4  := cast(f32x4) (texture.width  - 2)
         texture_height_x4 := cast(f32x4) (texture.height - 2)
 
-        inv_255 := cast(f32x4) (1.0 / 255.0)
+        inv_255         := cast(f32x4) (1.0 / 255.0)
         max_color_value := cast(f32x4) (255 * 255)
-        half   := cast(f32x4) 0.5
-        one    := cast(f32x4) 1
-        two    := cast(f32x4) 2
-        zero   := cast(f32x4) 0
+        
         zero_i := cast(i32x4) 0
-        four   := cast(f32x4) 4
-
 
         shift8  := cast(u32x4)  8
         shift16 := cast(u32x4) 16
@@ -646,16 +637,16 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
             u := delta_x * normal_x_axis_x + delta_y_n_x_axis_y
             v := delta_x * normal_y_axis_x + delta_y_n_y_axis_y
             defer {
-                delta_y_n_x_axis_y += normal_x_axis_y * two
-                delta_y_n_y_axis_y += normal_y_axis_y * two
+                delta_y_n_x_axis_y += normal_x_axis_y * 2
+                delta_y_n_y_axis_y += normal_y_axis_y * 2
             }
 
             clip_mask = start_clip_mask
             
             for x := fill_rect.min.x; x < fill_rect.max.x; x += 4 {
                 defer {
-                    u += normal_x_axis_x * four
-                    v += normal_y_axis_x * four
+                    u += normal_x_axis_x * 4
+                    v += normal_y_axis_x * 4
                     
                     if x + 4 >= fill_rect.max.x {
                         clip_mask = end_clip_mask
@@ -665,7 +656,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 }
                 
                 // u >= 0 && u <= 1 && v >= 0 && v <= 1
-                write_mask := transmute(i32x4) (clip_mask & simd.lanes_ge(u, zero) & simd.lanes_le(u, one) & simd.lanes_ge(v, zero) & simd.lanes_le(v, one))
+                write_mask := transmute(i32x4) (clip_mask & simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1))
 
                 // TODO(viktor): recheck later if this helps
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
@@ -678,8 +669,8 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
 
                     // NOTE(viktor): Bias texture coordinates to start on the 
                     // boundary between the 0,0 and 1,1 pixels
-                    tx := u * texture_width_x4  + half
-                    ty := v * texture_height_x4 + half
+                    tx := u * texture_width_x4  + 0.5
+                    ty := v * texture_height_x4 + 0.5
 
                     sx := cast(i32x4) tx
                     sy := cast(i32x4) ty
@@ -752,8 +743,8 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                     pixel_b = square(pixel_b)
 
                     // NOTE(viktor): bilinear blend
-                    ifx := one - fx
-                    ify := one - fy
+                    ifx := 1 - fx
+                    ify := 1 - fy
                     l0  := ify * ifx
                     l1  := ify * fx
                     l2  :=  fy * ifx
@@ -769,12 +760,12 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                     texel_b *= color_b 
                     texel_a *= color_a 
 
-                    texel_r = clamp(texel_r, zero, max_color_value)
-                    texel_g = clamp(texel_g, zero, max_color_value)
-                    texel_b = clamp(texel_b, zero, max_color_value)
+                    texel_r = clamp(texel_r, 0, max_color_value)
+                    texel_g = clamp(texel_g, 0, max_color_value)
+                    texel_b = clamp(texel_b, 0, max_color_value)
 
                     // NOTE(viktor): blend with target pixel
-                    inv_texel_a := (one - (inv_255 * texel_a))
+                    inv_texel_a := (1 - (inv_255 * texel_a))
                     blended_r := inv_texel_a * pixel_r + texel_r
                     blended_g := inv_texel_a * pixel_g + texel_g
                     blended_b := inv_texel_a * pixel_b + texel_b
