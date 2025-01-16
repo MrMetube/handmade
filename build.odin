@@ -10,11 +10,12 @@ import "base:runtime"
 
 when #config(BUILD, false) {
 
-pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
 flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows "
-debug    :: " -debug -define:INTERNAL=true "
+debug    :: " -debug "
+internal :: " -define:INTERNAL=true "
 
 optimizations :: " -o:none " when true else " -o:speed "
+pedantic :: " " when true else " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
 
 src_path :: `.\build.odin`
 
@@ -31,6 +32,12 @@ main :: proc() {
     
     debug_build := "debug.exe" 
 
+    { // Asset file Builder
+        if !run_command_sync(`C:\Odin\odin.exe`, `odin build asset_builder -out:.\build\asset_builder.exe`, flags, debug,pedantic) {
+            os.exit(1)
+        }
+    }
+    
     { // Game
         delete_all_like(".\\build\\*.pdb")
         
@@ -44,15 +51,8 @@ main :: proc() {
         }
         
         fmt.fprint(lock, "WAITING FOR PDB")
-        
-        if !run_command_sync(`C:\Odin\odin.exe`, 
-            `odin build game -build-mode:dll -out:.\build\game.dll`, 
-            fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number()), 
-            flags, 
-            debug, 
-            optimizations,
-            // pedantic
-        ) {
+        pdb := fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number())
+        if !run_command_sync(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:.\build\game.dll`, pdb, flags, debug, internal, optimizations, pedantic) {
             os.exit(1)
         }
     }
@@ -61,15 +61,8 @@ main :: proc() {
 
     {// Platform
         copy_over_common_code()
-                
-        if !run_command_sync(`C:\Odin\odin.exe`, 
-            `odin build . -out:.\build\`, 
-            debug_build, 
-            flags, 
-            debug, 
-            optimizations,
-            // pedantic,
-        ) {
+        
+        if !run_command_sync(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, internal, optimizations, pedantic,) {
             os.exit(1)
         }
     }
