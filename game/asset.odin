@@ -31,8 +31,8 @@ Asset :: struct {
     
     using as: struct #raw_union { 
         bitmap: AssetBitmapInfo, 
-        sound: AssetSoundInfo
-    }
+        sound: AssetSoundInfo,
+    },
 }
 
 AssetState :: enum {
@@ -45,7 +45,7 @@ AssetSlot :: struct {
     using as : struct #raw_union {
         bitmap: ^Bitmap,
         sound:  ^Sound,
-    }
+    },
 }
 
 AssetType :: struct {

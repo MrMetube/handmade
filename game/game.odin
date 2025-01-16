@@ -1,7 +1,6 @@
 package game
 
 import "base:intrinsics"
-import "core:fmt"
 
 INTERNAL :: #config(INTERNAL, false)
 
@@ -760,10 +759,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             // Post-physics entity work
             // 
             match_vector  := AssetVector {
-                .FacingDirection = entity.facing_direction
+                .FacingDirection = entity.facing_direction,
             }
             weight_vector := AssetVector {
-                .FacingDirection = 1
+                .FacingDirection = 1,
             }
             
             head_id  := best_match_bitmap_from(tran_state.assets, .Head, match_vector, weight_vector)

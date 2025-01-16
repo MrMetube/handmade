@@ -1,4 +1,4 @@
-package asset_builder
+package tools
 
 import "base:intrinsics"
 
@@ -6,25 +6,61 @@ import "core:fmt"
 import "core:math"
 import "core:os"
 
+
+// ---------------------- ---------------------- ----------------------
+// Implementation
+// ---------------------- ---------------------- ----------------------
+
 Out: os.Handle
 
-AssetType :: struct {
-    // NOTE(viktor): A range within the assets.assets
-    // TODO(viktor): should this just be a slice into the assets.assets?
-    first_asset_index:   u32,
-    one_past_last_index: u32,
+HUUGE :: 4096
+
+type_count:  u32
+asset_count: u32
+tag_count:   u32
+asset_types:   [AssetTypeId]hhaAssetType
+assets:  [HUUGE]Asset
+tags:    [HUUGE]hhaTag
+tag_ranges: [AssetTagId]f32
+
+DEBUG_asset_type: ^hhaAssetType
+DEBUG_asset: ^Asset
+
+Sound :: struct {
+    channel_count: u32,
+    channels: [2][]i16, // 1 or 2 channels of samples
 }
 
+Bitmap :: struct {
+    memory:        []ByteColor,
+    width, height: i32, 
+    
+    pitch: i32,
+    
+    align_percentage:  [2]f32,
+    width_over_height: f32,
+}
+
+BitmapId :: distinct u32
+SoundId  :: distinct u32
+
 Asset :: struct {
-    data_offset: u32,
     // TODO(viktor): should this just be a slice into the assets.tags?
     first_tag_index:         u32,
     one_past_last_tag_index: u32,
+    
+    using as: struct #raw_union { 
+        bitmap: AssetBitmapInfo, 
+        sound: AssetSoundInfo
+    }
+}
+
+AssetState :: enum {
+    Unloaded, Queued, Loaded, Locked, 
 }
 
 AssetTypeId :: enum {
     None,
-    
     //
     // NOTE(viktor): Bitmaps
     //
@@ -38,7 +74,6 @@ AssetTypeId :: enum {
     //
     // NOTE(viktor): Sounds
     //
-    
     // variant
     Blop, Drop, Woosh, Hit,
     Music,
@@ -46,15 +81,6 @@ AssetTypeId :: enum {
 
 AssetTagId :: enum {
     FacingDirection, // NOTE(viktor): angle in radians
-}
-
-AssetTag :: struct {
-    id:    AssetTagId,
-    value: f32,
-}
- 
-AssetState :: enum {
-    Unloaded, Queued, Loaded, Locked, 
 }
 
 AssetBitmapInfo :: struct {
@@ -68,36 +94,15 @@ AssetSoundInfo :: struct {
     first_sample_index: u32,
     sample_count:       u32,
     
-    next_id_to_play: u32,
+    next_id_to_play: SoundId,
 }
 
-HUUGE :: 4096
-
-bitmap_infos: [HUUGE]AssetBitmapInfo
-sound_infos:  [HUUGE]AssetSoundInfo
-types:   [AssetTypeId]AssetType
-assets:  [HUUGE]Asset
-tags:    [HUUGE]AssetTag
-tag_ranges: [AssetTagId]f32
-
-DEBUG_used_bitmap_count: u32
-DEBUG_used_sound_count: u32
-DEBUG_used_asset_count: u32
-DEBUG_used_tag_count: u32
-DEBUG_asset_type: ^AssetType
-DEBUG_asset: ^Asset
-
-Bitmap :: struct {
-    memory:        []ByteColor,
-    width, height: i32, 
-    
-    pitch: i32,
-    
-    align_percentage:  [2]f32,
-    width_over_height: f32,
-}
+AssetVector :: [AssetTagId]f32
 
 main :: proc() {
+    
+    asset_count = 1
+    tag_count = 1
     
     {
         begin_asset_type(.Shadow)
@@ -208,7 +213,7 @@ main :: proc() {
         sec :: 48000
         section :: 10 * sec
         total_sample_count :: 6_418_285
-        last: ^Asset
+        last_index: SoundId
         
         begin_asset_type(.Music)
         for first_sample_index: u32; first_sample_index < total_sample_count; first_sample_index += section {
@@ -217,11 +222,11 @@ main :: proc() {
                 sample_count = section
             }
             
-            this := add_sound_asset("../assets/Light Ambience 1.wav", first_sample_index, sample_count)
-            if last != nil {
-                get_sound_info(last.data_offset).next_id_to_play = this.data_offset
+            this_index := add_sound_asset("../assets/Light Ambience 1.wav", first_sample_index, sample_count)
+            if last_index != 0 {
+                assets[last_index].sound.next_id_to_play = this_index
             }
-            last = this
+            last_index = this_index
         }
         
         // add_sound_asset("../assets/Light Ambience 2.wav")
@@ -234,81 +239,82 @@ main :: proc() {
     
     err: os.Error
     file_name: string
-    Out, err = os.open("test.hha", os.O_RDWR)
-    if err == nil {
-        defer os.close(Out)
-        
-    } else {
+    Out, _ = os.open("test.hha", os.O_RDWR)
+    if err != nil {
         fmt.eprint("Error: could not open file %v because of %v", file_name, err)
+        os.exit(1)
     }
+    defer os.close(Out)
+    
+    header := hhaHeader {
+        magic_value = MagicValue,
+        version     = Version,
+        
+        tag_count   = tag_count,
+        asset_type_count = asset_count,// TODO(viktor): compute this, sparseness
+        asset_count = asset_count,
+    }
+        
+    tags_size        := header.tag_count        * size_of(hhaTag)
+    asset_types_size := header.asset_type_count * size_of(hhaAssetType)
+    assets_size      := header.asset_count      * size_of(hhaAsset)
+    
+    header.tags        = size_of(header)
+    header.asset_types = header.tags        + cast(u64) tags_size
+    header.assets      = header.asset_types + cast(u64) asset_types_size
+    
+    
+    os.write_ptr(Out, &header,                   size_of(header))
+    os.write_ptr(Out, &tags[0],                  cast(int) tags_size)
+    os.write_ptr(Out, &asset_types[auto_cast 0], cast(int) asset_types_size)
+    // os.write_ptr(Out, assets,                    cast(int) assets_size)
 }
 
 begin_asset_type :: proc(id: AssetTypeId) {
     assert(DEBUG_asset_type == nil)
     assert(DEBUG_asset == nil)
     
-    DEBUG_asset_type = &types[id]
-    DEBUG_asset_type.first_asset_index   = auto_cast DEBUG_used_asset_count
+    DEBUG_asset_type = &asset_types[id]
+    DEBUG_asset_type.id = auto_cast id
+    DEBUG_asset_type.first_asset_index   = auto_cast asset_count
     DEBUG_asset_type.one_past_last_index = DEBUG_asset_type.first_asset_index
 }
 
-add_bitmap_asset :: proc(file_name: string, align_percentage: v2 = {0.5, 0.5}) {
+add_bitmap_asset :: proc(filename: string, align_percentage: v2 = {0.5, 0.5}) -> (result: BitmapId) {
     assert(DEBUG_asset_type != nil)
     
-    asset := &assets[DEBUG_asset_type.one_past_last_index]
+    result = cast(BitmapId) DEBUG_asset_type.one_past_last_index
     DEBUG_asset_type.one_past_last_index += 1
-    asset.first_tag_index = DEBUG_used_asset_count
+    
+    asset := &assets[result]
+    asset.first_tag_index = tag_count
     asset.one_past_last_tag_index = asset.first_tag_index
-     {
-        assert(DEBUG_used_bitmap_count < auto_cast len(bitmap_infos))
-        
-        id := DEBUG_used_bitmap_count
-        DEBUG_used_bitmap_count += 1
-        
-        info := &bitmap_infos[id]
-        info.align_percentage = align_percentage
-        info.file_name        = file_name
-        
-        asset.data_offset = id
-    }
+    
+    asset.bitmap.align_percentage = align_percentage
+    asset.bitmap.file_name        = filename
     
     DEBUG_asset = asset
-}
-
-get_sound_info :: proc(id: u32) -> (result: ^AssetSoundInfo) {
-    result = &sound_infos[id]
+    
     return result
 }
 
-add_sound_asset :: proc(file_name: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (asset: ^Asset) {
+add_sound_asset :: proc(filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (result: SoundId) {
     assert(DEBUG_asset_type != nil)
     
-    asset = &assets[DEBUG_asset_type.one_past_last_index]
+    result = cast(SoundId) DEBUG_asset_type.one_past_last_index
     DEBUG_asset_type.one_past_last_index += 1
     
-    asset.first_tag_index = DEBUG_used_asset_count
+    asset := &assets[result]
+    asset.first_tag_index = tag_count
     asset.one_past_last_tag_index = asset.first_tag_index
     
-     {
-        assert(DEBUG_used_sound_count < auto_cast len(sound_infos))
-        
-        id := DEBUG_used_sound_count
-        DEBUG_used_sound_count += 1
-        
-        info := &sound_infos[id]
-        info^ = {
-            file_name          = file_name,
-            first_sample_index = first_sample_index,
-            sample_count       = sample_count,
-        }
-        
-        asset.data_offset = id
-    }
-    
+    asset.sound.file_name          = filename
+    asset.sound.first_sample_index = first_sample_index
+    asset.sound.sample_count       = sample_count
     
     DEBUG_asset = asset
     
-    return asset
+    return result
 }
 
 add_tag :: proc(id: AssetTagId, value: f32) {
@@ -317,17 +323,17 @@ add_tag :: proc(id: AssetTagId, value: f32) {
     
     DEBUG_asset.one_past_last_tag_index += 1
     
-    tag := &tags[DEBUG_used_asset_count]
-    DEBUG_used_asset_count += 1
+    tag := &tags[asset_count]
+    asset_count += 1
     
-    tag.id = id
+    tag.id = auto_cast id
     tag.value = value
 }
 
 end_asset_type :: proc() {
     assert(DEBUG_asset_type != nil)
     
-    DEBUG_used_asset_count = DEBUG_asset_type.one_past_last_index
+    asset_count = DEBUG_asset_type.one_past_last_index
     DEBUG_asset_type = nil
     DEBUG_asset = nil
 }
@@ -428,13 +434,253 @@ DEBUG_load_bmp :: proc (file_name: string, alignment_percentage: v2 = 0.5) -> (r
     return {}
 }
 
+DEBUG_load_wav :: proc (file_name: string, section_first_sample_index, section_sample_count: u32) -> (result: Sound) {
+    contents, _ := os.read_entire_file(file_name)
+    
+    WAVE_Header :: struct #packed {
+        riff:    u32,
+        size:    u32,
+        wave_id: u32,
+    }
+    
+    WAVE_Format :: enum u16 {
+        PCM        = 0x0001,
+        IEEE_FLOAT = 0x0003,
+        ALAW       = 0x0006,
+        MULAW      = 0x0007,
+        EXTENSIBLE = 0xfffe,
+    }
+    
+    WAVE_Chunk_ID :: enum u32 {
+        None = 0,
+        RIFF = 'R' << 0 | 'I' << 8 | 'F' << 16 | 'F' << 24,
+        WAVE = 'W' << 0 | 'A' << 8 | 'V' << 16 | 'E' << 24,
+        fmt_ = 'f' << 0 | 'm' << 8 | 't' << 16 | ' ' << 24,
+        data = 'd' << 0 | 'a' << 8 | 't' << 16 | 'a' << 24,
+    }
+    
+    WAVE_Chunk :: struct #packed {
+        id:   WAVE_Chunk_ID,
+        size: u32,
+    }
+    
+    WAVE_fmt :: struct #packed {
+        format_tag:            WAVE_Format,
+        n_channels:            u16,
+        n_samples_per_seconds: u32,
+        avg_bytes_per_sec:     u32,
+        block_align:           u16,
+        bits_per_sample:       u16,
+        cb_size:               u16,
+        valid_bits_per_sample: u16,
+        channel_mask:          u32,
+        sub_format:            [16]u8,
+    }
+
+    RiffIterator :: struct {
+        at:   [^]u8,
+        stop: rawpointer,
+    }
+    
+    if len(contents) > 0 {
+        headers := cast([^]WAVE_Header) &contents[0]
+        header := headers[0]
+        behind_header := cast([^]u8) &headers[1]
+        
+        assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
+        assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
+        
+        parse_chunk_at :: #force_inline proc(at: rawpointer, stop: rawpointer) -> (result: RiffIterator) {
+            result.at    = cast([^]u8) at
+            result.stop  = stop
+            
+            return result
+        }
+        
+        is_valid_riff_iter :: #force_inline proc(it: RiffIterator) -> (result: b32) {
+            at := cast(uintpointer) it.at
+            stop := cast(uintpointer) it.stop
+            result = at < stop 
+            
+            return result
+        }
+        
+        next_chunk :: #force_inline proc(it: RiffIterator) -> (result: RiffIterator) {
+            chunk := cast(^WAVE_Chunk)it.at
+            size := chunk.size
+            if size % 2 != 0 {
+                size += 1
+            }
+            result.at = cast([^]u8) &it.at[size + size_of(WAVE_Chunk)]
+            result.stop = it.stop
+            return result
+        }
+        
+        get_chunk_data :: #force_inline proc(it: RiffIterator) -> (result: rawpointer) {
+            result = &it.at[size_of(WAVE_Chunk)]
+            return result
+        }
+        
+        get_chunk_size :: #force_inline proc(it: RiffIterator) -> (result: u32) {
+            chunk := cast(^WAVE_Chunk)it.at
+            result = chunk.size
+            
+            return result
+        }
+        
+        get_type :: #force_inline proc(it: RiffIterator) -> (result: WAVE_Chunk_ID) {
+            chunk := cast(^WAVE_Chunk)it.at
+            result = chunk.id
+            return result
+        }
+        
+        channel_count:    u32
+        sample_data:      [^]i16
+        sample_data_size: u32
+        
+        for it := parse_chunk_at(behind_header, cast(rawpointer) &behind_header[header.size - 4]); is_valid_riff_iter(it); it = next_chunk(it) {
+            #partial switch get_type(it) {
+            case .fmt_: 
+                fmt := cast(^WAVE_fmt) get_chunk_data(it)
+                assert(fmt.format_tag == .PCM)
+                assert(fmt.n_samples_per_seconds == 48000)
+                assert(fmt.bits_per_sample == 16)
+                assert(fmt.block_align == size_of(u16) * fmt.n_channels)
+                channel_count = cast(u32) fmt.n_channels
+            case .data: 
+                sample_data = cast([^]i16) get_chunk_data(it)
+                sample_data_size = get_chunk_size(it)
+            }
+        }
+        
+        assert(sample_data != nil)
+        assert(channel_count != 0)
+        assert(sample_data_size != 0)
+        
+        sample_count := sample_data_size / (size_of(u16) * channel_count)
+        if channel_count == 1 {
+            result.channels[0] = sample_data[:sample_count]
+            result.channels[1] = nil
+        } else if channel_count == 2 {
+            result.channels[0] = sample_data[:sample_count]
+            result.channels[1] = sample_data[sample_count:sample_count*2]
+            
+            for index:u32 ; index < sample_count; index += 1 {
+                source := sample_data[2*index]
+                sample_data[2*index] = sample_data[index]
+                sample_data[index]   = source
+            }
+        } else {
+            assert(false, "invalid channel count in WAV file")
+        }
+        
+        result.channel_count = channel_count
+        if section_sample_count != 0 {
+            assert(section_first_sample_index + section_sample_count <= sample_count)
+            
+            result.channels[0] = result.channels[0][section_first_sample_index:][:section_sample_count]
+            result.channels[1] = result.channels[1][section_first_sample_index:][:section_sample_count]
+        }
+        
+        if section_first_sample_index + section_sample_count == sample_count {
+            // TODO(viktor): all sounds have to be padded with their subsequent sound
+            // out to 8 samples past their end
+            for &channel in result.channels {
+                channel = (raw_data(channel))[:sample_count+8]
+                
+                for sample_index in sample_count..<sample_count+8 {
+                    channel[sample_index] = 0
+                } 
+            }
+        }
+    }
+    
+    return result
+}
 
 
-// 
-// 
-//  Copypasta
-// 
-// 
+// ---------------------- ---------------------- ----------------------
+// File format
+// ---------------------- ---------------------- ----------------------
+
+
+
+MagicValue : u32 : 'h' << 0 | 'h' << 8 | 'a' << 16 | 'f' << 24
+Version    : u32 : 0
+
+hhaHeader :: struct #packed {
+    magic_value: u32,
+    version:     u32, 
+    
+    tag_count:        u32,
+    asset_type_count: u32,
+    asset_count:      u32,
+    
+    tags:        u64, // [tag_count]hhaTag
+    assets:      u64, // [asset_count]hhaAsset
+    asset_types: u64, // [asset_type_count]hhaAssetTypeEntry
+    
+    
+}
+
+hhaTag :: struct #packed {
+    id:    u32,
+    value: f32,
+}
+
+hhaAsset :: struct #packed {
+    data_offset: u64,
+    
+    first_tag_index:     u32,
+    one_past_last_index: u32,
+    
+    using as : struct #raw_union {
+        bitmap: hhaBitmap,
+        sound:  hhaSound,
+    }
+}
+
+hhaAssetType :: struct #packed {
+    id: u32,
+    
+    first_asset_index:   u32,
+    one_past_last_index: u32,
+}
+
+hhaBitmap :: struct #packed {
+    dimension:        [2]u32,
+    align_percentage: [2]f32,
+}
+
+hhaSound :: struct #packed {
+    first_sample_index: u32,
+    sample_count:       u32,
+    
+    next_id_to_play: u32,
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ---------------------- ---------------------- ----------------------
+// Copypasta
+// ---------------------- ---------------------- ----------------------
+
+
+rawpointer :: rawptr
+uintpointer :: uintptr
 
 v2 :: [2]f32
 v3 :: [3]f32
@@ -519,8 +765,7 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
 }
 
 
-safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
-@(require_results) safe_ratio_n_1 :: #force_inline proc(numerator, divisor, n: f32) -> f32 {
+@(require_results) safe_ratio_n :: #force_inline proc(numerator, divisor, n: f32) -> f32 {
     ratio := n
 
     if divisor != 0 {
@@ -529,31 +774,4 @@ safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
 
     return ratio
 }
-@(require_results) safe_ratio_n_2 :: #force_inline proc(numerator, divisor, n: v2) -> v2 {
-    ratio := n
-
-    if divisor != 0 {
-        ratio = numerator / divisor
-    }
-
-    return ratio
-}
-@(require_results) safe_ratio_n_3 :: #force_inline proc(numerator, divisor, n: v3) -> v3 {
-    ratio := n
-
-    if divisor != 0 {
-        ratio = numerator / divisor
-    }
-
-    return ratio
-}
-
-safe_ratio_0 :: proc { safe_ratio_0_1, safe_ratio_0_2, safe_ratio_0_3 }
-@(require_results) safe_ratio_0_1 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 0) }
-@(require_results) safe_ratio_0_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 0) }
-@(require_results) safe_ratio_0_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 0) }
-
-safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
-@(require_results) safe_ratio_1_1 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 1) }
-@(require_results) safe_ratio_1_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 1) }
-@(require_results) safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
+@(require_results) safe_ratio_0 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 0) }

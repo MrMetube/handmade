@@ -15,7 +15,7 @@ debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
 
 optimizations :: " -o:none " when true else " -o:speed "
-pedantic :: " " when true else " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
+pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
 
 src_path :: `.\build.odin`
 
@@ -33,37 +33,45 @@ main :: proc() {
     debug_build := "debug.exe" 
 
     { // Asset file Builder
-        if !run_command_sync(`C:\Odin\odin.exe`, `odin build asset_builder -out:.\build\asset_builder.exe`, flags, debug,pedantic) {
-            os.exit(1)
+        out := `.\build\asset_builder.exe`
+        if modified_since(`./tools/asset_bundler.odin`, out) {
+            if !run_command_sync(`C:\Odin\odin.exe`, `odin build tools/asset_bundler -file -out:`, out, flags, debug, pedantic) {
+                os.exit(1)
+            }
         }
     }
     
     { // Game
-        delete_all_like(".\\build\\*.pdb")
-        
-        // NOTE(viktor): the platform checks for this lock file when hotreloading
-        lock_path := `.\lock.tmp` 
-        lock, err := os.open(lock_path, mode = os.O_CREATE)
-        if err != nil do log.error(os.error_string(err))
-        defer {
-            os.close(lock)
-            os.remove(lock_path)
-        }
-        
-        fmt.fprint(lock, "WAITING FOR PDB")
-        pdb := fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number())
-        if !run_command_sync(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:.\build\game.dll`, pdb, flags, debug, internal, optimizations, pedantic) {
-            os.exit(1)
+        out := `.\build\game.dll`
+        /* if modified_since(`.\game`, out) */ {
+            delete_all_like(".\\build\\*.pdb")
+            
+            // NOTE(viktor): the platform checks for this lock file when hotreloading
+            lock_path := `.\lock.tmp` 
+            lock, err := os.open(lock_path, mode = os.O_CREATE)
+            if err != nil do log.error(os.error_string(err))
+            defer {
+                os.close(lock)
+                os.remove(lock_path)
+            }
+            
+            fmt.fprint(lock, "WAITING FOR PDB")
+            pdb := fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number())
+            if !run_command_sync(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, /* pedantic */) {
+                os.exit(1)
+            }
+            
+            copy_over_common_code()
         }
     }
 
     if is_running(debug_build) do os.exit(0)
 
     {// Platform
-        copy_over_common_code()
-        
-        if !run_command_sync(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, internal, optimizations, pedantic,) {
-            os.exit(1)
+        /* if modified_since(`.`, `.\build\debug.exe`) */ {
+            if !run_command_sync(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, internal, optimizations, /* pedantic */) {
+                os.exit(1)
+            }
         }
     }
     
@@ -102,7 +110,13 @@ copy_over_common_code :: proc() {
 }
 
 
-
+modified_since :: proc(src, out: string) -> (result: b32) {
+    src_time := get_last_write_time_(src)
+    out_time := get_last_write_time_(out)
+    result = src_time > out_time
+    
+    return result
+}
 
 rebuild_yourself :: proc(exe_path: string) {
     log.Level_Headers = {
@@ -112,11 +126,8 @@ rebuild_yourself :: proc(exe_path: string) {
         30..<40 = "[ERROR] ",
         40..<50 = "[FATAL] ",
     }
-   
-    exe_last_write_time := get_last_write_time_(exe_path)
-    src_last_write_time := get_last_write_time_(src_path)
     
-    if src_last_write_time > exe_last_write_time {
+    if modified_since(src_path, exe_path) {
         log.info("Rebuilding Build!")
         temp_path := fmt.tprintf("%s-temp", exe_path)
         

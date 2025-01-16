@@ -1,6 +1,5 @@
 package game
 
-import "core:simd"
 import "core:simd/x86"
 
 Mixer :: struct {
@@ -111,7 +110,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 prefetch_sound(assets, info.next_id_to_play)
                 
                 d_sample := playing_sound.d_sample
-                d_sample_chunk := 4 * d_sample * Pi
+                d_sample_chunk := 4 * d_sample
                 
                 volume   := playing_sound.current_volume
                 d_volume := seconds_per_sample * playing_sound.d_current_volume
@@ -139,20 +138,18 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 
                 real_chunks_remaining_in_sound := cast(f32) (samples_in_sound - round(playing_sound.samples_played)) / d_sample_chunk
                 chunks_remaining_in_sound := round(real_chunks_remaining_in_sound)
-                samples_ended: b32
                 if chunks_to_mix > chunks_remaining_in_sound {
                     chunks_to_mix = chunks_remaining_in_sound
-                    samples_ended = true
                 }
                 
-                volume_ended: [ChannelCount]b32
-                for &ended, index in volume_ended {
+                volume_ends_at: [ChannelCount]i32
+                for &ends_at, index in volume_ends_at {
                     if d_volume_chunk[index] != 0 {
                         volume_delta := playing_sound.target_volume[index] - volume[index]
                         volume_chunk_count := round(0.125 * volume_delta / d_volume_chunk[index])
                         if chunks_to_mix > volume_chunk_count {
                             chunks_to_mix = volume_chunk_count
-                            ended = true
+                            ends_at = chunks_to_mix
                         }
                     }
                 }
@@ -211,8 +208,8 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 playing_sound.current_volume[0] = (transmute([4]f32) volume_0)[0]
                 playing_sound.current_volume[1] = (transmute([4]f32) volume_1)[0]
                 
-                for ended, index in volume_ended {
-                    if ended {
+                for ends_at, index in volume_ends_at {
+                    if chunks_to_mix == ends_at {
                         playing_sound.current_volume[index] = playing_sound.target_volume[index]
                         playing_sound.d_current_volume[index] = 0
                     }
@@ -222,11 +219,14 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 assert(total_chunks_to_mix >= chunks_to_mix)
                 total_chunks_to_mix -= chunks_to_mix
 
-                if samples_ended {
+                if chunks_to_mix == chunks_remaining_in_sound {
                     if is_valid_sound(info.next_id_to_play) {
                         playing_sound.id = info.next_id_to_play
-                        assert(playing_sound.samples_played >= 0)
+                        assert(playing_sound.samples_played >= cast(f32) sample_count)
                         playing_sound.samples_played -= cast(f32) samples_in_sound
+                        if playing_sound.samples_played < 0 {
+                            playing_sound.samples_played = 0
+                        }
                     } else {
                         sound_finished = true
                     }
