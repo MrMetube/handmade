@@ -1,43 +1,32 @@
 package game
 
 import "base:intrinsics"
+import hha "asset_builder"
 
 Assets :: struct {
     tran_state: ^TransientState,
     arena: Arena,
     
+    files: []AssetFile,
+    
     types:   [AssetTypeId]AssetType,
     assets:  []Asset,
     slots:   []AssetSlot,
-    
     tags:    []AssetTag,
+    
     tag_ranges: [AssetTagId]f32,
     
-    
-    // TODO(viktor): These should go away once we actually load an asset file
-    DEBUG_used_asset_count: u32,
-    DEBUG_used_tag_count: u32,
-    DEBUG_asset_type: ^AssetType,
-    DEBUG_asset: ^Asset,
+    hha_contents: []u8,
 }
 
-BitmapId :: distinct u32
-SoundId  :: distinct u32
+SoundId     :: hha.SoundId
+BitmapId    :: hha.BitmapId
+Asset       :: hha.AssetData
+AssetTypeId :: hha.AssetTypeId
+AssetTag    :: hha.AssetTag
+AssetTagId  :: hha.AssetTagId
 
-Asset :: struct {
-    // TODO(viktor): should this just be a slice into the assets.tags?
-    first_tag_index:         u32,
-    one_past_last_tag_index: u32,
-    
-    using as: struct #raw_union { 
-        bitmap: AssetBitmapInfo, 
-        sound: AssetSoundInfo,
-    },
-}
-
-AssetState :: enum {
-    Unloaded, Queued, Loaded, Locked, 
-}
+AssetState :: enum { Unloaded, Queued, Loaded, Locked }
 
 AssetSlot :: struct {
     state:  AssetState,
@@ -49,223 +38,134 @@ AssetSlot :: struct {
 }
 
 AssetType :: struct {
-    // NOTE(viktor): A range within the assets.assets
-    // TODO(viktor): should this just be a slice into the assets.assets?
     first_asset_index:   u32,
     one_past_last_index: u32,
 }
 
-AssetTypeId :: enum {
-    None,
-    //
-    // NOTE(viktor): Bitmaps
-    //
-    Shadow, Wall, Arrow, Stair, 
-    // variant
-    Rock, Grass,
-    // structured
-    Head, Body, Cape, Sword,
-    Monster,
-    
-    //
-    // NOTE(viktor): Sounds
-    //
-    // variant
-    Blop, Drop, Woosh, Hit,
-    Music,
-}
-
-AssetTagId :: enum {
-    FacingDirection, // NOTE(viktor): angle in radians
-}
-
-AssetTag :: struct {
-    id:    AssetTagId,
-    value: f32,
-}
-
-AssetBitmapInfo :: struct {
-    align_percentage: [2]f32,
-    file_name:        string,
-}
-
-AssetSoundInfo :: struct {
-    file_name:       string,
-    
-    first_sample_index: u32,
-    sample_count:       u32,
-    
-    next_id_to_play: SoundId,
-}
-
 AssetVector :: [AssetTagId]f32
+
+when false {
+AssetFile :: struct {
+    handle: PlatformFileHandle,
+    // TODO(viktor): if  we ever do thread stacks, 
+    // then asset_type_array doesnt actually need to be kept here probably.
+    header: hha.Header,
+    asset_type_array: []hha.AssetTypeId,
+    tag_base: u32,
+}
+}
 
 make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets)
     sub_arena(&assets.arena, arena, memory_size)
     assets.tran_state = tran_state
-
-    assets.tags    = push(arena, AssetTag,  1024*len(AssetTypeId))
-    assets.slots   = push(arena, AssetSlot, 256*len(AssetTypeId))
-    assets.assets  = push(arena, Asset,     len(assets.slots))
-    
-    assets.DEBUG_used_asset_count  = 1
-    assets.DEBUG_used_tag_count    = 1
     
     for &range in assets.tag_ranges {
         range = 100_000_000
     }
-    
     assets.tag_ranges[.FacingDirection] = Tau
     
-    // 
-    // NOTE(Viktor): Bitmaps
-    // 
+    tag_count, asset_count: u32
+    when false {
+    {
+        file_group := Platform_begin_processing_all_files_of_type("hha")
         
-    begin_asset_type(assets, .Shadow)
-    add_bitmap_asset(assets, "../assets/shadow.bmp", {0.5, -0.4})
-    end_asset_type(assets)
-        
-    begin_asset_type(assets, .Arrow)
-    add_bitmap_asset(assets, "../assets/arrow.bmp" )
-    end_asset_type(assets)
-    
-    begin_asset_type(assets, .Stair)
-    add_bitmap_asset(assets, "../assets/stair.bmp")
-    end_asset_type(assets)
-
-    begin_asset_type(assets, .Rock)
-    add_bitmap_asset(assets, "../assets/rocks1.bmp")
-    add_bitmap_asset(assets, "../assets/rocks2.bmp")
-    add_bitmap_asset(assets, "../assets/rocks3.bmp")
-    add_bitmap_asset(assets, "../assets/rocks4.bmp")
-    add_bitmap_asset(assets, "../assets/rocks5.bmp")
-    add_bitmap_asset(assets, "../assets/rocks7.bmp")
-    end_asset_type(assets)
-    
-    // TODO(viktor): alignment percentages for these
-    begin_asset_type(assets, .Grass)
-    add_bitmap_asset(assets, "../assets/grass11.bmp")
-    add_bitmap_asset(assets, "../assets/grass12.bmp")
-    add_bitmap_asset(assets, "../assets/grass21.bmp")
-    add_bitmap_asset(assets, "../assets/grass22.bmp")
-    add_bitmap_asset(assets, "../assets/grass31.bmp")
-    add_bitmap_asset(assets, "../assets/grass32.bmp")
-    add_bitmap_asset(assets, "../assets/flower1.bmp")
-    add_bitmap_asset(assets, "../assets/flower2.bmp")
-    end_asset_type(assets)
-    
-    // add_bitmap_asset(result, "../assets/rocks6a.bmp")
-    // add_bitmap_asset(result, "../assets/rocks6b.bmp")
-    
-    // add_bitmap_asset(result, "../assets/rocks8a.bmp")
-    // add_bitmap_asset(result, "../assets/rocks8b.bmp")
-    // add_bitmap_asset(result, "../assets/rocks8c.bmp")
-    
-    begin_asset_type(assets, .Cape)
-    add_bitmap_asset(assets, "../assets/cape_left.bmp",  {0.36, 0.01})
-    add_tag(assets, .FacingDirection, Pi)
-    add_bitmap_asset(assets, "../assets/cape_right.bmp", {0.63, 0.01})
-    add_tag(assets, .FacingDirection, 0)
-    end_asset_type(assets)
-                        
-    begin_asset_type(assets, .Head)
-    add_bitmap_asset(assets, "../assets/head_left.bmp",  {0.36, 0.01})
-    add_tag(assets, .FacingDirection, Pi)
-    add_bitmap_asset(assets, "../assets/head_right.bmp", {0.63, 0.01})
-    add_tag(assets, .FacingDirection, 0)
-    end_asset_type(assets)
-                
-    begin_asset_type(assets, .Body)
-    add_bitmap_asset(assets, "../assets/body_left.bmp",  {0.36, 0.01})
-    add_tag(assets, .FacingDirection, Pi)
-    add_bitmap_asset(assets, "../assets/body_right.bmp", {0.63, 0.01})
-    add_tag(assets, .FacingDirection, 0)
-    end_asset_type(assets)
-                
-    begin_asset_type(assets, .Sword)
-    add_bitmap_asset(assets, "../assets/sword_left.bmp",  {0.36, 0.01})
-    add_tag(assets, .FacingDirection, Pi)
-    add_bitmap_asset(assets, "../assets/sword_right.bmp", {0.63, 0.01})
-    add_tag(assets, .FacingDirection, 0)
-    end_asset_type(assets)
-        
-    begin_asset_type(assets, .Monster)
-    add_bitmap_asset(assets, "../assets/orc_left.bmp"     , v2{0.7 , 0})
-    add_tag(assets, .FacingDirection, Pi)
-    add_bitmap_asset(assets, "../assets/orc_right.bmp"    , v2{0.27, 0})
-    add_tag(assets, .FacingDirection, 0)
-    end_asset_type(assets)
-    
-    // 
-    // NOTE(viktor): Sounds
-    // 
-    
-    begin_asset_type(assets, .Blop)
-    add_sound_asset(assets, "../assets/blop0.wav")
-    add_sound_asset(assets, "../assets/blop1.wav")
-    add_sound_asset(assets, "../assets/blop2.wav")
-    end_asset_type(assets)
-        
-    begin_asset_type(assets, .Drop)
-    add_sound_asset(assets, "../assets/drop0.wav")
-    add_sound_asset(assets, "../assets/drop1.wav")
-    add_sound_asset(assets, "../assets/drop2.wav")
-    end_asset_type(assets)
-        
-    begin_asset_type(assets, .Hit)
-    add_sound_asset(assets, "../assets/hit0.wav")
-    add_sound_asset(assets, "../assets/hit1.wav")
-    add_sound_asset(assets, "../assets/hit2.wav")
-    add_sound_asset(assets, "../assets/hit3.wav")
-    end_asset_type(assets)
-                
-    begin_asset_type(assets, .Woosh)
-    add_sound_asset(assets, "../assets/woosh0.wav")
-    add_sound_asset(assets, "../assets/woosh1.wav")
-    add_sound_asset(assets, "../assets/woosh2.wav")
-    end_asset_type(assets)
-    
-    
-    sec :: 48000
-    section :: 10 * sec
-    total_sample_count :: 6_418_285
-    last_index: SoundId
-    
-    begin_asset_type(assets, .Music)
-    for first_sample_index: u32; first_sample_index < total_sample_count; first_sample_index += section {
-        sample_count :u32= total_sample_count - first_sample_index
-        if sample_count > section {
-            sample_count = section
+        // TODO(viktor): which arena?
+        assets.files = push(arena, AssetFile, len(file_group))
+        for &file, index in assets.files {
+            file.handle = Platform_open_file(file_group, index)
+            file.header = {}
+            Platform_read_file(file.handle, 0, size_of(file.header), &file.header)
+            file.asset_type_array = push(arena, hha.AssetTypeId, file.header.asset_type_count)
+            Platform_read_file(file.handle, file.header.asset_types, file.header.asset_type_count * size_of(hha.AssetTypeId), &file.asset_type_array)
+            
+            if file.header.magic_value != hha.MagicValue { 
+                Platform_mark_file_error(file.handle, "HHA file has an invalid magic value")
+            }
+            if file.header.version > hha.Version {
+                Platform_mark_file_error(file.handle, "HHA file has a invalid or higher version than supported")
+            }
+            
+            if Platform_no_file_errors(file.handle) {
+                tag_count   += file.header.tag_count
+                asset_count += file.header.asset_count
+            } else {
+                unreachable() // TODO(viktor): Eventually, have some way of notifying users of bogus amogus files?
+            }
+            
         }
         
-        this_index := add_sound_asset(assets, "../assets/Light Ambience 1.wav", first_sample_index, sample_count)
-        if last_index != 0 {
-            assets.assets[last_index].sound.next_id_to_play = this_index
-        }
-        last_index = this_index
+        Platform_end_processing_all_files_of_type(file_group)
     }
     
-    // add_sound_asset(assets, "../assets/Light Ambience 2.wav")
-    // add_sound_asset(assets, "../assets/Light Ambience 3.wav")
-    // add_sound_asset(assets, "../assets/Light Ambience 4.wav")
-    // add_sound_asset(assets, "../assets/Light Ambience 5.wav")
-    end_asset_type(assets)
     
+    assets.slots  = push(arena, AssetSlot, asset_count)
+    assets.assets = push(arena, Asset,     asset_count)
+    assets.tags   = push(arena, AssetTag,  tag_count)
+    
+    loaded_asset_count, loaded_tag_count: u32
+    for id in AssetTypeId {
+        dest_type := &assets.types[id]
+        dest_type.first_asset_index = asset_count
+
+        for file in assets.files {
+            if Platform_no_file_errors(file.handle) {
+                for source_type in file.asset_type_array {
+                    if source_type.id == id {
+                        Platform_read_file(file.handle, )
+                        asset_count += 1
+                    }
+                }
+            }
+        }
+
+        dest_type.one_past_last_index = asset_count
+    }
+    assert(loaded_asset_count == asset_count)
+    assert(loaded_tag_count == tag_count)
+    }
+    
+    assets.hha_contents = DEBUG_read_entire_file("test.hha")
+    if assets.hha_contents != nil {
+        header_bytes := raw_data(assets.hha_contents)
+        header := cast(^hha.Header) header_bytes
+        
+        assert(header.magic_value == hha.MagicValue)
+        assert(header.version <= hha.Version)
+        
+        assets.slots  = push(arena, AssetSlot, header.asset_count)
+        
+        assets.assets = (cast([^]hha.AssetData) header_bytes[header.assets:]     )[:header.asset_count]
+        assets.tags   = (cast([^]hha.AssetTag)  header_bytes[header.tags:]       )[:header.tag_count]
+        
+        hha_types  := (cast([^]hha.AssetType) header_bytes[header.asset_types:])[:header.asset_type_count]
+        for &dest, index in assets.types {
+            source := hha_types[index]
+            // TODO(viktor): Support merging!
+            assert(dest.first_asset_index == 0)
+            assert(dest.one_past_last_index == 0)
+            dest.first_asset_index = source.first_asset_index
+            dest.one_past_last_index = source.one_past_last_index
+        }
+    }
     
     return assets
 }
 
 get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
-    result = assets.slots[id].bitmap
+    if is_valid_bitmap(id) {
+        result = assets.slots[id].bitmap
+    }
     return result
 }
 
 get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
-    result = assets.slots[id].sound
+    if is_valid_sound(id) {
+        result = assets.slots[id].sound
+    }
     return result
 }
-get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^AssetSoundInfo) {
+get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^hha.Sound) {
     result = &assets.assets[id].sound
     return result
 }
@@ -379,9 +279,19 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                         
                 do_load_sound_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
                     work := cast(^LoadSoundWork) data
-                 
-                    info := work.assets.assets[work.id].sound
-                    work.sound^ = DEBUG_load_wav(info.file_name, info.first_sample_index, info.sample_count)
+                    
+                    hha_asset := work.assets.assets[work.id]
+                    info      := hha_asset.sound
+                    
+                    samples_data_offset := hha_asset.data_offset
+                    sound := work.sound
+                    sound.channel_count = info.channel_count
+                    
+                    sound_bytes := raw_data(work.assets.hha_contents)
+                    for &channel in sound.channels[:info.channel_count] {
+                        channel = (cast([^]i16) sound_bytes[samples_data_offset:])[:info.sample_count]
+                        samples_data_offset += cast(u64) info.sample_count * size_of(i16)
+                    }
                     
                     complete_previous_writes_before_future_writes()
                     
@@ -398,9 +308,8 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                 work.id          = id
                 work.task        = task
                 work.sound       = push(&assets.arena, Sound)
-                work.final_state = .Loaded
                 
-                PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_sound_work, work)
+                Platform_enqueue_work(assets.tran_state.low_priority_queue, do_load_sound_work, work)
             } else {
                 _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
@@ -426,8 +335,23 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 do_load_bitmap_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
                     work := cast(^LoadBitmapWork) data
                  
-                    info := work.assets.assets[work.id].bitmap
-                    work.bitmap^ = DEBUG_load_bmp(info.file_name, info.align_percentage)
+                    hha_asset := work.assets.assets[work.id]
+                    info      := hha_asset.bitmap
+                    
+                    bitmap_bytes  := raw_data(work.assets.hha_contents[hha_asset.data_offset:])
+                    bitmap_memory := (cast([^]ByteColor) bitmap_bytes)[:info.dimension.x * info.dimension.y]
+                    
+                    bitmap := work.bitmap
+                    bitmap^ = {
+                        memory = bitmap_memory,
+                        width  = cast(i32) info.dimension.x, 
+                        height = cast(i32) info.dimension.y,
+                        
+                        pitch = cast(i32) info.dimension.x,
+                        
+                        align_percentage = info.align_percentage,
+                        width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
+                    }
                     
                     complete_previous_writes_before_future_writes()
                     
@@ -444,9 +368,8 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 work.id          = id
                 work.task        = task
                 work.bitmap      = push(&assets.arena, Bitmap, alignment = 16)
-                work.final_state = .Loaded
                 
-                PLATFORM_enqueue_work(assets.tran_state.low_priority_queue, do_load_bitmap_work, work)
+                Platform_enqueue_work(assets.tran_state.low_priority_queue, do_load_bitmap_work, work)
             } else {
                 _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
@@ -454,6 +377,22 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+when false {
+    
 
 begin_asset_type :: proc(assets: ^Assets, id: AssetTypeId) {
     assert(assets.DEBUG_asset_type == nil)
@@ -779,4 +718,6 @@ DEBUG_load_bmp :: proc (file_name: string, alignment_percentage: v2 = 0.5) -> (r
     }
     
     return {}
+}
+
 }

@@ -11,6 +11,7 @@ Mixer :: struct {
 }
 
 Sound :: struct {
+    // TODO(viktor): should channel_count be implicit, or does that make the underlying memory too messy?
     channel_count: u32,
     channels: [2][]i16, // 1 or 2 channels of samples
 }
@@ -132,7 +133,8 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 }
                 
                 chunks_to_mix := total_chunks_to_mix
-                assert(len(sound.channels[0]) & 3 == 0)
+                // TODO(viktor): IMPORTANT(viktor): Fix the alignment of sounds
+                // assert(len(sound.channels[0]) & 3 == 0) 
                 samples_in_sound := cast(i32) len(sound.channels[0])
                 chunks_in_sound := samples_in_sound / 4
                 

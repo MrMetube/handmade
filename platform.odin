@@ -306,8 +306,8 @@ main :: proc() {
         
         game_memory.high_priority_queue        = &high_queue
         game_memory.low_priority_queue         = &low_queue
-        game_memory.PLATFORM_enqueue_work      = enqueue_work
-        game_memory.PLATFORM_complete_all_work = complete_all_work
+        game_memory.Platform_enqueue_work      = enqueue_work
+        game_memory.Platform_complete_all_work = complete_all_work
     }
 
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {

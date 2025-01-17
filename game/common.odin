@@ -99,8 +99,8 @@ GameMemory :: struct {
     high_priority_queue:        ^PlatformWorkQueue,
     low_priority_queue:         ^PlatformWorkQueue,
     
-    PLATFORM_enqueue_work:      PlatformEnqueueWork,
-    PLATFORM_complete_all_work: PlatformCompleteAllWork,
+    Platform_enqueue_work:      PlatformEnqueueWork,
+    Platform_complete_all_work: PlatformCompleteAllWork,
     
     debug:    DEBUG_code,
     counters: [DebugCycleCounterName]DebugCycleCounter,

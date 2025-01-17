@@ -367,14 +367,14 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
             when false {
                 do_tile_render_work(it)
             } else {
-                PLATFORM_enqueue_work(queue, do_tile_render_work, it)
+                Platform_enqueue_work(queue, do_tile_render_work, it)
             }
             
             work_index += 1
         }
     }
 
-    PLATFORM_complete_all_work(queue)
+    Platform_complete_all_work(queue)
 }
 
 render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
@@ -1053,42 +1053,6 @@ unscale_and_bias :: #force_inline proc(normal: v4) -> (result: v4) {
 
     result.xyz = -1 + 2 * (normal.xyz * inv_255)
     result.w = inv_255 * normal.w
-
-    return result
-}
-
-// NOTE(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
-@(require_results)
-srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
-    result.r = square(srgb.r)
-    result.g = square(srgb.g)
-    result.b = square(srgb.b)
-    result.a = srgb.a
-
-    return result
-}
-@(require_results)
-srgb_255_to_linear_1 :: #force_inline proc(srgb: v4) -> (result: v4) {
-    inv_255: f32 = 1.0 / 255.0
-    result = srgb * inv_255
-    result = srgb_to_linear(result)
-
-    return result
-}
-
-@(require_results)
-linear_to_srgb :: #force_inline proc(linear: v4) -> (result: v4) {
-    result.r = square_root(linear.r)
-    result.g = square_root(linear.g)
-    result.b = square_root(linear.b)
-    result.a = linear.a
-
-    return result
-}
-@(require_results)
-linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
-    result = linear_to_srgb(linear)
-    result *= 255
 
     return result
 }

@@ -10,7 +10,9 @@ import "base:runtime"
 
 when #config(BUILD, false) {
 
-flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix -subsystem:windows "
+flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix "
+windows  :: " -subsystem:windows "
+console  :: " -subsystem:console "
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
 
@@ -32,19 +34,11 @@ main :: proc() {
     
     debug_build := "debug.exe" 
 
-    { // Asset file Builder
-        out := `.\build\asset_builder.exe`
-        if modified_since(`./tools/asset_bundler.odin`, out) {
-            if !run_command_sync(`C:\Odin\odin.exe`, `odin build tools/asset_bundler -file -out:`, out, flags, debug, pedantic) {
-                os.exit(1)
-            }
-        }
-    }
-    
     { // Game
         out := `.\build\game.dll`
-        /* if modified_since(`.\game`, out) */ {
-            delete_all_like(".\\build\\*.pdb")
+        /* if modified_since(`.\game`, out) */ 
+        {
+            delete_all_like(`.\build\game*.pdb`)
             
             // NOTE(viktor): the platform checks for this lock file when hotreloading
             lock_path := `.\lock.tmp` 
@@ -57,56 +51,42 @@ main :: proc() {
             
             fmt.fprint(lock, "WAITING FOR PDB")
             pdb := fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number())
-            if !run_command_sync(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, /* pedantic */) {
-                os.exit(1)
-            }
-            
-            copy_over_common_code()
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, /* pedantic */)
         }
     }
 
+    { // Asset file Builder
+        out := `.\build\asset_builder.exe`
+        src := `.\game\asset_builder`
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build `, src, ` -out:`, out, flags, console, debug, pedantic)
+    }
+    
     if is_running(debug_build) do os.exit(0)
 
     {// Platform
-        /* if modified_since(`.`, `.\build\debug.exe`) */ {
-            if !run_command_sync(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, internal, optimizations, /* pedantic */) {
-                os.exit(1)
-            }
-        }
+        copy_over(`.\game\common.odin`, `.\common.odin`, "package game", "package main")
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, windows, internal, optimizations, /* pedantic */)
     }
     
     os.exit(0)
 }
 
-copy_over_common_code :: proc() {
-    /* TODO(viktor):
-        use more sophisticated metaprogramming
-        
-        -custom-attribute:<string>
-                Add a custom attribute which will be ignored if it is unknown.
-                This can be used with metaprogramming tools.
-                Examples:
-                        -custom-attribute:my_tag
-                        -custom-attribute:my_tag,the_other_thing
-                        -custom-attribute:my_tag -custom-attribute:the_other_thing
-     */
-    common_game_path     := `.\game\common.odin`
-    common_platform_path := `.\common.odin`
-    file, ok := os.read_entire_file(common_game_path)
+copy_over :: proc(src_path, dst_path, package_line_to_delete, package_line_replacement: string) {
+    src, ok := os.read_entire_file(src_path)
     if !ok {
-        log.error("common.odin file could not be read")
+        log.errorf("file %v could not be read", src_path)
         os.exit(1)
     }
     
-    if os.exists(common_platform_path) do os.remove(common_platform_path)
-    common, err := os.open(common_platform_path, os.O_CREATE)
+    os.remove(dst_path)
     
-    common_code, _ := strings.replace(cast(string) file, "package game", "", 1)
-    if err != nil do log.error(os.error_string(err))
+    dst, _ := os.open(dst_path, os.O_CREATE)
+    src_code, _ := strings.replace(cast(string) src, package_line_to_delete, "", 1)
     
-    fmt.fprintfln(common, common_platform_header, common_game_path)
-    fmt.fprint(common, common_code)
-    os.close(common)
+    fmt.fprintln(dst, package_line_replacement)
+    fmt.fprintfln(dst, copypasta_header, src_path)
+    fmt.fprint(dst, src_code)
+    os.close(dst)
 }
 
 
@@ -133,17 +113,13 @@ rebuild_yourself :: proc(exe_path: string) {
         
         delete_all_like(temp_path)
         
-        if !run_command_sync(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file -define:BUILD=true ") {
-            os.exit(1)
-        } 
+        run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file -define:BUILD=true ")
         
         old_path := fmt.tprintf("%s-old", exe_path)
         if err := os.rename(exe_path,  old_path); err != nil do fmt.println(os.error_string(err))
         if err := os.rename(temp_path, exe_path); err != nil do fmt.println(os.error_string(err))
         
-        if !run_command_sync(exe_path) {
-            os.exit(1)
-        }
+        run_command_or_exit(exe_path)
         
         os.exit(0)
     }
@@ -213,7 +189,13 @@ is_running :: proc(exe_name: string) -> (running: b32) {
     return false
 }
 
-run_command_sync :: proc(program: string, args: ..string) -> (success: b32) {
+run_command_or_exit :: proc(program: string, args: ..string) {
+    if !run_command(program, ..args) {
+        os.exit(1)
+    }
+}
+
+run_command :: proc(program: string, args: ..string) -> (success: b32) {
     startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }
     process_info := win.PROCESS_INFORMATION{}
      
@@ -260,8 +242,7 @@ random_number :: proc() ->(result: u32) {
     return result
 }
 
-common_platform_header :: `package main
-
+copypasta_header :: `
 /* @Generated @Copypasta from %v
 
     -------------------------------------------------------------

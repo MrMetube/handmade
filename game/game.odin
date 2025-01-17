@@ -221,8 +221,8 @@ PairwiseCollsionRule :: struct {
 #assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
 
 // NOTE(viktor): Globals
-PLATFORM_enqueue_work:      PlatformEnqueueWork
-PLATFORM_complete_all_work: PlatformCompleteAllWork
+Platform_enqueue_work:      PlatformEnqueueWork
+Platform_complete_all_work: PlatformCompleteAllWork
 DEBUG_read_entire_file:     DebugReadEntireFile
 
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
@@ -232,8 +232,8 @@ PlatformWorkQueue :: struct {}
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     scoped_timed_block(.update_and_render)
 
-    PLATFORM_enqueue_work      = memory.PLATFORM_enqueue_work
-    PLATFORM_complete_all_work = memory.PLATFORM_complete_all_work
+    Platform_enqueue_work      = memory.Platform_enqueue_work
+    Platform_complete_all_work = memory.Platform_complete_all_work
     
     when INTERNAL {
         // NOTE(viktor): used by performance counters
@@ -520,22 +520,22 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             con_hero.darrow = {}
             if controller.button_up.ended_down {
                 con_hero.darrow =  {0, 1}
-                change_volume(&state.mixer, state.music, 4, {1,1})
+                // change_volume(&state.mixer, state.music, 4, {1,1})
             }
             if controller.button_down.ended_down {
                 con_hero.darrow = -{0, 1}
-                change_volume(&state.mixer, state.music, 10, {0,0})
+                // change_volume(&state.mixer, state.music, 10, {0,0})
             }
             if controller.button_left.ended_down {
                 con_hero.darrow = -{1, 0}
                 // change_volume(&state.mixer, state.music, 3, {1,0})
-                change_pitch(&state.mixer, state.music, state.music.d_sample - 0.1)
+                // change_pitch(&state.mixer, state.music, state.music.d_sample - 0.1)
                 
             }
             if controller.button_right.ended_down {
                 con_hero.darrow =  {1, 0}
                 // change_volume(&state.mixer, state.music, 3, {0,1})
-                change_pitch(&state.mixer, state.music, state.music.d_sample + 0.1)
+                // change_pitch(&state.mixer, state.music, state.music.d_sample + 0.1)
             }
             
             if con_hero.darrow != 0 {
@@ -1077,7 +1077,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
             work.task   = task
             ground_buffer.p = p
             
-            PLATFORM_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
+            Platform_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
         } else {
             end_task_with_memory(task)
         }
