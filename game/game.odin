@@ -221,19 +221,22 @@ PairwiseCollsionRule :: struct {
 #assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
 
 // NOTE(viktor): Globals
-Platform_enqueue_work:      PlatformEnqueueWork
-Platform_complete_all_work: PlatformCompleteAllWork
-DEBUG_read_entire_file:     DebugReadEntireFile
 
+Platform: PlatformAPI
+Platform_no_file_errors :: #force_inline proc(handle: PlatformFileHandle) -> b32 { 
+    return !handle.has_errors
+}
+DEBUG_read_entire_file : DebugReadEntireFile
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
-PlatformWorkQueue :: struct {}
+PlatformWorkQueue  :: struct {}
+PlatformFileHandle :: ^struct{ has_errors: b32 }
+PlatformFileGroup  :: []struct{}
 
 @(export)
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     scoped_timed_block(.update_and_render)
 
-    Platform_enqueue_work      = memory.Platform_enqueue_work
-    Platform_complete_all_work = memory.Platform_complete_all_work
+    Platform = memory.Platform_api
     
     when INTERNAL {
         // NOTE(viktor): used by performance counters
@@ -1077,7 +1080,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
             work.task   = task
             ground_buffer.p = p
             
-            Platform_enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
+            Platform.enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
         } else {
             end_task_with_memory(task)
         }

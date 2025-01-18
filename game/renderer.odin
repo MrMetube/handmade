@@ -367,14 +367,14 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
             when false {
                 do_tile_render_work(it)
             } else {
-                Platform_enqueue_work(queue, do_tile_render_work, it)
+                Platform.enqueue_work(queue, do_tile_render_work, it)
             }
             
             work_index += 1
         }
     }
 
-    Platform_complete_all_work(queue)
+    Platform.complete_all_work(queue)
 }
 
 render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {

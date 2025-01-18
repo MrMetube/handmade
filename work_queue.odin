@@ -30,7 +30,7 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: win.LONG) {
     }
 }
 
-enqueue_work :: proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer) {
+enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
     assert(new_next_entry != queue.next_entry_to_read) 
@@ -46,6 +46,17 @@ enqueue_work :: proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallb
     assert(ok)
     
     win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
+}
+
+complete_all_work : PlatformCompleteAllWork : proc(queue: ^PlatformWorkQueue) {
+    for queue.completion_count != queue.completion_goal {
+        do_next_work_queue_entry(queue)
+    }
+    
+    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, 0)
+    assert(ok)
+    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.completion_count, queue.completion_count, 0)
+    assert(ok)
 }
 
 do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b32) {
@@ -68,17 +79,6 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
     }
     
     return should_sleep
-}
-
-complete_all_work :: proc(queue: ^PlatformWorkQueue) {
-    for queue.completion_count != queue.completion_goal {
-        do_next_work_queue_entry(queue)
-    }
-    
-    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, 0)
-    assert(ok)
-    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.completion_count, queue.completion_count, 0)
-    assert(ok)
 }
 
 thread_proc :: proc "stdcall" (parameter: rawpointer) -> win.DWORD {

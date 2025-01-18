@@ -102,6 +102,32 @@ ReplayBuffer :: struct {
     memory_block: []u8,
 }
 
+FileHandle :: struct {
+    has_errors: b32,
+}
+File :: struct {
+    
+}
+PlatformFileHandle :: ^FileHandle
+PlatformFileGroup  :: []File
+
+
+begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : proc(file_extension: string) -> (result: PlatformFileGroup) {
+    unimplemented()
+}
+end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(file_group: PlatformFileGroup) {
+    unimplemented()
+}
+open_file : PlatformOpenFile : proc(file_group: PlatformFileGroup, #any_int index: u32) -> (result: PlatformFileHandle) {
+    unimplemented()
+}
+read_data_from_file : PlatformReadDataFromFile : proc(handle: PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer) {
+    unimplemented()
+}
+mark_file_error : PlatformMarkFileError : proc(handle: PlatformFileHandle, error_message: string) {
+    unimplemented()
+}
+
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
@@ -266,8 +292,23 @@ main :: proc() {
 
     context.allocator = {}
 
-    game_memory: GameMemory
-    {
+    game_memory := GameMemory{
+        high_priority_queue        = &high_queue,
+        low_priority_queue         = &low_queue,
+        
+        Platform_api = {
+            enqueue_work      = enqueue_work,
+            complete_all_work = complete_all_work,
+            
+            begin_processing_all_files_of_type = begin_processing_all_files_of_type,
+            end_processing_all_files_of_type   = end_processing_all_files_of_type,
+            open_file                          = open_file,
+            read_data_from_file                = read_data_from_file,
+            mark_file_error                    = mark_file_error,
+        },
+    }
+    
+    { // NOTE(viktor): initialize game_memory
         base_address := cast(rawpointer) cast(uintptr) terabytes(1) when INTERNAL else 0
 
         total_size := cast(uint) (PermanentStorageSize + TransientStorageSize)
@@ -298,16 +339,14 @@ main :: proc() {
 
         game_memory.permanent_storage = storage_ptr[0:][:PermanentStorageSize]
         game_memory.transient_storage = storage_ptr[PermanentStorageSize:][:TransientStorageSize]
-
-        game_memory.debug.read_entire_file  = DEBUG_read_entire_file
-        game_memory.debug.write_entire_file = DEBUG_write_entire_file
-        game_memory.debug.free_file_memory  = DEBUG_free_file_memory
         
-        
-        game_memory.high_priority_queue        = &high_queue
-        game_memory.low_priority_queue         = &low_queue
-        game_memory.Platform_enqueue_work      = enqueue_work
-        game_memory.Platform_complete_all_work = complete_all_work
+        when INTERNAL {
+            game_memory.debug = {
+                read_entire_file  = DEBUG_read_entire_file,
+                write_entire_file = DEBUG_write_entire_file,
+                free_file_memory  = DEBUG_free_file_memory,
+            }
+        }
     }
 
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {

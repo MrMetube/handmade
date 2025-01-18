@@ -44,15 +44,13 @@ AssetType :: struct {
 
 AssetVector :: [AssetTagId]f32
 
-when false {
 AssetFile :: struct {
     handle: PlatformFileHandle,
     // TODO(viktor): if  we ever do thread stacks, 
     // then asset_type_array doesnt actually need to be kept here probably.
     header: hha.Header,
-    asset_type_array: []hha.AssetTypeId,
+    asset_type_array: []hha.AssetType,
     tag_base: u32,
-}
 }
 
 make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
@@ -64,26 +62,26 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
         range = 100_000_000
     }
     assets.tag_ranges[.FacingDirection] = Tau
-    
+when false {
     tag_count, asset_count: u32
-    when false {
     {
-        file_group := Platform_begin_processing_all_files_of_type("hha")
+        file_group := Platform.begin_processing_all_files_of_type("hha")
         
         // TODO(viktor): which arena?
         assets.files = push(arena, AssetFile, len(file_group))
         for &file, index in assets.files {
-            file.handle = Platform_open_file(file_group, index)
+            file.handle = Platform.open_file(file_group, index)
+            file.tag_base = auto_cast len(assets.tags)
             file.header = {}
-            Platform_read_file(file.handle, 0, size_of(file.header), &file.header)
-            file.asset_type_array = push(arena, hha.AssetTypeId, file.header.asset_type_count)
-            Platform_read_file(file.handle, file.header.asset_types, file.header.asset_type_count * size_of(hha.AssetTypeId), &file.asset_type_array)
+            Platform.read_data_from_file(file.handle, 0, size_of(file.header), &file.header)
+            file.asset_type_array = push(arena, hha.AssetType, file.header.asset_type_count)
+            Platform.read_data_from_file(file.handle, file.header.asset_types, file.header.asset_type_count * size_of(hha.AssetTypeId), &file.asset_type_array)
             
             if file.header.magic_value != hha.MagicValue { 
-                Platform_mark_file_error(file.handle, "HHA file has an invalid magic value")
+                Platform.mark_file_error(file.handle, "HHA file has an invalid magic value")
             }
             if file.header.version > hha.Version {
-                Platform_mark_file_error(file.handle, "HHA file has a invalid or higher version than supported")
+                Platform.mark_file_error(file.handle, "HHA file has a invalid or higher version than supported")
             }
             
             if Platform_no_file_errors(file.handle) {
@@ -95,15 +93,21 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
             
         }
         
-        Platform_end_processing_all_files_of_type(file_group)
+        Platform.end_processing_all_files_of_type(file_group)
     }
     
-    
+    // NOTE(viktor): Allocate all metadata space
     assets.slots  = push(arena, AssetSlot, asset_count)
     assets.assets = push(arena, Asset,     asset_count)
     assets.tags   = push(arena, AssetTag,  tag_count)
     
-    loaded_asset_count, loaded_tag_count: u32
+    // NOTE(viktor): Load tags
+    for &file in assets.files {
+        file.asset_type_array = push(arena, hha.AssetType, file.header.asset_type_count)
+        Platform.read_data_from_file(file.handle, file.header.tags, file.header.tag_count * size_of(AssetTag), &assets.tags[file.tag_base])
+    }
+    
+    loaded_asset_count: u32
     for id in AssetTypeId {
         dest_type := &assets.types[id]
         dest_type.first_asset_index = asset_count
@@ -112,8 +116,20 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
             if Platform_no_file_errors(file.handle) {
                 for source_type in file.asset_type_array {
                     if source_type.id == id {
-                        Platform_read_file(file.handle, )
-                        asset_count += 1
+                        asset_count_for_type := source_type.one_past_last_index - source_type.first_asset_index
+                        assets_for_type := assets.assets[asset_count:][:asset_count_for_type]
+                        Platform.read_data_from_file(file.handle, 
+                                                     file.header.assets + cast(u64) source_type.first_asset_index * size_of(Asset), 
+                                                     asset_count_for_type * size_of(Asset),
+                                                     &assets_for_type[0])
+                                                     
+                        for &asset in assets_for_type {
+                            asset.first_tag_index += file.tag_base
+                            asset.one_past_last_tag_index += file.tag_base
+                        }
+                        
+                        asset_count += asset_count_for_type
+                        assert(asset_count <= loaded_asset_count)
                     }
                 }
             }
@@ -122,8 +138,15 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
         dest_type.one_past_last_index = asset_count
     }
     assert(loaded_asset_count == asset_count)
-    assert(loaded_tag_count == tag_count)
-    }
+}
+    
+    
+    
+    
+    
+    
+    
+    
     
     assets.hha_contents = DEBUG_read_entire_file("test.hha")
     if assets.hha_contents != nil {
@@ -154,14 +177,20 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
 
 get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
     if is_valid_bitmap(id) {
-        result = assets.slots[id].bitmap
+        slot := assets.slots[id]
+        if slot.state  == .Loaded || slot.state == .Locked {
+            result = slot.bitmap
+        }
     }
     return result
 }
 
 get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
     if is_valid_sound(id) {
-        result = assets.slots[id].sound
+        slot := assets.slots[id]
+        if slot.state  == .Loaded || slot.state == .Locked {
+            result = slot.sound
+        }
     }
     return result
 }
@@ -263,6 +292,32 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id) }
 prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id) }
 
+LoadAssetWork :: struct {
+    task:        ^TaskWithMemory,
+    asset_slot:  AssetSlot,
+    final_state: AssetState, 
+    
+    handle: PlatformFileHandle,
+    position, amount: u64,
+    destination:  rawpointer,
+}
+
+do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    work := cast(^LoadAssetWork) data
+    
+    when false do Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
+    
+    complete_previous_writes_before_future_writes()
+    
+    // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
+    // if Platform_no_file_errors(work.handle) 
+    {
+        work.asset_slot.state = work.final_state
+    }
+    
+    end_task_with_memory(work.task)
+}
+
 load_sound :: proc(assets: ^Assets, id: SoundId) {
     if is_valid_sound(id) {
         if _, ok := atomic_compare_exchange(&assets.slots[id].state, AssetState.Unloaded, AssetState.Queued); ok {
@@ -301,15 +356,29 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                     
                     end_task_with_memory(work.task)
                 }
+                /* 
+                
+                work^ = {
+                    task = task,
+                    final_state = .Loaded,
+                    
+                    handle = ,
+                    position = , 
+                    amount = ,
+                    destination = ,
+                    
+                    asset_slot = &assets.slots[],
+                }
+                */
 
-                work := push(&assets.arena, LoadSoundWork)
+                work := push(&task.arena, LoadSoundWork)
                 
                 work.assets      = assets
                 work.id          = id
                 work.task        = task
                 work.sound       = push(&assets.arena, Sound)
                 
-                Platform_enqueue_work(assets.tran_state.low_priority_queue, do_load_sound_work, work)
+                Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_sound_work, work)
             } else {
                 _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
@@ -322,54 +391,49 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
     if is_valid_bitmap(id) {
         if _, ok := atomic_compare_exchange(&assets.slots[id].state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
-                LoadBitmapWork :: struct {
-                    task:   ^TaskWithMemory,
-                    assets: ^Assets,
+                hha_asset := assets.assets[id]
+                info      := hha_asset.bitmap
+
+                bitmap_size := info.dimension.x * info.dimension.y
+                memory_size := bitmap_size * size_of(ByteColor)
+                
+                bitmap := push(&assets.arena, Bitmap)
+                bitmap^ = {
+                    memory = push(&assets.arena, ByteColor, bitmap_size, alignment = 16),
+                    width  = cast(i32) info.dimension.x, 
+                    height = cast(i32) info.dimension.y,
                     
-                    bitmap:      ^Bitmap,
-                    final_state: AssetState, 
+                    pitch = cast(i32) info.dimension.x,
                     
-                    id: BitmapId,
+                    align_percentage = info.align_percentage,
+                    width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
                 }
-                        
-                do_load_bitmap_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-                    work := cast(^LoadBitmapWork) data
-                 
-                    hha_asset := work.assets.assets[work.id]
-                    info      := hha_asset.bitmap
+                
+                
+                
+                bitmap_bytes  := raw_data(assets.hha_contents[hha_asset.data_offset:])
+                bitmap_memory := (cast([^]ByteColor) bitmap_bytes)[:info.dimension.x * info.dimension.y]
+                assets.slots[id].bitmap = bitmap
+                assets.slots[id].state = .Loaded
+                
+                
+                
+                bitmap.memory = bitmap_memory
+                
+                work := push(&task.arena, LoadAssetWork)
+                work^ = {
+                    task = task,
+                    final_state = .Loaded,
                     
-                    bitmap_bytes  := raw_data(work.assets.hha_contents[hha_asset.data_offset:])
-                    bitmap_memory := (cast([^]ByteColor) bitmap_bytes)[:info.dimension.x * info.dimension.y]
+                    // handle = ,
+                    position = hha_asset.data_offset, 
+                    amount = cast(u64) memory_size,
+                    destination = raw_data(bitmap.memory),
                     
-                    bitmap := work.bitmap
-                    bitmap^ = {
-                        memory = bitmap_memory,
-                        width  = cast(i32) info.dimension.x, 
-                        height = cast(i32) info.dimension.y,
-                        
-                        pitch = cast(i32) info.dimension.x,
-                        
-                        align_percentage = info.align_percentage,
-                        width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
-                    }
-                    
-                    complete_previous_writes_before_future_writes()
-                    
-                    slot := &work.assets.slots[work.id]
-                    slot.bitmap = work.bitmap
-                    slot.state  = work.final_state
-                    
-                    end_task_with_memory(work.task)
+                    asset_slot = { bitmap = bitmap },
                 }
 
-                work := push(&assets.arena, LoadBitmapWork)
-                
-                work.assets      = assets
-                work.id          = id
-                work.task        = task
-                work.bitmap      = push(&assets.arena, Bitmap, alignment = 16)
-                
-                Platform_enqueue_work(assets.tran_state.low_priority_queue, do_load_bitmap_work, work)
+                Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {
                 _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)

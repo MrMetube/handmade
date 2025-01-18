@@ -96,20 +96,35 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
 
-    high_priority_queue:        ^PlatformWorkQueue,
-    low_priority_queue:         ^PlatformWorkQueue,
+    high_priority_queue: ^PlatformWorkQueue,
+    low_priority_queue:  ^PlatformWorkQueue,
     
-    Platform_enqueue_work:      PlatformEnqueueWork,
-    Platform_complete_all_work: PlatformCompleteAllWork,
-    
+    Platform_api: PlatformAPI,
+
     debug:    DEBUG_code,
     counters: [DebugCycleCounterName]DebugCycleCounter,
 }
 
-// TODO(viktor): this should only be in platform.odin
+PlatformAPI :: struct {
+    enqueue_work:      PlatformEnqueueWork,
+    complete_all_work: PlatformCompleteAllWork,
+        
+    begin_processing_all_files_of_type: PlatformBeginProcessingAllFilesOfType,
+    end_processing_all_files_of_type:   PlatformEndProcessingAllFilesOfType,
+    open_file:                          PlatformOpenFile,
+    read_data_from_file:                PlatformReadDataFromFile,
+    mark_file_error:                    PlatformMarkFileError,
+}
+
 PlatformWorkQueueCallback :: #type proc(data: rawpointer)
-PlatformEnqueueWork     :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
-PlatformCompleteAllWork :: #type proc(queue: ^PlatformWorkQueue)
+PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
+PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
+
+PlatformBeginProcessingAllFilesOfType :: #type proc(file_extension: string) -> PlatformFileGroup
+PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: PlatformFileGroup)
+PlatformOpenFile                      :: #type proc(file_group: PlatformFileGroup, #any_int index: u32) -> PlatformFileHandle
+PlatformReadDataFromFile              :: #type proc(handle: PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer)
+PlatformMarkFileError                 :: #type proc(handle: PlatformFileHandle, error_message: string)
 
 when INTERNAL { 
     DEBUG_code :: struct {
