@@ -44,8 +44,6 @@ cast_vec_v4 :: #force_inline proc($T: typeid, v:[4]$E) -> [4]T where T != E {
     return vec_cast(T, v.x, v.y, v.z, v.w)
 }
 
-
-
 min_vec :: proc { min_vec_2, min_vec_3}
 max_vec :: proc { max_vec_2, max_vec_3}
 

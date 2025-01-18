@@ -122,9 +122,15 @@ PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
 
 PlatformBeginProcessingAllFilesOfType :: #type proc(file_extension: string) -> PlatformFileGroup
 PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: PlatformFileGroup)
-PlatformOpenFile                      :: #type proc(file_group: PlatformFileGroup, #any_int index: u32) -> PlatformFileHandle
-PlatformReadDataFromFile              :: #type proc(handle: PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer)
-PlatformMarkFileError                 :: #type proc(handle: PlatformFileHandle, error_message: string)
+PlatformOpenFile                      :: #type proc(file_group: PlatformFileGroup, #any_int index: u32) -> ^PlatformFileHandle
+PlatformReadDataFromFile              :: #type proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer)
+PlatformMarkFileError                 :: #type proc(handle: ^PlatformFileHandle, error_message: string)
+
+Platform_no_file_errors :: #force_inline proc(handle: ^PlatformFileHandle) -> b32 { 
+    return handle.no_errors
+}
+
+
 
 when INTERNAL { 
     DEBUG_code :: struct {
@@ -182,6 +188,10 @@ atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new:
 }
 
 complete_previous_writes_before_future_writes :: #force_inline proc "contextless" () {
+    // TODO(viktor): what should that actually be
+    intrinsics.atomic_thread_fence(.Seq_Cst)
+}
+complete_previous_reads_before_future_reads :: #force_inline proc "contextless" () {
     // TODO(viktor): what should that actually be
     intrinsics.atomic_thread_fence(.Seq_Cst)
 }

@@ -223,13 +223,10 @@ PairwiseCollsionRule :: struct {
 // NOTE(viktor): Globals
 
 Platform: PlatformAPI
-Platform_no_file_errors :: #force_inline proc(handle: PlatformFileHandle) -> b32 { 
-    return !handle.has_errors
-}
 DEBUG_read_entire_file : DebugReadEntireFile
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
 PlatformWorkQueue  :: struct {}
-PlatformFileHandle :: ^struct{ has_errors: b32 }
+PlatformFileHandle :: struct{ no_errors: b32 }
 PlatformFileGroup  :: []struct{}
 
 @(export)
