@@ -111,7 +111,7 @@ PlatformAPI :: struct {
         
     begin_processing_all_files_of_type: PlatformBeginProcessingAllFilesOfType,
     end_processing_all_files_of_type:   PlatformEndProcessingAllFilesOfType,
-    open_file:                          PlatformOpenFile,
+    open_next_file:                     PlatformOpenNextFile,
     read_data_from_file:                PlatformReadDataFromFile,
     mark_file_error:                    PlatformMarkFileError,
 }
@@ -120,9 +120,9 @@ PlatformWorkQueueCallback :: #type proc(data: rawpointer)
 PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
 PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
 
-PlatformBeginProcessingAllFilesOfType :: #type proc(file_extension: string) -> PlatformFileGroup
-PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: PlatformFileGroup)
-PlatformOpenFile                      :: #type proc(file_group: PlatformFileGroup, #any_int index: u32) -> ^PlatformFileHandle
+PlatformBeginProcessingAllFilesOfType :: #type proc(file_extension: string) -> ^PlatformFileGroup
+PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: ^PlatformFileGroup)
+PlatformOpenNextFile                  :: #type proc(file_group: ^PlatformFileGroup) -> ^PlatformFileHandle
 PlatformReadDataFromFile              :: #type proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer)
 PlatformMarkFileError                 :: #type proc(handle: ^PlatformFileHandle, error_message: string)
 
@@ -134,16 +134,16 @@ Platform_no_file_errors :: #force_inline proc(handle: ^PlatformFileHandle) -> b3
 
 when INTERNAL { 
     DEBUG_code :: struct {
-        read_entire_file : DebugReadEntireFile,
+        read_entire_file:  DebugReadEntireFile,
         write_entire_file: DebugWriteEntireFile,
-        free_file_memory : DebugFreeFileMemory,
+        free_file_memory:  DebugFreeFileMemory,
     }
 
     DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
     DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
     DebugFreeFileMemory  :: #type proc(memory: []u8)
     
-    DEBUG_GLOBAL_memory : ^GameMemory
+    DEBUG_GLOBAL_memory: ^GameMemory
     
     begin_timed_block  :: #force_inline proc(name: DebugCycleCounterName) -> i64 { return intrinsics.read_cycle_counter()}
     @(deferred_in_out=end_timed_block)

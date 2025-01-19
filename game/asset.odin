@@ -61,7 +61,7 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     assets.tran_state = tran_state
     
     for &range in assets.tag_ranges {
-        range = 100_000_000
+        range = 1_000_000_000
     }
     assets.tag_ranges[.FacingDirection] = Tau
     
@@ -73,15 +73,15 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     }
     
     // NOTE(viktor): count the null tag and null asset only once and not per HHA file
-    tag_count  : u32 = 1
+    tag_count:   u32 = 1
     asset_count: u32 = 1
     {
         file_group := Platform.begin_processing_all_files_of_type("hha")
         
         // TODO(viktor): which arena?
-        assets.files = push(arena, AssetFile, len(file_group))
+        assets.files = push(arena, AssetFile, file_group.file_count)
         for &file, index in assets.files {
-            file.handle = Platform.open_file(file_group, index)
+            file.handle = Platform.open_next_file(file_group)
             file.tag_base = tag_count
             
             file.header = {}

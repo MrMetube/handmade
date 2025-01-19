@@ -223,11 +223,10 @@ PairwiseCollsionRule :: struct {
 // NOTE(viktor): Globals
 
 Platform: PlatformAPI
-DEBUG_read_entire_file : DebugReadEntireFile
 // NOTE(viktor): declaration of a platform struct, into which we should never need to look
-PlatformWorkQueue  :: struct {}
-PlatformFileHandle :: struct{ no_errors: b32 }
-PlatformFileGroup  :: []struct{}
+PlatformWorkQueue  :: struct{}
+PlatformFileHandle :: struct{ no_errors:  b32 }
+PlatformFileGroup  :: struct{ file_count: u32 }
 
 @(export)
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
@@ -238,7 +237,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     when INTERNAL {
         // NOTE(viktor): used by performance counters
         DEBUG_GLOBAL_memory = memory
-        DEBUG_read_entire_file = memory.debug.read_entire_file
     }
         
     ground_buffer_size :: 256

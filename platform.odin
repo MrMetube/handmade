@@ -275,7 +275,7 @@ main :: proc() {
             
             begin_processing_all_files_of_type = begin_processing_all_files_of_type,
             end_processing_all_files_of_type   = end_processing_all_files_of_type,
-            open_file                          = open_file,
+            open_next_file                     = open_next_file,
             read_data_from_file                = read_data_from_file,
             mark_file_error                    = mark_file_error,
         },
