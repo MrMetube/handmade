@@ -1,6 +1,5 @@
 package main
 
-
 import "core:os"
 import win "core:sys/windows"
 import "core:fmt"
@@ -36,11 +35,10 @@ main :: proc() {
 
     { // Game
         out := `.\build\game.dll`
-        /* if modified_since(`.\game`, out) */ 
         {
             delete_all_like(`.\build\game*.pdb`)
             
-            // NOTE(viktor): the platform checks for this lock file when hotreloading
+            // NOTE(viktor): the platform checks for this lock file when hot-reloading
             lock_path := `.\lock.tmp` 
             lock, err := os.open(lock_path, mode = os.O_CREATE)
             if err != nil do log.error(os.error_string(err))
@@ -91,6 +89,7 @@ copy_over :: proc(src_path, dst_path, package_line_to_delete, package_line_repla
 
 
 modified_since :: proc(src, out: string) -> (result: b32) {
+    // TODO(viktor): also allow for checking a whole dir for changes
     src_time := get_last_write_time_(src)
     out_time := get_last_write_time_(out)
     result = src_time > out_time
@@ -113,7 +112,7 @@ rebuild_yourself :: proc(exe_path: string) {
         
         delete_all_like(temp_path)
         
-        run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file -define:BUILD=true ")
+        run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file -define:BUILD=true ", pedantic)
         
         old_path := fmt.tprintf("%s-old", exe_path)
         if err := os.rename(exe_path,  old_path); err != nil do fmt.println(os.error_string(err))

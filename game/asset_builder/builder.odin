@@ -9,20 +9,20 @@ import "core:os"
 import "core:strings"
 import "core:c/libc"
 
-
 HUUGE :: 4096
 
-tag_count: u32 = 1
-tags:      [HUUGE]AssetTag
-
-asset_types: [AssetTypeId]AssetType
-
-asset_count:   u32 = 1
-asset_sources: [HUUGE]SourceAsset
-asset_data:    [HUUGE]AssetData
-
-asset_type: ^AssetType
-asset_index: u32
+HHA :: struct {
+    tag_count:   u32,
+    type_count:   u32,
+    asset_count: u32,
+    
+    type:        ^AssetType,
+    asset_index: u32,
+}
+tags:    [HUUGE]AssetTag
+types:   [HUUGE]AssetType
+sources: [HUUGE]SourceAsset
+data:    [HUUGE]AssetData
 
 SourceSound :: struct {
     channel_count: u32,
@@ -44,41 +44,95 @@ SourceAsset :: struct {
 }
 
 main :: proc() {
-    // 
-    // NOTE(viktor): Bitmaps
-    // 
-    begin_asset_type(.Shadow)
-    add_bitmap_asset("../assets/shadow.bmp", {0.5, -0.4})
-    end_asset_type()
-        
-    begin_asset_type(.Arrow)
-    add_bitmap_asset("../assets/arrow.bmp" )
-    end_asset_type()
-    
-    begin_asset_type(.Stair)
-    add_bitmap_asset("../assets/stair.bmp")
-    end_asset_type()
+    write_hero()
+    write_non_hero()
+    write_sounds()
+}
 
-    begin_asset_type(.Rock)
-    add_bitmap_asset("../assets/rocks1.bmp")
-    add_bitmap_asset("../assets/rocks2.bmp")
-    add_bitmap_asset("../assets/rocks3.bmp")
-    add_bitmap_asset("../assets/rocks4.bmp")
-    add_bitmap_asset("../assets/rocks5.bmp")
-    add_bitmap_asset("../assets/rocks7.bmp")
-    end_asset_type()
+init :: proc(hha: ^HHA) {
+    hha.tag_count   = 1
+    hha.asset_count = 1
+    hha.type_count  = 1
+    hha.type        = nil
+    hha.asset_index = 0
+    
+    sources = {}
+    data    = {}
+    tags    = {}
+    types   = {}
+}
+
+write_hero :: proc () {
+    hha: HHA
+    init(&hha)
+        
+    begin_asset_type(&hha, .Head)
+    add_bitmap_asset(&hha, "../assets/head_left.bmp",  {0.36, 0.01})
+    add_tag(&hha, .FacingDirection, Pi)
+    add_bitmap_asset(&hha, "../assets/head_right.bmp", {0.63, 0.01})
+    add_tag(&hha, .FacingDirection, 0)
+    end_asset_type(&hha)
+
+    begin_asset_type(&hha, .Body)
+    add_bitmap_asset(&hha, "../assets/body_left.bmp",  {0.36, 0.01})
+    add_tag(&hha, .FacingDirection, Pi)
+    add_bitmap_asset(&hha, "../assets/body_right.bmp", {0.63, 0.01})
+    add_tag(&hha, .FacingDirection, 0)
+    end_asset_type(&hha)
+    
+    begin_asset_type(&hha, .Cape)
+    add_bitmap_asset(&hha, "../assets/cape_left.bmp",  {0.36, 0.01})
+    add_tag(&hha, .FacingDirection, Pi)
+    add_bitmap_asset(&hha, "../assets/cape_right.bmp", {0.63, 0.01})
+    add_tag(&hha, .FacingDirection, 0)
+    end_asset_type(&hha)
+    
+    begin_asset_type(&hha, .Sword)
+    add_bitmap_asset(&hha, "../assets/sword_left.bmp",  {0.36, 0.01})
+    add_tag(&hha, .FacingDirection, Pi)
+    add_bitmap_asset(&hha, "../assets/sword_right.bmp", {0.63, 0.01})
+    add_tag(&hha, .FacingDirection, 0)
+    end_asset_type(&hha)
+    
+    output_hha_file(`.\hero.hha`, hha)
+}
+
+write_non_hero :: proc () {
+    hha: HHA
+    init(&hha)
+    
+    begin_asset_type(&hha, .Shadow)
+    add_bitmap_asset(&hha, "../assets/shadow.bmp", {0.5, -0.4})
+    end_asset_type(&hha)
+        
+    begin_asset_type(&hha, .Arrow)
+    add_bitmap_asset(&hha, "../assets/arrow.bmp" )
+    end_asset_type(&hha)
+    
+    begin_asset_type(&hha, .Stair)
+    add_bitmap_asset(&hha, "../assets/stair.bmp")
+    end_asset_type(&hha)
+
+    begin_asset_type(&hha, .Rock)
+    add_bitmap_asset(&hha, "../assets/rocks1.bmp")
+    add_bitmap_asset(&hha, "../assets/rocks2.bmp")
+    add_bitmap_asset(&hha, "../assets/rocks3.bmp")
+    add_bitmap_asset(&hha, "../assets/rocks4.bmp")
+    add_bitmap_asset(&hha, "../assets/rocks5.bmp")
+    add_bitmap_asset(&hha, "../assets/rocks7.bmp")
+    end_asset_type(&hha)
     
     // TODO(viktor): alignment percentages for these
-    begin_asset_type(.Grass)
-    add_bitmap_asset("../assets/grass11.bmp")
-    add_bitmap_asset("../assets/grass12.bmp")
-    add_bitmap_asset("../assets/grass21.bmp")
-    add_bitmap_asset("../assets/grass22.bmp")
-    add_bitmap_asset("../assets/grass31.bmp")
-    add_bitmap_asset("../assets/grass32.bmp")
-    add_bitmap_asset("../assets/flower1.bmp")
-    add_bitmap_asset("../assets/flower2.bmp")
-    end_asset_type()
+    begin_asset_type(&hha, .Grass)
+    add_bitmap_asset(&hha, "../assets/grass11.bmp")
+    add_bitmap_asset(&hha, "../assets/grass12.bmp")
+    add_bitmap_asset(&hha, "../assets/grass21.bmp")
+    add_bitmap_asset(&hha, "../assets/grass22.bmp")
+    add_bitmap_asset(&hha, "../assets/grass31.bmp")
+    add_bitmap_asset(&hha, "../assets/grass32.bmp")
+    add_bitmap_asset(&hha, "../assets/flower1.bmp")
+    add_bitmap_asset(&hha, "../assets/flower2.bmp")
+    end_asset_type(&hha)
     
     // add_bitmap_asset(result, "../assets/rocks6a.bmp")
     // add_bitmap_asset(result, "../assets/rocks6b.bmp")
@@ -86,106 +140,77 @@ main :: proc() {
     // add_bitmap_asset(result, "../assets/rocks8a.bmp")
     // add_bitmap_asset(result, "../assets/rocks8b.bmp")
     // add_bitmap_asset(result, "../assets/rocks8c.bmp")
-    
-    begin_asset_type(.Cape)
-    add_bitmap_asset("../assets/cape_left.bmp",  {0.36, 0.01})
-    add_tag(.FacingDirection, Pi)
-    add_bitmap_asset("../assets/cape_right.bmp", {0.63, 0.01})
-    add_tag(.FacingDirection, 0)
-    end_asset_type()
-                        
-    begin_asset_type(.Head)
-    add_bitmap_asset("../assets/head_left.bmp",  {0.36, 0.01})
-    add_tag(.FacingDirection, Pi)
-    add_bitmap_asset("../assets/head_right.bmp", {0.63, 0.01})
-    add_tag(.FacingDirection, 0)
-    end_asset_type()
-                
-    begin_asset_type(.Body)
-    add_bitmap_asset("../assets/body_left.bmp",  {0.36, 0.01})
-    add_tag(.FacingDirection, Pi)
-    add_bitmap_asset("../assets/body_right.bmp", {0.63, 0.01})
-    add_tag(.FacingDirection, 0)
-    end_asset_type()
-                
-    begin_asset_type(.Sword)
-    add_bitmap_asset("../assets/sword_left.bmp",  {0.36, 0.01})
-    add_tag(.FacingDirection, Pi)
-    add_bitmap_asset("../assets/sword_right.bmp", {0.63, 0.01})
-    add_tag(.FacingDirection, 0)
-    end_asset_type()
         
-    begin_asset_type(.Monster)
-    add_bitmap_asset("../assets/orc_left.bmp"     , v2{0.7 , 0})
-    add_tag(.FacingDirection, Pi)
-    add_bitmap_asset("../assets/orc_right.bmp"    , v2{0.27, 0})
-    add_tag(.FacingDirection, 0)
-    end_asset_type()
+    begin_asset_type(&hha, .Monster)
+    add_bitmap_asset(&hha, "../assets/orc_left.bmp"     , v2{0.7 , 0})
+    add_tag(&hha, .FacingDirection, Pi)
+    add_bitmap_asset(&hha, "../assets/orc_right.bmp"    , v2{0.27, 0})
+    add_tag(&hha, .FacingDirection, 0)
+    end_asset_type(&hha)
     
-    // 
-    // NOTE(viktor): Sounds
-    // 
+    output_hha_file(`.\non_hero.hha`, hha)
+}
+
+write_sounds :: proc() {
+    hha: HHA
+    init(&hha)
     
-    begin_asset_type(.Blop)
-    add_sound_asset("../assets/blop0.wav")
-    add_sound_asset("../assets/blop1.wav")
-    add_sound_asset("../assets/blop2.wav")
-    end_asset_type()
+    begin_asset_type(&hha, .Blop)
+    add_sound_asset(&hha, "../assets/blop0.wav")
+    add_sound_asset(&hha, "../assets/blop1.wav")
+    add_sound_asset(&hha, "../assets/blop2.wav")
+    end_asset_type(&hha)
         
-    begin_asset_type(.Drop)
-    add_sound_asset("../assets/drop0.wav")
-    add_sound_asset("../assets/drop1.wav")
-    add_sound_asset("../assets/drop2.wav")
-    end_asset_type()
+    begin_asset_type(&hha, .Drop)
+    add_sound_asset(&hha, "../assets/drop0.wav")
+    add_sound_asset(&hha, "../assets/drop1.wav")
+    add_sound_asset(&hha, "../assets/drop2.wav")
+    end_asset_type(&hha)
         
-    begin_asset_type(.Hit)
-    add_sound_asset("../assets/hit0.wav")
-    add_sound_asset("../assets/hit1.wav")
-    add_sound_asset("../assets/hit2.wav")
-    add_sound_asset("../assets/hit3.wav")
-    end_asset_type()
+    begin_asset_type(&hha, .Hit)
+    add_sound_asset(&hha, "../assets/hit0.wav")
+    add_sound_asset(&hha, "../assets/hit1.wav")
+    add_sound_asset(&hha, "../assets/hit2.wav")
+    add_sound_asset(&hha, "../assets/hit3.wav")
+    end_asset_type(&hha)
                 
-    begin_asset_type(.Woosh)
-    add_sound_asset("../assets/woosh0.wav")
-    add_sound_asset("../assets/woosh1.wav")
-    add_sound_asset("../assets/woosh2.wav")
-    end_asset_type()
+    begin_asset_type(&hha, .Woosh)
+    add_sound_asset(&hha, "../assets/woosh0.wav")
+    add_sound_asset(&hha, "../assets/woosh1.wav")
+    add_sound_asset(&hha, "../assets/woosh2.wav")
+    end_asset_type(&hha)
         
     
     sec :: 48000
     section :: 10 * sec
     total_sample_count :: 6_418_285
-    last_index: u32
     
-    begin_asset_type(.Music)
+    begin_asset_type(&hha, .Music)
     for first_sample_index: u32; first_sample_index < total_sample_count; first_sample_index += section {
         sample_count :u32= total_sample_count - first_sample_index
         if sample_count > section {
             sample_count = section
         }
         
-        this_index := add_sound_asset("../assets/Light Ambience 1.wav", first_sample_index, sample_count)
-        if last_index != 0 {
-            asset_data[last_index].sound.next_id_to_play = auto_cast this_index
+        this_index := add_sound_asset(&hha, "../assets/Light Ambience 1.wav", first_sample_index, sample_count)
+        if first_sample_index + section < total_sample_count {
+            data[this_index].sound.chain = .Advance
         }
-        last_index = this_index
     }
     
     // add_sound_asset("../assets/Light Ambience 2.wav")
     // add_sound_asset("../assets/Light Ambience 3.wav")
     // add_sound_asset("../assets/Light Ambience 4.wav")
     // add_sound_asset("../assets/Light Ambience 5.wav")
-    end_asset_type()
-
-    // 
-    // NOTE(viktor): Output the asset file
-    // 
-
-    file_name:= `..\data\test.hha`
+    end_asset_type(&hha)
+    
+    output_hha_file(`.\sounds.hha`, hha)
+}
+output_hha_file :: proc(file_name: string, hha: HHA) {
     out := libc.fopen(strings.clone_to_cstring(file_name), "wb")
     if out == nil {
-        fmt.eprint("could not open asset file")
-        os.exit(1)
+        fmt.eprint("could not open asset file:", file_name)
+        return
     }
     defer libc.fclose(out)
     
@@ -193,9 +218,9 @@ main :: proc() {
         magic_value = MagicValue,
         version     = Version,
         
-        tag_count        = tag_count,
-        asset_type_count = asset_count,// TODO(viktor): compute this, sparseness
-        asset_count      = asset_count,
+        tag_count        = hha.tag_count,
+        asset_type_count = hha.type_count,
+        asset_count      = hha.asset_count,
     }
         
     tags_size        := header.tag_count        * size_of(AssetTag)
@@ -207,15 +232,15 @@ main :: proc() {
     header.assets      = header.asset_types + cast(u64) asset_types_size
     
     
-    libc.fwrite(&header,                   size_of(header),            1, out)
-    libc.fwrite(&tags[0],                  cast(uint) tags_size,        1, out)
-    libc.fwrite(&asset_types[auto_cast 0], cast(uint) asset_types_size, 1, out)
+    libc.fwrite(&header,             size_of(header),             1, out)
+    libc.fwrite(raw_data(tags[:]),   cast(uint) tags_size,        1, out)
+    libc.fwrite(raw_data(types[:]),  cast(uint) asset_types_size, 1, out)
     
     libc.fseek(out, cast(i32) assets_size, .CUR)
     context.allocator = context.temp_allocator
-    for index in 1..<asset_count {
-        src := &asset_sources[index]
-        dst := &asset_data[index]
+    for index in 1..<hha.asset_count {
+        src := &sources[index]
+        dst := &data[index]
         
         dst.data_offset = auto_cast libc.ftell(out)
         
@@ -224,8 +249,6 @@ main :: proc() {
             bitmap := load_bmp(src.filename)
             
             dst.bitmap.dimension = vec_cast(u32, bitmap.width, bitmap.height)
-            // TODO(viktor): 
-            // dst.bitmap.align_percentage = 
             assert(bitmap.pitch == bitmap.width)
             libc.fwrite(&bitmap.memory[0], cast(uint) (dst.bitmap.dimension.x * dst.bitmap.dimension.y) * size_of([4]u8), 1, out)
         } else {
@@ -242,81 +265,82 @@ main :: proc() {
     }
     
     libc.fseek(out, cast(i32) header.assets, .SET)
-    libc.fwrite(&asset_data[0], cast(uint) assets_size, 1, out)
+    libc.fwrite(raw_data(data[:]), cast(uint) assets_size, 1, out)
 }
 
-begin_asset_type :: proc(id: AssetTypeId) {
-    assert(asset_type == nil)
-    assert(asset_index == 0)
+begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId) {
+    assert(hha.type == nil)
+    assert(hha.asset_index == 0)
     
-    asset_type = &asset_types[id]
-    asset_type.id = id
-    asset_type.first_asset_index   = auto_cast asset_count
-    asset_type.one_past_last_index = asset_type.first_asset_index
+    hha.type = &types[hha.type_count]
+    hha.type_count += 1
+    hha.type.id = id
+    hha.type.first_asset_index   = auto_cast hha.asset_count
+    hha.type.one_past_last_index = hha.type.first_asset_index
 }
 
-add_bitmap_asset :: proc(filename: string, align_percentage: v2 = {0.5, 0.5}) -> (result: u32) {
-    assert(asset_type != nil)
+add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.5, 0.5}) -> (result: u32) {
+    assert(hha.type != nil)
     
-    result = asset_type.one_past_last_index
-    asset_type.one_past_last_index += 1
-    src := &asset_sources[result]
-    hha := &asset_data[result]
+    result = hha.type.one_past_last_index
+    hha.type.one_past_last_index += 1
+    src := &sources[result]
+    data := &data[result]
     
     src.type = .Bitmap
     src.filename = filename
     
-    hha.bitmap.align_percentage = align_percentage
-    hha.first_tag_index         = tag_count
-    hha.one_past_last_tag_index = hha.first_tag_index
+    data.bitmap.align_percentage = align_percentage
+    data.first_tag_index         = hha.tag_count
+    data.one_past_last_tag_index = data.first_tag_index
     
-    asset_index = result
+    hha.asset_index = result
     
     return result
 }
 
-add_sound_asset :: proc(filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (result: u32) {
-    assert(asset_type != nil)
+add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (result: u32) {
+    assert(hha.type != nil)
     
-    result = asset_type.one_past_last_index
-    asset_type.one_past_last_index += 1
-    src := &asset_sources[result]
-    hha := &asset_data[result]
+    result = hha.type.one_past_last_index
+    hha.type.one_past_last_index += 1
+    src := &sources[result]
+    data := &data[result]
     
     src.type               = .Sound
     src.filename           = filename
     src.first_sample_index = first_sample_index
     
-    hha.sound.next_id_to_play   = 0
-    hha.sound.sample_count      = sample_count
-    hha.first_tag_index         = tag_count
-    hha.one_past_last_tag_index = hha.first_tag_index
+    data.sound.chain             = .None
+    data.sound.sample_count      = sample_count
+    data.first_tag_index         = hha.tag_count
+    data.one_past_last_tag_index = data.first_tag_index
     
-    asset_index = result
+    hha.asset_index = result
     
     return result
 }
 
-add_tag :: proc(id: AssetTagId, value: f32) {
-    assert(asset_type != nil)
-    assert(asset_index != 0)
+add_tag :: proc(hha: ^HHA, id: AssetTagId, value: f32) {
+    assert(hha.type != nil)
+    assert(hha.asset_index != 0)
     
-    hha := &asset_data[asset_index]
-    hha.one_past_last_tag_index += 1
+    data := &data[hha.asset_index]
+    data.one_past_last_tag_index += 1
     
-    tag := &tags[tag_count]
-    tag_count += 1
+    tag := &tags[hha.tag_count]
+    hha.tag_count += 1
     
     tag.id = auto_cast id
     tag.value = value
 }
 
-end_asset_type :: proc() {
-    assert(asset_type != nil)
+end_asset_type :: proc(hha: ^HHA) {
+    assert(hha.type != nil)
     
-    asset_count = asset_type.one_past_last_index
-    asset_type = nil
-    asset_index = 0
+    hha.asset_count = hha.type.one_past_last_index
+    hha.type = nil
+    hha.asset_index = 0
 }
 
 

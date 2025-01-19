@@ -744,6 +744,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 
             // NOTE(viktor): nothing
             case .Monster:
+                if random_unilateral(&state.general_entropy, f32) > 0.98 {
+                    entity.facing_direction += Pi
+                    entity.facing_direction = mod(entity.facing_direction, Tau)
+                } 
             case .Wall:
             case .Stairwell: 
             case .Space: 

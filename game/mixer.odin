@@ -1,6 +1,7 @@
 package game
 
 import "core:simd/x86"
+import hha "asset_builder"
 
 Mixer :: struct {
     permanent_arena:          ^Arena,
@@ -107,8 +108,8 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         sound_finished: b32
         for total_chunks_to_mix != 0 && !sound_finished {
             if sound != nil {
-                info := get_sound_info(assets, playing_sound.id)
-                prefetch_sound(assets, info.next_id_to_play)
+                next_sound_in_chain := get_next_sound_in_chain(assets, playing_sound.id)
+                prefetch_sound(assets, next_sound_in_chain)
                 
                 d_sample := playing_sound.d_sample
                 d_sample_chunk := 4 * d_sample
@@ -222,8 +223,8 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 total_chunks_to_mix -= chunks_to_mix
 
                 if chunks_to_mix == chunks_remaining_in_sound {
-                    if is_valid_sound(info.next_id_to_play) {
-                        playing_sound.id = info.next_id_to_play
+                    if is_valid_sound(next_sound_in_chain) {
+                        playing_sound.id = next_sound_in_chain
                         assert(playing_sound.samples_played >= cast(f32) sample_count)
                         playing_sound.samples_played -= cast(f32) samples_in_sound
                         if playing_sound.samples_played < 0 {

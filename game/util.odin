@@ -80,10 +80,14 @@ abs_vec_3 :: #force_inline proc(a: [3]$E) -> [3]E where intrinsics.type_is_numer
 
 
 mod :: proc {
+    mod_f,
     mod_d,
     mod_ds,
 }
 
+mod_f :: proc(value: f32, divisor: f32) -> f32 {
+    return math.mod(value, divisor)
+}
 mod_d :: proc(value: [2]f32, divisor: f32) -> [2]f32 {
     return {math.mod(value.x, divisor), math.mod(value.y, divisor)}
 }
