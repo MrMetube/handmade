@@ -487,9 +487,8 @@ main :: proc() {
         {
             offscreen_buffer := Bitmap{
                 memory = GLOBAL_back_buffer.memory,
-                width  = GLOBAL_back_buffer.width,
-                height = GLOBAL_back_buffer.height,
-                pitch  = GLOBAL_back_buffer.width,
+                width  = cast(i16) GLOBAL_back_buffer.width,
+                height = cast(i16) GLOBAL_back_buffer.height,
             }
 
             if state.input_record_index != 0 {

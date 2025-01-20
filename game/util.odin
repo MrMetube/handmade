@@ -98,7 +98,9 @@ mod_ds :: proc(value: [2]f32, divisor: [2]f32) -> [2]f32 {
 
 round :: proc {
     round_f32,
+    round_f32_i,
     round_f32s,
+    round_f32s_i,
 }
 
 @(require_results)
@@ -108,16 +110,30 @@ round_f32 :: #force_inline proc(f: f32) -> i32 {
 }
 
 @(require_results)
+round_f32_i :: #force_inline proc(f: f32, $T: typeid) -> T {
+    if f < 0 do return cast(T) -math.round(-f)
+    return cast(T) math.round(f)
+}
+
+@(require_results)
 round_f32s :: #force_inline proc(fs: [$N]f32) -> [N]i32 where N > 1 {
     fs := fs
     for &e in fs do e = math.round(e) 
     return vec_cast(i32, fs)
 }
+@(require_results)
+round_f32s_i :: #force_inline proc(fs: [$N]f32, $T: typeid) -> [N]T where N > 1 {
+    fs := fs
+    for &e in fs do e = math.round(e) 
+    return vec_cast(T, fs)
+}
 
 
 floor :: proc {
     floor_f32,
+    floor_f32_i,
     floor_f32_simd,
+    floor_f32_simd_i,
 }
 
 @(require_results)
@@ -126,23 +142,42 @@ floor_f32 :: #force_inline proc(f: f32) -> (i:i32) {
 }
 
 @(require_results)
+floor_f32_i :: #force_inline proc(f: f32, $T: typeid) -> (i:T) {
+    return cast(T) math.floor(f)
+}
+
+@(require_results)
 floor_f32_simd :: #force_inline proc(fs: [$N]f32) -> [N]i32 {
     return vec_cast(i32, simd.to_array(simd.floor(simd.from_array(fs))))
+}
+@(require_results)
+floor_f32_simd_i :: #force_inline proc(fs: [$N]f32, $T: typeid) -> [N]T {
+    return vec_cast(T, simd.to_array(simd.floor(simd.from_array(fs))))
 }
 
 ceil :: proc {
     ceil_f32,
+    ceil_f32_i,
     ceil_f32_simd,
+    ceil_f32_simd_i,
 }
 
 @(require_results)
 ceil_f32 :: #force_inline proc(f: f32) -> (i:i32) {
     return cast(i32) math.ceil(f)
 }
+@(require_results)
+ceil_f32_i :: #force_inline proc(f: f32, $T: typeid) -> (i:T) {
+    return cast(T) math.ceil(f)
+}
 
 @(require_results)
 ceil_f32_simd :: #force_inline proc(fs: [$N]f32) -> [N]i32 {
     return vec_cast(i32, simd.to_array(simd.ceil(simd.from_array(fs))))
+}
+@(require_results)
+ceil_f32_simd_i :: #force_inline proc(fs: [$N]f32, $T: typeid) -> [N]T {
+    return vec_cast(T, simd.to_array(simd.ceil(simd.from_array(fs))))
 }
 
 

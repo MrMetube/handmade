@@ -111,7 +111,7 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets,  max_push_buffer_size:
     return result
 }
 
-perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
+perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i16, meters_to_pixels, focal_length, distance_above_target: f32) {
     group.transform.orthographic = false
     
     group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
@@ -125,7 +125,7 @@ perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meter
     group.transform.focal_length          = focal_length
 }
 
-orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels: f32) {
+orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i16, meters_to_pixels: f32) {
     group.transform.orthographic = true
     
     group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
@@ -340,10 +340,10 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
         - Re-test some of our instruction choices
     */
     
-    tile_count :: [2]i32{4, 4}
+    tile_count :: [2]i16{4, 4}
     work: [tile_count.x * tile_count.y]TileRenderWork
     
-    tile_size  := [2]i32{target.width, target.height} / tile_count
+    tile_size  := [2]i16{target.width, target.height} / tile_count
     tile_size.x = ((tile_size.x + 3) / 4) * 4
     
     work_index: i32
@@ -468,15 +468,15 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
 }
 
 draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
-    rounded_center := round(center)
+    rounded_center := round(center, i16)
 
     left   := rounded_center.x - bitmap.width  / 2
     top	   := rounded_center.y - bitmap.height / 2
     right  := left + bitmap.width
     bottom := top  + bitmap.height
 
-    src_left: i32
-    src_top : i32
+    src_left: i16
+    src_top:  i16
     if left < 0 {
         src_left = -left
         left = 0
@@ -488,13 +488,13 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     bottom = min(bottom, buffer.height)
     right  = min(right,  buffer.width)
 
-    src_row := bitmap.pitch * src_top + src_left
-    dst_row := left + top * buffer.width
+    src_row := cast(i32) bitmap.width * cast(i32) src_top + cast(i32) src_left
+    dst_row := cast(i32) left + cast(i32) top * cast(i32) buffer.width
     for _ in top..< bottom  {
         src_index := src_row
         dst_index := dst_row
-        defer dst_row += buffer.pitch
-        defer src_row += bitmap.pitch
+        defer dst_row += cast(i32) buffer.width
+        defer src_row += cast(i32) bitmap.width
 
         for _ in left..< right  {
             src := bitmap.memory[src_index]
@@ -525,7 +525,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
     assert(texture.memory != nil)
     assert(texture.width  >= 0)
     assert(texture.height >= 0)
-    assert(texture.pitch  >  0)
+    assert(texture.width  >  0)
 
     // NOTE(viktor): premultiply color
     color := color
@@ -541,16 +541,16 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
  */
     inverted_infinity_rectangle :: #force_inline proc() -> (result: Rectangle2i) {
-        result.min = max(i32)
-        result.max = min(i32)
+        result.min = max(i16)
+        result.max = min(i16)
         
         return result
     }
     
     fill_rect := inverted_infinity_rectangle()
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
-        floorp := floor(testp)
-        ceilp  := ceil(testp)
+        floorp := floor(testp, i16)
+        ceilp  := ceil(testp, i16)
         if fill_rect.min.x > floorp.x do fill_rect.min.x = floorp.x
         if fill_rect.min.y > floorp.y do fill_rect.min.y = floorp.y
         if fill_rect.max.x < ceilp.x  do fill_rect.max.x = ceilp.x
@@ -589,12 +589,12 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         // TODO(viktor): IMPORTANT(viktor): fix this clipping
         if fill_rect.min.x & 3 != 0 {
             start_clip_mask = start_clip_masks[fill_rect.min.x & 3]
-            fill_rect.min.x = fill_rect.min.x & (~i32(3))
+            fill_rect.min.x = fill_rect.min.x & (~i16(3))
         }
 
         if fill_rect.max.x & 3 != 0 {
             end_clip_mask = end_clip_masks[fill_rect.max.x & 3]
-            fill_rect.max.x = (fill_rect.max.x & (~i32(3))) + 4
+            fill_rect.max.x = (fill_rect.max.x & (~i16(3))) + 4
         }
         
         normal_x_axis := x_axis * 1 / length_squared(x_axis)
@@ -622,7 +622,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         normal_y_axis_x := cast(f32x4) normal_y_axis.x
         normal_y_axis_y := cast(f32x4) normal_y_axis.y
         
-        texture_pitch := cast(i32x4) texture.pitch
+        texture_width := cast(i32x4) texture.width
 
         delta_x := cast(f32x4) fill_rect.min.x - cast(f32x4) origin.x + f32x4{ 0, 1, 2, 3}
         delta_y := cast(f32x4) fill_rect.min.y - cast(f32x4) origin.y
@@ -661,7 +661,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 // TODO(viktor): recheck later if this helps
                 // if x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[0]) != 0 && x86._mm_movemask_epi8((cast([^]simd.i64x2) &write_mask)[1]) != 0 
                 #no_bounds_check {
-                    pixel := cast(^[4]ByteColor) &buffer.memory[y * buffer.pitch + x]
+                    pixel := cast(^[4]ByteColor) &buffer.memory[cast(i32)y * cast(i32)buffer.width + cast(i32)x]
                     original_pixel := simd.masked_load(pixel, zero_i, write_mask)
                     
                     u = clamp_01(u)
@@ -679,7 +679,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                     fy := ty - cast(f32x4) sy
 
                     // NOTE(viktor): bilinear sample
-                    fetch := sy * texture_pitch + sx
+                    fetch := sy * texture_width + sx
                     
                     fetch_0 := (cast([^]i32)&fetch)[0]
                     fetch_1 := (cast([^]i32)&fetch)[1]
@@ -693,8 +693,8 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                     
                     sample_a := i32x4{ texel_0[0],                 texel_1[0],                 texel_2[0],                 texel_3[0],                }
                     sample_b := i32x4{ texel_0[1],                 texel_1[1],                 texel_2[1],                 texel_3[1],                }
-                    sample_c := i32x4{ texel_0[texture.pitch],     texel_1[texture.pitch],     texel_2[texture.pitch],     texel_3[texture.pitch],    }
-                    sample_d := i32x4{ texel_0[texture.pitch + 1], texel_1[texture.pitch + 1], texel_2[texture.pitch + 1], texel_3[texture.pitch + 1] }
+                    sample_c := i32x4{ texel_0[texture.width],     texel_1[texture.width],     texel_2[texture.width],     texel_3[texture.width],    }
+                    sample_d := i32x4{ texel_0[texture.width + 1], texel_1[texture.width + 1], texel_2[texture.width + 1], texel_3[texture.width + 1] }
 
                     ta_r := cast(f32x4) (maskFF &          sample_a           )
                     ta_g := cast(f32x4) (maskFF & simd.shr(sample_a,  shift8) )
@@ -810,14 +810,14 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
 
-    minimum := [2]i32{
-        floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
-        floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
+    minimum := [2]i16{
+        floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x), i16),
+        floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y), i16),
     }
 
-    maximum := [2]i32{
-        ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
-        ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
+    maximum := [2]i16{
+        ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x), i16),
+        ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y), i16),
     }
 
     width_max      := buffer.width-1
@@ -826,12 +826,12 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     inv_height_max := 1 / cast(f32) height_max
 
     // TODO(viktor): this will need to be specified separately
-    origin_z     :f32= 0.5
+    origin_z: f32 = 0.5
     origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
     fixed_cast_y := inv_height_max * origin_y
 
-    maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
-    minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
+    maximum = clamp(maximum, [2]i16{0,0}, [2]i16{width_max, height_max})
+    minimum = clamp(minimum, [2]i16{0,0}, [2]i16{width_max, height_max})
 
     for y in minimum.y..=maximum.y {
         for x in minimum.x..=maximum.x {
@@ -862,7 +862,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 
                 // TODO(viktor): formalize texture boundaries
                 t := v2{u,v} * vec_cast(f32, texture.width-2, texture.height-2)
-                s := vec_cast(i32, t)
+                s := floor(t, i16)
                 f := t - vec_cast(f32, s)
 
                 assert(s.x >= 0 && s.x < texture.width)
@@ -924,7 +924,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                 texel *= color
                 texel.rgb = clamp_01(texel.rgb)
 
-                dst := &buffer.memory[y * buffer.pitch + x]
+                dst := &buffer.memory[cast(i32)y * cast(i32)buffer.width + cast(i32)x]
                 pixel := srgb_255_to_linear_1(vec_cast(f32, dst^))
 
 
@@ -938,8 +938,8 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 }
 
 draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rect: Rectangle2i, even: b32){
-    rounded_center := floor(center)
-    rounded_size   := floor(size)
+    rounded_center := floor(center, i16)
+    rounded_size   := floor(size, i16)
 
     fill_rect := Rectangle2i{
         rounded_center - rounded_size / 2, 
@@ -953,8 +953,7 @@ draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rec
 
     for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
         for x in fill_rect.min.x..<fill_rect.max.x {
-            // TODO(viktor): should use pitch here
-            dst := &buffer.memory[y*buffer.pitch + x]
+            dst := &buffer.memory[cast(i32)y * cast(i32)buffer.width + cast(i32) x]
             src := color * 255
 
             dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
@@ -967,14 +966,14 @@ draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rec
 }
 
 // TODO(viktor): should sample return a pointer instead?
-sample :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
-    texel := texture.memory[p.y * texture.pitch + p.x]
+sample :: #force_inline proc(texture: Bitmap, p: [2]i16) -> (result: v4) {
+    texel := texture.memory[cast(i32) p.y * cast(i32) texture.width + cast(i32) p.x]
     result = vec_cast(f32, texel)
 
     return result
 }
 
-sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
+sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i16) -> (s00, s01, s10, s11: v4) {
     s00 = sample(texture, p + {0, 0})
     s01 = sample(texture, p + {1, 0})
     s10 = sample(texture, p + {0, 1})
@@ -1017,7 +1016,7 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
 
     // NOTE(viktor): bilinear sample
     t        := uv * (lod_size - 2)
-    index    := vec_cast(i32, t)
+    index    := vec_cast(i16, t)
     fraction := t - vec_cast(f32, index)
 
     assert(index.x >= 0 && index.x < lod.width)
@@ -1034,7 +1033,7 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
 
     when false {
         // NOTE(viktor): Turn this on to see where in the map you're sampling!
-        texel := &lod.memory[lod.start + index.y * lod.pitch + index.x]
+        texel := &lod.memory[lod.start + index.y * lod.width + index.x]
         texel^ = 255
     }
 

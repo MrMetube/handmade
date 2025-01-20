@@ -23,15 +23,15 @@ AssetTypeId :: hha.AssetTypeId
 AssetTag    :: hha.AssetTag
 AssetTagId  :: hha.AssetTagId
 
-AssetState :: enum { Unloaded, Queued, Loaded, Locked }
+AssetState :: enum u16 { Unloaded, Queued, Loaded, Locked }
 
 AssetSlot :: struct {
-    state:  AssetState,
-    
     using as : struct #raw_union {
-        bitmap: ^Bitmap,
-        sound:  ^Sound,
+        bitmap: Bitmap,
+        sound:  Sound,
     },
+    
+    state:  AssetState,
 }
 
 Asset :: struct {
@@ -177,10 +177,10 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
 
 get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
     if is_valid_bitmap(id) {
-        slot := assets.slots[id]
+        slot := &assets.slots[id]
         if slot.state  == .Loaded || slot.state == .Locked {
             complete_previous_reads_before_future_reads()
-            result = slot.bitmap
+            result = &slot.bitmap
         }
     }
     return result
@@ -188,10 +188,10 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bit
 
 get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
     if is_valid_sound(id) {
-        slot := assets.slots[id]
+        slot := &assets.slots[id]
         if slot.state  == .Loaded || slot.state == .Locked {
             complete_previous_reads_before_future_reads()
-            result = slot.sound
+            result = &slot.sound
         }
     }
     return result
@@ -334,16 +334,17 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 }
 
 load_sound :: proc(assets: ^Assets, id: SoundId) {
+    slot := &assets.slots[id]
     if is_valid_sound(id) {
-        if _, ok := atomic_compare_exchange(&assets.slots[id].state, AssetState.Unloaded, AssetState.Queued); ok {
+        if _, ok := atomic_compare_exchange(&slot.state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
                 asset := assets.assets[id]
                 info  := asset.sound
                 
-                sound := push(&assets.arena, Sound)
-                sound.channel_count = info.channel_count
+                sound := &slot.sound
+                sound.channel_count = cast(u8) info.channel_count
                 
-                total_sample_count := info.sample_count * sound.channel_count
+                total_sample_count := info.sample_count * cast(u32) sound.channel_count
                 memory_size := total_sample_count * size_of(i16)
                 samples := push(&assets.arena, i16, total_sample_count, alignment = 8)
                 for &channel, index in sound.channels[:sound.channel_count] {
@@ -361,13 +362,12 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                     amount = cast(u64) memory_size,
                     destination = raw_data(samples),
                     
-                    asset_slot = &assets.slots[id],
+                    asset_slot = slot,
                 }
-                work.asset_slot.sound = sound
                 
                 Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {
-                _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
+                _, ok = atomic_compare_exchange(&slot.state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
             }
         }
@@ -375,8 +375,9 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
 }
 
 load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
+    slot := &assets.slots[id]
     if is_valid_bitmap(id) {
-        if _, ok := atomic_compare_exchange(&assets.slots[id].state, AssetState.Unloaded, AssetState.Queued); ok {
+        if _, ok := atomic_compare_exchange(&slot.state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
                 asset := assets.assets[id]
                 info  := asset.bitmap
@@ -384,13 +385,11 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 bitmap_size := info.dimension.x * info.dimension.y
                 memory_size := bitmap_size * size_of(ByteColor)
                 
-                bitmap := push(&assets.arena, Bitmap)
+                bitmap := &slot.bitmap
                 bitmap^ = {
                     memory = push(&assets.arena, ByteColor, bitmap_size, alignment = 16),
-                    width  = cast(i32) info.dimension.x, 
-                    height = cast(i32) info.dimension.y,
-                    
-                    pitch = cast(i32) info.dimension.x,
+                    width  = cast(i16) info.dimension.x, 
+                    height = cast(i16) info.dimension.y,
                     
                     align_percentage = info.align_percentage,
                     width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
@@ -407,13 +406,12 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                     amount = cast(u64) memory_size,
                     destination = raw_data(bitmap.memory),
                     
-                    asset_slot = &assets.slots[id],
+                    asset_slot = slot,
                 }
-                work.asset_slot.bitmap = bitmap
 
                 Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {
-                _, ok = atomic_compare_exchange(&assets.slots[id].state, AssetState.Queued, AssetState.Unloaded)
+                _, ok = atomic_compare_exchange(&slot.state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
             }
         }

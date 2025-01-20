@@ -153,7 +153,7 @@ TransientState :: struct {
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
     
-    env_size: [2]i32,
+    env_size: [2]i16,
     using _ : struct #raw_union {
         using _ : struct {
             env_bottom, env_middle, env_top: EnvironmentMap,
@@ -437,9 +437,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_game_assets(&tran_state.arena, megabytes(64), tran_state)
+        tran_state.assets = make_game_assets(&tran_state.arena, megabytes(5), tran_state)
         
-        // play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+        play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         
         // TODO(viktor): pick a real number here!
@@ -449,7 +449,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
         }
         
-        test_size :[2]i32= 256
+        test_size: [2]i16= 256
         tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
         tran_state.test_normal  = make_empty_bitmap(&tran_state.arena, test_size, false)
         make_sphere_normal_map(tran_state.test_normal, 0)
@@ -571,7 +571,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     render_memory := begin_temporary_memory(&tran_state.arena)
     
     monitor_width_in_meters :: 0.635
-    buffer_size := [2]i32{buffer.width, buffer.height}
+    buffer_size := [2]i16{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
     render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4))
@@ -795,7 +795,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
                 
-                { // NOTE(viktor): Particle system test
+                when false { // NOTE(viktor): Particle system test
                     for spawn_index in 0..<4 {
                         particle := &state.particles[state.next_particle]
                         state.next_particle += 1
@@ -1067,7 +1067,7 @@ make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
-            dst := &bitmap.memory[y*bitmap.pitch + x]
+            dst := &bitmap.memory[cast(i32) y * cast(i32) bitmap.width + cast(i32) x]
             dst^ = vec_cast(u8, color)
         }
     }
@@ -1092,7 +1092,7 @@ make_sphere_normal_map :: proc(buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
-            dst := &buffer.memory[y*buffer.pitch + x]
+            dst := &buffer.memory[cast(i32) y * cast(i32) buffer.width + cast(i32) x]
             dst^ = vec_cast(u8, color)
         }
     }
@@ -1116,18 +1116,17 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
             base_color: v3 = 0
             color := V4(alpha * base_color, alpha)
             
-            dst := &buffer.memory[y*buffer.pitch + x]
+            dst := &buffer.memory[cast(i32) y * cast(i32) buffer.width + cast(i32) x]
             dst^ = vec_cast(u8, color)
         }
     }
 }
 
-make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
+make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i16, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
-        memory = push(arena, ByteColor, cast(u64) (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
+        memory = push(arena, ByteColor, (cast(i32)dim.x * cast(i32) dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
         height = dim.y,
-        pitch  = dim.x,
     }
     
     return result

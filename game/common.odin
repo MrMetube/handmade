@@ -19,13 +19,13 @@ GameSoundBuffer :: struct {
 
 ByteColor :: [4]u8
 Bitmap :: struct {
-    memory:        []ByteColor,
-    width, height: i32, 
-    
-    pitch: i32,
+    // TODO(viktor): the length of the slice and either width or height are redundant
+    memory: []ByteColor,
     
     align_percentage:  [2]f32,
     width_over_height: f32,
+    
+    width, height: i16, 
 }
 
 InputButton :: struct {

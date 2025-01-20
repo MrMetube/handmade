@@ -13,8 +13,9 @@ Mixer :: struct {
 
 Sound :: struct {
     // TODO(viktor): should channel_count be implicit, or does that make the underlying memory too messy?
-    channel_count: u32,
-    channels: [2][]i16, // 1 or 2 channels of samples
+    // TODO(viktor): should sample_count be explicit, or does that make the underlying memory too messy?
+    channel_count: u8,
+    channels: [2][]i16, // 1 or 2 channels of [sample_count]samples
 }
 
 PlayingSound :: struct {
