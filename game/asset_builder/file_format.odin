@@ -26,7 +26,6 @@ AssetTypeId :: enum u32 {
     None,
     // NOTE(viktor): Bitmaps
     Shadow, Wall, Arrow, Stair, 
-
     Rock, Grass,
 
     Cape, Head, Body, Sword,

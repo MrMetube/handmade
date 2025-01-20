@@ -9,13 +9,10 @@ INTERNAL :: #config(INTERNAL, false)
     ARCHITECTURE EXPLORATION
     
     - Audio
-        - Sound effects triggers
-        - Ambient sounds
-        - Music
+        - Fix clicking Bug at the end of samples
 
     - Asset streaming
-      - File format
-      - Memory management
+        - Memory management
     
     - Rendering
         - Straighten out all coordinate systems!
@@ -78,7 +75,6 @@ INTERNAL :: #config(INTERNAL, false)
 
         * Animation should probably lead into rendering
             - Skeletal animation
-            - Particle systems
 
     PRODUCTION
     -> Game
@@ -127,11 +123,15 @@ State :: struct {
     standart_room_collision,
     wall_collision: ^EntityCollisionVolumeGroup,
 
-    general_entropy: RandomSeries,
+    effects_entropy: RandomSeries, // NOTE(viktor): this is randomness that does NOT effect the gameplay
     
     time: f32,
     
+    next_particle: u32,
+    particles: [256]Particle,
 }
+// NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
+#assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
 
 TransientState :: struct {
     is_initialized: b32,
@@ -156,6 +156,13 @@ TransientState :: struct {
         },
         envs: [3]EnvironmentMap,
     },
+}
+
+Particle :: struct {
+    p:      v3,
+    dp:     v3,
+    color:  v4,
+    dcolor: v4,
 }
 
 TaskWithMemory :: struct {
@@ -217,16 +224,13 @@ PairwiseCollsionRule :: struct {
     next_in_hash: ^PairwiseCollsionRule,
 }
 
-// NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-#assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
-
-// NOTE(viktor): Globals
-
-Platform: PlatformAPI
-// NOTE(viktor): declaration of a platform struct, into which we should never need to look
+// NOTE(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
 PlatformFileHandle :: struct{ no_errors:  b32 }
 PlatformFileGroup  :: struct{ file_count: u32 }
+
+// NOTE(viktor): Globals
+Platform: PlatformAPI
 
 @(export)
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
@@ -264,7 +268,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
         init_world(world, {chunk_dim_in_meters, chunk_dim_in_meters, state.typical_floor_height})
         
-        state.general_entropy = seed_random_series(500)
+        state.effects_entropy = seed_random_series(500)
         tiles_per_screen :: [2]i32{15, 7}
 
         tile_size_in_meters :: 1.5
@@ -423,7 +427,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
 
         tran_state.assets = make_game_assets(&tran_state.arena, megabytes(64), tran_state)
         
-        play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+        // play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         
         // TODO(viktor): pick a real number here!
@@ -435,9 +439,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         
         test_size :[2]i32= 256
         tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
-        // draw_rectangle(tran_state.test_diffuse, vec_cast(f32, test_size/2), vec_cast(f32, test_size), 0.5)
-        
-        tran_state.test_normal = make_empty_bitmap(&tran_state.arena, test_size, false)
+        tran_state.test_normal  = make_empty_bitmap(&tran_state.arena, test_size, false)
         make_sphere_normal_map(tran_state.test_normal, 0)
         make_sphere_diffuse_map(tran_state.test_diffuse)
         
@@ -537,7 +539,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             }
             
             if con_hero.darrow != 0 {
-                play_sound(&state.mixer, random_sound_from(tran_state.assets, .Hit, &state.general_entropy), 0.2)
+                play_sound(&state.mixer, random_sound_from(tran_state.assets, .Hit, &state.effects_entropy), 0.2)
             }
         }
     }
@@ -565,7 +567,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
-    clear(render_group, DarkGreen)
+    clear(render_group, Red)
     
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
@@ -742,7 +744,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 
             // NOTE(viktor): nothing
             case .Monster:
-                if random_unilateral(&state.general_entropy, f32) > 0.98 {
+                if random_unilateral(&state.effects_entropy, f32) > 0.98 {
                     entity.facing_direction += Pi
                     entity.facing_direction = mod(entity.facing_direction, Tau)
                 } 
@@ -780,6 +782,32 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, head_id,  1.6)
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
+                { // NOTE(viktor): Particle system test
+                    for spawn_index in 0..<1 {
+                        particle := &state.particles[state.next_particle]
+                        state.next_particle += 1
+                        if state.next_particle >= len(state.particles) {
+                            state.next_particle = 0
+                        }
+                        particle.p = {random_bilateral(&state.effects_entropy, f32) * 0.1, 0, 0}
+                        particle.dp = {random_bilateral(&state.effects_entropy, f32)*0.15, (random_unilateral(&state.effects_entropy, f32)+0.1)*1, 0}
+                        particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
+                        particle.dcolor = {0,0,0,-0.2}
+                    }
+                    
+                    for &particle in state.particles {
+                        // NOTE(viktor): simulate particle forward in time
+                        particle.p += particle.dp * input.delta_time
+                        particle.color += particle.dcolor * input.delta_time
+                        // TODO(viktor): should we just clamp colors in the renderer?
+                        color := clamp_01(particle.color)
+                        if color.a > 0.7 {
+                            color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
+                        }
+                        // NOTE(viktor): render the particle
+                        push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Head), 1, particle.p, color)
+                    }
+                }
 
             case .Arrow:
                 push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
@@ -822,7 +850,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     }
     render_group.transform.offset = 0
     
-    when false {
+    when false { // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
     
         for it, it_index in tran_state.envs {

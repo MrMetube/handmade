@@ -466,7 +466,7 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
         }
     }
 }
-/* 
+
 draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     rounded_center := round(center)
 
@@ -488,7 +488,7 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     bottom = min(bottom, buffer.height)
     right  = min(right,  buffer.width)
 
-    src_row := bitmap.start + bitmap.pitch * src_top + src_left
+    src_row := bitmap.pitch * src_top + src_left
     dst_row := left + top * buffer.width
     for _ in top..< bottom  {
         src_index := src_row
@@ -516,7 +516,7 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
         }
     }
 }
- */
+
  @( enable_target_feature="sse,sse2",
     optimization_mode="favor_size",
 )

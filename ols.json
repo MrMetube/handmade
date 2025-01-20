@@ -1,6 +1,6 @@
 {
     "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
-    "checker_args": "-define:INTERNAL=true -define:BUILD=true",
+    "checker_args": "-define:INTERNAL=true -define:BUILD=true -define:PLATFORM=true",
 
     "enable_procedure_snippet": true,
     "enable_format": false,
