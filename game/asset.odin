@@ -292,7 +292,7 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
-        result = random_between_u32(series, type.first_asset_index, type.one_past_last_index)
+        result = random_between_u32(series, type.first_asset_index, type.one_past_last_index-1)
     }
     
     return result

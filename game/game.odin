@@ -1,6 +1,7 @@
 package game
 
 import "base:intrinsics"
+import "core:fmt"
 
 INTERNAL :: #config(INTERNAL, false)
 
@@ -111,7 +112,7 @@ State :: struct {
 
     world: ^World,
     
-    collision_rule_hash: [256]^PairwiseCollsionRule,
+    collision_rule_hash:       [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
 
     null_collision, 
@@ -128,10 +129,13 @@ State :: struct {
     time: f32,
     
     next_particle: u32,
-    particles: [256]Particle,
+    particles:     [256]Particle,
+    cells:         [ParticleCellSize][ParticleCellSize]ParticleCell,
 }
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
+
+ParticleCellSize :: 16
 
 TransientState :: struct {
     is_initialized: b32,
@@ -158,11 +162,19 @@ TransientState :: struct {
     },
 }
 
+ParticleCell :: struct {
+    density: f32,
+    velocity_times_density: v3
+}
+
 Particle :: struct {
     p:      v3,
     dp:     v3,
+    ddp:    v3,
     color:  v4,
     dcolor: v4,
+    
+    bitmap_id: BitmapId,
 }
 
 TaskWithMemory :: struct {
@@ -782,31 +794,100 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, head_id,  1.6)
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
+                
                 { // NOTE(viktor): Particle system test
-                    for spawn_index in 0..<1 {
+                    for spawn_index in 0..<4 {
                         particle := &state.particles[state.next_particle]
                         state.next_particle += 1
                         if state.next_particle >= len(state.particles) {
                             state.next_particle = 0
                         }
-                        particle.p = {random_bilateral(&state.effects_entropy, f32) * 0.1, 0, 0}
-                        particle.dp = {random_bilateral(&state.effects_entropy, f32)*0.15, (random_unilateral(&state.effects_entropy, f32)+0.1)*1, 0}
+                        particle.p = {random_bilateral(&state.effects_entropy, f32)*0.1, 0, 0}
+                        particle.dp = {random_bilateral(&state.effects_entropy, f32)*0, (random_unilateral(&state.effects_entropy, f32)*0.4)+7, 0}
+                        particle.ddp = {0, -9.8, 0}
                         particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
                         particle.dcolor = {0,0,0,-0.2}
+                        particle.bitmap_id = random_bitmap_from(tran_state.assets, AssetTypeId.Head, &state.effects_entropy)
                     }
                     
+                    for &row in state.cells {
+                        zero(row[:])
+                    }
+                    
+                    grid_scale :f32= 0.3
+                    grid_origin:= v3{-0.5 * grid_scale * ParticleCellSize, 0, 0}
+                    for particle in state.particles {
+                        p := ( particle.p - grid_origin ) / grid_scale
+                        x := truncate(p.x)
+                        y := truncate(p.y)
+                        
+                        x = clamp(x, 1, ParticleCellSize-2)
+                        y = clamp(y, 1, ParticleCellSize-2)
+                        
+                        cell := &state.cells[y][x]
+                        cell_l := &state.cells[y][x-1]
+                        cell_r := &state.cells[y][x+1]
+                        cell_u := &state.cells[y+1][x]
+                        cell_d := &state.cells[y-1][x]
+                        
+                        density: f32 = particle.color.a
+                        cell.density                += density
+                        cell.velocity_times_density += density * particle.dp
+                    }
+        
+                    for row, y in state.cells {
+                        for cell, x in row {
+                            alpha := clamp_01(0.1 * cell.density)
+                            color := v4{1,1,1, alpha}
+                            position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
+                            push_rectangle(render_group, position, grid_scale, color)
+                        }
+                    }
+
                     for &particle in state.particles {
+                                                
+                        p := ( particle.p - grid_origin ) / grid_scale
+                        x := truncate(p.x)
+                        y := truncate(p.y)
+                        
+                        x = clamp(x, 1, ParticleCellSize-2)
+                        y = clamp(y, 1, ParticleCellSize-2)
+                        
+                        cell := &state.cells[y][x]
+                        cell_l := &state.cells[y][x-1]
+                        cell_r := &state.cells[y][x+1]
+                        cell_u := &state.cells[y+1][x]
+                        cell_d := &state.cells[y-1][x]
+                        
+                        dispersion: v3
+                        dc : f32 = 0.3
+                        dispersion += dc * (cell.density - cell_l.density) * v3{-1, 0, 0}
+                        dispersion += dc * (cell.density - cell_r.density) * v3{ 1, 0, 0}
+                        dispersion += dc * (cell.density - cell_d.density) * v3{ 0,-1, 0}
+                        dispersion += dc * (cell.density - cell_u.density) * v3{ 0, 1, 0}
+                        
+                        particle_ddp := particle.ddp + dispersion
                         // NOTE(viktor): simulate particle forward in time
-                        particle.p += particle.dp * input.delta_time
+                        particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
+                        particle.dp    += particle_ddp * input.delta_time
                         particle.color += particle.dcolor * input.delta_time
                         // TODO(viktor): should we just clamp colors in the renderer?
                         color := clamp_01(particle.color)
-                        if color.a > 0.7 {
+                        if color.a > 0.9 {
                             color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
                         }
+
+                        if particle.p.y < 0 {
+                            coefficient_of_restitution :f32= 0.3
+                            coefficient_of_friction :f32= 0.7
+                            particle.p.y *= -1
+                            particle.dp.y *= -coefficient_of_restitution
+                            particle.dp.x *= coefficient_of_friction
+                        }
                         // NOTE(viktor): render the particle
-                        push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Head), 1, particle.p, color)
+                        push_bitmap(render_group, particle.bitmap_id, 1, particle.p, color)
                     }
+                                        
                 }
 
             case .Arrow:
