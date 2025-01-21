@@ -437,7 +437,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(20), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(16), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
@@ -1002,8 +1002,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     
     end_temporary_memory(sim_memory)
     end_temporary_memory(render_memory)
-    
-    evict_assets_as_necessary(tran_state.assets)
     
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)

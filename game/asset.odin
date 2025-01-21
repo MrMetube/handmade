@@ -5,7 +5,8 @@ import hha "asset_builder"
 
 Assets :: struct {
     tran_state: ^TransientState,
-    arena: Arena,
+    
+    memory_sentinel: AssetMemoryBlock,
     
     target_memory_footprint: u64,
     total_memory_used: u64,
@@ -35,7 +36,7 @@ Asset :: struct {
     using data: hha.AssetData,
     file_index: u32,
     
-    memory: ^AssetMemoryHeader,
+    header: ^AssetMemoryHeader,
     
     state: AssetState,
     flags: AssetFlags,
@@ -57,6 +58,16 @@ AssetType :: struct {
     one_past_last_index: u32,
 }
 
+AssetMemoryBlockFlags :: bit_set[enum u64 {
+    Used,
+}]
+
+AssetMemoryBlock :: struct {
+    prev, next: ^AssetMemoryBlock,
+    size:       u64,
+    flags:      AssetMemoryBlockFlags,
+}
+
 AssetVector :: [AssetTagId]f32
 
 AssetFile :: struct {
@@ -70,7 +81,12 @@ AssetFile :: struct {
 
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets)
-    sub_arena(&assets.arena, arena, memory_size)
+    assets.memory_sentinel.size = 0
+    assets.memory_sentinel.next = &assets.memory_sentinel 
+    assets.memory_sentinel.prev = &assets.memory_sentinel 
+    
+    insert_block(&assets.memory_sentinel, push(arena, memory_size), memory_size)
+    
     assets.tran_state = tran_state
     assets.target_memory_footprint = memory_size
     assets.total_memory_used = 0
@@ -198,7 +214,7 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, must_be_locked: 
         if asset.state == .Loaded || .Locked in asset.flags {
             assert((!must_be_locked) || (.Locked in asset.flags))
             complete_previous_reads_before_future_reads()
-            result = &asset.memory.as.bitmap
+            result = &asset.header.as.bitmap
             mark_asset_as_recently_used(assets, asset)
         }
     }
@@ -217,7 +233,7 @@ get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound
         asset := &assets.assets[id]
         if asset.state == .Loaded {
             complete_previous_reads_before_future_reads()
-            result = &asset.memory.as.sound
+            result = &asset.header.as.sound
             mark_asset_as_recently_used(assets, asset)
         }
     }
@@ -336,22 +352,94 @@ get_file_handle_for :: #force_inline proc(assets:^Assets, file_index: u32) -> (r
 prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id) }
 prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) { load_bitmap(assets, id, locked) }
 
-aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
-    result = Platform.allocate_memory(size)
+insert_block :: proc(previous: ^AssetMemoryBlock, memory: [^]u8, size: u64) -> (result: ^AssetMemoryBlock) {
+    assert(size > size_of(AssetMemoryBlock))
+    result = cast(^AssetMemoryBlock) memory
+    result.size = size - size_of(AssetMemoryBlock)
     
-    if result != nil {
-        assets.total_memory_used += size
+    result.flags = {}
+    
+    result.prev = previous
+    result.next = previous.next
+    
+    result.next.prev = result
+    result.prev.next = result
+    
+    return result
+}
+
+find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemoryBlock) {
+    // TODO(viktor): find best matched block
+    for it := assets.memory_sentinel.next; it != &assets.memory_sentinel; it = it.next {
+        if .Used not_in it.flags {
+            if it.size >= size {
+                result = it
+                break
+            }
+        }
     }
     
     return result
 }
 
-release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, #any_int size: u64) {
-    Platform.deallocate_memory(memory)
+aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
+    when true {
+        attempts: i32 = 8
+        for attempts > 0 {
+            block := find_block_for_size(assets, size)
+
+            if block != nil {
+                block.flags += { .Used }
+                assert(block.size >= size)
+                result = &(cast([^]AssetMemoryBlock) block)[1]
+                
+                remaining_size := block.size - size
+                
+                BlockSplitThreshhold := kilobytes(4) // TODO(viktor): set this based on the smallest asset size
+                
+                if remaining_size >= BlockSplitThreshhold {
+                    block.size -= remaining_size
+                    insert_block(block, (cast([^]u8)result)[size:], remaining_size)
+                }
+                break
+            } else {
+                for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
+                    asset := &assets.assets[it.asset_index]
+                    if asset.state == .Loaded {
+                        block = evict_asset(assets, it, asset)
+                        break
+                    }
+                }
+                attempts -= 1
+            }
+        }
+        assert(attempts > 0, "Failed to free enough memory") 
+        
+    } else {
+        result = Platform.allocate_memory(size)
+        
+        if result != nil {
+            assets.total_memory_used += size
+        }
+    }
+    
+    return result
+}
+
+release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, #any_int size: u64)-> (result: ^AssetMemoryBlock) {
+    when true {
+        result = &(cast([^]AssetMemoryBlock)memory)[-1]
+        result.flags -= { .Used }
+        // TODO(viktor): merge previous and or next
+    } else {
+        Platform.deallocate_memory(memory)
+    }
  
     if memory != nil {
         assets.total_memory_used -= size
     }
+    
+    return result
 }
 
 insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
@@ -367,7 +455,8 @@ insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^Asse
 add_asset_header_to_list :: proc(assets: ^Assets, asset_index: u32, total_size: u64) {
     asset := &assets.assets[asset_index]
     assert(asset.state != .Loaded)
-    header := asset.memory
+    
+    header := asset.header
     header.total_size  = total_size
     header.asset_index = asset_index
     
@@ -376,7 +465,7 @@ add_asset_header_to_list :: proc(assets: ^Assets, asset_index: u32, total_size: 
 
 mark_asset_as_recently_used :: proc(assets: ^Assets, asset: ^Asset) {
     if .Locked not_in asset.flags {
-        header := asset.memory
+        header := asset.header
         
         remove_asset_header_from_list(header)
         insert_asset_header_at_front(assets, header)
@@ -403,20 +492,22 @@ evict_assets_as_necessary :: proc(assets: ^Assets) {
     }
 }
 
-evict_asset :: proc(assets: ^Assets, header: ^AssetMemoryHeader, asset: ^Asset) {
+evict_asset :: proc(assets: ^Assets, header: ^AssetMemoryHeader, asset: ^Asset) -> (result: ^AssetMemoryBlock) {
     assert(asset.state == .Loaded)
     assert(.Locked not_in asset.flags)
     
     remove_asset_header_from_list(header)
     
-    release_asset_memory(assets, asset.memory, asset.memory.total_size)
-    asset.memory = nil
+    result = release_asset_memory(assets, asset.header, asset.header.total_size)
+    asset.header = nil
     asset.state = .Unloaded
+    
+    return result
 }
 
 LoadAssetWork :: struct {
     task:        ^TaskWithMemory,
-    asset:  ^Asset,
+    asset:       ^Asset,
     final_flags: AssetFlags, 
     
     handle: ^PlatformFileHandle,
@@ -453,10 +544,10 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                 total := memory_size + size_of(AssetMemoryHeader)
         
                 // TODO(viktor): support alignment of 16
-                asset.memory = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
-                sample_memory := &(cast([^]AssetMemoryHeader) asset.memory)[1]
+                asset.header = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
+                sample_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
 
-                sound := &asset.memory.as.sound
+                sound := &asset.header.as.sound
                 sound.channel_count = cast(u8) info.channel_count
                 
                 samples := (cast([^]i16) sample_memory)[:total_sample_count]
@@ -500,10 +591,10 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) {
                 total := memory_size + size_of(AssetMemoryHeader)
             
                 // TODO(viktor): support alignment of 16
-                asset.memory = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
-                bitmap_memory := &(cast([^]AssetMemoryHeader) asset.memory)[1]
+                asset.header = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
+                bitmap_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
                 
-                bitmap := &asset.memory.as.bitmap
+                bitmap := &asset.header.as.bitmap
                 bitmap^ = {
                     memory = (cast([^]ByteColor)bitmap_memory)[:pixel_count],
                     width  = cast(i32) info.dimension.x, 
