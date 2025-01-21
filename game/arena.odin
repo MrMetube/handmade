@@ -65,8 +65,14 @@ push_string :: #force_inline proc(arena: ^Arena, s: string) -> (result: string) 
     return result
 }
 
-zero :: proc { zero_struct, zero_slice }
+zero :: proc { zero_size, zero_struct, zero_slice }
 
+zero_size :: #force_inline proc(memory: rawpointer, size: u64) {
+    mem := (cast([^]u8)memory)[:size]
+    for &b in mem {
+        b = {}
+    }
+}
 zero_struct :: #force_inline proc(s: ^$T) {
     s^ = {}
 }

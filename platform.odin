@@ -39,7 +39,7 @@ LowPriorityWorkQueueThreadCount  :: 2
 Resolution := [2]i32 {1920, 1080}
 // Resolution := [2]i32 {1280, 720}
 
-MonitorRefreshHz: u32 = 30
+MonitorRefreshHz: u32 = 72
 
 
 PermanentStorageSize := megabytes(256)
@@ -272,6 +272,9 @@ main :: proc() {
         Platform_api = {
             enqueue_work      = enqueue_work,
             complete_all_work = complete_all_work,
+            
+            allocate_memory   = allocate_memory,
+            deallocate_memory = deallocate_memory,
             
             begin_processing_all_files_of_type = begin_processing_all_files_of_type,
             end_processing_all_files_of_type   = end_processing_all_files_of_type,
@@ -1114,4 +1117,14 @@ my_assertion_failure :: proc(prefix, message: string, loc: runtime.Source_Code_L
         runtime.debug_trap()
     }
     runtime.trap()
+}
+
+
+allocate_memory : PlatformAllocateMemory : proc(size: u64) -> (result: rawpointer) {
+    result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    return result
+}
+
+deallocate_memory : PlatformDeallocateMemory : proc(memory: rawpointer) {
+    win.VirtualFree(memory, 0, win.MEM_RELEASE)
 }

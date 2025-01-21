@@ -108,7 +108,10 @@ GameMemory :: struct {
 PlatformAPI :: struct {
     enqueue_work:      PlatformEnqueueWork,
     complete_all_work: PlatformCompleteAllWork,
-        
+    
+    allocate_memory:   PlatformAllocateMemory,
+    deallocate_memory: PlatformDeallocateMemory,
+    
     begin_processing_all_files_of_type: PlatformBeginProcessingAllFilesOfType,
     end_processing_all_files_of_type:   PlatformEndProcessingAllFilesOfType,
     open_next_file:                     PlatformOpenNextFile,
@@ -119,6 +122,9 @@ PlatformAPI :: struct {
 PlatformWorkQueueCallback :: #type proc(data: rawpointer)
 PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer)
 PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
+
+PlatformAllocateMemory   :: #type proc(size: u64) -> rawpointer
+PlatformDeallocateMemory :: #type proc(memory:rawpointer)
 
 PlatformBeginProcessingAllFilesOfType :: #type proc(file_extension: string) -> ^PlatformFileGroup
 PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: ^PlatformFileGroup)

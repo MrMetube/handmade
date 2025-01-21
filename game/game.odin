@@ -241,10 +241,9 @@ PlatformWorkQueue  :: struct{}
 PlatformFileHandle :: struct{ no_errors:  b32 }
 PlatformFileGroup  :: struct{ file_count: u32 }
 
-// NOTE(viktor): Globals
 Platform: PlatformAPI
 
-@(export)
+@(export) 
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     scoped_timed_block(.update_and_render)
 
@@ -437,7 +436,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_game_assets(&tran_state.arena, megabytes(5), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(50), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
@@ -731,7 +730,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 
             case .Familiar: 
                 closest_hero: ^Entity
-                closest_hero_dsq := square(10)
+                closest_hero_dsq := square(f32(10))
 
                 // TODO(viktor): make spatial queries easy for things
                 for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {

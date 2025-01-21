@@ -50,31 +50,17 @@ DegPerRad :: 360.0/Tau
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
-square :: proc { square_f, square_f3, square_x4, square_x8 }
-@(require_results) square_f  :: #force_inline proc(x: f32) -> f32 { return x * x}
-@(require_results) square_f3 :: #force_inline proc(v: v3)  -> v3  { return v * v}
-@(require_results) square_x4 :: #force_inline proc(x: simd.f32x4) -> simd.f32x4 { return x * x}
-@(require_results) square_x8 :: #force_inline proc(x: simd.f32x8) -> simd.f32x8 { return x * x }
+@(require_results) square  :: #force_inline proc(x: $T) -> T { return x * x}
 
 square_root :: simd.sqrt
 
-lerp :: proc { lerp_1, lerp_2, lerp_3, lerp_4 }
-@(require_results) lerp_1 :: #force_inline proc(from, to, t: f32) -> f32 {
-    result := (1-t) * from + t * to
-
-    return result
-}
-@(require_results) lerp_2 :: #force_inline proc(from, to, t: v2) -> v2 {
+lerp :: proc { lerp_vf, lerp_t }
+@(require_results) lerp_t :: #force_inline proc(from, to: $T, t: T) -> T {
     result := (1-t) * from + t * to
     
     return result
 }
-@(require_results) lerp_3 :: #force_inline proc(from, to, t: v3) -> v3 {
-    result := (1-t) * from + t * to
-    
-    return result
-}
-@(require_results) lerp_4 :: #force_inline proc(from, to, t: v4) -> v4 {
+@(require_results) lerp_vf :: #force_inline proc(from, to: $V, t: f32) -> V where V != f32 {
     result := (1-t) * from + t * to
     
     return result
@@ -123,14 +109,10 @@ safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
     when intrinsics.type_is_simd_vector(T) {
         result = simd.clamp(value, min, max)
     } else when intrinsics.type_is_array(T) {
-        E :: intrinsics.type_elem_type(T)
-        when 2 * size_of(E) == size_of(T) {
-            result = T{ clamp(value.x, min.x, max.x), clamp(value.y, min.y, max.y) }
-        } else when 3 * size_of(E) == size_of(T) {
-            result = T{ clamp(value.x, min.x, max.x), clamp(value.y, min.y, max.y), clamp(value.z, min.z, max.z) }
-        } else when 4 * size_of(E) == size_of(T) {
-            result = T{ clamp(value.x, min.x, max.x), clamp(value.y, min.y, max.y), clamp(value.z, min.z, max.z), clamp(value.w, min.w, max.w) }
-        }
+        result.x = clamp(value.x, min.x, max.x)
+        result.y = clamp(value.y, min.y, max.y)
+        when len(T) >= 3 do result.z = clamp(value.z, min.z, max.z) 
+        when len(T) >= 4 do result.w = clamp(value.w, min.w, max.w)
     } else {
         result = builtin.clamp(value, min, max)
     }
@@ -144,14 +126,10 @@ safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
         one  :: cast(T) 1
         result = simd.clamp(value, zero, one)
     } else when intrinsics.type_is_array(T) {
-        E :: intrinsics.type_elem_type(T)
-        when 2 * size_of(E) == size_of(T) {
-            result = T{ clamp_01(value.x), clamp_01(value.y) }
-        } else when 3 * size_of(E) == size_of(T) {
-            result = T{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z) }
-        } else when 4 * size_of(E) == size_of(T) {
-            result = T{ clamp_01(value.x), clamp_01(value.y), clamp_01(value.z), clamp_01(value.w) }
-        }
+        result.x = clamp_01(value.x)
+        result.y = clamp_01(value.y)
+        when len(T) >= 3 do result.z = clamp_01(value.z)
+        when len(T) >= 4 do result.w = clamp_01(value.w)
     } else {
         result = clamp(value, 0, 1)
     }
@@ -220,69 +198,28 @@ V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
     return result
 }
 
-dot :: proc { dot2, dot3, dot4 }
-@(require_results) dot2 :: #force_inline proc(a, b: v2) -> f32 {
-    return a.x * b.x + a.y * b.y
-}
-@(require_results) dot3 :: #force_inline proc(a, b: v3) -> f32 {
-    return a.x * b.x + a.y * b.y + a.z * b.z
-}
-@(require_results) dot4 :: #force_inline proc(a, b: v4) -> f32 {
-    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+@(require_results) dot :: #force_inline proc(a, b: $V/[$N]f32) -> (result: f32) {
+    result = a.x * b.x + a.y * b.y
+    when N >= 3 do result += a.z * b.z
+    when N >= 4 do result += a.w * b.w
+    return result
 }
 
-
-project :: proc { project_2, project_3 }
-@(require_results) project_2 :: #force_inline proc(v, axis: v2) -> v2 {
-    return v - 1 * dot(v, axis) * axis
-}
-@(require_results) project_3 :: #force_inline proc(v, axis: v3) -> v3 {
+@(require_results) project :: #force_inline proc(v, axis: $V) -> V {
     return v - 1 * dot(v, axis) * axis
 }
 
-@(require_results) reflect :: #force_inline proc(v, axis:v2) -> v2 {
-    return v - 2 * dot(v, axis) * axis
-}
-
-
-length :: proc { length_2, length_3, length_4 }
-@(require_results) length_2 :: #force_inline proc(vec: v2) -> (length:f32) {
+@(require_results) length :: #force_inline proc(vec: $V) -> (result: f32) {
     length_squared := length_squared(vec)
-    length = math.sqrt(length_squared)
-    return length
-}
-@(require_results) length_3 :: #force_inline proc(vec: v3) -> (length:f32) {
-    length_squared := length_squared(vec)
-    length = math.sqrt(length_squared)
-    return length
-}
-@(require_results) length_4 :: #force_inline proc(vec: v4) -> (length:f32) {
-    length_squared := length_squared(vec)
-    length = math.sqrt(length_squared)
-    return length
-}
-
-length_squared :: proc { length_squared_2, length_squared_3, length_squared_4 }
-@(require_results) length_squared_2 :: #force_inline proc(vec: v2) -> f32 {
-    return dot(vec, vec)
-}
-@(require_results) length_squared_3 :: #force_inline proc(vec: v3) -> f32 {
-    return dot(vec, vec)
-}
-@(require_results) length_squared_4 :: #force_inline proc(vec: v4) -> f32 {
-    return dot(vec, vec)
-}
-
-normalize :: proc { normalize_2, normalize_3, normalize_4 }
-@(require_results) normalize_2 :: #force_inline proc(vec: v2) -> (result: v2) {
-    result = vec / length(vec)
+    result = math.sqrt(length_squared)
     return result
 }
-@(require_results) normalize_3 :: #force_inline proc(vec: v3) -> (result: v3) {
-    result = vec / length(vec)
-    return result
+
+@(require_results) length_squared :: #force_inline proc(vec: $V) -> f32 {
+    return dot(vec, vec)
 }
-@(require_results) normalize_4 :: #force_inline proc(vec: v4) -> (result: v4) {
+
+@(require_results) normalize :: #force_inline proc(vec: $V) -> (result: V) {
     result = vec / length(vec)
     return result
 }
@@ -356,19 +293,16 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
 }
 
 @(require_results) rectangle_contains :: #force_inline proc(rec: Rectangle($T), point: T) -> (result: b32) {
-    result = rec.min.x < point.x && point.x < rec.max.x && rec.min.y < point.y && point.y < rec.max.y
-    when len(T) >= 3 {
-        result &= rec.min.z < point.z && point.z < rec.max.z
-    }
+    result  = rec.min.x < point.x && point.x < rec.max.x 
+    result &= rec.min.y < point.y && point.y < rec.max.y
+    when len(T) >= 3 do result &= rec.min.z < point.z && point.z < rec.max.z
     return result
 }
 
 @(require_results) rectangle_intersects :: #force_inline proc(a, b: Rectangle($T)) -> (result: b32) {
     result  = !(b.max.x <= a.min.x || b.min.x >= a.max.x)
     result &= !(b.max.y <= a.min.y || b.min.y >= a.max.y)
-    when len(T) >= 3 {
-        result &= !(b.max.z <= a.min.z || b.min.z >= a.max.z)
-    }
+    when len(T) >= 3 do result &= !(b.max.z <= a.min.z || b.min.z >= a.max.z)
     
     return result
 }

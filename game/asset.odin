@@ -7,6 +7,8 @@ Assets :: struct {
     tran_state: ^TransientState,
     arena: Arena,
     
+    total_memory_used: u64,
+    
     files: []AssetFile,
     
     types:   [AssetTypeId]AssetType,
@@ -55,10 +57,11 @@ AssetFile :: struct {
     tag_base: u32,
 }
 
-make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
+make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets)
     sub_arena(&assets.arena, arena, memory_size)
     assets.tran_state = tran_state
+    assets.total_memory_used = 0
     
     for &range in assets.tag_ranges {
         range = 1_000_000_000
@@ -126,8 +129,8 @@ make_game_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^Transient
     
     loaded_asset_count: u32 = 1
     // NOTE(viktor): reserve and zero out the null tag / null asset
-    // assets.tags[0]   = {}
-    // assets.assets[0] = {}
+    assets.tags[0]   = {}
+    assets.assets[0] = {}
     
     for id in AssetTypeId {
         dest_type := &assets.types[id]
@@ -325,12 +328,31 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     
     complete_previous_writes_before_future_writes()
     
-    // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
-    if Platform_no_file_errors(work.handle) {
-        work.asset_slot.state = work.final_state
+    work.asset_slot.state = work.final_state
+    if !Platform_no_file_errors(work.handle) {
+        // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
+        zero(work.destination, work.amount)
     }
     
     end_task_with_memory(work.task)
+}
+
+aquire_asset_memory :: #force_inline proc(assets: ^Assets, size: u64) -> (result: rawpointer) {
+    result = Platform.allocate_memory(size)
+    
+    if result != nil {
+        assets.total_memory_used += size
+    }
+    
+    return result
+}
+
+release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, size: u64) {
+    Platform.deallocate_memory(memory)
+ 
+    if memory != nil {
+        assets.total_memory_used -= size
+    }
 }
 
 load_sound :: proc(assets: ^Assets, id: SoundId) {
@@ -347,6 +369,7 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                 total_sample_count := info.sample_count * cast(u32) sound.channel_count
                 memory_size := total_sample_count * size_of(i16)
                 samples := push(&assets.arena, i16, total_sample_count, alignment = 8)
+                // samples := (cast([^]i16) aquire_asset_memory(assets, auto_cast memory_size))[:total_sample_count]
                 for &channel, index in sound.channels[:sound.channel_count] {
                     channel = samples[info.sample_count * auto_cast index:][:info.sample_count]
                 }
@@ -388,6 +411,7 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 bitmap := &slot.bitmap
                 bitmap^ = {
                     memory = push(&assets.arena, ByteColor, bitmap_size, alignment = 16),
+                    // memory = (cast([^]ByteColor)aquire_asset_memory(assets, auto_cast memory_size))[:bitmap_size],
                     width  = cast(i16) info.dimension.x, 
                     height = cast(i16) info.dimension.y,
                     
