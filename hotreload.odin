@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import win "core:sys/windows"
 
 update_and_render    : UpdateAndRender

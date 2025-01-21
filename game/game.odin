@@ -8,21 +8,9 @@ INTERNAL :: #config(INTERNAL, false)
 /*
     TODO(viktor):
     ARCHITECTURE EXPLORATION
-    
-    - Audio
-        - Fix clicking Bug at the end of samples
 
     - Asset streaming
         - Memory management
-    
-    - Rendering
-        - Straighten out all coordinate systems!
-            - Screen
-            - World
-            - Texture
-        - Particle systems
-        - Lighting
-        - Final Optimization    
 
     - Debug code
         - Fonts
@@ -31,6 +19,19 @@ INTERNAL :: #config(INTERNAL, false)
         - (a little gui) switches / sliders / etc
         - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
         - Thread visualization 
+    
+    - Audio
+        - Fix clicking Bug at the end of samples
+
+    - Particle systems
+    
+    - Rendering
+        - Straighten out all coordinate systems!
+            - Screen
+            - World
+            - Texture
+        - Lighting
+        - Final Optimization    
         
     - Z !
         - debug drawing of Z levels and inclusion of Z to make sure
@@ -153,7 +154,7 @@ TransientState :: struct {
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
     
-    env_size: [2]i16,
+    env_size: [2]i32,
     using _ : struct #raw_union {
         using _ : struct {
             env_bottom, env_middle, env_top: EnvironmentMap,
@@ -164,7 +165,7 @@ TransientState :: struct {
 
 ParticleCell :: struct {
     density: f32,
-    velocity_times_density: v3
+    velocity_times_density: v3,
 }
 
 Particle :: struct {
@@ -436,10 +437,11 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(50), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(20), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
+        state.mixer.master_volume = 0.25
         
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
@@ -448,7 +450,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
         }
         
-        test_size: [2]i16= 256
+        test_size: [2]i32= 256
         tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
         tran_state.test_normal  = make_empty_bitmap(&tran_state.arena, test_size, false)
         make_sphere_normal_map(tran_state.test_normal, 0)
@@ -570,10 +572,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     render_memory := begin_temporary_memory(&tran_state.arena)
     
     monitor_width_in_meters :: 0.635
-    buffer_size := [2]i16{buffer.width, buffer.height}
+    buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4))
+    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4), false)
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
@@ -605,7 +607,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    when false {
+    {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -794,8 +796,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
                 
-                when false { // NOTE(viktor): Particle system test
-                    for spawn_index in 0..<4 {
+                { // NOTE(viktor): Particle system test
+                    for _ in 0..<4 {
                         particle := &state.particles[state.next_particle]
                         state.next_particle += 1
                         if state.next_particle >= len(state.particles) {
@@ -824,10 +826,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                         y = clamp(y, 1, ParticleCellSize-2)
                         
                         cell := &state.cells[y][x]
-                        cell_l := &state.cells[y][x-1]
-                        cell_r := &state.cells[y][x+1]
-                        cell_u := &state.cells[y+1][x]
-                        cell_d := &state.cells[y-1][x]
                         
                         density: f32 = particle.color.a
                         cell.density                += density
@@ -1005,6 +1003,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     end_temporary_memory(sim_memory)
     end_temporary_memory(render_memory)
     
+    evict_assets_as_necessary(tran_state.assets)
+    
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
 }
@@ -1066,7 +1066,7 @@ make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
-            dst := &bitmap.memory[cast(i32) y * cast(i32) bitmap.width + cast(i32) x]
+            dst := &bitmap.memory[y * bitmap.width + x]
             dst^ = vec_cast(u8, color)
         }
     }
@@ -1091,7 +1091,7 @@ make_sphere_normal_map :: proc(buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
             
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
-            dst := &buffer.memory[cast(i32) y * cast(i32) buffer.width + cast(i32) x]
+            dst := &buffer.memory[y * buffer.width + x]
             dst^ = vec_cast(u8, color)
         }
     }
@@ -1115,15 +1115,15 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
             base_color: v3 = 0
             color := V4(alpha * base_color, alpha)
             
-            dst := &buffer.memory[cast(i32) y * cast(i32) buffer.width + cast(i32) x]
+            dst := &buffer.memory[y * buffer.width + x]
             dst^ = vec_cast(u8, color)
         }
     }
 }
 
-make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i16, clear_to_zero: b32 = true) -> (result: Bitmap) {
+make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
-        memory = push(arena, ByteColor, (cast(i32)dim.x * cast(i32) dim.y), clear_to_zero = clear_to_zero, alignment = 16),
+        memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
         height = dim.y,
     }
@@ -1157,7 +1157,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
         assert(buffer_size.x == buffer_size.y)
         half_dim := buffer_size * 0.5
 
-        render_group := make_render_group(&task.arena, tran_state.assets, 0)
+        render_group := make_render_group(&task.arena, tran_state.assets, 0, true)
         orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
 
         clear(render_group, Red)

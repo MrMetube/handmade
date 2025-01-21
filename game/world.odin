@@ -130,7 +130,7 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {
     result := center
     result.offset += offset
 
-    rounded_offset  := round(result.offset / world.chunk_dim_meters)
+    rounded_offset  := round(result.offset / world.chunk_dim_meters, i32)
     result.chunk  = result.chunk + rounded_offset
     result.offset -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
 

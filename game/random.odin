@@ -80,8 +80,9 @@ random_between_f32 :: #force_inline proc(series: ^RandomSeries, min, max: f32) -
 }
 random_between_u32 :: #force_inline proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
     assert(min < max)
-    result = min + (max-min) * (next_random_u32(series) % ((max+1)-min))
-    
+    result = min + (next_random_u32(series) % ((max+1)-min))
+    assert(result >= min)
+    assert(result <= max)
     return result
 }
 

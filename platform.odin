@@ -4,7 +4,6 @@ import "base:intrinsics"
 import "base:runtime"
 
 import "core:fmt"
-import "core:mem"
 import win "core:sys/windows"
 
 /*
@@ -490,8 +489,8 @@ main :: proc() {
         {
             offscreen_buffer := Bitmap{
                 memory = GLOBAL_back_buffer.memory,
-                width  = cast(i16) GLOBAL_back_buffer.width,
-                height = cast(i16) GLOBAL_back_buffer.height,
+                width  = GLOBAL_back_buffer.width,
+                height = GLOBAL_back_buffer.height,
             }
 
             if state.input_record_index != 0 {

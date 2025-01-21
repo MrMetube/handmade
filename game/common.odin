@@ -25,7 +25,7 @@ Bitmap :: struct {
     align_percentage:  [2]f32,
     width_over_height: f32,
     
-    width, height: i16, 
+    width, height: i32, 
 }
 
 InputButton :: struct {

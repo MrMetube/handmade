@@ -16,7 +16,7 @@ v4 :: [4]f32
 Rectangle   :: struct($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
-Rectangle2i :: Rectangle([2]i16)
+Rectangle2i :: Rectangle([2]i32)
 
 
 // ---------------------- ---------------------- ----------------------
@@ -148,6 +148,72 @@ safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
 sign :: proc{ sign_i, sign_f }
 @(require_results) sign_i  :: #force_inline proc(i: i32) -> i32 { return i >= 0 ? 1 : -1 }
 @(require_results) sign_f  :: #force_inline proc(x: f32) -> f32 { return x >= 0 ? 1 : -1 }
+
+mod :: proc { mod_f, mod_vf, mod_v }
+@(require_results) mod_f :: proc(value: f32, divisor: f32) -> f32 {
+    return math.mod(value, divisor)
+}
+@(require_results) mod_vf :: proc(value: [2]f32, divisor: f32) -> [2]f32 {
+    return {math.mod(value.x, divisor), math.mod(value.y, divisor)}
+}
+@(require_results) mod_v :: proc(value: [2]f32, divisor: [2]f32) -> [2]f32 {
+    return {math.mod(value.x, divisor.x), math.mod(value.y, divisor.y)}
+}
+
+round :: proc { round_f, round_v }
+@(require_results) round_f :: #force_inline proc(f: f32, $T: typeid) -> T {
+    if f < 0 do return cast(T) -math.round(-f)
+    return cast(T) math.round(f)
+}
+@(require_results) round_v :: #force_inline proc(fs: [$N]f32, $T: typeid) -> [N]T where N > 1 {
+    fs := fs
+    for &e in fs do e = math.round(e) 
+    return vec_cast(T, fs)
+}
+
+floor :: proc { floor_f, floor_v }
+@(require_results) floor_f :: #force_inline proc(f: f32, $T: typeid) -> (i:T) {
+    return cast(T) math.floor(f)
+}
+@(require_results) floor_v :: #force_inline proc(fs: [$N]f32, $T: typeid) -> [N]T {
+    return vec_cast(T, simd.to_array(simd.floor(simd.from_array(fs))))
+}
+
+ceil :: proc { ceil_f, ceil_v }
+@(require_results) ceil_f :: #force_inline proc(f: f32, $T: typeid) -> (i:T) {
+    return cast(T) math.ceil(f)
+}
+@(require_results) ceil_v :: #force_inline proc(fs: [$N]f32, $T: typeid) -> [N]T {
+    return vec_cast(T, simd.to_array(simd.ceil(simd.from_array(fs))))
+}
+
+truncate :: proc { truncate_f32, truncate_f32s }
+@(require_results) truncate_f32 :: #force_inline proc(f: f32) -> i32 {
+    return cast(i32) f
+}
+@(require_results) truncate_f32s :: #force_inline proc(fs: [$N]f32) -> [N]i32 where N > 1 {
+    return vec_cast(i32, fs)
+}
+
+
+sin :: proc { sin_f }
+@(require_results) sin_f :: #force_inline proc(angle: f32) -> f32 {
+    return math.sin(angle)
+}
+
+
+cos :: proc { cos_f }
+@(require_results) cos_f :: #force_inline proc(angle: f32) -> f32 {
+    return math.cos(angle)
+}
+
+
+atan2 :: proc { atan2_f }
+
+@(require_results) atan2_f :: #force_inline proc(y, x: f32) -> f32 {
+    return math.atan2(y, x)
+}
+
 
 
 // ---------------------- ---------------------- ----------------------
@@ -350,7 +416,7 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     return result
 }
 
-@(require_results) rectangle_clamped_area :: #force_inline proc(rec: Rectangle2i) -> (result: i16) {
+@(require_results) rectangle_clamped_area :: #force_inline proc(rec: Rectangle2i) -> (result: i32) {
     dimension := rec.max - rec.min
     if dimension.x > 0 && dimension.y > 0 {
         result = dimension.x * dimension.y

@@ -7,14 +7,16 @@ Assets :: struct {
     tran_state: ^TransientState,
     arena: Arena,
     
+    target_memory_footprint: u64,
     total_memory_used: u64,
     
+    loaded_asset_sentinel: AssetMemoryHeader,
+        
     files: []AssetFile,
-    
-    types:   [AssetTypeId]AssetType,
-    assets:  []Asset,
-    slots:   []AssetSlot,
-    tags:    []AssetTag,
+
+    types:  [AssetTypeId]AssetType,
+    assets: []Asset,
+    tags:   []AssetTag,
     
     tag_ranges: [AssetTagId]f32,
 }
@@ -25,20 +27,29 @@ AssetTypeId :: hha.AssetTypeId
 AssetTag    :: hha.AssetTag
 AssetTagId  :: hha.AssetTagId
 
-AssetState :: enum u16 { Unloaded, Queued, Loaded, Locked }
-
-AssetSlot :: struct {
-    using as : struct #raw_union {
-        bitmap: Bitmap,
-        sound:  Sound,
-    },
-    
-    state:  AssetState,
-}
+AssetState :: enum u8 { Unloaded, Queued, Loaded }
+AssetFlag  :: enum u8 { Locked }
+AssetFlags :: bit_set[AssetFlag]
 
 Asset :: struct {
     using data: hha.AssetData,
     file_index: u32,
+    
+    memory: ^AssetMemoryHeader,
+    
+    state: AssetState,
+    flags: AssetFlags,
+}
+
+AssetMemoryHeader :: struct {
+    next, prev:  ^AssetMemoryHeader,
+    asset_index: u32,
+    
+    total_size: u64,
+    as: struct #raw_union {
+        bitmap: Bitmap,
+        sound:  Sound,
+    },
 }
 
 AssetType :: struct {
@@ -61,7 +72,11 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     assets = push(arena, Assets)
     sub_arena(&assets.arena, arena, memory_size)
     assets.tran_state = tran_state
+    assets.target_memory_footprint = memory_size
     assets.total_memory_used = 0
+    
+    assets.loaded_asset_sentinel.next = &assets.loaded_asset_sentinel
+    assets.loaded_asset_sentinel.prev = &assets.loaded_asset_sentinel
     
     for &range in assets.tag_ranges {
         range = 1_000_000_000
@@ -115,7 +130,6 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     }
     
     // NOTE(viktor): Allocate all metadata space
-    assets.slots  = push(arena, AssetSlot, asset_count)
     assets.assets = push(arena, Asset,     asset_count)
     assets.tags   = push(arena, AssetTag,  tag_count)
     
@@ -178,33 +192,45 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     return assets
 }
 
-get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
+get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, must_be_locked: b32) -> (result: ^Bitmap) {
     if is_valid_bitmap(id) {
-        slot := &assets.slots[id]
-        if slot.state  == .Loaded || slot.state == .Locked {
+        asset := &assets.assets[id]
+        if asset.state == .Loaded || .Locked in asset.flags {
+            assert((!must_be_locked) || (.Locked in asset.flags))
             complete_previous_reads_before_future_reads()
-            result = &slot.bitmap
+            result = &asset.memory.as.bitmap
+            mark_asset_as_recently_used(assets, asset)
         }
+    }
+    return result
+}
+
+get_bitmap_info :: proc(assets: ^Assets, id: BitmapId) -> (result: ^hha.BitmapInfo) {
+    if is_valid_bitmap(id) {
+        result = &assets.assets[id].info.bitmap
     }
     return result
 }
 
 get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
     if is_valid_sound(id) {
-        slot := &assets.slots[id]
-        if slot.state  == .Loaded || slot.state == .Locked {
+        asset := &assets.assets[id]
+        if asset.state == .Loaded {
             complete_previous_reads_before_future_reads()
-            result = &slot.sound
+            result = &asset.memory.as.sound
+            mark_asset_as_recently_used(assets, asset)
         }
     }
     return result
 }
-get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^hha.Sound) {
+
+get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^hha.SoundInfo) {
     if is_valid_sound(id) {
-        result = &assets.assets[id].sound
+        result = &assets.assets[id].info.sound
     }
     return result
 }
+
 get_next_sound_in_chain :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: SoundId) {
     switch get_sound_info(assets, id).chain {
     case .None:    result = 0
@@ -241,7 +267,6 @@ first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: u32) {
     return result
 }
 
-// TODO(viktor): are these even needed?
 best_match_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: SoundId) {
     result = cast(SoundId) best_match_asset_from(assets, id, match_vector, weight_vector)
     return result
@@ -309,35 +334,9 @@ get_file_handle_for :: #force_inline proc(assets:^Assets, file_index: u32) -> (r
 
 
 prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id) }
-prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id) }
+prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) { load_bitmap(assets, id, locked) }
 
-LoadAssetWork :: struct {
-    task:        ^TaskWithMemory,
-    asset_slot:  ^AssetSlot,
-    final_state: AssetState, 
-    
-    handle: ^PlatformFileHandle,
-    position, amount: u64,
-    destination:  rawpointer,
-}
-
-do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    work := cast(^LoadAssetWork) data
-    
-    Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
-    
-    complete_previous_writes_before_future_writes()
-    
-    work.asset_slot.state = work.final_state
-    if !Platform_no_file_errors(work.handle) {
-        // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
-        zero(work.destination, work.amount)
-    }
-    
-    end_task_with_memory(work.task)
-}
-
-aquire_asset_memory :: #force_inline proc(assets: ^Assets, size: u64) -> (result: rawpointer) {
+aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
     result = Platform.allocate_memory(size)
     
     if result != nil {
@@ -347,7 +346,7 @@ aquire_asset_memory :: #force_inline proc(assets: ^Assets, size: u64) -> (result
     return result
 }
 
-release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, size: u64) {
+release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, #any_int size: u64) {
     Platform.deallocate_memory(memory)
  
     if memory != nil {
@@ -355,65 +354,160 @@ release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, 
     }
 }
 
+insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
+    sentinel := &assets.loaded_asset_sentinel
+    
+    header.prev = sentinel
+    header.next = sentinel.next
+    
+    header.next.prev = header
+    header.prev.next = header
+}
+
+add_asset_header_to_list :: proc(assets: ^Assets, asset_index: u32, total_size: u64) {
+    asset := &assets.assets[asset_index]
+    assert(asset.state != .Loaded)
+    header := asset.memory
+    header.total_size  = total_size
+    header.asset_index = asset_index
+    
+    insert_asset_header_at_front(assets, header)
+}
+
+mark_asset_as_recently_used :: proc(assets: ^Assets, asset: ^Asset) {
+    if .Locked not_in asset.flags {
+        header := asset.memory
+        
+        remove_asset_header_from_list(header)
+        insert_asset_header_at_front(assets, header)
+    }
+}
+
+remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
+    header.prev.next = header.next
+    header.next.prev = header.prev
+    
+    header.next = nil
+    header.prev = nil
+}
+
+evict_assets_as_necessary :: proc(assets: ^Assets) {
+    for assets.total_memory_used > assets.target_memory_footprint {
+        last  := assets.loaded_asset_sentinel.prev
+        asset := &assets.assets[last.asset_index]
+        if last != &assets.loaded_asset_sentinel && asset.state == .Loaded {
+            evict_asset(assets, last, asset)
+        } else {
+            break
+        }
+    }
+}
+
+evict_asset :: proc(assets: ^Assets, header: ^AssetMemoryHeader, asset: ^Asset) {
+    assert(asset.state == .Loaded)
+    assert(.Locked not_in asset.flags)
+    
+    remove_asset_header_from_list(header)
+    
+    release_asset_memory(assets, asset.memory, asset.memory.total_size)
+    asset.memory = nil
+    asset.state = .Unloaded
+}
+
+LoadAssetWork :: struct {
+    task:        ^TaskWithMemory,
+    asset:  ^Asset,
+    final_flags: AssetFlags, 
+    
+    handle: ^PlatformFileHandle,
+    position, amount: u64,
+    destination: rawpointer,
+}
+
+do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    work := cast(^LoadAssetWork) data
+    
+    Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
+    
+    complete_previous_writes_before_future_writes()
+    
+    work.asset.state = .Loaded
+    work.asset.flags = work.final_flags
+    if !Platform_no_file_errors(work.handle) {
+        // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
+        zero(work.destination, work.amount)
+    }
+    
+    end_task_with_memory(work.task)
+}
+
 load_sound :: proc(assets: ^Assets, id: SoundId) {
-    slot := &assets.slots[id]
+    asset := &assets.assets[id]
     if is_valid_sound(id) {
-        if _, ok := atomic_compare_exchange(&slot.state, AssetState.Unloaded, AssetState.Queued); ok {
+        if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
-                asset := assets.assets[id]
-                info  := asset.sound
-                
-                sound := &slot.sound
+                info  := asset.info.sound
+            
+                total_sample_count := cast(u64) info.channel_count * cast(u64) info.sample_count
+                memory_size := total_sample_count * size_of(i16)
+                total := memory_size + size_of(AssetMemoryHeader)
+        
+                // TODO(viktor): support alignment of 16
+                asset.memory = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
+                sample_memory := &(cast([^]AssetMemoryHeader) asset.memory)[1]
+
+                sound := &asset.memory.as.sound
                 sound.channel_count = cast(u8) info.channel_count
                 
-                total_sample_count := info.sample_count * cast(u32) sound.channel_count
-                memory_size := total_sample_count * size_of(i16)
-                samples := push(&assets.arena, i16, total_sample_count, alignment = 8)
-                // samples := (cast([^]i16) aquire_asset_memory(assets, auto_cast memory_size))[:total_sample_count]
+                samples := (cast([^]i16) sample_memory)[:total_sample_count]
                 for &channel, index in sound.channels[:sound.channel_count] {
                     channel = samples[info.sample_count * auto_cast index:][:info.sample_count]
                 }
-                
+                                
                 work := push(&task.arena, LoadAssetWork)
                 work^ = {
                     task = task,
-                    final_state = .Loaded,
                     
                     handle = get_file_handle_for(assets, asset.file_index),
                     
                     position = asset.data_offset, 
-                    amount = cast(u64) memory_size,
+                    amount = memory_size,
                     destination = raw_data(samples),
                     
-                    asset_slot = slot,
+                    asset = asset,
                 }
+                
+                add_asset_header_to_list(assets, cast(u32) id, total)
                 
                 Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {
-                _, ok = atomic_compare_exchange(&slot.state, AssetState.Queued, AssetState.Unloaded)
+                _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
             }
         }
     }
 }
 
-load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
-    slot := &assets.slots[id]
+load_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) {
+    asset := &assets.assets[id]
     if is_valid_bitmap(id) {
-        if _, ok := atomic_compare_exchange(&slot.state, AssetState.Unloaded, AssetState.Queued); ok {
+        if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
-                asset := assets.assets[id]
-                info  := asset.bitmap
-
-                bitmap_size := info.dimension.x * info.dimension.y
-                memory_size := bitmap_size * size_of(ByteColor)
+                info  := asset.info.bitmap
                 
-                bitmap := &slot.bitmap
+                pixel_count := cast(u64) info.dimension.x * cast(u64) info.dimension.y
+                memory_size := pixel_count * size_of(ByteColor)
+                total := memory_size + size_of(AssetMemoryHeader)
+            
+                // TODO(viktor): support alignment of 16
+                asset.memory = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
+                bitmap_memory := &(cast([^]AssetMemoryHeader) asset.memory)[1]
+                
+                bitmap := &asset.memory.as.bitmap
                 bitmap^ = {
-                    memory = push(&assets.arena, ByteColor, bitmap_size, alignment = 16),
-                    // memory = (cast([^]ByteColor)aquire_asset_memory(assets, auto_cast memory_size))[:bitmap_size],
-                    width  = cast(i16) info.dimension.x, 
-                    height = cast(i16) info.dimension.y,
+                    memory = (cast([^]ByteColor)bitmap_memory)[:pixel_count],
+                    width  = cast(i32) info.dimension.x, 
+                    height = cast(i32) info.dimension.y,
                     
                     align_percentage = info.align_percentage,
                     width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
@@ -422,20 +516,25 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 work := push(&task.arena, LoadAssetWork)
                 work^ = {
                     task = task,
-                    final_state = .Loaded,
                     
                     handle = get_file_handle_for(assets, asset.file_index),
                     
                     position = asset.data_offset, 
-                    amount = cast(u64) memory_size,
+                    amount = memory_size,
                     destination = raw_data(bitmap.memory),
                     
-                    asset_slot = slot,
+                    asset = asset,
+                }
+                
+                if locked {
+                    work.final_flags += { .Locked }
+                } else {
+                    add_asset_header_to_list(assets, cast(u32) id, total)
                 }
 
                 Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {
-                _, ok = atomic_compare_exchange(&slot.state, AssetState.Queued, AssetState.Unloaded)
+                _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
                 assert(auto_cast ok)
             }
         }

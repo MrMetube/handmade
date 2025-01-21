@@ -49,7 +49,7 @@ main :: proc() {
             
             fmt.fprint(lock, "WAITING FOR PDB")
             pdb := fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number())
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, /* pedantic */)
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when false else ""))
         }
     }
 
@@ -63,11 +63,34 @@ main :: proc() {
 
     {// Platform
         copy_over(`.\game\common.odin`, `.\common.odin`, "package game", "package main")
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, windows, internal, optimizations, /* pedantic */)
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
     }
     
     os.exit(0)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 copy_over :: proc(src_path, dst_path, package_line_to_delete, package_line_replacement: string) {
     src, ok := os.read_entire_file(src_path)

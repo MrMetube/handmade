@@ -64,13 +64,13 @@ AssetData :: struct #packed {
     first_tag_index:         u32,
     one_past_last_tag_index: u32,
     
-    using as : struct #raw_union {
-        bitmap: Bitmap,
-        sound:  Sound,
+    info : struct #raw_union {
+        bitmap: BitmapInfo,
+        sound:  SoundInfo,
     }
 }
 
-Bitmap :: struct #packed {
+BitmapInfo :: struct #packed {
     dimension:        [2]u32,
     align_percentage: [2]f32,
 }
@@ -79,7 +79,7 @@ SoundChain :: enum u32 {
     None, Loop, Advance,
 }
 
-Sound :: struct #packed {
+SoundInfo :: struct #packed {
     sample_count:  u32,
     channel_count: u32,
     chain:         SoundChain,

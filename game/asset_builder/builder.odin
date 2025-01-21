@@ -13,7 +13,7 @@ HUUGE :: 4096
 
 HHA :: struct {
     tag_count:   u32,
-    type_count:   u32,
+    type_count:  u32,
     asset_count: u32,
     
     type:        ^AssetType,
@@ -26,13 +26,12 @@ data:    [HUUGE]AssetData
 
 SourceSound :: struct {
     channel_count: u32,
-    channels: [2][]i16, // 1 or 2 channels of samples
+    channels:      [2][]i16, // 1 or 2 channels of samples
 }
 
 SourceBitmap :: struct {
     memory:        [][4]u8,
     width, height: i32, 
-    pitch: i32,
 }
 
 SourceAssetType :: enum { Sound, Bitmap }
@@ -194,7 +193,7 @@ write_sounds :: proc() {
         
         this_index := add_sound_asset(&hha, "../assets/Light Ambience 1.wav", first_sample_index, sample_count)
         if first_sample_index + section < total_sample_count {
-            data[this_index].sound.chain = .Advance
+            data[this_index].info.sound.chain = .Advance
         }
     }
     
@@ -248,18 +247,19 @@ output_hha_file :: proc(file_name: string, hha: HHA) {
         if src.type == .Bitmap {
             bitmap := load_bmp(src.filename)
             
-            dst.bitmap.dimension = vec_cast(u32, bitmap.width, bitmap.height)
-            assert(bitmap.pitch == bitmap.width)
-            libc.fwrite(&bitmap.memory[0], cast(uint) (dst.bitmap.dimension.x * dst.bitmap.dimension.y) * size_of([4]u8), 1, out)
+            info := &dst.info.bitmap
+            info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
+            libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
         } else {
             assert(src.type == .Sound)
-            wav := load_wav(src.filename, src.first_sample_index, dst.sound.sample_count)
+            info := &dst.info.sound
+            wav := load_wav(src.filename, src.first_sample_index, info.sample_count)
             
-            dst.sound.sample_count  = auto_cast len(wav.channels[0])
-            dst.sound.channel_count = wav.channel_count
+            info.sample_count  = auto_cast len(wav.channels[0])
+            info.channel_count = wav.channel_count
             
             for channel in wav.channels[:wav.channel_count] {
-                libc.fwrite(&channel[0], cast(uint) dst.sound.sample_count * size_of(i16), 1, out)
+                libc.fwrite(&channel[0], cast(uint) info.sample_count * size_of(i16), 1, out)
             }
         }
     }
@@ -290,7 +290,7 @@ add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.
     src.type = .Bitmap
     src.filename = filename
     
-    data.bitmap.align_percentage = align_percentage
+    data.info.bitmap.align_percentage = align_percentage
     data.first_tag_index         = hha.tag_count
     data.one_past_last_tag_index = data.first_tag_index
     
@@ -311,8 +311,8 @@ add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0
     src.filename           = filename
     src.first_sample_index = first_sample_index
     
-    data.sound.chain             = .None
-    data.sound.sample_count      = sample_count
+    data.info.sound.chain             = .None
+    data.info.sound.sample_count      = sample_count
     data.first_tag_index         = hha.tag_count
     data.one_past_last_tag_index = data.first_tag_index
     
@@ -428,7 +428,6 @@ load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
             memory = pixels, 
             width  = header.width, 
             height = header.height, 
-            pitch  = header.width,
         }
 
         return result
