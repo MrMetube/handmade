@@ -126,9 +126,13 @@ PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
 PlatformAllocateMemory   :: #type proc(size: u64) -> rawpointer
 PlatformDeallocateMemory :: #type proc(memory:rawpointer)
 
-PlatformBeginProcessingAllFilesOfType :: #type proc(file_extension: string) -> ^PlatformFileGroup
+PlatformFileType   :: enum { AssetFile }
+PlatformFileHandle :: struct{ no_errors:  b32, _platform: rawpointer }
+PlatformFileGroup  :: struct{ file_count: u32, _platform: rawpointer }
+
+PlatformBeginProcessingAllFilesOfType :: #type proc(type: PlatformFileType) -> PlatformFileGroup
 PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: ^PlatformFileGroup)
-PlatformOpenNextFile                  :: #type proc(file_group: ^PlatformFileGroup) -> ^PlatformFileHandle
+PlatformOpenNextFile                  :: #type proc(file_group: ^PlatformFileGroup) -> PlatformFileHandle
 PlatformReadDataFromFile              :: #type proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer)
 PlatformMarkFileError                 :: #type proc(handle: ^PlatformFileHandle, error_message: string)
 

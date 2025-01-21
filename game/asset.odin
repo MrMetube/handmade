@@ -8,9 +8,6 @@ Assets :: struct {
     
     memory_sentinel: AssetMemoryBlock,
     
-    target_memory_footprint: u64,
-    total_memory_used: u64,
-    
     loaded_asset_sentinel: AssetMemoryHeader,
         
     files: []AssetFile,
@@ -71,7 +68,7 @@ AssetMemoryBlock :: struct {
 AssetVector :: [AssetTagId]f32
 
 AssetFile :: struct {
-    handle: ^PlatformFileHandle,
+    handle: PlatformFileHandle,
     // TODO(viktor): if  we ever do thread stacks, 
     // then asset_type_array doesnt actually need to be kept here probably.
     header: hha.Header,
@@ -88,8 +85,6 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     insert_block(&assets.memory_sentinel, push(arena, memory_size), memory_size)
     
     assets.tran_state = tran_state
-    assets.target_memory_footprint = memory_size
-    assets.total_memory_used = 0
     
     assets.loaded_asset_sentinel.next = &assets.loaded_asset_sentinel
     assets.loaded_asset_sentinel.prev = &assets.loaded_asset_sentinel
@@ -110,29 +105,29 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     tag_count:   u32 = 1
     asset_count: u32 = 1
     {
-        file_group := Platform.begin_processing_all_files_of_type("hha")
+        file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
         
         // TODO(viktor): which arena?
         assets.files = push(arena, AssetFile, file_group.file_count)
         for &file, index in assets.files {
-            file.handle = Platform.open_next_file(file_group)
+            file.handle = Platform.open_next_file(&file_group)
             file.tag_base = tag_count
             
             file.header = {}
-            read_data_from_file_into_struct(file.handle, 0, &file.header)
+            read_data_from_file_into_struct(&file.handle, 0, &file.header)
             
             file.asset_type_array = push(arena, hha.AssetType, file.header.asset_type_count)
-            read_data_from_file_into_slice(file.handle, file.header.asset_types, file.asset_type_array)
+            read_data_from_file_into_slice(&file.handle, file.header.asset_types, file.asset_type_array)
 
             if file.header.magic_value != hha.MagicValue { 
-                Platform.mark_file_error(file.handle, "HHA file has an invalid magic value")
+                Platform.mark_file_error(&file.handle, "HHA file has an invalid magic value")
             }
             
             if file.header.version > hha.Version {
-                Platform.mark_file_error(file.handle, "HHA file has a invalid or higher version than supported")
+                Platform.mark_file_error(&file.handle, "HHA file has a invalid or higher version than supported")
             }
             
-            if Platform_no_file_errors(file.handle) {
+            if Platform_no_file_errors(&file.handle) {
                 // NOTE(viktor): The first slot in every HHA is a null asset/ null tag
                 // so we don't count it as something we will need space for!
                 asset_count += (file.header.asset_count - 1)
@@ -142,19 +137,19 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
             }
         }
         
-        Platform.end_processing_all_files_of_type(file_group)
+        Platform.end_processing_all_files_of_type(&file_group)
     }
     
     // NOTE(viktor): Allocate all metadata space
-    assets.assets = push(arena, Asset,     asset_count)
-    assets.tags   = push(arena, AssetTag,  tag_count)
+    assets.assets = push(arena, Asset,    asset_count)
+    assets.tags   = push(arena, AssetTag, tag_count)
     
     // NOTE(viktor): Load tags
     for &file in assets.files {
         // NOTE(viktor): skip the null tag
         offset := file.header.tags + size_of(hha.AssetTag)
         file_tag_count := file.header.tag_count-1
-        read_data_from_file_into_slice(file.handle, offset, assets.tags[file.tag_base:][:file_tag_count])
+        read_data_from_file_into_slice(&file.handle, offset, assets.tags[file.tag_base:][:file_tag_count])
     }
     
     loaded_asset_count: u32 = 1
@@ -166,8 +161,8 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         dest_type := &assets.types[id]
         dest_type.first_asset_index = loaded_asset_count
 
-        for file, file_index in assets.files {
-            if Platform_no_file_errors(file.handle) {
+        for &file, file_index in assets.files {
+            if Platform_no_file_errors(&file.handle) {
                 for source_type, source_index in file.asset_type_array {
                     if source_type.id == id {
                         asset_count_for_type := source_type.one_past_last_index - source_type.first_asset_index
@@ -175,7 +170,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
                         defer end_temporary_memory(hha_memory)
                         
                         hha_asset_array := push(&tran_state.arena, hha.AssetData, asset_count_for_type)
-                        read_data_from_file_into_slice(file.handle, file.header.assets + cast(u64) source_type.first_asset_index * size_of(hha.AssetData), hha_asset_array)
+                        read_data_from_file_into_slice(&file.handle, file.header.assets + cast(u64) source_type.first_asset_index * size_of(hha.AssetData), hha_asset_array)
                                                     
                         assets_for_type := assets.assets[loaded_asset_count:][:asset_count_for_type]
                         for &asset, asset_index in assets_for_type {
@@ -344,13 +339,59 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 
 
 get_file_handle_for :: #force_inline proc(assets:^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
-    result = assets.files[file_index].handle
+    result = &assets.files[file_index].handle
     return result
 }
 
 
 prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id) }
 prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) { load_bitmap(assets, id, locked) }
+
+aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
+    block := find_block_for_size(assets, size)
+
+    for {
+        if block != nil && block.size >= size {
+            block.flags += { .Used }
+            result = &(cast([^]AssetMemoryBlock) block)[1]
+            
+            remaining_size := block.size - size
+            
+            BlockSplitThreshhold := kilobytes(4) // TODO(viktor): set this based on the smallest asset size
+            
+            if remaining_size >= BlockSplitThreshhold {
+                block.size -= remaining_size
+                insert_block(block, (cast([^]u8)result)[size:], remaining_size)
+            }
+            break
+        } else {
+            for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
+                asset := &assets.assets[it.asset_index]
+                if asset.state == .Loaded {
+                    assert(asset.state == .Loaded)
+                    assert(.Locked not_in asset.flags)
+                    
+                    remove_asset_header_from_list(it)
+                    
+                    block = &(cast([^]AssetMemoryBlock) asset.header)[-1]
+                    block.flags -= { .Used }
+                        
+                    if merge_if_possible(assets, block.prev, block) {
+                        block = block.prev
+                    }
+                    merge_if_possible(assets, block, block.next)
+
+                    asset.header = nil
+                    asset.state = .Unloaded
+                    
+                    break
+                }
+            }
+        }
+    }
+
+    return result
+}
 
 insert_block :: proc(previous: ^AssetMemoryBlock, memory: [^]u8, size: u64) -> (result: ^AssetMemoryBlock) {
     assert(size > size_of(AssetMemoryBlock))
@@ -370,6 +411,8 @@ insert_block :: proc(previous: ^AssetMemoryBlock, memory: [^]u8, size: u64) -> (
 
 find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemoryBlock) {
     // TODO(viktor): find best matched block
+    // TODO(viktor): this will probably need to be accelarated in the 
+    // future as the resident asset count grows.
     for it := assets.memory_sentinel.next; it != &assets.memory_sentinel; it = it.next {
         if .Used not_in it.flags {
             if it.size >= size {
@@ -382,63 +425,19 @@ find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemory
     return result
 }
 
-aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
-    when true {
-        attempts: i32 = 8
-        for attempts > 0 {
-            block := find_block_for_size(assets, size)
-
-            if block != nil {
-                block.flags += { .Used }
-                assert(block.size >= size)
-                result = &(cast([^]AssetMemoryBlock) block)[1]
+merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> (result: b32) {
+    if first != &assets.memory_sentinel && second != &assets.memory_sentinel {
+        if .Used not_in first.flags && .Used not_in second.flags {
+            expect_second_memory := &(cast([^]u8) first)[size_of(AssetMemoryBlock) + first.size] 
+            if cast(rawpointer) second == expect_second_memory {
+                second.next.prev  = second.prev
+                second.prev.next = second.next
                 
-                remaining_size := block.size - size
-                
-                BlockSplitThreshhold := kilobytes(4) // TODO(viktor): set this based on the smallest asset size
-                
-                if remaining_size >= BlockSplitThreshhold {
-                    block.size -= remaining_size
-                    insert_block(block, (cast([^]u8)result)[size:], remaining_size)
-                }
-                break
-            } else {
-                for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
-                    asset := &assets.assets[it.asset_index]
-                    if asset.state == .Loaded {
-                        block = evict_asset(assets, it, asset)
-                        break
-                    }
-                }
-                attempts -= 1
+                first.size += size_of(AssetMemoryBlock) + second.size
+                result = true
             }
         }
-        assert(attempts > 0, "Failed to free enough memory") 
-        
-    } else {
-        result = Platform.allocate_memory(size)
-        
-        if result != nil {
-            assets.total_memory_used += size
-        }
     }
-    
-    return result
-}
-
-release_asset_memory :: #force_inline proc(assets: ^Assets, memory: rawpointer, #any_int size: u64)-> (result: ^AssetMemoryBlock) {
-    when true {
-        result = &(cast([^]AssetMemoryBlock)memory)[-1]
-        result.flags -= { .Used }
-        // TODO(viktor): merge previous and or next
-    } else {
-        Platform.deallocate_memory(memory)
-    }
- 
-    if memory != nil {
-        assets.total_memory_used -= size
-    }
-    
     return result
 }
 
@@ -478,31 +477,6 @@ remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
     
     header.next = nil
     header.prev = nil
-}
-
-evict_assets_as_necessary :: proc(assets: ^Assets) {
-    for assets.total_memory_used > assets.target_memory_footprint {
-        last  := assets.loaded_asset_sentinel.prev
-        asset := &assets.assets[last.asset_index]
-        if last != &assets.loaded_asset_sentinel && asset.state == .Loaded {
-            evict_asset(assets, last, asset)
-        } else {
-            break
-        }
-    }
-}
-
-evict_asset :: proc(assets: ^Assets, header: ^AssetMemoryHeader, asset: ^Asset) -> (result: ^AssetMemoryBlock) {
-    assert(asset.state == .Loaded)
-    assert(.Locked not_in asset.flags)
-    
-    remove_asset_header_from_list(header)
-    
-    result = release_asset_memory(assets, asset.header, asset.header.total_size)
-    asset.header = nil
-    asset.state = .Unloaded
-    
-    return result
 }
 
 LoadAssetWork :: struct {

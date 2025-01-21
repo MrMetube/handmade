@@ -239,8 +239,6 @@ PairwiseCollsionRule :: struct {
 
 // NOTE(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
-PlatformFileHandle :: struct{ no_errors:  b32 }
-PlatformFileGroup  :: struct{ file_count: u32 }
 
 Platform: PlatformAPI
 
@@ -437,7 +435,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(16), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(32), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound

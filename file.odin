@@ -4,36 +4,45 @@ import "core:fmt"
 import "core:mem"
 import win "core:sys/windows"
 
-PlatformFileHandle :: struct {
-    // NOTE(viktor): must be kept in sync with game.PlatformFileHandle
-    no_errors: b32,
+FileHandle :: struct {
     handle:    win.HANDLE,
 }
 
-PlatformFileGroup :: struct {
-    // NOTE(viktor): must be kept in sync with game.PlatformFileGroup
-    file_count:  u32,
+FileGroup :: struct {
     find_handle: win.HANDLE,
     data:        win.WIN32_FIND_DATAW,
 }
 
-begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : proc(file_extension: string) -> (result: ^PlatformFileGroup) {
-    pattern := win.utf8_to_wstring(fmt.tprint("*.", file_extension, sep=""))
+FileExtensions :: [PlatformFileType] string {
+    .AssetFile = "hha",
+}
+
+begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : proc(type: PlatformFileType) -> (result: PlatformFileGroup) {
+    pattern: [32]win.wchar_t
+    pattern[0] = '*'
+    pattern[1] = '.'
+    
+    FileExtensions := FileExtensions
+    file_extension := FileExtensions[type]
+    assert(len(file_extension) <= 30)
+    for r, i in file_extension {
+        pattern[i+2] = cast(u16) r
+    }
     
     // TODO(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
-    err: mem.Allocator_Error
-    result, err = new(PlatformFileGroup)
+    group, err := new(FileGroup)
     if err == nil {
-        result.find_handle = win.FindFirstFileW(pattern, &result.data)
-        for result.find_handle != win.INVALID_HANDLE_VALUE {
+        group.find_handle = win.FindFirstFileW(&pattern[0], &group.data)
+        for group.find_handle != win.INVALID_HANDLE_VALUE {
             result.file_count += 1
-            if !win.FindNextFileW(result.find_handle, &result.data){
+            if !win.FindNextFileW(group.find_handle, &group.data){
                 break
             }
         }
-        win.FindClose(result.find_handle)
+        win.FindClose(group.find_handle)
         
-        result.find_handle = win.FindFirstFileW(pattern, &result.data)
+        group.find_handle = win.FindFirstFileW(&pattern[0], &group.data)
+        result._platform = group
     } else {
         unreachable()
     }
@@ -41,15 +50,18 @@ begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : pro
     return result
 }
 
-open_next_file : PlatformOpenNextFile : proc(file_group: ^PlatformFileGroup) -> (result: ^PlatformFileHandle) {
+open_next_file : PlatformOpenNextFile : proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle) {
+    file_group := cast(^FileGroup) group._platform
+    
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
         // TODO(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
-        err: mem.Allocator_Error
-        result, err = new(PlatformFileHandle)
+        file_handle, err := new(FileHandle)
+
         if err == nil {
-            filename := &file_group.data.cFileName[0]
-            result.handle = win.CreateFileW(filename, win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
-            result.no_errors = result.handle != win.INVALID_HANDLE_VALUE
+            file_handle.handle = win.CreateFileW(&file_group.data.cFileName[0], win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
+            
+            result.no_errors = file_handle.handle != win.INVALID_HANDLE_VALUE
+            result._platform = file_handle
         } else {
             unreachable()
         }
@@ -65,15 +77,16 @@ open_next_file : PlatformOpenNextFile : proc(file_group: ^PlatformFileGroup) -> 
 }
 
 read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer) {
+    file_handle := cast(^FileHandle) handle._platform
     if Platform_no_file_errors(handle) {
         overlap_info := win.OVERLAPPED{
-            Offset     = cast(u32) (position         & 0xFFFFFFFF),
-            OffsetHigh = cast(u32) ((position >> 32) & 0xFFFFFFFF),
+            Offset     = safe_truncate_u64(position),
+            OffsetHigh = safe_truncate_u64(position >> 32),
         }
         
         bytes_read: u32
         amount_32 := safe_truncate(amount)
-        if win.ReadFile(handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount {
+        if win.ReadFile(file_handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount {
             // NOTE(viktor): File read succeded
         } else {
             mark_file_error(handle, "Read file failed")
@@ -81,10 +94,12 @@ read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandl
     }
 }
 
-end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(file_group: ^PlatformFileGroup) {
+end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(group: ^PlatformFileGroup) {
+    file_group := cast(^FileGroup) group._platform
     if file_group != nil {
         win.FindClose(file_group.find_handle)
         free(file_group)
+        group._platform = nil
     }
 }
 
