@@ -35,10 +35,13 @@ AssetTypeId :: enum u32 {
     Blop, Drop, Woosh, Hit,
     
     Music,
+    
+    Font,
 }
 
 AssetTagId :: enum {
     FacingDirection, // NOTE(viktor): angle in radians
+    Codepoint, // NOTE(viktor): utf8 codepoint for font
 }
 
 // 

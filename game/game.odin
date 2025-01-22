@@ -239,8 +239,11 @@ PairwiseCollsionRule :: struct {
 
 // NOTE(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
-
 Platform: PlatformAPI
+
+when INTERNAL {
+    Debug: DEBUG_code
+}
 
 @(export) 
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
@@ -251,6 +254,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     when INTERNAL {
         // NOTE(viktor): used by performance counters
         DEBUG_GLOBAL_memory = memory
+        Debug = memory.debug
     }
         
     ground_buffer_size :: 256
@@ -442,7 +446,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         state.mixer.master_volume = 0.25
         
         // TODO(viktor): pick a real number here!
-        tran_state.ground_buffers = push(&tran_state.arena, GroundBuffer, 64)
+        tran_state.ground_buffers = push(&state.world_arena, GroundBuffer, 64)
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
@@ -773,20 +777,16 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             // 
             // Post-physics entity work
             // 
-            match_vector  := AssetVector {
-                .FacingDirection = entity.facing_direction,
-            }
-            weight_vector := AssetVector {
-                .FacingDirection = 1,
-            }
+            facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
+            facing_weights := #partial AssetVector{.FacingDirection = 1 }
             
-            head_id  := best_match_bitmap_from(tran_state.assets, .Head, match_vector, weight_vector)
-            body_id  := best_match_bitmap_from(tran_state.assets, .Body, match_vector, weight_vector)
-            cape_id  := best_match_bitmap_from(tran_state.assets, .Cape, match_vector, weight_vector)
-            sword_id := best_match_bitmap_from(tran_state.assets, .Sword, match_vector, weight_vector)
+            head_id  := best_match_bitmap_from(tran_state.assets, .Head, facing_match, facing_weights)
             switch entity.type {
             case .Nil: // NOTE(viktor): nothing
             case .Hero:
+                cape_id  := best_match_bitmap_from(tran_state.assets, .Cape, facing_match, facing_weights)
+                sword_id := best_match_bitmap_from(tran_state.assets, .Sword, facing_match, facing_weights)
+                body_id  := best_match_bitmap_from(tran_state.assets, .Body, facing_match, facing_weights)
                 push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, cape_id,  1.6)
                 push_bitmap(render_group, body_id,  1.6)
@@ -806,7 +806,14 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                         particle.ddp = {0, -9.8, 0}
                         particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
                         particle.dcolor = {0,0,0,-0.2}
-                        particle.bitmap_id = random_bitmap_from(tran_state.assets, AssetTypeId.Head, &state.effects_entropy)
+                        
+                        nothings := "NOTHINGS"
+                        
+                        r := random_choice_data(&state.effects_entropy, transmute([]u8) nothings)^
+                        font_match   := #partial AssetVector{ .Codepoint = cast(f32) r }
+                        font_weights := #partial AssetVector{ .Codepoint = 1 }
+                        
+                        particle.bitmap_id = best_match_bitmap_from(tran_state.assets, AssetTypeId.Font, font_match, font_weights)
                     }
                     
                     for &row in state.cells {
@@ -880,7 +887,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                             particle.dp.x *= coefficient_of_friction
                         }
                         // NOTE(viktor): render the particle
-                        push_bitmap(render_group, particle.bitmap_id, 1, particle.p, color)
+                        push_bitmap(render_group, particle.bitmap_id, 0.1, particle.p, color)
                     }
                                         
                 }
@@ -902,7 +909,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, head_id, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
             case .Monster:
-                monster_id := best_match_bitmap_from(tran_state.assets, .Monster, match_vector, weight_vector)
+                monster_id := best_match_bitmap_from(tran_state.assets, .Monster, facing_match, facing_weights)
 
                 push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, monster_id, 1.5)
@@ -1122,6 +1129,7 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true)
         memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
         height = dim.y,
+        width_over_height = safe_ratio_1(cast(f32) dim.x,  cast(f32) dim.y)
     }
     
     return result

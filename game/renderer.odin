@@ -172,6 +172,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32
     }
 }
 push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
+    assert(bitmap.width_over_height != 0)
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size

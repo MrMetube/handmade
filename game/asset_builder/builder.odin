@@ -3,11 +3,14 @@ package hha
 
 import "base:intrinsics"
 
+import "core:c/libc"
 import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:strings"
-import "core:c/libc"
+import win "core:sys/windows"
+
+import tt "vendor:stb/truetype"
 
 HUUGE :: 4096
 
@@ -34,12 +37,15 @@ SourceBitmap :: struct {
     width, height: i32, 
 }
 
-SourceAssetType :: enum { Sound, Bitmap }
+SourceAssetType :: enum { Sound, Bitmap, Font }
 
 SourceAsset :: struct {
-    type: SourceAssetType,
-    filename: string,
-    first_sample_index: u32,
+    type:               SourceAssetType,
+    filename:           string,
+    using extra: struct #raw_union {
+        first_sample_index: u32,
+        codepoint:          rune,
+    }
 }
 
 main :: proc() {
@@ -147,6 +153,13 @@ write_non_hero :: proc () {
     add_tag(&hha, .FacingDirection, 0)
     end_asset_type(&hha)
     
+    begin_asset_type(&hha, .Font)
+    for c in 'A'..='Z' {
+        add_character_asset(&hha, `C:\Windows\Fonts\arial.ttf`, c)
+        add_tag(&hha,.Codepoint, cast(f32) c)
+    }
+    end_asset_type(&hha)
+    
     output_hha_file(`.\non_hero.hha`, hha)
 }
 
@@ -205,10 +218,11 @@ write_sounds :: proc() {
     
     output_hha_file(`.\sounds.hha`, hha)
 }
+
 output_hha_file :: proc(file_name: string, hha: HHA) {
     out := libc.fopen(strings.clone_to_cstring(file_name), "wb")
     if out == nil {
-        fmt.eprint("could not open asset file:", file_name)
+        fmt.eprintln("could not open asset file:", file_name)
         return
     }
     defer libc.fclose(out)
@@ -221,7 +235,7 @@ output_hha_file :: proc(file_name: string, hha: HHA) {
         asset_type_count = hha.type_count,
         asset_count      = hha.asset_count,
     }
-        
+    
     tags_size        := header.tag_count        * size_of(AssetTag)
     asset_types_size := header.asset_type_count * size_of(AssetType)
     assets_size      := header.asset_count      * size_of(AssetData)
@@ -244,14 +258,20 @@ output_hha_file :: proc(file_name: string, hha: HHA) {
         dst.data_offset = auto_cast libc.ftell(out)
         
         defer free_all(context.allocator)
-        if src.type == .Bitmap {
+        switch src.type {
+        case .Bitmap:
             bitmap := load_bmp(src.filename)
             
             info := &dst.info.bitmap
             info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
             libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
-        } else {
-            assert(src.type == .Sound)
+        case .Font:
+            bitmap := load_glyph_bitmap(src.filename[:], src.codepoint)
+            
+            info := &dst.info.bitmap
+            info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
+            libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
+        case .Sound:
             info := &dst.info.sound
             wav := load_wav(src.filename, src.first_sample_index, info.sample_count)
             
@@ -277,6 +297,27 @@ begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId) {
     hha.type.id = id
     hha.type.first_asset_index   = auto_cast hha.asset_count
     hha.type.one_past_last_index = hha.type.first_asset_index
+}
+
+add_character_asset :: proc(hha: ^HHA, path_to_font: string, codepoint: rune) -> (result: u32) {
+    assert(hha.type != nil)
+    
+    result = hha.type.one_past_last_index
+    hha.type.one_past_last_index += 1
+    src := &sources[result]
+    data := &data[result]
+    
+    src.type = .Font
+    src.filename = path_to_font
+    src.codepoint = codepoint
+    
+    data.info.bitmap.align_percentage = {0.5, 0.5}
+    data.first_tag_index         = hha.tag_count
+    data.one_past_last_tag_index = data.first_tag_index
+    
+    hha.asset_index = result
+    
+    return result
 }
 
 add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.5, 0.5}) -> (result: u32) {
@@ -343,6 +384,36 @@ end_asset_type :: proc(hha: ^HHA) {
     hha.asset_index = 0
 }
 
+load_glyph_bitmap :: proc(path_to_font: string, codepoint: rune) -> (result: SourceBitmap) {
+    font: tt.fontinfo
+    font_file, ok := os.read_entire_file(path_to_font)
+    assert(ok)
+    defer free(raw_data(font_file))
+    
+    ok = auto_cast tt.InitFont(&font, raw_data(font_file), 0)
+    assert(ok)
+    
+    // TODO(viktor): 
+    pixels :f32= 64
+    w, h, xoff, yoff: i32
+    mono_bitmap := tt.GetCodepointBitmap(&font, 0, tt.ScaleForPixelHeight(&font, pixels), codepoint, &w, &h, &xoff, &yoff)
+    defer tt.FreeBitmap(mono_bitmap, nil)
+    
+    result.memory = make([][4]u8, w*h)
+    result.width = w
+    result.height = h
+    
+    for y in 0..<h {
+        for x in 0..<w {
+            dest := &result.memory[y * w + x]
+            src  := mono_bitmap[(h-y) * w + x]
+            
+            dest^ = src
+        }
+    }
+    
+    return result
+}
 
 load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
     contents, _ := os.read_entire_file(file_name)
@@ -437,9 +508,7 @@ load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
 }
 
 load_wav :: proc (file_name: string, section_first_sample_index, section_sample_count: u32) -> (result: SourceSound) {
-    contents_unpadded, _ := os.read_entire_file(file_name)
-    contents := make_slice([]u8, len(contents_unpadded) + 4096 * 1024)
-    copy_slice(contents, contents_unpadded)
+    contents, _ := os.read_entire_file(file_name)
     
     WAVE_Header :: struct #packed {
         riff:    u32,
