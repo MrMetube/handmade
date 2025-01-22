@@ -191,12 +191,16 @@ megabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { ret
 gigabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return megabytes(value) * 1024 }
 terabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return gigabytes(value) * 1024 }
 
+// TODO(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
 atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
     ok_: bool
     was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
     ok = cast(b32) ok_
     return was, ok
 }
+
+volatile_load :: intrinsics.volatile_load
+volatile_store :: intrinsics.volatile_store
 
 @(enable_target_feature="sse")
 complete_previous_writes_before_future_writes :: proc "contextless" () {

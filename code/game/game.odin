@@ -9,6 +9,10 @@ INTERNAL :: #config(INTERNAL, false)
     TODO(viktor):
     ARCHITECTURE EXPLORATION
 
+    - :PointerArithmetic
+        - change the types to a less c-mindset
+        - or if necessary make utilities to these operations
+    
     - Asset streaming
         - Memory management
 
@@ -257,7 +261,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         Debug = memory.debug
     }
         
-    ground_buffer_size :: 256
+    ground_buffer_size :: 512
     
     // ---------------------- ---------------------- ----------------------
     // ---------------------- Permanent Initialization
@@ -306,7 +310,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             
             result = map_into_worldspace(world, result, offset + additional_offset)
             
-            assert(auto_cast is_canonical(world, result.offset))
+            assert(is_canonical(world, result.offset))
         
             return result
         }
@@ -439,14 +443,14 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(8), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(48), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         state.mixer.master_volume = 0.25
         
         // TODO(viktor): pick a real number here!
-        tran_state.ground_buffers = push(&state.world_arena, GroundBuffer, 64)
+        tran_state.ground_buffers = push(&state.world_arena, GroundBuffer, 256)
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
@@ -577,7 +581,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4))
+    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4), false)
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
@@ -590,7 +594,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             
             if abs(offset.z) == 0 {
                 bitmap := ground_buffer.bitmap
-                bitmap.align_percentage = 0.5
+                bitmap.align_percentage = 0
                 
                 ground_chunk_size := world.chunk_dim_meters.x
                 push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
@@ -609,7 +613,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    when false {
+    {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -1000,6 +1004,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     
     tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer)
     
+    finish_render_group(render_group)
+    
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.       
@@ -1137,63 +1143,73 @@ make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true)
 
 FillGroundChunkWork :: struct {
     task: ^TaskWithMemory,
-    group: ^RenderGroup,
-    buffer: Bitmap,
+    
+    tran_state: ^TransientState, 
+    state: ^State, 
+    ground_buffer: ^GroundBuffer, 
+    p: WorldPosition,
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    data := cast(^FillGroundChunkWork) data
+    work := cast(^FillGroundChunkWork) data
 
-    render_group_to_output(data.group, data.buffer)
     
-    end_task_with_memory(data.task)
+    bitmap := &work.ground_buffer.bitmap
+    bitmap.align_percentage = 0.5
+    bitmap.width_over_height = 1
+    
+    buffer_size := work.state.world.chunk_dim_meters.xy
+    assert(buffer_size.x == buffer_size.y)
+    half_dim := buffer_size * 0.5
+
+    render_group := make_render_group(&work.task.arena, work.tran_state.assets, 0, true)
+    orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
+
+    clear(render_group, Red)
+        
+    chunk_z := work.p.chunk.z
+    for offset_y in i32(-1) ..= 1 {
+        for offset_x in i32(-1) ..= 1 {
+            chunk_x := work.p.chunk.x + offset_x
+            chunk_y := work.p.chunk.y + offset_y
+            
+            center := vec_cast(f32, offset_x, offset_y) * buffer_size
+            // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
+            series := seed_random_series(cast(u32) (463 * chunk_x + 311 * chunk_y + 185 * chunk_z) + 99)
+            
+            for _ in 0..<120 {
+                stamp := random_bitmap_from(work.tran_state.assets, .Grass, &series)
+                p := center + random_bilateral_2(&series, f32) * half_dim 
+                push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
+            }
+        }
+    }
+    
+    assert(all_assets_valid(render_group))
+    
+    render_group_to_output(render_group, bitmap^)
+    
+    finish_render_group(render_group)
+    
+    end_task_with_memory(work.task)
 }
 
 fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buffer: ^GroundBuffer, p: WorldPosition){
     if task := begin_task_with_memory(tran_state); task != nil {
         work := push(&task.arena, FillGroundChunkWork)
-        
-        bitmap := &ground_buffer.bitmap
-        bitmap.align_percentage = 0.5
-        bitmap.width_over_height = 1
-        
-        buffer_size := state.world.chunk_dim_meters.xy
-        assert(buffer_size.x == buffer_size.y)
-        half_dim := buffer_size * 0.5
-
-        render_group := make_render_group(&task.arena, tran_state.assets, 0)
-        orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
-
-        clear(render_group, Red)
             
-        chunk_z := p.chunk.z
-        for offset_y in i32(-1) ..= 1 {
-            for offset_x in i32(-1) ..= 1 {
-                chunk_x := p.chunk.x + offset_x
-                chunk_y := p.chunk.y + offset_y
-                
-                center := vec_cast(f32, offset_x, offset_y) * buffer_size
-                // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
-                series := seed_random_series(cast(u32) (133 * chunk_x + 593 * chunk_y + 329 * chunk_z))
-                
-                for _ in 0..<4 {
-                    stamp := random_bitmap_from(tran_state.assets, .Grass, &series)
-                    p := center + random_bilateral_2(&series, f32) * half_dim 
-                    push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
-                }
-            }
+        work^ = {
+            task = task,
+    
+            tran_state = tran_state, 
+            state = state,
+            ground_buffer = ground_buffer, 
+            p = p
         }
         
-        if all_assets_valid(render_group) {
-            work.buffer = bitmap^
-            work.group  = render_group
-            work.task   = task
-            ground_buffer.p = p
-            
-            Platform.enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
-        } else {
-            end_task_with_memory(task)
-        }
+        ground_buffer.p = p
+        
+        Platform.enqueue_work(tran_state.low_priority_queue, do_fill_ground_chunk_work, work)
     }
 }
 

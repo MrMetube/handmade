@@ -1,10 +1,16 @@
 package game
 
+import "base:intrinsics"
 import hha "asset_builder"
 
 Assets :: struct {
     tran_state: ^TransientState,
     
+    next_generation:            AssetGenerationId,
+    in_flight_generation_count: u32,
+    in_flight_generations:      [32]AssetGenerationId,    
+    
+    memory_operation_lock: u32,
     memory_sentinel: AssetMemoryBlock,
     
     loaded_asset_sentinel: AssetMemoryHeader,
@@ -39,13 +45,15 @@ AssetMemoryHeader :: struct {
     next, prev:  ^AssetMemoryHeader,
     asset_index: u32,
     
-    generation_id: u32,
+    generation_id: AssetGenerationId,
     total_size:    u64,
     as: struct #raw_union {
         bitmap: Bitmap,
         sound:  Sound,
     },
 }
+
+AssetGenerationId :: distinct u32
 
 AssetType :: struct {
     first_asset_index:   u32,
@@ -74,8 +82,8 @@ AssetFile :: struct {
 }
 
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
-    assets = push(arena, Assets)
-    assets.memory_sentinel.size = 0
+    assets = push(arena, Assets, clear_to_zero = true)
+    
     assets.memory_sentinel.next = &assets.memory_sentinel 
     assets.memory_sentinel.prev = &assets.memory_sentinel 
     
@@ -200,44 +208,57 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     return assets
 }
 
-get_asset :: #force_inline proc(assets: ^Assets, id: u32) -> (result: ^AssetMemoryHeader) {
+insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
+    sentinel := &assets.loaded_asset_sentinel
+    
+    header.prev = sentinel
+    header.next = sentinel.next
+    
+    header.next.prev = header
+    header.prev.next = header
+}
+
+remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
+    header.prev.next = header.next
+    header.next.prev = header.prev
+    
+    header.next = nil
+    header.prev = nil
+}
+
+get_asset :: #force_inline proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) -> (result: ^AssetMemoryHeader) {
     if is_valid_asset_id(id) {
         asset := &assets.assets[id]
         
-        for {
-            if asset.state == .Loaded {
-                if was, ok := atomic_compare_exchange(&asset.state, AssetState.Loaded, AssetState.Operating); ok {
-                    result = asset.header
-                    
-                    mark_asset_as_recently_used(assets, asset)
-                    when false {
-                        if asset.header.generation_id < generation_id {
-                            asset.header.generation_id = generation_id
-                        }
-                    }
-                    
-                    complete_previous_writes_before_future_writes()
-                    asset.state = was
-                    break
-                }
-            } else if asset.state != .Operating {
-                break
+        begin_asset_lock(assets)
+        defer end_asset_lock(assets)
+        
+        if asset.state == .Loaded {
+            result = asset.header
+            
+            remove_asset_header_from_list(result)
+            insert_asset_header_at_front(assets, result)
+            
+            if asset.header.generation_id < generation_id {
+                asset.header.generation_id = generation_id
             }
+            
+            complete_previous_writes_before_future_writes()
         }
     }
     return result
 }
 
-get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
-    header := get_asset(assets, cast(u32) id)
+get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
+    header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.as.bitmap
     }
     return result
 }
 
-get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
-    header := get_asset(assets, cast(u32) id)
+get_sound :: #force_inline proc(assets: ^Assets, id: SoundId, generation_id: AssetGenerationId) -> (result: ^Sound) {
+    header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.as.sound
     }
@@ -358,22 +379,79 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 }
 
 
-get_file_handle_for :: #force_inline proc(assets:^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
+get_file_handle_for :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
     result = &assets.files[file_index].handle
     return result
 }
 
 
-prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets, id) }
-prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id) }
+prefetch_sound  :: #force_inline proc(assets: ^Assets, id: SoundId)  { load_sound(assets, id)  }
+prefetch_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
 
-aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
+begin_generation :: #force_inline proc(assets: ^Assets) -> (result: AssetGenerationId) {
+    begin_asset_lock(assets)
+    
+    result = assets.next_generation
+    assets.next_generation += 1
+    assets.in_flight_generations[assets.in_flight_generation_count] = result
+    assets.in_flight_generation_count += 1
+    
+    end_asset_lock(assets)
+    
+    return result
+}
+
+end_generation :: #force_inline proc(assets: ^Assets, generation: AssetGenerationId) {
+    for &in_flight, index in assets.in_flight_generations[:assets.in_flight_generation_count] {
+        if in_flight == generation {
+            assets.in_flight_generation_count -= 1
+            if assets.in_flight_generation_count > 0 {
+                in_flight = assets.in_flight_generations[assets.in_flight_generation_count]
+            }
+        }
+    }
+}
+
+
+generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (result: b32) {
+    result = true
+    
+    for in_flight in assets.in_flight_generations[:assets.in_flight_generation_count] {
+        if in_flight == check {
+            result = false
+            break
+        }
+    }
+    
+    return result
+}
+
+begin_asset_lock :: proc(assets: ^Assets) {
+    for {
+        if _, ok := atomic_compare_exchange(&assets.memory_operation_lock, 0, 1); ok {
+            break
+        }
+    }
+    
+}
+end_asset_lock :: proc(assets: ^Assets) {
+    complete_previous_writes_before_future_writes()
+    assets.memory_operation_lock = 0
+}
+
+acquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64, asset_index: u32) -> (result: ^AssetMemoryHeader) {
     block := find_block_for_size(assets, size)
+    
+    begin_asset_lock(assets)
+    defer end_asset_lock(assets)
 
     for {
         if block != nil && block.size >= size {
             block.flags += { .Used }
-            result = &(cast([^]AssetMemoryBlock) block)[1]
+            // :PointerArithmetic
+            blocks := cast([^]AssetMemoryBlock) block
+            next_block := &blocks[1]
+            result = cast(^AssetMemoryHeader) next_block
             
             remaining_size := block.size - size
             
@@ -381,15 +459,17 @@ aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -
             
             if remaining_size >= BlockSplitThreshhold {
                 block.size -= remaining_size
+                // :PointerArithmetic
                 insert_block(block, (cast([^]u8)result)[size:], remaining_size)
             }
             break
         } else {
             for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
                 asset := &assets.assets[it.asset_index]
-                if asset.state == .Loaded {
+                if asset.state == .Loaded && generation_has_completed(assets, asset.header.generation_id) {
                     remove_asset_header_from_list(it)
                     
+                    // :PointerArithmetic
                     block = &(cast([^]AssetMemoryBlock) asset.header)[-1]
                     block.flags -= { .Used }
                         
@@ -405,6 +485,18 @@ aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -
                 }
             }
         }
+    }
+        
+    if result != nil {
+        asset := &assets.assets[asset_index]
+        asset.header = result
+        assert(asset.state != .Loaded)
+        
+        header := asset.header
+        header.total_size  = size
+        header.asset_index = asset_index
+        
+        insert_asset_header_at_front(assets, header)
     }
 
     return result
@@ -445,6 +537,7 @@ find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemory
 merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> (result: b32) {
     if first != &assets.memory_sentinel && second != &assets.memory_sentinel {
         if .Used not_in first.flags && .Used not_in second.flags {
+            // :PointerArithmetic
             expect_second_memory := &(cast([^]u8) first)[size_of(AssetMemoryBlock) + first.size] 
             if cast(rawpointer) second == expect_second_memory {
                 second.next.prev  = second.prev
@@ -458,63 +551,30 @@ merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> 
     return result
 }
 
-insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
-    sentinel := &assets.loaded_asset_sentinel
-    
-    header.prev = sentinel
-    header.next = sentinel.next
-    
-    header.next.prev = header
-    header.prev.next = header
-}
-
-add_asset_header_to_list :: proc(assets: ^Assets, asset_index: u32, total_size: u64) {
-    asset := &assets.assets[asset_index]
-    assert(asset.state != .Loaded)
-    
-    header := asset.header
-    header.total_size  = total_size
-    header.asset_index = asset_index
-    
-    insert_asset_header_at_front(assets, header)
-}
-
-mark_asset_as_recently_used :: proc(assets: ^Assets, asset: ^Asset) {
-    header := asset.header
-    
-    remove_asset_header_from_list(header)
-    insert_asset_header_at_front(assets, header)
-}
-
-remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
-    header.prev.next = header.next
-    header.next.prev = header.prev
-    
-    header.next = nil
-    header.prev = nil
-}
-
 LoadAssetWork :: struct {
     task:        ^TaskWithMemory,
     asset:       ^Asset,
     
-    handle: ^PlatformFileHandle,
+    handle:           ^PlatformFileHandle,
     position, amount: u64,
-    destination: rawpointer,
+    destination:      rawpointer,
 }
 
-do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    work := cast(^LoadAssetWork) data
-    
+load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
     Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
     
     complete_previous_writes_before_future_writes()
     
     work.asset.state = .Loaded
     if !Platform_no_file_errors(work.handle) {
-        // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
         zero(work.destination, work.amount)
     }
+}
+
+do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    work := cast(^LoadAssetWork) data
+    
+    load_asset_work_immediatly(work)
     
     end_task_with_memory(work.task)
 }
@@ -531,8 +591,12 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                 total := memory_size + size_of(AssetMemoryHeader)
         
                 // TODO(viktor): support alignment of 16
-                asset.header = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
-                sample_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
+                asset.header = acquire_asset_memory(assets, total, cast(u32) id)
+                
+                sample_memory := pointer_step(asset.header, 1)
+                // :PointerArithmetic
+                // sample_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
+                assert(sample_memory == &(cast([^]AssetMemoryHeader) asset.header)[1])
 
                 sound := &asset.header.as.sound
                 sound.channel_count = cast(u8) info.channel_count
@@ -555,22 +619,25 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                     asset = asset,
                 }
                 
-                add_asset_header_to_list(assets, cast(u32) id, total)
-                
                 Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {
                 _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
-                assert(auto_cast ok)
+                assert(ok)
             }
         }
     }
 }
 
-load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
+load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) {
     asset := &assets.assets[id]
     if is_valid_bitmap(id) {
         if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
-            if task := begin_task_with_memory(assets.tran_state); task != nil {
+            task: ^TaskWithMemory
+            if !immediate {
+                task = begin_task_with_memory(assets.tran_state) 
+            }
+            
+            if immediate || task != nil {
                 info  := asset.info.bitmap
                 
                 pixel_count := cast(u64) info.dimension.x * cast(u64) info.dimension.y
@@ -578,7 +645,8 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                 total := memory_size + size_of(AssetMemoryHeader)
             
                 // TODO(viktor): support alignment of 16
-                asset.header = cast(^AssetMemoryHeader) aquire_asset_memory(assets, total)
+                asset.header = acquire_asset_memory(assets, total, cast(u32) id)
+                // :PointerArithmetic
                 bitmap_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
                 
                 bitmap := &asset.header.as.bitmap
@@ -591,8 +659,7 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                     width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
                 }
                 
-                work := push(&task.arena, LoadAssetWork)
-                work^ = {
+                work := LoadAssetWork {
                     task = task,
                     
                     handle = get_file_handle_for(assets, asset.file_index),
@@ -604,13 +671,19 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
                     asset = asset,
                 }
                 
-                add_asset_header_to_list(assets, cast(u32) id, total)
-
-                Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
+                if !immediate {
+                    task_work := push(&task.arena, LoadAssetWork)
+                    task_work^ = work
+                    Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
+                } else {
+                    load_asset_work_immediatly(&work)
+                }
             } else {
                 _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
-                assert(auto_cast ok)
+                assert(ok)
             }
+        } else {
+            for volatile_load(&asset.state) == .Queued {}
         }
     }
 }

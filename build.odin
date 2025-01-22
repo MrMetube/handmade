@@ -1,4 +1,4 @@
-package main
+package build
 
 import "core:os"
 import win "core:sys/windows"
@@ -7,36 +7,38 @@ import "core:log"
 import "core:strings"
 import "base:runtime"
 
-when #config(BUILD, false) {
-
 flags    :: ` -vet-cast -vet-shadowing -error-pos-style:unix `
 windows  :: " -subsystem:windows "
 console  :: " -subsystem:console "
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
-
-optimizations :: " -o:none " when true else " -o:speed "
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
 
+optimizations :: " -o:none " when true else " -o:speed "
+
 src_path :: `.\build.odin`
+exe_path :: `.\build\build.exe`
+
+build_dir :: `.\build`
 
 main :: proc() {
-    // TODO(viktor): maybe automatically copypasta the copypasta files?
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
     context.logger.lowest_level = .Info
     
-    exe_path := os.args[0]
+    // TODO(viktor): clean up the initial build turd (ie. .\handmade.exe)
     rebuild_yourself(exe_path)
     
-    if !os.exists(`.\build`) do os.make_directory(`.\build`)
+    if !os.exists(build_dir) do os.make_directory(build_dir)
     if !os.exists(`.\data`)  do os.make_directory(`.\data`) 
+    
+    os.set_current_directory(build_dir)
     
     debug_build := "debug.exe" 
 
     { // Game
-        out := `.\build\game.dll`
+        out := `.\game.dll`
         {
-            delete_all_like(`.\build\game*.pdb`)
+            delete_all_like(`.\game*.pdb`)
             
             // NOTE(viktor): the platform checks for this lock file when hot-reloading
             lock_path := `.\lock.tmp` 
@@ -48,22 +50,22 @@ main :: proc() {
             }
             
             fmt.fprint(lock, "WAITING FOR PDB")
-            pdb := fmt.tprintf(` -pdb-name:.\build\game-%d.pdb`, random_number())
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when false else ""))
+            pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when false else ""))
         }
     }
 
     { // Asset file Builder
-        out := `.\build\asset_builder.exe`
-        src := `.\game\asset_builder`
+        out := `.\asset_builder.exe`
+        src := `..\code\game\asset_builder`
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build `, src, ` -out:`, out, flags, console, debug, pedantic)
     }
     
     if is_running(debug_build) do os.exit(0)
 
     {// Platform
-        copy_over(`.\game\common.odin`, `.\common.odin`, "package game", "package main")
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build . -out:.\build\`, debug_build, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
+        copy_over(`..\code\game\common.odin`, `..\code\common.odin`, "package game", "package main")
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_build, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
     }
     
     os.exit(0)
@@ -135,7 +137,7 @@ rebuild_yourself :: proc(exe_path: string) {
         
         delete_all_like(temp_path)
         
-        run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file -define:BUILD=true ", pedantic)
+        run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file ", pedantic)
         
         old_path := fmt.tprintf("%s-old", exe_path)
         if err := os.rename(exe_path,  old_path); err != nil do fmt.println(os.error_string(err))
@@ -149,12 +151,12 @@ rebuild_yourself :: proc(exe_path: string) {
 
 get_last_write_time_ :: proc(filename: string) -> (last_write_time: u64) {
     FILE_ATTRIBUTE_DATA :: struct {
-        dwFileAttributes : win.DWORD,
-        ftCreationTime   : win.FILETIME,
-        ftLastAccessTime : win.FILETIME,
-        ftLastWriteTime  : win.FILETIME,
-        nFileSizeHigh    : win.DWORD,
-        nFileSizeLow     : win.DWORD,
+        dwFileAttributes:  win.DWORD,
+        ftCreationTime:    win.FILETIME,
+        ftLastAccessTime:  win.FILETIME,
+        ftLastWriteTime:   win.FILETIME,
+        nFileSizeHigh:     win.DWORD,
+        nFileSizeLow:      win.DWORD,
     }
 
     file_information : FILE_ATTRIBUTE_DATA
@@ -176,7 +178,7 @@ delete_all_like :: proc(pattern: string) {
     for {
         file_name, err := win.utf16_to_utf8(find_data.cFileName[:])
         assert(err == nil)
-        file_path := fmt.tprintf(".\\build\\%v", file_name)
+        file_path := fmt.tprintf(`.\%v`, file_name)
         
         if err := os.remove(file_path); err != nil {
             log.errorf("Failed to delete file: %s because of error: %s", file_path, os.error_string(os.get_last_error()))
@@ -220,8 +222,8 @@ run_command_or_exit :: proc(program: string, args: ..string) {
 run_command :: proc(program: string, args: ..string) -> (success: b32) {
     startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }
     process_info := win.PROCESS_INFORMATION{}
-     
-    os.set_current_directory("D:\\handmade")
+    
+    
     working_directory := win.utf8_to_wstring(os.get_current_directory())
     
     joined_args := strings.join(args, "")
@@ -236,7 +238,7 @@ run_command :: proc(program: string, args: ..string) -> (success: b32) {
         win.utf8_to_wstring(program), 
         win.utf8_to_wstring(joined_args), 
         nil, nil, 
-        win.FALSE, 0, 
+        win.TRUE, 0, 
         nil, working_directory, 
         &startup_info, &process_info,
     ) {
@@ -282,5 +284,3 @@ copypasta_header :: `
     -------------------------------------------------------------
     
 */`
-
-} // end when #config(BUILD)

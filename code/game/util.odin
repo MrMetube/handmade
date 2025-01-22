@@ -1,6 +1,7 @@
 package game 
 
 import "base:intrinsics"
+import "base:runtime"
 import "core:math"
 import "core:simd"
 
@@ -8,6 +9,30 @@ f32x4 :: #simd[4]f32
 u32x4 :: #simd[4]u32
 i32x4 :: #simd[4]i32
 i16x8 :: #simd[8]i16
+
+@(disabled=ODIN_DISABLE_ASSERT)
+assert :: #force_inline proc(condition: b32, message := #caller_expression(condition), loc := #caller_location) {
+    if !condition {
+        // NOTE(viktor): if needed enclose the failure code in the cold proc to improve branch prediction
+        // @(cold)
+        // cold :: proc(message: string, loc: runtime.Source_Code_Location) {
+            runtime.print_caller_location(loc)
+            runtime.print_string(" Assertion failed")
+            if len(message) > 0 {
+                runtime.print_string(": ")
+                runtime.print_string(message)
+            }
+            runtime.print_byte('\n')
+            
+            when ODIN_DEBUG {
+                runtime.debug_trap()
+            } else {
+                runtime.trap()
+            }
+        // }
+        // cold(message, loc)
+    }
+}
 
 vec_cast :: proc { 
     cast_vec_2, cast_vec_3, cast_vec_4,
@@ -91,4 +116,10 @@ rotate_right :: #force_inline proc(value: u32, amount: i32) -> u32 {
     // TODO: can odin insert rotate intrinsics
     masked := amount & 31
     return value >> u32(-masked) | value << u32(32 + masked)
+}
+
+pointer_step :: proc(t: ^$T, #any_int step: i64) ->(result: ^T) {
+    ts := cast([^]T) t
+    result = &ts[step]
+    return result
 }

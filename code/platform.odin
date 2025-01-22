@@ -106,8 +106,6 @@ main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
 
-    context.assertion_failure_proc = my_assertion_failure
-
     //   
     //   Platform Setup
     //   
@@ -794,7 +792,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
     if result := GLOBAL_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // TODO: assert that region1/2_size is valid
         // TODO: Collapse these two loops
-
+        
         dest_samples := cast([^]Sample) region1
         region1_sample_count := region1_size / sound_output.bytes_per_sample
 
@@ -808,7 +806,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
             source_sample_index += 1
             sound_output.running_sample_index += 1
         }
-
+        
         dest_samples = cast([^]Sample) region2
         region2_sample_count := region2_size / sound_output.bytes_per_sample
 
@@ -1101,23 +1099,6 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
         }
     }
 }
-
-my_assertion_failure :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-    runtime.print_caller_location(loc)
-    runtime.print_string(" ")
-    runtime.print_string(prefix)
-    if len(message) > 0 {
-        runtime.print_string(": ")
-        runtime.print_string(message)
-    }
-    runtime.print_byte('\n')
-    
-    when ODIN_DEBUG {
-        runtime.debug_trap()
-    }
-    runtime.trap()
-}
-
 
 allocate_memory : PlatformAllocateMemory : proc(size: u64) -> (result: rawpointer) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)

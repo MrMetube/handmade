@@ -28,8 +28,10 @@ import "core:simd/x86"
 */
 
 RenderGroup :: struct {
-    assets:              ^Assets,
-    missing_asset_count: i32,
+    assets:                ^Assets,
+    missing_asset_count:   i32,
+    renders_in_background: b32,
+    generation_id:         AssetGenerationId,
     
     push_buffer:      []u8,
     push_buffer_size: u32,
@@ -92,23 +94,31 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
-make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: u64) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: u64, renders_in_background: b32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
+    
+    result.assets = assets
+    result.renders_in_background = renders_in_background
+    result.generation_id = begin_generation(assets)
+    
     
     max_push_buffer_size := max_push_buffer_size
     if max_push_buffer_size == 0 {
         max_push_buffer_size = arena_remaining_size(arena)
     }
+    
     result.push_buffer = push(arena, u8, max_push_buffer_size)
-
     result.push_buffer_size = 0
+    
     result.global_alpha = 1
-    result.assets = assets
-
     result.transform.scale  = 1
     result.transform.offset = 0
 
     return result
+}
+
+finish_render_group :: proc(group: ^RenderGroup) {
+    end_generation(group.assets, group.generation_id)
 }
 
 perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
@@ -161,11 +171,17 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
-    bitmap := get_bitmap(group.assets, id)
+    bitmap := get_bitmap(group.assets, id, group.generation_id)
+    if group.renders_in_background && bitmap == nil {
+        load_bitmap(group.assets, id, true)
+        bitmap = get_bitmap(group.assets, id, group.generation_id)
+    }
+    
     if bitmap != nil {
         push_bitmap_raw(group, bitmap^, height, offset, color, id)
     } else {
-        load_bitmap(group.assets, id)
+        assert(!group.renders_in_background)
+        load_bitmap(group.assets, id, false)
         group.missing_asset_count += 1
     }
 }
@@ -681,15 +697,12 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                     // NOTE(viktor): bilinear sample
                     fetch := sy * texture_width + sx
                     
-                    fetch_0 := (cast([^]i32)&fetch)[0]
-                    fetch_1 := (cast([^]i32)&fetch)[1]
-                    fetch_2 := (cast([^]i32)&fetch)[2]
-                    fetch_3 := (cast([^]i32)&fetch)[3]
+                    fetch_i := transmute([4]i32) fetch
                     
-                    texel_0 := cast([^]i32) &texture.memory[fetch_0]
-                    texel_1 := cast([^]i32) &texture.memory[fetch_1]
-                    texel_2 := cast([^]i32) &texture.memory[fetch_2]
-                    texel_3 := cast([^]i32) &texture.memory[fetch_3]
+                    texel_0 := cast([^]i32) &texture.memory[fetch_i[0]]
+                    texel_1 := cast([^]i32) &texture.memory[fetch_i[1]]
+                    texel_2 := cast([^]i32) &texture.memory[fetch_i[2]]
+                    texel_3 := cast([^]i32) &texture.memory[fetch_i[3]]
                     
                     sample_a := i32x4{ texel_0[0],                 texel_1[0],                 texel_2[0],                 texel_3[0],                }
                     sample_b := i32x4{ texel_0[1],                 texel_1[1],                 texel_2[1],                 texel_3[1],                }

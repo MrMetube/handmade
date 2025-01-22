@@ -77,6 +77,9 @@ change_pitch :: proc(mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
 output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
     mixer_memory := begin_temporary_memory(temporary_arena)
     defer end_temporary_memory(mixer_memory)
+
+    generation_id := begin_generation(assets)
+    defer end_generation(assets, generation_id)
     
     seconds_per_sample := 1.0 / cast(f32) sound_buffer.samples_per_second
     ChannelCount :: 2
@@ -101,7 +104,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         
         real_channel_cursor: [ChannelCount]u32
         
-        sound := get_sound(assets, playing_sound.id)
+        sound := get_sound(assets, playing_sound.id, generation_id)
         
         total_chunks_to_mix := chunk_count
         

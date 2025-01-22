@@ -558,6 +558,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
     if len(contents) > 0 {
         headers := cast([^]WAVE_Header) &contents[0]
         header := headers[0]
+        // :PointerArithmetic
         behind_header := cast([^]u8) &headers[1]
         
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
@@ -584,6 +585,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             if size % 2 != 0 {
                 size += 1
             }
+            // :PointerArithmetic
             result.at = cast([^]u8) &it.at[size + size_of(WAVE_Chunk)]
             result.stop = it.stop
             return result

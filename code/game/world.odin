@@ -65,8 +65,8 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
 
 change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     // TODO(viktor): if the entity moves  into the camera bounds, shoulds this force the entity into the high set immediatly?
-    assert(auto_cast (old_p == nil || is_valid(old_p^)))
-    assert(auto_cast (new_p == nil || is_valid(new_p^)))
+    assert((old_p == nil || is_valid(old_p^)))
+    assert((new_p == nil || is_valid(new_p^)))
 
     if old_p != nil && new_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
         // NOTE(viktor): leave entity where it is
@@ -134,7 +134,7 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {
     result.chunk  = result.chunk + rounded_offset
     result.offset -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
 
-    assert(auto_cast is_canonical(world, result.offset))
+    assert(is_canonical(world, result.offset))
 
     return result
 }
@@ -156,8 +156,8 @@ is_canonical :: #force_inline proc(world: ^World, offset: v3) -> b32 {
 }
 
 are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b32 {
-    assert(auto_cast is_canonical(world, a.offset))
-    assert(auto_cast is_canonical(world, b.offset))
+    assert(is_canonical(world, a.offset))
+    assert(is_canonical(world, b.offset))
 
     return a.chunk == b.chunk
 }
