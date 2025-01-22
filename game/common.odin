@@ -1,6 +1,7 @@
 package game
 
 import "base:intrinsics"
+import "core:simd/x86"
 
 // 
 // Common Definitions
@@ -197,13 +198,13 @@ atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new:
     return was, ok
 }
 
-complete_previous_writes_before_future_writes :: #force_inline proc "contextless" () {
-    // TODO(viktor): what should that actually be
-    intrinsics.atomic_thread_fence(.Seq_Cst)
+@(enable_target_feature="sse")
+complete_previous_writes_before_future_writes :: proc "contextless" () {
+    x86._mm_sfence()
 }
-complete_previous_reads_before_future_reads :: #force_inline proc "contextless" () {
-    // TODO(viktor): what should that actually be
-    intrinsics.atomic_thread_fence(.Seq_Cst)
+@(enable_target_feature="sse2")
+complete_previous_reads_before_future_reads :: proc "contextless" () {
+    x86._mm_lfence()
 }
 
 align2     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  1) &~  1 }

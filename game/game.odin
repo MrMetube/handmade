@@ -439,7 +439,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(32), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(8), tran_state)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
@@ -577,7 +577,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4), false)
+    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4))
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
@@ -609,7 +609,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         V3(screen_bounds.max, 4 * state.typical_floor_height),
     }
 
-    {
+    when false {
         min_p := map_into_worldspace(world, state.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, state.camera_p, camera_bounds.max)
 
@@ -1161,7 +1161,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
         assert(buffer_size.x == buffer_size.y)
         half_dim := buffer_size * 0.5
 
-        render_group := make_render_group(&task.arena, tran_state.assets, 0, true)
+        render_group := make_render_group(&task.arena, tran_state.assets, 0)
         orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
 
         clear(render_group, Red)

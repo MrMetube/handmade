@@ -1,6 +1,5 @@
 package game
 
-import "base:intrinsics"
 import hha "asset_builder"
 
 Assets :: struct {
@@ -25,9 +24,7 @@ AssetTypeId :: hha.AssetTypeId
 AssetTag    :: hha.AssetTag
 AssetTagId  :: hha.AssetTagId
 
-AssetState :: enum u8 { Unloaded, Queued, Loaded }
-AssetFlag  :: enum u8 { Locked }
-AssetFlags :: bit_set[AssetFlag]
+AssetState :: enum u8 { Unloaded, Queued, Loaded, Operating }
 
 Asset :: struct {
     using data: hha.AssetData,
@@ -35,15 +32,15 @@ Asset :: struct {
     
     header: ^AssetMemoryHeader,
     
-    state: AssetState,
-    flags: AssetFlags,
+    state:         AssetState,
 }
 
 AssetMemoryHeader :: struct {
     next, prev:  ^AssetMemoryHeader,
     asset_index: u32,
     
-    total_size: u64,
+    generation_id: u32,
+    total_size:    u64,
     as: struct #raw_union {
         bitmap: Bitmap,
         sound:  Sound,
@@ -203,15 +200,46 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     return assets
 }
 
-get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, must_be_locked: b32) -> (result: ^Bitmap) {
-    if is_valid_bitmap(id) {
+get_asset :: #force_inline proc(assets: ^Assets, id: u32) -> (result: ^AssetMemoryHeader) {
+    if is_valid_asset_id(id) {
         asset := &assets.assets[id]
-        if asset.state == .Loaded || .Locked in asset.flags {
-            assert((!must_be_locked) || (.Locked in asset.flags))
-            complete_previous_reads_before_future_reads()
-            result = &asset.header.as.bitmap
-            mark_asset_as_recently_used(assets, asset)
+        
+        for {
+            if asset.state == .Loaded {
+                if was, ok := atomic_compare_exchange(&asset.state, AssetState.Loaded, AssetState.Operating); ok {
+                    result = asset.header
+                    
+                    mark_asset_as_recently_used(assets, asset)
+                    when false {
+                        if asset.header.generation_id < generation_id {
+                            asset.header.generation_id = generation_id
+                        }
+                    }
+                    
+                    complete_previous_writes_before_future_writes()
+                    asset.state = was
+                    break
+                }
+            } else if asset.state != .Operating {
+                break
+            }
         }
+    }
+    return result
+}
+
+get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) -> (result: ^Bitmap) {
+    header := get_asset(assets, cast(u32) id)
+    if header != nil {
+        result = &header.as.bitmap
+    }
+    return result
+}
+
+get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
+    header := get_asset(assets, cast(u32) id)
+    if header != nil {
+        result = &header.as.sound
     }
     return result
 }
@@ -219,18 +247,6 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, must_be_locked: 
 get_bitmap_info :: proc(assets: ^Assets, id: BitmapId) -> (result: ^hha.BitmapInfo) {
     if is_valid_bitmap(id) {
         result = &assets.assets[id].info.bitmap
-    }
-    return result
-}
-
-get_sound :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: ^Sound) {
-    if is_valid_sound(id) {
-        asset := &assets.assets[id]
-        if asset.state == .Loaded {
-            complete_previous_reads_before_future_reads()
-            result = &asset.header.as.sound
-            mark_asset_as_recently_used(assets, asset)
-        }
     }
     return result
 }
@@ -251,6 +267,10 @@ get_next_sound_in_chain :: #force_inline proc(assets: ^Assets, id: SoundId) -> (
     return result
 }
 
+is_valid_asset_id :: #force_inline proc(id: u32) -> (result: b32) {
+    result = id != 0
+    return result
+}
 is_valid_bitmap :: #force_inline proc(id: BitmapId) -> (result: b32) {
     result = id != BitmapId(0)
     return result
@@ -344,8 +364,8 @@ get_file_handle_for :: #force_inline proc(assets:^Assets, file_index: u32) -> (r
 }
 
 
-prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id) }
-prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) { load_bitmap(assets, id, locked) }
+prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets, id) }
+prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id) }
 
 aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -> (result: rawpointer) {
     block := find_block_for_size(assets, size)
@@ -368,9 +388,6 @@ aquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64) -
             for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
                 asset := &assets.assets[it.asset_index]
                 if asset.state == .Loaded {
-                    assert(asset.state == .Loaded)
-                    assert(.Locked not_in asset.flags)
-                    
                     remove_asset_header_from_list(it)
                     
                     block = &(cast([^]AssetMemoryBlock) asset.header)[-1]
@@ -463,12 +480,10 @@ add_asset_header_to_list :: proc(assets: ^Assets, asset_index: u32, total_size: 
 }
 
 mark_asset_as_recently_used :: proc(assets: ^Assets, asset: ^Asset) {
-    if .Locked not_in asset.flags {
-        header := asset.header
-        
-        remove_asset_header_from_list(header)
-        insert_asset_header_at_front(assets, header)
-    }
+    header := asset.header
+    
+    remove_asset_header_from_list(header)
+    insert_asset_header_at_front(assets, header)
 }
 
 remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
@@ -482,7 +497,6 @@ remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
 LoadAssetWork :: struct {
     task:        ^TaskWithMemory,
     asset:       ^Asset,
-    final_flags: AssetFlags, 
     
     handle: ^PlatformFileHandle,
     position, amount: u64,
@@ -497,7 +511,6 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     complete_previous_writes_before_future_writes()
     
     work.asset.state = .Loaded
-    work.asset.flags = work.final_flags
     if !Platform_no_file_errors(work.handle) {
         // TODO(viktor): should we actually fill in bogus amongus data in here and set to final state anyway?
         zero(work.destination, work.amount)
@@ -553,7 +566,7 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
     }
 }
 
-load_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) {
+load_bitmap :: proc(assets: ^Assets, id: BitmapId) {
     asset := &assets.assets[id]
     if is_valid_bitmap(id) {
         if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
@@ -591,11 +604,7 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId, locked: b32) {
                     asset = asset,
                 }
                 
-                if locked {
-                    work.final_flags += { .Locked }
-                } else {
-                    add_asset_header_to_list(assets, cast(u32) id, total)
-                }
+                add_asset_header_to_list(assets, cast(u32) id, total)
 
                 Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, work)
             } else {

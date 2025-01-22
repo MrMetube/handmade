@@ -9,7 +9,7 @@ import "base:runtime"
 
 when #config(BUILD, false) {
 
-flags    :: " -vet-cast -vet-shadowing -error-pos-style:unix "
+flags    :: ` -vet-cast -vet-shadowing -error-pos-style:unix `
 windows  :: " -subsystem:windows "
 console  :: " -subsystem:console "
 debug    :: " -debug "

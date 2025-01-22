@@ -30,7 +30,6 @@ import "core:simd/x86"
 RenderGroup :: struct {
     assets:              ^Assets,
     missing_asset_count: i32,
-    assets_should_be_locked: b32,
     
     push_buffer:      []u8,
     push_buffer_size: u32,
@@ -93,7 +92,7 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
-make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: u64, assets_should_be_locked: b32) -> (result: ^RenderGroup) {
+make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: u64) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
     
     max_push_buffer_size := max_push_buffer_size
@@ -105,7 +104,6 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
     result.push_buffer_size = 0
     result.global_alpha = 1
     result.assets = assets
-    result.assets_should_be_locked = assets_should_be_locked
 
     result.transform.scale  = 1
     result.transform.offset = 0
@@ -163,11 +161,11 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
-    bitmap := get_bitmap(group.assets, id, group.assets_should_be_locked)
+    bitmap := get_bitmap(group.assets, id)
     if bitmap != nil {
         push_bitmap_raw(group, bitmap^, height, offset, color, id)
     } else {
-        load_bitmap(group.assets, id, group.assets_should_be_locked)
+        load_bitmap(group.assets, id)
         group.missing_asset_count += 1
     }
 }
