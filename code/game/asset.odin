@@ -682,7 +682,7 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) {
                 _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
                 assert(ok)
             }
-        } else {
+        } else if immediate {
             for volatile_load(&asset.state) == .Queued {}
         }
     }

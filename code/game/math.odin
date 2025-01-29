@@ -50,7 +50,7 @@ DegPerRad :: 360.0/Tau
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
-@(require_results) square  :: #force_inline proc(x: $T) -> T { return x * x}
+@(require_results) square :: #force_inline proc(x: $T) -> T { return x * x }
 
 square_root :: simd.sqrt
 
@@ -122,9 +122,7 @@ safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
 
 @(require_results) clamp_01 :: #force_inline proc(value: $T) -> (result:T) {
     when intrinsics.type_is_simd_vector(T) {
-        zero :: cast(T) 0
-        one  :: cast(T) 1
-        result = simd.clamp(value, zero, one)
+        result = simd.clamp(value, 0, 1)
     } else when intrinsics.type_is_array(T) {
         result.x = clamp_01(value.x)
         result.y = clamp_01(value.y)

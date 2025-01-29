@@ -387,26 +387,32 @@ end_asset_type :: proc(hha: ^HHA) {
 load_glyph_bitmap :: proc(path_to_font: string, codepoint: rune) -> (result: SourceBitmap) {
     font: tt.fontinfo
     font_file, ok := os.read_entire_file(path_to_font)
-    assert(ok)
+    if !ok {
+        fmt.println(os.error_string(cast(os.Platform_Error) win.GetLastError()))
+        assert(false)
+    }
     defer free(raw_data(font_file))
     
     ok = auto_cast tt.InitFont(&font, raw_data(font_file), 0)
     assert(ok)
     
     // TODO(viktor): 
-    pixels :f32= 64
+    pixels :f32= 256
     w, h, xoff, yoff: i32
-    mono_bitmap := tt.GetCodepointBitmap(&font, 0, tt.ScaleForPixelHeight(&font, pixels), codepoint, &w, &h, &xoff, &yoff)
-    defer tt.FreeBitmap(mono_bitmap, nil)
+    _mono_bitmap := tt.GetCodepointBitmap(&font, 0, tt.ScaleForPixelHeight(&font, pixels), codepoint, &w, &h, &xoff, &yoff)
+    defer tt.FreeBitmap(_mono_bitmap, nil)
+    mono_bitmap := _mono_bitmap
     
-    result.memory = make([][4]u8, w*h)
-    result.width = w
-    result.height = h
+    // NOTE(viktor): add an apron for bilinear blending
+    result.width  = w+2
+    result.height = h+2
+    result.memory = make([][4]u8, result.width*result.height)
+    for &p in result.memory do p = 0
     
     for y in 0..<h {
         for x in 0..<w {
-            dest := &result.memory[y * w + x]
-            src  := mono_bitmap[(h-y) * w + x]
+            src  := mono_bitmap[(h-1 - y) * w + x]
+            dest := &result.memory[(y+1) * result.width + x+1]
             
             dest^ = src
         }
