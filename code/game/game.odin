@@ -9,13 +9,12 @@ INTERNAL :: #config(INTERNAL, false)
     TODO(viktor):
     ARCHITECTURE EXPLORATION
 
+    - Renderer Clipping StartMask and Alignment causes issues
+    
     - :PointerArithmetic
         - change the types to a less c-mindset
         - or if necessary make utilities to these operations
     
-    - Asset streaming
-        - Memory management
-
     - Debug code
         - Fonts
         - Logging
@@ -247,11 +246,12 @@ Platform: PlatformAPI
 
 when INTERNAL {
     Debug: DEBUG_code
+    Debug_render_group: ^RenderGroup
 }
 
 @(export) 
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
-    scoped_timed_block(.update_and_render)
+    update_and_render_start_count := begin_timed_block(.update_and_render)
 
     Platform = memory.Platform_api
     
@@ -445,6 +445,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
 
         tran_state.assets = make_assets(&tran_state.arena, megabytes(48), tran_state)
         
+        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
+        
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         state.mixer.master_volume = 0.25
@@ -474,16 +476,18 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         tran_state.is_initialized = true
     }
     
-    when false {
+    if input.reloaded_executable {
         // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
-        if input.reloaded_executable {
+        when false {
             for &ground_buffer in tran_state.ground_buffers {
                 ground_buffer.p = null_position()
             }
-            
-            make_sphere_normal_map(tran_state.test_normal, 0)
-            make_sphere_diffuse_map(tran_state.test_diffuse)
         }
+        // TODO(viktor): The global doesnt get saved between reloads, save it instead of leaking that memory
+        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
+        
+        // make_sphere_normal_map(tran_state.test_normal, 0)
+        // make_sphere_diffuse_map(tran_state.test_diffuse)
     }
     
     // ---------------------- ---------------------- ----------------------
@@ -582,6 +586,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
     render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4), false)
+    begin_render(render_group)
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
@@ -851,7 +856,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                     }
 
                     for &particle in state.particles {
-                                                
                         p := ( particle.p - grid_origin ) / grid_scale
                         x := truncate(p.x)
                         y := truncate(p.y)
@@ -1001,10 +1005,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         }
 
     }
-    
+
     tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer)
-    
-    finish_render_group(render_group)
+    end_render(render_group)
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
@@ -1016,6 +1019,17 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
+    
+    end_timed_block(.update_and_render, update_and_render_start_count)
+
+    if Debug_render_group != nil {
+        Debug_reset(buffer.width, buffer.height)
+        
+        overlay_cycle_counters(memory)
+        tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
+        end_render(Debug_render_group)
+        
+    }
 }
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
@@ -1028,6 +1042,25 @@ output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     
     output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
+}
+    
+overlay_cycle_counters :: proc(game_memory: ^GameMemory) {
+    when INTERNAL {
+        name_table := [DebugCycleCounterName]string{
+            .update_and_render      = "UpdateAndRender",
+            .render_to_output       = "RenderToOutput",
+            .draw_rectangle_slowly  = "DrawRectangleSlowly",
+            .draw_rectangle_quickly = "DrawRectangleQuickly",
+            .test_pixel             = "TestPixel",
+        }
+        
+        Debug_text_line("Debug Game Cycle Counts:")
+        
+        for counter, name in game_memory.counters {
+            denom := counter.hit_count == 0 ? 1 : counter.hit_count
+            Debug_text_line(name_table[name])
+        }
+    }
 }
 
 begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
@@ -1163,6 +1196,8 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     half_dim := buffer_size * 0.5
 
     render_group := make_render_group(&work.task.arena, work.tran_state.assets, 0, true)
+    begin_render(render_group)
+    
     orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
 
     clear(render_group, Red)
@@ -1189,7 +1224,7 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     
     render_group_to_output(render_group, bitmap^)
     
-    finish_render_group(render_group)
+    end_render(render_group)
     
     end_task_with_memory(work.task)
 }

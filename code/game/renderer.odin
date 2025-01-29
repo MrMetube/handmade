@@ -39,6 +39,8 @@ RenderGroup :: struct {
     transform:                       Transform,
     global_alpha:                    f32,
     monitor_half_diameter_in_meters: v2,
+    
+    inside_render: b32,
 }
 
 Transform :: struct {
@@ -99,7 +101,7 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
     
     result.assets = assets
     result.renders_in_background = renders_in_background
-    result.generation_id = begin_generation(assets)
+    result.generation_id = 0
     
     
     max_push_buffer_size := max_push_buffer_size
@@ -117,8 +119,19 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
     return result
 }
 
-finish_render_group :: proc(group: ^RenderGroup) {
+begin_render :: proc(group: ^RenderGroup) {
+    assert(!group.inside_render)
+    
+    group.generation_id = begin_generation(group.assets)
+    group.inside_render = true
+}
+
+end_render :: proc(group: ^RenderGroup) {
+    assert(group.inside_render)
+    
     end_generation(group.assets, group.generation_id)
+    group.push_buffer_size = 0
+    group.inside_render = false
 }
 
 perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
@@ -149,6 +162,8 @@ orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, mete
 }
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+    assert(group.inside_render)
+    
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
     size := cast(u32) size_of(T) + header_size
     if group.push_buffer_size + size < auto_cast len(group.push_buffer) {
@@ -171,6 +186,8 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+    assert(group.inside_render)
+    
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     if group.renders_in_background && bitmap == nil {
         load_bitmap(group.assets, id, true)
@@ -186,7 +203,9 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32
     }
 }
 push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
+    assert(group.inside_render)
     assert(bitmap.width_over_height != 0)
+    
     size  := v2{bitmap.width_over_height, 1} * height
     // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
@@ -210,6 +229,8 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, heigh
 }
 
 push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}) {
+    assert(group.inside_render)
+    
     p := V3(offset.xy + size * 0.5, 0)
     basis_p, scale, valid := project_with_transform(group.transform, p)
     
@@ -226,6 +247,8 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, c
 }
 
 push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+    assert(group.inside_render)
+    
     // TODO(viktor): there are rounding issues with draw_rectangle
     // NOTE(viktor): Top and Bottom
     push_rectangle(group, offset - {0, size.y*0.5, 0}, {size.x+thickness, thickness}, color)
@@ -234,6 +257,41 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
     // NOTE(viktor): Left and Right
     push_rectangle(group, offset - {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
     push_rectangle(group, offset + {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
+}
+
+scale : f32 = 40
+at_y: f32
+left_edge: f32
+
+Debug_reset :: proc(width, height: i32) {
+    begin_render(Debug_render_group)
+    orthographic(Debug_render_group, {width, height}, 1)
+    
+    at_y = 0.5 * cast(f32) height - scale * 2
+    left_edge = -0.5* cast(f32) width + scale
+}
+
+@(disabled=!INTERNAL)
+Debug_text_line :: proc(text: string) {
+    if Debug_render_group != nil {
+        assert(Debug_render_group.inside_render)
+        
+        font_weights := #partial AssetVector{ .Codepoint = 1 }
+        font_match   := #partial AssetVector{ .Codepoint = 0 }
+        
+        at_x := left_edge
+        
+        for r in text {
+            if r != ' ' {
+                font_match[.Codepoint] = cast(f32) r 
+                bitmap_id := best_match_bitmap_from(Debug_render_group.assets, AssetTypeId.Font, font_match, font_weights)
+                push_bitmap(Debug_render_group, bitmap_id, scale, {at_x, at_y, 0})
+            }
+            at_x += scale
+        }
+        
+        at_y -= scale * 1.3
+    }
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
@@ -250,6 +308,8 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}
 }
 
 push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
+    assert(group.inside_render)
+    
     if entity.hit_point_max > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
@@ -266,6 +326,8 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
 }
 
 clear :: proc(group: ^RenderGroup, color: v4) {
+    assert(group.inside_render)
+    
     entry := push_render_element(group, RenderGroupEntryClear)
     if entry != nil {
         entry.color = color
@@ -347,6 +409,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 }
 
 tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap) {
+    assert(group.inside_render)
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
     
     /* TODO(viktor):
@@ -395,6 +458,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
 }
 
 render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
+    assert(group.inside_render)
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
     
     work := TileRenderWork{
@@ -410,6 +474,8 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i, even: b32) {
+    assert(group.inside_render)
+    
     null_pixels_to_meters :: 1
 
     for base_address: u32 = 0; base_address < group.push_buffer_size; {

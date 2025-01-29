@@ -154,7 +154,8 @@ write_non_hero :: proc () {
     end_asset_type(&hha)
     
     begin_asset_type(&hha, .Font)
-    for c in 'A'..='Z' {
+    
+    for c in '!'..<'~' {
         add_character_asset(&hha, `C:\Windows\Fonts\arial.ttf`, c)
         add_tag(&hha,.Codepoint, cast(f32) c)
     }

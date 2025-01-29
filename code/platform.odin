@@ -502,30 +502,25 @@ main :: proc() {
                 update_and_render(&game_memory, offscreen_buffer, new_input)
                 
                 handle_debug_cycle_counters :: proc(game_memory: ^GameMemory) {
-                    when false && INTERNAL {
-                        title := "Debug Game Cycle Counts"
-                        longest_name_length := len(title)
-                        for counter, name in game_memory.counters {
-                            name_string := fmt.tprint(name)
-                            longest_name_length = max(longest_name_length, len(name_string))
-                        }
+                    when INTERNAL {
+                        // title := "Debug Game Cycle Counts"
+                        // longest_name_length := len(title)
+                        // for counter, name in game_memory.counters {
+                        //     name_string := fmt.tprint(name)
+                        //     longest_name_length = max(longest_name_length, len(name_string))
+                        // }
                         
-                        format := fmt.tprintf("%%%ds:", longest_name_length)
+                        // format := fmt.tprintf("%%%ds:", longest_name_length)
                         
-                        fmt.printfln(format, title)
-                        format = fmt.tprintf("%s %% 10vcy, %% 10vh, %% 10v cy/h", format)
+                        // fmt.printfln(format, title)
+                        // format = fmt.tprintf("%s %% 10vcy, %% 10vh, %% 10v cy/h", format)
                         for &counter, name in game_memory.counters {
                             denom := counter.hit_count == 0 ? 1 : counter.hit_count
-                            fmt.printfln(format, name, counter.cycle_count, counter.hit_count, counter.cycle_count / denom)
-                            counter.cycle_count = 0
-                            counter.hit_count = 0
-                            // 4.8 GHz with 144 fps -> 33.333.333 cycles per frame
-                            // update_and_render:
-                            //  5 Jan 2025             18.476.474
+                            // fmt.printfln(format, name, counter.cycle_count, counter.hit_count, counter.cycle_count / denom)
+                            counter = {}
                         }
                     }
                 }
-                handle_debug_cycle_counters(&game_memory)
             }
 
             sound_is_valid = true

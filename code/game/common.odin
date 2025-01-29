@@ -156,6 +156,8 @@ when INTERNAL {
     
     DEBUG_GLOBAL_memory: ^GameMemory
     
+    // TODO(viktor): use @disabled here?
+    @require_results
     begin_timed_block  :: #force_inline proc(name: DebugCycleCounterName) -> i64 { return intrinsics.read_cycle_counter()}
     @(deferred_in_out=end_timed_block)
     scoped_timed_block :: #force_inline proc(name: DebugCycleCounterName) -> i64 { return intrinsics.read_cycle_counter()}
