@@ -161,6 +161,11 @@ orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, mete
     group.transform.focal_length          = 10
 }
 
+all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
+    result = group.missing_asset_count == 0
+    return result
+}
+
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     assert(group.inside_render)
     
@@ -180,9 +185,13 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
     return result
 }
 
-all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
-    result = group.missing_asset_count == 0
-    return result
+clear :: proc(group: ^RenderGroup, color: v4) {
+    assert(group.inside_render)
+    
+    entry := push_render_element(group, RenderGroupEntryClear)
+    if entry != nil {
+        entry.color = color
+    }
 }
 
 push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
@@ -207,9 +216,8 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, heigh
     assert(bitmap.width_over_height != 0)
     
     size  := v2{bitmap.width_over_height, 1} * height
-    // TODO(viktor): recheck alignments
     align := bitmap.align_percentage * size
-    p     := offset - v3{align.x, -align.y, 0}
+    p     := offset - V3(align, 0)
 
     basis_p, scale, valid := project_with_transform(group.transform, p)
 
@@ -259,38 +267,45 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
     push_rectangle(group, offset + {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
 }
 
-scale : f32 = 40
-at_y: f32
-left_edge: f32
 
-Debug_reset :: proc(width, height: i32) {
-    begin_render(Debug_render_group)
-    orthographic(Debug_render_group, {width, height}, 1)
+when INTERNAL {
+    scale : f32 = 1
+    at_y: f32
+    left_edge: f32
     
-    at_y = 0.5 * cast(f32) height - scale * 2
-    left_edge = -0.5* cast(f32) width + scale
-}
+    Debug_reset :: proc(width, height: i32) {
+        begin_render(Debug_render_group)
+        orthographic(Debug_render_group, {width, height}, 1)
+        
+        at_y = 0.5 * cast(f32) height - scale * 2
+        left_edge = -0.5* cast(f32) width + scale
+    }
 
-@(disabled=!INTERNAL)
-Debug_text_line :: proc(text: string) {
-    if Debug_render_group != nil {
-        assert(Debug_render_group.inside_render)
-        
-        font_weights := #partial AssetVector{ .Codepoint = 1 }
-        font_match   := #partial AssetVector{ .Codepoint = 0 }
-        
-        at_x := left_edge
-        
-        for r in text {
-            if r != ' ' {
-                font_match[.Codepoint] = cast(f32) r 
-                bitmap_id := best_match_bitmap_from(Debug_render_group.assets, AssetTypeId.Font, font_match, font_weights)
-                push_bitmap(Debug_render_group, bitmap_id, scale, {at_x, at_y, 0})
+    Debug_text_line :: proc(text: string) {
+        if Debug_render_group != nil {
+            assert(Debug_render_group.inside_render)
+            
+            font_weights := #partial AssetVector{ .Codepoint = 1 }
+            font_match   := #partial AssetVector{ .Codepoint = 0 }
+            
+            at_x := left_edge
+            
+            dim :v2= 10
+            for r in text {
+                if r != ' ' {
+                    font_match[.Codepoint] = cast(f32) r 
+                    bitmap_id := best_match_bitmap_from(Debug_render_group.assets, AssetTypeId.Font, font_match, font_weights)
+                    
+                    info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
+                    
+                    dim = scale * vec_cast(f32, info.dimension)
+                    push_bitmap(Debug_render_group, bitmap_id, dim.y, {at_x, at_y, 0})
+                }
+                at_x += dim.x
             }
-            at_x += scale
+            
+            at_y -= 1.3 * dim.y
         }
-        
-        at_y -= scale * 1.3
     }
 }
 
@@ -323,15 +338,6 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
         }
     }
 
-}
-
-clear :: proc(group: ^RenderGroup, color: v4) {
-    assert(group.inside_render)
-    
-    entry := push_render_element(group, RenderGroupEntryClear)
-    if entry != nil {
-        entry.color = color
-    }
 }
 
 get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {

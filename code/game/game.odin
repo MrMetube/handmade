@@ -447,7 +447,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         
         Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
         
-        play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+        // play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         state.mixer.master_volume = 0.25
         
@@ -803,7 +803,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
                 
-                { // NOTE(viktor): Particle system test
+                when false { // NOTE(viktor): Particle system test
                     for _ in 0..<4 {
                         particle := &state.particles[state.next_particle]
                         state.next_particle += 1

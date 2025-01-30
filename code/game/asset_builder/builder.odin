@@ -267,10 +267,9 @@ output_hha_file :: proc(file_name: string, hha: HHA) {
             info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
             libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
         case .Font:
-            bitmap := load_glyph_bitmap(src.filename[:], src.codepoint)
-            
             info := &dst.info.bitmap
-            info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
+            bitmap := load_glyph_bitmap(src.filename[:], src.codepoint, info)
+            
             libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
         case .Sound:
             info := &dst.info.sound
@@ -385,7 +384,7 @@ end_asset_type :: proc(hha: ^HHA) {
     hha.asset_index = 0
 }
 
-load_glyph_bitmap :: proc(path_to_font: string, codepoint: rune) -> (result: SourceBitmap) {
+load_glyph_bitmap :: proc(path_to_font: string, codepoint: rune, info: ^BitmapInfo) -> (result: SourceBitmap) {
     font: tt.fontinfo
     font_file, ok := os.read_entire_file(path_to_font)
     if !ok {
@@ -398,11 +397,12 @@ load_glyph_bitmap :: proc(path_to_font: string, codepoint: rune) -> (result: Sou
     assert(ok)
     
     // TODO(viktor): 
-    pixels :f32= 256
+    pixels :f32= 128
+    scale_factor := tt.ScaleForPixelHeight(&font, pixels)
     w, h, xoff, yoff: i32
-    _mono_bitmap := tt.GetCodepointBitmap(&font, 0, tt.ScaleForPixelHeight(&font, pixels), codepoint, &w, &h, &xoff, &yoff)
+    _mono_bitmap := tt.GetCodepointBitmap(&font, 0, scale_factor, codepoint, &w, &h, &xoff, &yoff)
     defer tt.FreeBitmap(_mono_bitmap, nil)
-    mono_bitmap := _mono_bitmap
+    mono_bitmap := _mono_bitmap[:w*h]
     
     // NOTE(viktor): add an apron for bilinear blending
     result.width  = w+2
@@ -410,12 +410,18 @@ load_glyph_bitmap :: proc(path_to_font: string, codepoint: rune) -> (result: Sou
     result.memory = make([][4]u8, result.width*result.height)
     for &p in result.memory do p = 0
     
+    info.dimension = vec_cast(u32, result.width, result.height)
+    
+    info.align_percentage.y = (1 + cast(f32) (yoff + h)) / cast(f32) result.height
+    info.align_percentage.x = (1) / cast(f32) result.width
+            
+    
     for y in 0..<h {
         for x in 0..<w {
             src  := mono_bitmap[(h-1 - y) * w + x]
             dest := &result.memory[(y+1) * result.width + x+1]
             
-            dest^ = src
+            dest^ = premuliply_alpha(255, 255, 255, src)
         }
     }
     
@@ -483,22 +489,12 @@ load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
                 c := raw_pixels[y * header.width + x]
                 p := &pixels[y * header.width + x]
                 
-                texel := vec_cast(f32, 
-                    vec_cast(u8, 
-                        ((c & red_mask)   >> red_shift),
-                        ((c & green_mask) >> green_shift),
-                        ((c & blue_mask)  >> blue_shift),
-                        ((c & alpha_mask) >> alpha_shift),
-                    ),
-                )
-                
-                texel = srgb_255_to_linear_1(texel)
-                
-                texel.rgb = texel.rgb * texel.a
-                
-                texel = linear_1_to_srgb_255(texel)
-                
-                p^ = vec_cast(u8, texel + 0.5)
+                p^ = premuliply_alpha( 
+                    cast(u8) ((c & red_mask)   >> red_shift),
+                    cast(u8) ((c & green_mask) >> green_shift),
+                    cast(u8) ((c & blue_mask)  >> blue_shift),
+                    cast(u8) ((c & alpha_mask) >> alpha_shift),
+                ) 
             }
         }
         
@@ -677,6 +673,20 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             // }
         }
     }
+    
+    return result
+}
+
+premuliply_alpha :: proc(r, g, b, a: u8) -> (result: [4]u8) {
+    texel := vec_cast(f32, r, g, b, a)
+    
+    texel = srgb_255_to_linear_1(texel)
+    
+    texel.rgb = texel.rgb * texel.a
+    
+    texel = linear_1_to_srgb_255(texel)
+    
+    result = vec_cast(u8, texel + 0.5)
     
     return result
 }
