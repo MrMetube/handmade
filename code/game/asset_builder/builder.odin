@@ -37,6 +37,10 @@ SourceBitmap :: struct {
     width, height: i32, 
 }
 
+SourceFont :: struct {
+    
+}
+
 SourceAssetType :: enum { Sound, Bitmap, Font }
 
 SourceAsset :: struct {

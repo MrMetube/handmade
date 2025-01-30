@@ -9,6 +9,7 @@ Version    : u32 : 0
 
 BitmapId :: distinct u32
 SoundId  :: distinct u32
+FontId   :: distinct u32
 
 AssetTag :: struct #packed {
     id:    AssetTagId,
@@ -24,6 +25,7 @@ AssetType :: struct #packed {
 
 AssetTypeId :: enum u32 {
     None,
+    
     // NOTE(viktor): Bitmaps
     Shadow, Wall, Arrow, Stair, 
     Rock, Grass,
@@ -36,7 +38,8 @@ AssetTypeId :: enum u32 {
     
     Music,
     
-    Font,
+    // NOTE(viktor): Fonts
+    Font, FontGlyph,
 }
 
 AssetTagId :: enum {
@@ -70,21 +73,36 @@ AssetData :: struct #packed {
     info : struct #raw_union {
         bitmap: BitmapInfo,
         sound:  SoundInfo,
+        font:   FontInfo,
     }
 }
 
 BitmapInfo :: struct #packed {
     dimension:        [2]u32,
     align_percentage: [2]f32,
-}
-
-SoundChain :: enum u32 {
-    None, Loop, Advance,
+    // NOTE(viktor): Data is:
+    //     pixels: [dimension[1]][dimension[2]] [4]u8
 }
 
 SoundInfo :: struct #packed {
     sample_count:  u32,
     channel_count: u32,
     chain:         SoundChain,
+    // NOTE(viktor): Data is:
+    //     samples: [channel_count][sample_count] i16
+}
+
+// TODO(viktor): coult these be polymorphic structs?
+// i.e. FontInfo :: struct($codepoint_count: u32) #packed {
+FontInfo :: struct #packed {
+    codepoint_count: u32,
+    line_advance:    f32,
+    // NOTE(viktor): Data is:
+    //     codepoint_count:    [codepoint_count] BitmapId,
+    //     horizontal_advance: [codepoint_count*codepoint_count] f32,
+}
+
+SoundChain :: enum u32 {
+    None, Loop, Advance,
 }
 

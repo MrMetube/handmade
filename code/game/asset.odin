@@ -24,8 +24,10 @@ Assets :: struct {
     tag_ranges: [AssetTagId]f32,
 }
 
-SoundId     :: hha.SoundId
-BitmapId    :: hha.BitmapId
+FontId   :: hha.FontId
+SoundId  :: hha.SoundId
+BitmapId :: hha.BitmapId
+
 AssetTypeId :: hha.AssetTypeId
 AssetTag    :: hha.AssetTag
 AssetTagId  :: hha.AssetTagId
@@ -50,6 +52,7 @@ AssetMemoryHeader :: struct {
     as: struct #raw_union {
         bitmap: Bitmap,
         sound:  Sound,
+        font:   Font,
     },
 }
 
@@ -74,12 +77,19 @@ AssetVector :: [AssetTagId]f32
 
 AssetFile :: struct {
     handle: PlatformFileHandle,
-    // TODO(viktor): if  we ever do thread stacks, 
+    // TODO(viktor): if we ever do thread stacks, 
     // then asset_type_array doesnt actually need to be kept here probably.
     header: hha.Header,
     asset_type_array: []hha.AssetType,
     tag_base: u32,
 }
+
+Font :: struct {
+    codepoints: []BitmapId,
+    horizontal_advance: []f32,
+}
+
+////////////////////////////////////////////////
 
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets, clear_to_zero = true)
@@ -208,26 +218,10 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     return assets
 }
 
-insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
-    sentinel := &assets.loaded_asset_sentinel
-    
-    header.prev = sentinel
-    header.next = sentinel.next
-    
-    header.next.prev = header
-    header.prev.next = header
-}
-
-remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
-    header.prev.next = header.next
-    header.next.prev = header.prev
-    
-    header.next = nil
-    header.prev = nil
-}
+////////////////////////////////////////////////
 
 get_asset :: #force_inline proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) -> (result: ^AssetMemoryHeader) {
-    if is_valid_asset_id(id) {
+    if is_valid_asset(id) {
         asset := &assets.assets[id]
         
         begin_asset_lock(assets)
@@ -265,16 +259,39 @@ get_sound :: #force_inline proc(assets: ^Assets, id: SoundId, generation_id: Ass
     return result
 }
 
+get_font :: #force_inline proc(assets: ^Assets, id: FontId, generation_id: AssetGenerationId) -> (result: ^Font) {
+    header := get_asset(assets, cast(u32) id, generation_id)
+    if header != nil {
+        result = &header.as.font
+    }
+    return result
+}
+
+////////////////////////////////////////////////
+// Additional Information
+
+is_valid_asset :: #force_inline proc(id: $T/u32) -> (result: b32) {
+    result = id != 0
+    return result
+}
+
 get_bitmap_info :: proc(assets: ^Assets, id: BitmapId) -> (result: ^hha.BitmapInfo) {
-    if is_valid_bitmap(id) {
+    if is_valid_asset(id) {
         result = &assets.assets[id].info.bitmap
     }
     return result
 }
 
 get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^hha.SoundInfo) {
-    if is_valid_sound(id) {
+    if is_valid_asset(id) {
         result = &assets.assets[id].info.sound
+    }
+    return result
+}
+
+get_font_info :: proc(assets: ^Assets, id: FontId) -> (result: ^hha.FontInfo) {
+    if is_valid_asset(id) {
+        result = &assets.assets[id].info.font
     }
     return result
 }
@@ -288,18 +305,41 @@ get_next_sound_in_chain :: #force_inline proc(assets: ^Assets, id: SoundId) -> (
     return result
 }
 
-is_valid_asset_id :: #force_inline proc(id: u32) -> (result: b32) {
-    result = id != 0
+get_horizontal_advance_for_pair :: proc(font: ^Font, previous_codepoint, codepoint: rune) -> (result: f32) {
+    previous_codepoint := previous_codepoint
+    codepoint          := codepoint
+    
+    previous_codepoint = get_clamped_codepoint(font, previous_codepoint)
+    codepoint          = get_clamped_codepoint(font, codepoint)
+    
+    codepoint_count := cast(rune) len(font.codepoints)
+    result = font.horizontal_advance[previous_codepoint * codepoint_count + codepoint]
+    
     return result
 }
-is_valid_bitmap :: #force_inline proc(id: BitmapId) -> (result: b32) {
-    result = id != BitmapId(0)
+
+get_line_advance :: proc(info: ^hha.FontInfo) -> (result: f32) {
+    result = info.line_advance
     return result
 }
-is_valid_sound :: #force_inline proc(id: SoundId) -> (result: b32) {
-    result = id != SoundId(0)
+
+get_bitmap_for_glyph :: proc(font: ^Font, codepoint: rune) -> (result: BitmapId) {
+    codepoint := codepoint
+    codepoint = get_clamped_codepoint(font, codepoint)
+    
+    result = font.codepoints[codepoint]
     return result
 }
+
+get_clamped_codepoint :: proc(font: ^Font, desired: rune) -> (result: rune) {
+    if desired < cast(rune) len(font.codepoints) {
+        result = desired
+    }
+    return result
+}
+
+////////////////////////////////////////////////
+// Queries
 
 first_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: SoundId) {
     result = cast(SoundId) first_asset_from(assets, id)
@@ -319,13 +359,14 @@ first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: u32) {
     return result
 }
 
-best_match_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: SoundId) {
-    result = cast(SoundId) best_match_asset_from(assets, id, match_vector, weight_vector)
-    return result
+best_match_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> SoundId {
+    return cast(SoundId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
-best_match_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: BitmapId) {
-    result = cast(BitmapId) best_match_asset_from(assets, id, match_vector, weight_vector)
-    return result
+best_match_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> BitmapId {
+    return cast(BitmapId) best_match_asset_from(assets, id, match_vector, weight_vector)
+}
+best_match_font_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> FontId {
+    return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
 best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
     type := assets.types[id]
@@ -379,14 +420,8 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 }
 
 
-get_file_handle_for :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
-    result = &assets.files[file_index].handle
-    return result
-}
-
-
-prefetch_sound  :: #force_inline proc(assets: ^Assets, id: SoundId)  { load_sound(assets, id)  }
-prefetch_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
+////////////////////////////////////////////////
+// Memory Management
 
 begin_generation :: #force_inline proc(assets: ^Assets) -> (result: AssetGenerationId) {
     begin_asset_lock(assets)
@@ -412,7 +447,6 @@ end_generation :: #force_inline proc(assets: ^Assets, generation: AssetGeneratio
     }
 }
 
-
 generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (result: b32) {
     result = true
     
@@ -437,6 +471,24 @@ begin_asset_lock :: proc(assets: ^Assets) {
 end_asset_lock :: proc(assets: ^Assets) {
     complete_previous_writes_before_future_writes()
     assets.memory_operation_lock = 0
+}
+
+insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
+    sentinel := &assets.loaded_asset_sentinel
+    
+    header.prev = sentinel
+    header.next = sentinel.next
+    
+    header.next.prev = header
+    header.prev.next = header
+}
+
+remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
+    header.prev.next = header.next
+    header.next.prev = header.prev
+    
+    header.next = nil
+    header.prev = nil
 }
 
 acquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64, asset_index: u32) -> (result: ^AssetMemoryHeader) {
@@ -551,6 +603,12 @@ merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> 
     return result
 }
 
+////////////////////////////////
+// Loading
+
+prefetch_sound  :: #force_inline proc(assets: ^Assets, id: SoundId)  { load_sound(assets, id)  }
+prefetch_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
+
 LoadAssetWork :: struct {
     task:        ^TaskWithMemory,
     asset:       ^Asset,
@@ -579,12 +637,17 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     end_task_with_memory(work.task)
 }
 
+get_file_handle_for :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
+    result = &assets.files[file_index].handle
+    return result
+}
+
 load_sound :: proc(assets: ^Assets, id: SoundId) {
-    asset := &assets.assets[id]
-    if is_valid_sound(id) {
+    if is_valid_asset(id) {
+        asset := &assets.assets[id]
         if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
             if task := begin_task_with_memory(assets.tran_state); task != nil {
-                info  := asset.info.sound
+                info := asset.info.sound
             
                 total_sample_count := cast(u64) info.channel_count * cast(u64) info.sample_count
                 memory_size := total_sample_count * size_of(i16)
@@ -629,8 +692,8 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
 }
 
 load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) {
-    asset := &assets.assets[id]
-    if is_valid_bitmap(id) {
+    if is_valid_asset(id) {
+        asset := &assets.assets[id]
         if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
             task: ^TaskWithMemory
             if !immediate {
@@ -638,7 +701,7 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) {
             }
             
             if immediate || task != nil {
-                info  := asset.info.bitmap
+                info := asset.info.bitmap
                 
                 pixel_count := cast(u64) info.dimension.x * cast(u64) info.dimension.y
                 memory_size := pixel_count * size_of(ByteColor)
@@ -667,6 +730,68 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) {
                     position = asset.data_offset, 
                     amount = memory_size,
                     destination = raw_data(bitmap.memory),
+                    
+                    asset = asset,
+                }
+                
+                if !immediate {
+                    task_work := push(&task.arena, LoadAssetWork)
+                    task_work^ = work
+                    Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
+                } else {
+                    load_asset_work_immediatly(&work)
+                }
+            } else {
+                _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
+                assert(ok)
+            }
+        } else if immediate {
+            for volatile_load(&asset.state) == .Queued {}
+        }
+    }
+}
+
+load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
+    // TODO(viktor): merge this preamble and postamble
+    if is_valid_asset(id) {
+        asset := &assets.assets[id]
+        if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
+            task: ^TaskWithMemory
+            if !immediate {
+                task = begin_task_with_memory(assets.tran_state) 
+            }
+            
+            if immediate || task != nil {
+                info := asset.info.font
+                
+                codepoint_count := cast(u64) info.codepoint_count
+                memory_size := codepoint_count * size_of(BitmapId)
+                total := memory_size + size_of(AssetMemoryHeader)
+            
+                // TODO(viktor): support alignment of 16
+                asset.header = acquire_asset_memory(assets, total, cast(u32) id)
+                // :PointerArithmetic
+                font_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
+                
+                codepoints := (cast([^]BitmapId) font_memory)[:info.codepoint_count]
+                // :PointerArithmetic
+                horizontal_advance_memory := &(raw_data(codepoints))[info.codepoint_count]
+                horizontal_advance := (cast([^]f32) horizontal_advance_memory)[:square(info.codepoint_count)]
+                
+                font := &asset.header.as.font
+                font^ = {
+                    codepoints         = codepoints,
+                    horizontal_advance = horizontal_advance,
+                }
+                
+                work := LoadAssetWork {
+                    task = task,
+                    
+                    handle = get_file_handle_for(assets, asset.file_index),
+                    
+                    position = asset.data_offset, 
+                    amount = memory_size,
+                    destination = raw_data(font.codepoints),
                     
                     asset = asset,
                 }

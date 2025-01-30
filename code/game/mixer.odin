@@ -226,7 +226,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 total_chunks_to_mix -= chunks_to_mix
 
                 if chunks_to_mix == chunks_remaining_in_sound {
-                    if is_valid_sound(next_sound_in_chain) {
+                    if is_valid_asset(next_sound_in_chain) {
                         playing_sound.id = next_sound_in_chain
                         assert(playing_sound.samples_played >= cast(f32) sample_count)
                         playing_sound.samples_played -= cast(f32) samples_in_sound
