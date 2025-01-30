@@ -39,8 +39,7 @@ Asset :: struct {
     file_index: u32,
     
     header: ^AssetMemoryHeader,
-    
-    state:         AssetState,
+    state:  AssetState,
 }
 
 AssetMemoryHeader :: struct {
@@ -82,11 +81,16 @@ AssetFile :: struct {
     header: hha.Header,
     asset_type_array: []hha.AssetType,
     tag_base: u32,
+    
+    font_bitmap_id_offset: BitmapId,
 }
 
 Font :: struct {
-    codepoints: []BitmapId,
-    horizontal_advance: []f32,
+    bitmap_id_offset: BitmapId,
+    // TODO(viktor): clean this up, the loading does not handle that we need to fill two slices
+    codepoint_count:    u32,
+    codepoints:         [^]BitmapId,
+    horizontal_advance: [^]f32,
 }
 
 ////////////////////////////////////////////////
@@ -177,9 +181,15 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         dest_type.first_asset_index = loaded_asset_count
 
         for &file, file_index in assets.files {
+            file.font_bitmap_id_offset = 0
+            
             if Platform_no_file_errors(&file.handle) {
                 for source_type, source_index in file.asset_type_array {
                     if source_type.id == id {
+                        if source_type.id == .FontGlyph {
+                            file.font_bitmap_id_offset = cast(BitmapId) (asset_count - source_type.first_asset_index)
+                        }
+                        
                         asset_count_for_type := source_type.one_past_last_index - source_type.first_asset_index
                         hha_memory := begin_temporary_memory(arena)
                         defer end_temporary_memory(hha_memory)
@@ -312,7 +322,7 @@ get_horizontal_advance_for_pair :: proc(font: ^Font, previous_codepoint, codepoi
     previous_codepoint = get_clamped_codepoint(font, previous_codepoint)
     codepoint          = get_clamped_codepoint(font, codepoint)
     
-    codepoint_count := cast(rune) len(font.codepoints)
+    codepoint_count := cast(rune) font.codepoint_count
     result = font.horizontal_advance[previous_codepoint * codepoint_count + codepoint]
     
     return result
@@ -327,12 +337,12 @@ get_bitmap_for_glyph :: proc(font: ^Font, codepoint: rune) -> (result: BitmapId)
     codepoint := codepoint
     codepoint = get_clamped_codepoint(font, codepoint)
     
-    result = font.codepoints[codepoint]
+    result = font.bitmap_id_offset + font.codepoints[codepoint]
     return result
 }
 
 get_clamped_codepoint :: proc(font: ^Font, desired: rune) -> (result: rune) {
-    if desired < cast(rune) len(font.codepoints) {
+    if desired < cast(rune) font.codepoint_count {
         result = desired
     }
     return result
@@ -637,8 +647,13 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     end_task_with_memory(work.task)
 }
 
+get_file :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^AssetFile) {
+    result = &assets.files[file_index]
+    return result
+}
+
 get_file_handle_for :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
-    result = &assets.files[file_index].handle
+    result = &get_file(assets, file_index).handle
     return result
 }
 
@@ -765,21 +780,24 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
                 info := asset.info.font
                 
                 codepoint_count := cast(u64) info.codepoint_count
-                memory_size := codepoint_count * size_of(BitmapId)
-                total := memory_size + size_of(AssetMemoryHeader)
+                codepoints_size := codepoint_count * size_of(BitmapId)
+                horizontal_advance_size := codepoint_count * codepoint_count * size_of(f32)
+                data_size := codepoints_size + horizontal_advance_size
+                total := data_size + size_of(AssetMemoryHeader)
             
                 // TODO(viktor): support alignment of 16
                 asset.header = acquire_asset_memory(assets, total, cast(u32) id)
                 // :PointerArithmetic
-                font_memory := &(cast([^]AssetMemoryHeader) asset.header)[1]
+                font_memory := (cast([^]AssetMemoryHeader) asset.header)[1:]
                 
-                codepoints := (cast([^]BitmapId) font_memory)[:info.codepoint_count]
+                codepoints := (cast([^]BitmapId) font_memory)//[:codepoint_count]
                 // :PointerArithmetic
-                horizontal_advance_memory := &(raw_data(codepoints))[info.codepoint_count]
-                horizontal_advance := (cast([^]f32) horizontal_advance_memory)[:square(info.codepoint_count)]
+                horizontal_advance_memory := (cast([^]BitmapId) font_memory)[codepoints_size:]
+                horizontal_advance := (cast([^]f32) horizontal_advance_memory)//[:square(codepoint_count)]
                 
                 font := &asset.header.as.font
                 font^ = {
+                    bitmap_id_offset   = get_file(assets, asset.file_index).font_bitmap_id_offset,
                     codepoints         = codepoints,
                     horizontal_advance = horizontal_advance,
                 }
@@ -790,8 +808,8 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
                     handle = get_file_handle_for(assets, asset.file_index),
                     
                     position = asset.data_offset, 
-                    amount = memory_size,
-                    destination = raw_data(font.codepoints),
+                    amount = data_size,
+                    destination = font_memory,
                     
                     asset = asset,
                 }

@@ -20,6 +20,7 @@ src_path :: `.\build.odin`
 exe_path :: `.\build\build.exe`
 
 build_dir :: `.\build`
+data_dir  :: `.\data`
 
 main :: proc() {
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
@@ -29,7 +30,7 @@ main :: proc() {
     rebuild_yourself(exe_path)
     
     if !os.exists(build_dir) do os.make_directory(build_dir)
-    if !os.exists(`.\data`)  do os.make_directory(`.\data`) 
+    if !os.exists(data_dir)  do os.make_directory(data_dir) 
     
     os.set_current_directory(build_dir)
     
@@ -123,19 +124,23 @@ modified_since :: proc(src, out: string) -> (result: b32) {
 }
 
 rebuild_yourself :: proc(exe_path: string) {
-    log.Level_Headers = {
-         0..<10 = "[DEBUG] ",
-        10..<20 = "[INFO ] ",
-        20..<30 = "[WARN ] ",
-        30..<40 = "[ERROR] ",
-        40..<50 = "[FATAL] ",
+    when false {
+        log.Level_Headers = {
+             0..<10 = "DEBUG ",
+            10..<20 = "INFO  ",
+            20..<30 = "WARN  ",
+            30..<40 = "ERROR ",
+            40..<50 = "FATAL ",
+        }
+    } else {
+        log.Level_Headers = { 0..<50 = "" }
     }
     
     if modified_since(src_path, exe_path) {
-        log.info("Rebuilding Build!")
+        log.info("Rebuilding!")
         temp_path := fmt.tprintf("%s-temp", exe_path)
         
-        delete_all_like(temp_path)
+        delete_all_like(temp_path) 
         
         run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, " -file ", pedantic)
         
