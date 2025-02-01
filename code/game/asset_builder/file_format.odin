@@ -96,7 +96,9 @@ SoundInfo :: struct #packed {
 // i.e. FontInfo :: struct($codepoint_count: u32) #packed {
 FontInfo :: struct #packed {
     codepoint_count: u32,
-    line_advance:    f32,
+    ascent:  f32,
+    descent: f32,
+    linegap: f32,
     // NOTE(viktor): Data is:
     //     codepoint_count:    [codepoint_count] BitmapId,
     //     horizontal_advance: [codepoint_count*codepoint_count] f32,

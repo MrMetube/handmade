@@ -328,8 +328,13 @@ get_horizontal_advance_for_pair :: proc(font: ^Font, previous_codepoint, codepoi
     return result
 }
 
+get_baseline :: proc(info: ^hha.FontInfo) -> (result: f32) {
+    result = info.ascent
+    return result
+}
+
 get_line_advance :: proc(info: ^hha.FontInfo) -> (result: f32) {
-    result = info.line_advance
+    result = info.ascent - info.descent + info.linegap
     return result
 }
 

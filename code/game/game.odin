@@ -1055,6 +1055,7 @@ overlay_cycle_counters :: proc(game_memory: ^GameMemory) {
         }
         
         Debug_text_line("Debug Game Cycle Counts:")
+        Debug_text_line("西安:")
         
         for counter, name in game_memory.counters {
             denom := counter.hit_count == 0 ? 1 : counter.hit_count

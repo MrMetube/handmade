@@ -42,10 +42,9 @@ SourceFont :: struct {
     font:         tt.fontinfo,
     scale_factor: f32,
     
-    codepoint_count:     u32,
-    codepoints:          []BitmapId,
-    horizontal_advances: []f32,
-    line_advance:        f32,
+    codepoint_count:          u32,
+    codepoints:               []BitmapId,
+    horizontal_advances:      []f32,
 }
 
 SourceAsset :: union {
@@ -189,15 +188,15 @@ write_fonts :: proc() {
     
     // @Leak
     debug_font := load_font(`..\assets\raw\Caladea\Caladea-Regular.ttf`, '~'+1)
-    
-    begin_asset_type(hha, .Font)
-    add_font_asset(hha, &debug_font)
-    end_asset_type(hha)
-    
+
     begin_asset_type(hha, .FontGlyph)
     for c in '!'..<'~' {
         debug_font.codepoints[c] = add_character_asset(hha, &debug_font, c)
     }
+    end_asset_type(hha)
+    
+    begin_asset_type(hha, .Font)
+    add_font_asset(hha, &debug_font)
     end_asset_type(hha)
     
     output_hha_file(`.\fonts.hha`, hha)
@@ -391,7 +390,13 @@ add_font_asset :: proc(hha: ^HHA, font: ^SourceFont) -> (u32) {
     result, data, src := add_asset(hha)
     
     data.info.font.codepoint_count = font.codepoint_count
-    data.info.font.line_advance    = font.line_advance
+    
+    ascent, descent, linegap: i32
+    tt.GetFontVMetrics(&font.font, &ascent, &descent, &linegap)
+    data.info.font.ascent  = cast(f32) ascent  * font.scale_factor
+    data.info.font.descent = cast(f32) descent * font.scale_factor
+    data.info.font.linegap = cast(f32) linegap * font.scale_factor
+    
     src^ = SourceFontInfo{ font }
     
     return result
@@ -443,23 +448,15 @@ load_font :: proc(path_to_font: string, codepoint_count: u32) -> (result: Source
     assert(ok)
     
     // TODO(viktor): how large should the glyphs be rendered?
-    pixels : f32 = 180
+    pixels : f32 = 150
     result.scale_factor = tt.ScaleForPixelHeight(&result.font, pixels)
     
-    ascent, descent, lineGap: i32
-    tt.GetFontVMetrics(&result.font, &ascent, &descent, &lineGap)
-    
-    result.line_advance    = result.scale_factor * cast(f32) (ascent - descent + lineGap)
     result.codepoint_count = codepoint_count
     result.codepoints      = make([]BitmapId, codepoint_count)
 
     result.horizontal_advances = make([]f32, codepoint_count*codepoint_count)
-    for a in 0..<codepoint_count {
-        advance_width, left_side_bearing: i32
-        tt.GetCodepointHMetrics(&result.font, cast(rune) a, &advance_width, &left_side_bearing)
-        for b in 0..<codepoint_count {
-            result.horizontal_advances[a * codepoint_count + b] = cast(f32) advance_width * result.scale_factor
-        }
+    for &a in result.horizontal_advances {
+        a = 0
     }
 
     kerning_count := tt.GetKerningTableLength(&result.font)
@@ -467,7 +464,7 @@ load_font :: proc(path_to_font: string, codepoint_count: u32) -> (result: Source
     tt.GetKerningTable(&result.font, raw_data(kerning_table), kerning_count)
     for entry in kerning_table {
         count := cast(rune) codepoint_count
-        if entry.glyph1 < count && entry.glyph2 < count {
+        if 0 < entry.glyph1 && entry.glyph1 < count && 0 < entry.glyph2 && entry.glyph2 < count {
             result.horizontal_advances[entry.glyph1 * count + entry.glyph2] += cast(f32) entry.advance * result.scale_factor
         }
     }
@@ -491,8 +488,17 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
     
     info.dimension = vec_cast(u32, result.width, result.height)
     
-    info.align_percentage.x = (1 + cast(f32) (-xoff)) / cast(f32) result.width
+    info.align_percentage.x = (1) / cast(f32) result.width
     info.align_percentage.y = (1 + cast(f32) (yoff + h)) / cast(f32) result.height
+    
+    for other_codepoint in rune(0)..<cast(rune)font.codepoint_count {
+        advance := &font.horizontal_advances[other_codepoint * cast(rune)font.codepoint_count + codepoint]
+        advance^ += cast(f32) w
+        if other_codepoint != 0 {
+            other_advance := &font.horizontal_advances[other_codepoint * cast(rune)font.codepoint_count + codepoint]
+            other_advance^ += cast(f32) -xoff
+        }
+    }
     
     for y in 0..<h {
         for x in 0..<w {

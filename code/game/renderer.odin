@@ -269,31 +269,31 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
 
 
 when INTERNAL {
-    font_scale : f32 = .8
+    font_scale : f32 = 1
     cp_y: f32
     left_edge: f32
+    font_id: FontId
     
     Debug_reset :: proc(width, height: i32) {
         begin_render(Debug_render_group)
         orthographic(Debug_render_group, {width, height}, 1)
         
-        font_id := best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, {}, {})
+        font_id = best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, {}, {})
         font := get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
         
-        line_advance :f32= 10
+        baseline :f32= 10
         if font != nil {
             font_info := get_font_info(Debug_render_group.assets, font_id)
-            line_advance = font_info.line_advance
+            baseline = get_baseline(font_info)
         }
-        cp_y = 0.5 * cast(f32) height - line_advance
-        left_edge = -0.5* cast(f32) width
+        
+        cp_y      =  0.5 * cast(f32) height - baseline
+        left_edge = -0.5 * cast(f32) width
     }
 
     Debug_text_line :: proc(text: string) {
         if Debug_render_group != nil {
             assert(Debug_render_group.inside_render)
-            
-            font_id := best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, {}, {})
             
             font := get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
             if font != nil {
