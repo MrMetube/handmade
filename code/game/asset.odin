@@ -98,8 +98,8 @@ Font :: struct {
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets, clear_to_zero = true)
     
-    assets.memory_sentinel.next = &assets.memory_sentinel 
-    assets.memory_sentinel.prev = &assets.memory_sentinel 
+    assets.memory_sentinel.next = &assets.memory_sentinel
+    assets.memory_sentinel.prev = &assets.memory_sentinel
     
     insert_block(&assets.memory_sentinel, push(arena, memory_size), memory_size)
     
@@ -121,8 +121,8 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     }
     
     // NOTE(viktor): count the null tag and null asset only once and not per HHA file
-    tag_count:   u32 = 1
-    asset_count: u32 = 1
+    total_tag_count:   u32 = 1
+    total_asset_count: u32 = 1
     {
         file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
         
@@ -130,7 +130,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         assets.files = push(arena, AssetFile, file_group.file_count)
         for &file, index in assets.files {
             file.handle = Platform.open_next_file(&file_group)
-            file.tag_base = tag_count
+            file.tag_base = total_tag_count
             
             file.header = {}
             read_data_from_file_into_struct(&file.handle, 0, &file.header)
@@ -149,8 +149,8 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
             if Platform_no_file_errors(&file.handle) {
                 // NOTE(viktor): The first slot in every HHA is a null asset/ null tag
                 // so we don't count it as something we will need space for!
-                asset_count += (file.header.asset_count - 1)
-                tag_count   += (file.header.tag_count - 1)
+                total_asset_count += (file.header.asset_count - 1)
+                total_tag_count   += (file.header.tag_count - 1)
             } else {
                 unreachable() // TODO(viktor): Eventually, have some way of notifying users of bogus amogus files?
             }
@@ -160,8 +160,8 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     }
     
     // NOTE(viktor): Allocate all metadata space
-    assets.assets = push(arena, Asset,    asset_count)
-    assets.tags   = push(arena, AssetTag, tag_count)
+    assets.assets = push(arena, Asset,    total_asset_count)
+    assets.tags   = push(arena, AssetTag, total_tag_count)
     
     // NOTE(viktor): Load tags
     for &file in assets.files {
@@ -171,14 +171,14 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         read_data_from_file_into_slice(&file.handle, offset, assets.tags[file.tag_base:][:file_tag_count])
     }
     
-    loaded_asset_count: u32 = 1
+    asset_count: u32 = 1
     // NOTE(viktor): reserve and zero out the null tag / null asset
     assets.tags[0]   = {}
     assets.assets[0] = {}
     
     for id in AssetTypeId {
         dest_type := &assets.types[id]
-        dest_type.first_asset_index = loaded_asset_count
+        dest_type.first_asset_index = asset_count
 
         for &file, file_index in assets.files {
             file.font_bitmap_id_offset = 0
@@ -197,7 +197,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
                         hha_asset_array := push(&tran_state.arena, hha.AssetData, asset_count_for_type)
                         read_data_from_file_into_slice(&file.handle, file.header.assets + cast(u64) source_type.first_asset_index * size_of(hha.AssetData), hha_asset_array)
                                                     
-                        assets_for_type := assets.assets[loaded_asset_count:][:asset_count_for_type]
+                        assets_for_type := assets.assets[asset_count:][:asset_count_for_type]
                         for &asset, asset_index in assets_for_type {
                             hha_asset := hha_asset_array[asset_index]
                             
@@ -213,17 +213,17 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
                         }
                         
                         
-                        loaded_asset_count += asset_count_for_type
-                        assert(loaded_asset_count <= asset_count)
+                        asset_count += asset_count_for_type
+                        assert(asset_count <= total_asset_count)
                     }
                 }
             }
         }
 
-        dest_type.one_past_last_index = loaded_asset_count
+        dest_type.one_past_last_index = asset_count
     }
     
-    assert(loaded_asset_count == asset_count)
+    assert(asset_count == total_asset_count)
     
     return assets
 }
@@ -515,6 +515,7 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, #any_int size: u64, 
             next_block := &blocks[1]
             result = cast(^AssetMemoryHeader) next_block
             
+            assert(block.size >= size)
             remaining_size := block.size - size
             
             BlockSplitThreshhold := kilobytes(4) // TODO(viktor): set this based on the smallest asset size
@@ -683,7 +684,7 @@ load_sound :: proc(assets: ^Assets, id: SoundId) {
                 for &channel, index in sound.channels[:sound.channel_count] {
                     channel = samples[info.sample_count * auto_cast index:][:info.sample_count]
                 }
-                                
+                
                 work := push(&task.arena, LoadAssetWork)
                 work^ = {
                     task = task,
@@ -742,8 +743,8 @@ load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) {
                     
                     handle = get_file_handle_for(assets, asset.file_index),
                     
-                    position = asset.data_offset, 
-                    amount = memory_size,
+                    position    = asset.data_offset, 
+                    amount      = memory_size,
                     destination = raw_data(bitmap.memory),
                     
                     asset = asset,
@@ -785,7 +786,6 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
                 data_size := codepoints_size + horizontal_advance_size
                 total := data_size + size_of(AssetMemoryHeader)
             
-                // TODO(viktor): support alignment of 16
                 asset.header = acquire_asset_memory(assets, total, cast(u32) id)
                 // :PointerArithmetic
                 font_memory := (cast([^]AssetMemoryHeader) asset.header)[1:]
@@ -797,6 +797,7 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
                 
                 font := &asset.header.as.font
                 font^ = {
+                    codepoint_count    = info.codepoint_count,
                     bitmap_id_offset   = get_file(assets, asset.file_index).font_bitmap_id_offset,
                     codepoints         = codepoints,
                     horizontal_advance = horizontal_advance,
@@ -813,6 +814,7 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
                     
                     asset = asset,
                 }
+                
                 
                 if !immediate {
                     task_work := push(&task.arena, LoadAssetWork)

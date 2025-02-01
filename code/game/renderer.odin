@@ -269,7 +269,7 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
 
 
 when INTERNAL {
-    font_scale : f32 = 1
+    font_scale : f32 = .8
     cp_y: f32
     left_edge: f32
     
@@ -277,17 +277,23 @@ when INTERNAL {
         begin_render(Debug_render_group)
         orthographic(Debug_render_group, {width, height}, 1)
         
-        cp_y = 0.5 * cast(f32) height - font_scale * 2
-        left_edge = -0.5* cast(f32) width + font_scale
+        font_id := best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, {}, {})
+        font := get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
+        
+        line_advance :f32= 10
+        if font != nil {
+            font_info := get_font_info(Debug_render_group.assets, font_id)
+            line_advance = font_info.line_advance
+        }
+        cp_y = 0.5 * cast(f32) height - line_advance
+        left_edge = -0.5* cast(f32) width
     }
 
     Debug_text_line :: proc(text: string) {
         if Debug_render_group != nil {
             assert(Debug_render_group.inside_render)
             
-            font_weights := #partial AssetVector{ .Codepoint = 1 }
-            font_match   := #partial AssetVector{ .Codepoint = 0 }
-            font_id := best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, font_match, font_weights)
+            font_id := best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, {}, {})
             
             font := get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
             if font != nil {
@@ -298,18 +304,18 @@ when INTERNAL {
                 for codepoint in text {
                     defer previous_codepoint = codepoint
                     
-                    advance_x := font_scale * get_horizontal_advance_for_pair(font, previous_codepoint, codepoint)
-                    cp_x += advance_x
+                    advance_x := get_horizontal_advance_for_pair(font, previous_codepoint, codepoint)
+                    cp_x += advance_x * font_scale
                     
                     if codepoint != ' ' {
                         bitmap_id := get_bitmap_for_glyph(font, codepoint)
                         info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
-                        
-                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y, {cp_x, cp_y, 0})
+                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0})
                     }
                 }
                 
-                cp_y -= font_scale * get_line_advance(font_info)
+                advance_y := get_line_advance(font_info)
+                cp_y -= font_scale * advance_y
             } else {
                 load_font(Debug_render_group.assets, font_id, false)
             }

@@ -2,8 +2,8 @@ package main
 
 import win "core:sys/windows"
 
-update_and_render    : UpdateAndRender
-output_sound_samples : OutputSoundSamples
+update_and_render:    UpdateAndRender
+output_sound_samples: OutputSoundSamples
 
 load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
     if game_lib == nil {
@@ -49,12 +49,11 @@ unload_game_lib :: proc() {
     output_sound_samples = nil
 }
 
-
-// ---------------------- Internal stuff
-
+////////////////////////////////////////////////
+// Internal stuff
 
 @(private="file")
-game_lib : win.HMODULE
+game_lib: win.HMODULE
 
 @(private="file")
 UpdateAndRender    :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: Input)

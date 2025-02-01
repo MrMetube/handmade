@@ -443,7 +443,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             sub_arena(&task.arena, &tran_state.arena, megabytes(2))
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(48), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, megabytes(64), tran_state)
         
         Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
         

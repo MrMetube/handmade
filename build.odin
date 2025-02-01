@@ -1,3 +1,5 @@
+#+feature dynamic-literals
+
 package build
 
 import "core:os"
@@ -7,12 +9,11 @@ import "core:log"
 import "core:strings"
 import "base:runtime"
 
-flags    :: ` -vet-cast -vet-shadowing -error-pos-style:unix `
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing `
 windows  :: " -subsystem:windows "
-console  :: " -subsystem:console "
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
-pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game -vet-unused-procedures -vet-style "
+pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-packages:main,game,hha -vet-unused-procedures -vet-style "
 
 optimizations :: " -o:none " when true else " -o:speed "
 
@@ -22,21 +23,51 @@ exe_path :: `.\build\build.exe`
 build_dir :: `.\build`
 data_dir  :: `.\data`
 
+Target :: enum {
+    Game,
+    Platform,
+    AssetBuilder,
+}
+TargetFlags :: bit_set[Target]
+
+TargetNames := map[string]Target {
+    "-Game"         = .Game,
+    "-Platform"     = .Platform,
+    "-AssetBuilder" = .AssetBuilder,
+}
+
 main :: proc() {
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
     context.logger.lowest_level = .Info
     
+    targetsToBuild := TargetFlags{}
+    for arg in os.args[1:] {
+        if v, ok := TargetNames[arg]; ok {
+            targetsToBuild += {v}
+        }
+    }
+    if card(targetsToBuild) == 0 do targetsToBuild = ~targetsToBuild
+    
     // TODO(viktor): clean up the initial build turd (ie. .\handmade.exe)
+    // TODO(viktor): confirm in which directory we are running, handle subdirectories
     rebuild_yourself(exe_path)
     
     if !os.exists(build_dir) do os.make_directory(build_dir)
     if !os.exists(data_dir)  do os.make_directory(data_dir) 
     
-    os.set_current_directory(build_dir)
+    {
+        err := os.set_current_directory(build_dir)
+        assert(err == nil)
+    }
+
+    // TODO(viktor): parallel and serial build steps
+    if .AssetBuilder in targetsToBuild {
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, /* pedantic */)
+    }
     
     debug_build := "debug.exe" 
-
-    { // Game
+    
+    if .Game in targetsToBuild {
         out := `.\game.dll`
         {
             delete_all_like(`.\game*.pdb`)
@@ -56,15 +87,9 @@ main :: proc() {
         }
     }
 
-    { // Asset file Builder
-        out := `.\asset_builder.exe`
-        src := `..\code\game\asset_builder`
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build `, src, ` -out:`, out, flags, console, debug, pedantic)
-    }
-    
     if is_running(debug_build) do os.exit(0)
 
-    {// Platform
+    if .Platform in targetsToBuild {
         copy_over(`..\code\game\common.odin`, `..\code\common.odin`, "package game", "package main")
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_build, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
     }
@@ -148,7 +173,10 @@ rebuild_yourself :: proc(exe_path: string) {
         if err := os.rename(exe_path,  old_path); err != nil do fmt.println(os.error_string(err))
         if err := os.rename(temp_path, exe_path); err != nil do fmt.println(os.error_string(err))
         
-        run_command_or_exit(exe_path)
+        exe := os.args[0]
+        args := os.args
+        args[0] = " "
+        run_command_or_exit(exe, ..args) 
         
         os.exit(0)
     }
@@ -233,11 +261,7 @@ run_command :: proc(program: string, args: ..string) -> (success: b32) {
     
     joined_args := strings.join(args, "")
     
-    if len(args) == 0 {
-        log.info("Running:", program,)
-    } else {
-        log.info("Running:", joined_args)
-    }
+    log.info("Running:", program, " - ", joined_args)
     
     if win.CreateProcessW(
         win.utf8_to_wstring(program), 

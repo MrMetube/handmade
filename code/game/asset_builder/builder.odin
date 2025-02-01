@@ -74,6 +74,7 @@ SourceFontGlyphInfo :: struct {
 }
 
 main :: proc() {
+    write_fonts()
     write_hero()
     write_non_hero()
     write_sounds()
@@ -143,6 +144,7 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/stair.bmp")
     end_asset_type(hha)
 
+    // TODO(viktor): alignment percentages for these
     begin_asset_type(hha, .Rock)
     add_bitmap_asset(hha, "../assets/rocks1.bmp")
     add_bitmap_asset(hha, "../assets/rocks2.bmp")
@@ -152,6 +154,13 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/rocks7.bmp")
     end_asset_type(hha)
     
+    // add_bitmap_asset(result, "../assets/rocks6a.bmp")
+    // add_bitmap_asset(result, "../assets/rocks6b.bmp")
+    
+    // add_bitmap_asset(result, "../assets/rocks8a.bmp")
+    // add_bitmap_asset(result, "../assets/rocks8b.bmp")
+    // add_bitmap_asset(result, "../assets/rocks8c.bmp")
+        
     // TODO(viktor): alignment percentages for these
     begin_asset_type(hha, .Grass)
     add_bitmap_asset(hha, "../assets/grass11.bmp")
@@ -164,13 +173,6 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/flower2.bmp")
     end_asset_type(hha)
     
-    // add_bitmap_asset(result, "../assets/rocks6a.bmp")
-    // add_bitmap_asset(result, "../assets/rocks6b.bmp")
-    
-    // add_bitmap_asset(result, "../assets/rocks8a.bmp")
-    // add_bitmap_asset(result, "../assets/rocks8b.bmp")
-    // add_bitmap_asset(result, "../assets/rocks8c.bmp")
-        
     begin_asset_type(hha, .Monster)
     add_bitmap_asset(hha, "../assets/orc_left.bmp"     , v2{0.7 , 0})
     add_tag(hha, .FacingDirection, Pi)
@@ -178,8 +180,15 @@ write_non_hero :: proc () {
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
     
+    output_hha_file(`.\non_hero.hha`, hha)
+}
+
+write_fonts :: proc() {
+    hha := new(HHA)
+    init(hha)
+    
     // @Leak
-    debug_font := load_font(`C:\Windows\Fonts\arial.ttf`, '~'+1)
+    debug_font := load_font(`..\assets\raw\Caladea\Caladea-Regular.ttf`, '~'+1)
     
     begin_asset_type(hha, .Font)
     add_font_asset(hha, &debug_font)
@@ -191,7 +200,7 @@ write_non_hero :: proc () {
     }
     end_asset_type(hha)
     
-    output_hha_file(`.\non_hero.hha`, hha)
+    output_hha_file(`.\fonts.hha`, hha)
 }
 
 write_sounds :: proc() {
@@ -276,7 +285,7 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
     header.assets      = header.asset_types + cast(u64) asset_types_size
     
     
-    libc.fwrite(&header,             size_of(header),             1, out)
+    libc.fwrite(&header,                 size_of(header),             1, out)
     libc.fwrite(raw_data(hha.tags[:]),   cast(uint) tags_size,        1, out)
     libc.fwrite(raw_data(hha.types[:]),  cast(uint) asset_types_size, 1, out)
     
@@ -290,13 +299,18 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
         
         defer free_all(context.allocator)
         switch v in src {
-        case SourceBitmapInfo:
+          case SourceBitmapInfo:
+            info := &dst.info.bitmap
             bitmap := load_bmp(v.filename)
             
-            info := &dst.info.bitmap
             info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
             libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
-        case SourceFontInfo:
+          case SourceFontGlyphInfo:
+            info := &dst.info.bitmap
+            bitmap := load_glyph_bitmap(v.font, v.codepoint, info)
+            
+            libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
+          case SourceFontInfo:
             info := &dst.info.font
             
             codepoint_count := cast(u64) info.codepoint_count
@@ -305,12 +319,7 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
             
             libc.fwrite(&v.font.codepoints[0],          cast(uint) codepoints_size, 1, out)
             libc.fwrite(&v.font.horizontal_advances[0], cast(uint) horizontal_advance_size, 1, out)
-        case SourceFontGlyphInfo:
-            info := &dst.info.bitmap
-            bitmap := load_glyph_bitmap(v.font, v.codepoint, info)
-            
-            libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
-        case SourceSoundInfo:
+          case SourceSoundInfo:
             info := &dst.info.sound
             wav := load_wav(v.filename, v.first_sample_index, info.sample_count)
             
@@ -396,7 +405,7 @@ add_character_asset :: proc(hha: ^HHA, font: ^SourceFont, codepoint: rune) -> (B
         codepoint = codepoint,
     }
     
-    data.info.bitmap.align_percentage = {0.5, 0.5}
+    data.info.bitmap.align_percentage = 0
     
     return cast(BitmapId) result
 }
@@ -434,17 +443,34 @@ load_font :: proc(path_to_font: string, codepoint_count: u32) -> (result: Source
     assert(ok)
     
     // TODO(viktor): how large should the glyphs be rendered?
-    pixels :f32= 128
+    pixels : f32 = 180
     result.scale_factor = tt.ScaleForPixelHeight(&result.font, pixels)
     
     ascent, descent, lineGap: i32
     tt.GetFontVMetrics(&result.font, &ascent, &descent, &lineGap)
-    result.line_advance = result.scale_factor * cast(f32) (ascent - descent + lineGap)
     
+    result.line_advance    = result.scale_factor * cast(f32) (ascent - descent + lineGap)
     result.codepoint_count = codepoint_count
-    
-    result.codepoints          = make([]BitmapId, codepoint_count)
+    result.codepoints      = make([]BitmapId, codepoint_count)
+
     result.horizontal_advances = make([]f32, codepoint_count*codepoint_count)
+    for a in 0..<codepoint_count {
+        advance_width, left_side_bearing: i32
+        tt.GetCodepointHMetrics(&result.font, cast(rune) a, &advance_width, &left_side_bearing)
+        for b in 0..<codepoint_count {
+            result.horizontal_advances[a * codepoint_count + b] = cast(f32) advance_width * result.scale_factor
+        }
+    }
+
+    kerning_count := tt.GetKerningTableLength(&result.font)
+    kerning_table := make([]tt.kerningentry, kerning_count)
+    tt.GetKerningTable(&result.font, raw_data(kerning_table), kerning_count)
+    for entry in kerning_table {
+        count := cast(rune) codepoint_count
+        if entry.glyph1 < count && entry.glyph2 < count {
+            result.horizontal_advances[entry.glyph1 * count + entry.glyph2] += cast(f32) entry.advance * result.scale_factor
+        }
+    }
     
     return result
 }
@@ -465,8 +491,8 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
     
     info.dimension = vec_cast(u32, result.width, result.height)
     
+    info.align_percentage.x = (1 + cast(f32) (-xoff)) / cast(f32) result.width
     info.align_percentage.y = (1 + cast(f32) (yoff + h)) / cast(f32) result.height
-    info.align_percentage.x = (1) / cast(f32) result.width
     
     for y in 0..<h {
         for x in 0..<w {
@@ -475,10 +501,6 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
             
             dest^ = premuliply_alpha(255, 255, 255, src)
         }
-    }
-    
-    for other_codepoint_index in 0..<font.codepoint_count {
-        font.horizontal_advances[cast(u32) codepoint * font.codepoint_count + other_codepoint_index] = cast(f32) result.width
     }
     
     return result
