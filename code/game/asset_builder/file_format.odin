@@ -92,16 +92,22 @@ SoundInfo :: struct #packed {
     //     samples: [channel_count][sample_count] i16
 }
 
+GlyphInfo :: struct #packed {
+    codepoint: rune,
+    bitmap:    BitmapId,
+}
+
 // TODO(viktor): coult these be polymorphic structs?
 // i.e. FontInfo :: struct($codepoint_count: u32) #packed {
 FontInfo :: struct #packed {
-    codepoint_count: u32,
     ascent:  f32,
     descent: f32,
     linegap: f32,
+    
+    glyph_count: u32,
     // NOTE(viktor): Data is:
-    //     codepoint_count:    [codepoint_count] BitmapId,
-    //     horizontal_advance: [codepoint_count*codepoint_count] f32,
+    //     glyphs:             [glyph_count] GlyphInfo,
+    //     horizontal_advance: [glyph_count][glyph_count] f32,
 }
 
 SoundChain :: enum u32 {

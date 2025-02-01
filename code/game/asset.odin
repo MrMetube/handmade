@@ -88,7 +88,7 @@ AssetFile :: struct {
 Font :: struct {
     bitmap_id_offset: BitmapId,
     // TODO(viktor): clean this up, the loading does not handle that we need to fill two slices
-    codepoint_count:    u32,
+    glyph_count:    u32,
     codepoints:         [^]BitmapId,
     horizontal_advance: [^]f32,
 }
@@ -322,8 +322,7 @@ get_horizontal_advance_for_pair :: proc(font: ^Font, previous_codepoint, codepoi
     previous_codepoint = get_clamped_codepoint(font, previous_codepoint)
     codepoint          = get_clamped_codepoint(font, codepoint)
     
-    codepoint_count := cast(rune) font.codepoint_count
-    result = font.horizontal_advance[previous_codepoint * codepoint_count + codepoint]
+    result = font.horizontal_advance[previous_codepoint * cast(rune) font.glyph_count + codepoint]
     
     return result
 }
@@ -347,7 +346,7 @@ get_bitmap_for_glyph :: proc(font: ^Font, codepoint: rune) -> (result: BitmapId)
 }
 
 get_clamped_codepoint :: proc(font: ^Font, desired: rune) -> (result: rune) {
-    if desired < cast(rune) font.codepoint_count {
+    if desired < cast(rune) font.glyph_count {
         result = desired
     }
     return result
@@ -785,9 +784,9 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
             if immediate || task != nil {
                 info := asset.info.font
                 
-                codepoint_count := cast(u64) info.codepoint_count
-                codepoints_size := codepoint_count * size_of(BitmapId)
-                horizontal_advance_size := codepoint_count * codepoint_count * size_of(f32)
+                glyph_count := cast(u64) info.glyph_count
+                codepoints_size := glyph_count * size_of(BitmapId)
+                horizontal_advance_size := glyph_count * glyph_count * size_of(f32)
                 data_size := codepoints_size + horizontal_advance_size
                 total := data_size + size_of(AssetMemoryHeader)
             
@@ -795,14 +794,14 @@ load_font :: proc(assets: ^Assets, id: FontId, immediate: b32) {
                 // :PointerArithmetic
                 font_memory := (cast([^]AssetMemoryHeader) asset.header)[1:]
                 
-                codepoints := (cast([^]BitmapId) font_memory)//[:codepoint_count]
+                codepoints := (cast([^]BitmapId) font_memory)//[:glyph_count]
                 // :PointerArithmetic
                 horizontal_advance_memory := (cast([^]BitmapId) font_memory)[codepoints_size:]
-                horizontal_advance := (cast([^]f32) horizontal_advance_memory)//[:square(codepoint_count)]
+                horizontal_advance := (cast([^]f32) horizontal_advance_memory)//[:square(glyph_count)]
                 
                 font := &asset.header.as.font
                 font^ = {
-                    codepoint_count    = info.codepoint_count,
+                    glyph_count        = info.glyph_count,
                     bitmap_id_offset   = get_file(assets, asset.file_index).font_bitmap_id_offset,
                     codepoints         = codepoints,
                     horizontal_advance = horizontal_advance,
