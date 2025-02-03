@@ -533,7 +533,7 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
             if(block.size - (alignment - auto_cast alignment_offset) >= size) {
                 remaining_size := block.size - size
                 
-                BlockSplitThreshhold := kilobytes(4) // TODO(viktor): set this based on the smallest asset size
+                BlockSplitThreshhold :: 4 * Kilobyte // TODO(viktor): set this based on the smallest asset size
                 
                 if remaining_size >= BlockSplitThreshhold {
                     block.size -= remaining_size

@@ -10,6 +10,6 @@
 *.test
 *.input
 
-/code/copypasta_common.odin
+/code/copypasta*.odin
 
 lock.tmp

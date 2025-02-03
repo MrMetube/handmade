@@ -1,6 +1,7 @@
 package game
 
 import "base:intrinsics"
+import "base:runtime"
 import "core:simd/x86"
 
 // 
@@ -86,7 +87,6 @@ GameMemory :: struct {
     Platform_api: PlatformAPI,
 
     debug:    DEBUG_code,
-    counters: [DebugCycleCounterName]DebugCycleCounter,
 }
 
 PlatformAPI :: struct {
@@ -124,46 +124,14 @@ Platform_no_file_errors :: #force_inline proc(handle: ^PlatformFileHandle) -> b3
     return handle.no_errors
 }
 
-
-CycleCount :: distinct i64
-DebugCycleCounter :: struct {
-    cycle_count: CycleCount,
-    hit_count:   i64,
-}
-
-DebugCycleCounterName :: enum {
-    update_and_render,
-    render_to_output,
-    draw_rectangle_slowly,
-    draw_rectangle_quickly,
-    test_pixel,
-}
-
-read_cycle_counter :: #force_inline proc() -> CycleCount { return cast(CycleCount) intrinsics.read_cycle_counter() }
-
-when INTERNAL { 
-    DEBUG_code :: struct {
-        read_entire_file:  DebugReadEntireFile,
-        write_entire_file: DebugWriteEntireFile,
-        free_file_memory:  DebugFreeFileMemory,
-    }
-
-    DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
-    DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
-    DebugFreeFileMemory  :: #type proc(memory: []u8)
-    
-    DEBUG_GLOBAL_memory: ^GameMemory
-}
-
-
 // 
 // Utilities
 // 
 
-kilobytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return value * 1024 }
-megabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return kilobytes(value) * 1024 }
-gigabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return megabytes(value) * 1024 }
-terabytes :: #force_inline proc "contextless" (#any_int value: u64) -> u64 { return gigabytes(value) * 1024 }
+Kilobyte :: runtime.Kilobyte
+Megabyte :: runtime.Megabyte
+Gigabyte :: runtime.Gigabyte
+Terabyte :: runtime.Terabyte
 
 // TODO(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
 atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {

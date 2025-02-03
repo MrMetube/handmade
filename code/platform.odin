@@ -42,8 +42,8 @@ Resolution :: [2]i32 {1280, 720}
 MonitorRefreshHz: u32 : 72
 
 
-PermanentStorageSize := megabytes(256)
-TransientStorageSize := gigabytes(1)
+PermanentStorageSize :: 256 * Megabyte
+TransientStorageSize :: 1 * Gigabyte
 
 //   
 //  Globals
@@ -283,13 +283,13 @@ main :: proc() {
     }
     
     { // NOTE(viktor): initialize game_memory
-        base_address := cast(rawpointer) cast(uintptr) terabytes(1) when INTERNAL else 0
+        base_address := cast(rawpointer) cast(uintpointer) (1 * Terabyte) when INTERNAL else 0
 
         total_size := cast(uint) (PermanentStorageSize + TransientStorageSize)
 
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         // TODO(viktor): why limit ourselves?
-        assert(cast(u64) total_size < gigabytes(4))
+        assert(total_size < 4 * Gigabyte)
         state.game_memory_block = storage_ptr[:total_size]
 
         // TODO(viktor): TransientStorage needs to be broken up
@@ -506,8 +506,8 @@ main :: proc() {
                     when INTERNAL {
                         title := "Debug Game Cycle Counts"
                         longest_name_length := len(title)
-                        for counter, name in game_memory.counters {
-                            name_string := fmt.tprint(name)
+                        for _, record in DebugRecords {
+                            name_string := fmt.tprint(record.procedure)
                             longest_name_length = max(longest_name_length, len(name_string))
                         }
                         
@@ -515,10 +515,11 @@ main :: proc() {
                         
                         fmt.printfln(format, title)
                         format = fmt.tprintf("%s %% 10vcy, %% 10vh, %% 10v cy/h", format)
-                        for &counter, name in game_memory.counters {
-                            denom := counter.hit_count == 0 ? 1 : counter.hit_count
-                            fmt.printfln(format, name, counter.cycle_count, counter.hit_count, cast(i64) counter.cycle_count / denom)
-                            counter = {}
+                        for _, &record in DebugRecords {
+                            denom := record.hit_count == 0 ? 1 : record.hit_count
+                            fmt.printfln(format, record.procedure, record.cycle_count, record.hit_count, cast(i64) record.cycle_count / denom)
+                            record.hit_count = 0
+                            record.cycle_count = 0
                         }
                     }
                 }

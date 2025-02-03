@@ -253,7 +253,7 @@ when INTERNAL {
 
 @(export) 
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
-    timed_block(.update_and_render)
+    timed_block()
 
     Platform = memory.Platform_api
     
@@ -442,12 +442,12 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         
         for &task in tran_state.tasks {
             task.in_use = false
-            sub_arena(&task.arena, &tran_state.arena, megabytes(2))
+            sub_arena(&task.arena, &tran_state.arena, 2 * Megabyte)
         }
 
-        tran_state.assets = make_assets(&tran_state.arena, megabytes(64), tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, 64 * Megabyte, tran_state)
         
-        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
+        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, 32 * Megabyte, false)
         
         play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
@@ -486,7 +486,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             }
         }
         // TODO(viktor): The global doesnt get saved between reloads, save it instead of leaking that memory
-        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
+        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, 32 * Megabyte, false)
         
         // make_sphere_normal_map(tran_state.test_normal, 0)
         // make_sphere_diffuse_map(tran_state.test_diffuse)
@@ -587,7 +587,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, tran_state.assets, megabytes(4), false)
+    render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
     begin_render(render_group)
     
     focal_length, distance_above_ground : f32 = 0.6, 8
@@ -1027,7 +1027,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         overlay_cycle_counters(memory)
         tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
         end_render(Debug_render_group)
-        
     }
 }
 
@@ -1045,22 +1044,14 @@ output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
     
 overlay_cycle_counters :: proc(game_memory: ^GameMemory) {
     when INTERNAL {
-        name_table := [DebugCycleCounterName]string{
-            .update_and_render      = "UpdateAndRender",
-            .render_to_output       = "RenderToOutput",
-            .draw_rectangle_slowly  = "DrawRectangleSlowly",
-            .draw_rectangle_quickly = "DrawRectangleQuickly",
-            .test_pixel             = "TestPixel",
-        }
-        
         // Debug_text_line("贺佳樱我爱你")
-        Debug_text_line("AVA: WA ty fi ij `^?'\"")
-        Debug_text_line("0123456789°")
+        // Debug_text_line("AVA: WA ty fi ij `^?'\"")
+        // Debug_text_line("0123456789°")
         Debug_text_line("Debug Game Cycle Counts:")
         
-        for counter, name in game_memory.counters {
-            denom := counter.hit_count == 0 ? 1 : counter.hit_count
-            Debug_text_line(name_table[name])
+        for _, record in DebugRecords {
+            denom := record.hit_count == 0 ? 1 : record.hit_count
+            Debug_text_line(record.procedure)
         }
     }
 }

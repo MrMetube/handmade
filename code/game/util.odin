@@ -11,7 +11,7 @@ i32x4 :: #simd[4]i32
 i16x8 :: #simd[8]i16
 
 @(disabled=ODIN_DISABLE_ASSERT)
-assert :: #force_inline proc(condition: b32, message := #caller_expression(condition), loc := #caller_location) {
+assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {
     if !condition {
         // NOTE(viktor): if needed enclose the failure code in the cold proc to improve branch prediction
         // @(cold)
