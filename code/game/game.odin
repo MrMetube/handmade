@@ -253,7 +253,7 @@ when INTERNAL {
 
 @(export) 
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
-    update_and_render_start_count := begin_timed_block(.update_and_render)
+    timed_block(.update_and_render)
 
     Platform = memory.Platform_api
     
@@ -1022,8 +1022,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
     
-    end_timed_block(.update_and_render, update_and_render_start_count)
-
     if Debug_render_group != nil {
         Debug_reset(buffer.width, buffer.height)
         overlay_cycle_counters(memory)

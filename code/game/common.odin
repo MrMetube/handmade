@@ -75,23 +75,6 @@ Input :: struct {
 }
 #assert(size_of(Input{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(Input{}._mouse_buttons_array_and_enum._buttons_enum))
 
-when INTERNAL {
-    DebugCycleCounter :: struct {
-        cycle_count: i64,
-        hit_count:   i64,
-    }
-
-    DebugCycleCounterName :: enum {
-        update_and_render,
-        render_to_output,
-        draw_rectangle_slowly,
-        draw_rectangle_quickly,
-        test_pixel,
-    }
-} else {
-    DebugCycleCounterName :: enum {}
-}
-
 GameMemory :: struct {
     // NOTE: REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
@@ -142,6 +125,21 @@ Platform_no_file_errors :: #force_inline proc(handle: ^PlatformFileHandle) -> b3
 }
 
 
+CycleCount :: distinct i64
+DebugCycleCounter :: struct {
+    cycle_count: CycleCount,
+    hit_count:   i64,
+}
+
+DebugCycleCounterName :: enum {
+    update_and_render,
+    render_to_output,
+    draw_rectangle_slowly,
+    draw_rectangle_quickly,
+    test_pixel,
+}
+
+read_cycle_counter :: #force_inline proc() -> CycleCount { return cast(CycleCount) intrinsics.read_cycle_counter() }
 
 when INTERNAL { 
     DEBUG_code :: struct {
@@ -155,32 +153,6 @@ when INTERNAL {
     DebugFreeFileMemory  :: #type proc(memory: []u8)
     
     DEBUG_GLOBAL_memory: ^GameMemory
-    
-    // TODO(viktor): use @disabled here?
-    @require_results
-    begin_timed_block  :: #force_inline proc(name: DebugCycleCounterName) -> i64 { return intrinsics.read_cycle_counter()}
-    @(deferred_in_out=end_timed_block)
-    scoped_timed_block :: #force_inline proc(name: DebugCycleCounterName) -> i64 { return intrinsics.read_cycle_counter()}
-    end_timed_block    :: #force_inline proc(name: DebugCycleCounterName, start_cycle_count: i64) {
-        #no_bounds_check {
-            end_cycle_count := intrinsics.read_cycle_counter()
-            counter := &DEBUG_GLOBAL_memory.counters[name]
-            counter.cycle_count += end_cycle_count - start_cycle_count
-            counter.hit_count   += 1
-        }
-    }
-    
-    @(deferred_in_out=end_timed_block_counted)
-    scoped_timed_block_counted :: #force_inline proc(name: DebugCycleCounterName, count: i64) -> i64 { return intrinsics.read_cycle_counter()}
-    end_timed_block_counted    :: #force_inline proc(name: DebugCycleCounterName, count, start_cycle_count: i64) {
-        #no_bounds_check {
-            end_cycle_count := intrinsics.read_cycle_counter()
-            counter := &DEBUG_GLOBAL_memory.counters[name]
-            counter.cycle_count += end_cycle_count - start_cycle_count
-            counter.hit_count   += count
-        }
-    }
-    
 }
 
 
@@ -200,9 +172,8 @@ atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new:
     ok = cast(b32) ok_
     return was, ok
 }
-
-volatile_load :: intrinsics.volatile_load
-volatile_store :: intrinsics.volatile_store
+volatile_load      :: intrinsics.volatile_load
+volatile_store     :: intrinsics.volatile_store
 
 @(enable_target_feature="sse")
 complete_previous_writes_before_future_writes :: proc "contextless" () {
