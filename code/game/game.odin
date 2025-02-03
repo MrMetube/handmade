@@ -10,6 +10,8 @@ INTERNAL :: #config(INTERNAL, false)
     ARCHITECTURE EXPLORATION
 
     - Renderer Clipping StartMask and Alignment causes issues
+    - Dead Lock on Load when a lot of assets are loaded at once
+    - font rendering robustness
     
     - :PointerArithmetic
         - change the types to a less c-mindset
@@ -447,7 +449,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         
         Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, megabytes(32), false)
         
-        // play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+        play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         state.mixer.master_volume = 0.25
         
@@ -1024,7 +1026,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
 
     if Debug_render_group != nil {
         Debug_reset(buffer.width, buffer.height)
-        
         overlay_cycle_counters(memory)
         tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
         end_render(Debug_render_group)
@@ -1054,9 +1055,10 @@ overlay_cycle_counters :: proc(game_memory: ^GameMemory) {
             .test_pixel             = "TestPixel",
         }
         
+        // Debug_text_line("贺佳樱我爱你")
+        Debug_text_line("AVA: WA ty fi ij `^?'\"")
+        Debug_text_line("0123456789°")
         Debug_text_line("Debug Game Cycle Counts:")
-        Debug_text_line("西安")
-        Debug_text_line("小耳木兎")
         
         for counter, name in game_memory.counters {
             denom := counter.hit_count == 0 ? 1 : counter.hit_count

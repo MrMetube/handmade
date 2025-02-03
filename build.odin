@@ -64,9 +64,7 @@ main :: proc() {
     if .AssetBuilder in targetsToBuild {
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, /* pedantic */)
     }
-    
-    debug_build := "debug.exe" 
-    
+
     if .Game in targetsToBuild {
         out := `.\game.dll`
         {
@@ -86,12 +84,11 @@ main :: proc() {
             run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when false else ""))
         }
     }
-
-    if is_running(debug_build) do os.exit(0)
-
-    if .Platform in targetsToBuild {
+    
+    debug_exe := "debug.exe" 
+    if .Platform in targetsToBuild && !is_running(debug_exe) {
         copy_over(`..\code\game\common.odin`, `..\code\common.odin`, "package game", "package main")
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_build, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
     }
     
     os.exit(0)

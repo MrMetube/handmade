@@ -287,7 +287,7 @@ when INTERNAL {
             baseline = get_baseline(font_info)
         }
         
-        cp_y      =  0.5 * cast(f32) height - baseline
+        cp_y      =  0.5 * cast(f32) height - baseline * font_scale
         left_edge = -0.5 * cast(f32) width
     }
 
@@ -304,13 +304,14 @@ when INTERNAL {
                 for codepoint in text {
                     defer previous_codepoint = codepoint
                     
-                    advance_x := get_horizontal_advance_for_pair(font, previous_codepoint, codepoint)
+                    advance_x := get_horizontal_advance_for_pair(font, font_info, previous_codepoint, codepoint)
                     cp_x += advance_x * font_scale
                     
-                    if codepoint != ' ' {
-                        bitmap_id := get_bitmap_for_glyph(font, codepoint)
-                        info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
-                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0})
+                    bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
+                    info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
+                    
+                    if info != nil && codepoint != ' ' {
+                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0}, {1, 0.76, 0.37, 1})
                     }
                 }
                 
@@ -501,7 +502,7 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
     for base_address: u32 = 0; base_address < group.push_buffer_size; {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
         base_address += size_of(RenderGroupEntryHeader)
-
+        //:PointerArithmetic
         data := &group.push_buffer[base_address]
 
         switch header.type {
@@ -625,6 +626,7 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
     scoped_timed_block(.draw_rectangle_quickly)
     assert(texture.memory != nil)
+    assert(len(texture.memory) <= 2160 * 1444 * 2)
     assert(texture.width  >= 0)
     assert(texture.height >= 0)
     assert(texture.width  >  0)
@@ -690,14 +692,13 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         
         if fill_rect.min.x & 3 != 0 {
             start_clip_mask = start_clip_masks[fill_rect.min.x & 3]
-            
-            // TODO(viktor): IMPORTANT(viktor): fix this clipping
-            fill_rect.min.x = fill_rect.min.x & (~i32(3)) + 4
+            // TODO(viktor): IMPORTANT: fix this clipping
+            fill_rect.min.x = align4(fill_rect.min.x)// - 4
         }
 
         if fill_rect.max.x & 3 != 0 {
             end_clip_mask = end_clip_masks[fill_rect.max.x & 3]
-            fill_rect.max.x = fill_rect.max.x & (~i32(3)) + 4
+            fill_rect.max.x = align4(fill_rect.max.x)
         }
         
         normal_x_axis := x_axis * 1 / length_squared(x_axis)

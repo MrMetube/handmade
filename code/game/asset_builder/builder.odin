@@ -24,8 +24,9 @@ HHA :: struct {
     
     tags:    [HUUGE]AssetTag,
     types:   [HUUGE]AssetType,
-    sources: [HUUGE]SourceAsset,
     data:    [HUUGE]AssetData,
+    
+    sources: [HUUGE]SourceAsset,
 }
 
 SourceSound :: struct {
@@ -42,9 +43,6 @@ SourceFont :: struct {
     font:         tt.fontinfo,
     scale_factor: f32,
     
-    min_codepoint: rune,
-    max_codepoint: rune,
-    
     max_glyph_count: u32,
     glyph_count:     u32,
     
@@ -52,6 +50,7 @@ SourceFont :: struct {
     glyphs:              []GlyphInfo,
     horizontal_advances: []f32,
     
+    one_past_highest_codepoint: rune,
     glyph_index_from_codepoint: []u32,
 }
 
@@ -87,22 +86,19 @@ main :: proc() {
     write_sounds()
 }
 
-init :: proc(hha: ^HHA) {
-    hha.tag_count   = 1
-    hha.asset_count = 1
-    hha.type_count  = 1
-    hha.type        = nil
-    hha.asset_index = 0
-    
-    hha.sources = {}
-    hha.data    = {}
-    hha.tags    = {}
-    hha.types   = {}
+make_hha :: proc() -> (hha: ^HHA) {
+    hha = new(HHA)
+    hha^ = {
+        tag_count   = 1,
+        asset_count = 1,
+        type_count  = 1,
+    }
+    return hha
 }
 
 write_hero :: proc () {
-    hha := new(HHA)
-    init(hha)
+    hha := make_hha()
+    defer output_hha_file(`.\hero.hha`, hha)
         
     begin_asset_type(hha, .Head)
     add_bitmap_asset(hha, "../assets/head_left.bmp",  {0.36, 0.01})
@@ -131,13 +127,11 @@ write_hero :: proc () {
     add_bitmap_asset(hha, "../assets/sword_right.bmp", {0.63, 0.01})
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
-    
-    output_hha_file(`.\hero.hha`, hha)
 }
 
 write_non_hero :: proc () {
-    hha := new(HHA)
-    init(hha)
+    hha := make_hha()
+    defer output_hha_file(`.\non_hero.hha`, hha)
     
     begin_asset_type(hha, .Shadow)
     add_bitmap_asset(hha, "../assets/shadow.bmp", {0.5, -0.4})
@@ -186,41 +180,32 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/orc_right.bmp"    , v2{0.27, 0})
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
-    
-    output_hha_file(`.\non_hero.hha`, hha)
 }
 
 write_fonts :: proc() {
-    hha := new(HHA)
-    init(hha)
+    hha := make_hha()
+    defer output_hha_file(`.\fonts.hha`, hha)
     
     // @Leak
-    debug_font := load_font(`C:\Windows\Fonts\arial.ttf`)
+    debug_font := load_font(`C:\Windows\Fonts\LiberationSans-Regular.ttf`)
+    // debug_font := load_font(`C:\Windows\Fonts\arial.ttf`)
+    // debug_font := load_font(`C:\Users\Viktor\Downloads\Noto_Sans_SC\static\NotoSansSC-Regular.ttf`)
+
+    begin_asset_type(hha, .FontGlyph)
+    for c in rune(1)..<127 do add_character_asset(hha, &debug_font, c)
+    for c in "贺佳樱我爱你" do add_character_asset(hha, &debug_font, c)
+    for c in "°" do add_character_asset(hha, &debug_font, c)
+
+    end_asset_type(hha)
     
     begin_asset_type(hha, .Font)
     add_font_asset(hha, &debug_font)
     end_asset_type(hha)
-    
-    begin_asset_type(hha, .FontGlyph)
-    add_character_asset(hha, &debug_font, ' ')
-    for c in '!'..<'~' {
-        add_character_asset(hha, &debug_font, c)
-    }
-    for c in "西安"    {
-        add_character_asset(hha, &debug_font, c)
-    }
-    for c in "小耳木兎" {
-        add_character_asset(hha, &debug_font, c)
-    }
-
-    end_asset_type(hha)
-
-    output_hha_file(`.\fonts.hha`, hha)
 }
 
 write_sounds :: proc() {
-    hha := new(HHA)
-    init(hha)
+    hha := make_hha()
+    defer output_hha_file(`.\sounds.hha`, hha)
     
     begin_asset_type(hha, .Blop)
     add_sound_asset(hha, "../assets/blop0.wav")
@@ -259,7 +244,7 @@ write_sounds :: proc() {
             sample_count = section
         }
         
-        this_index := add_sound_asset(hha, "../assets/Light Ambience 1.wav", first_sample_index, sample_count)
+        this_index := add_sound_asset(hha, "../assets/Light Ambience 3.wav", first_sample_index, sample_count)
         if first_sample_index + section < total_sample_count {
             hha.data[this_index].info.sound.chain = .Advance
         }
@@ -270,11 +255,10 @@ write_sounds :: proc() {
     // add_sound_asset("../assets/Light Ambience 4.wav")
     // add_sound_asset("../assets/Light Ambience 5.wav")
     end_asset_type(hha)
-    
-    output_hha_file(`.\sounds.hha`, hha)
 }
 
 output_hha_file :: proc(file_name: string, hha: ^HHA) {
+    // TODO(viktor): don't use libc
     out := libc.fopen(strings.clone_to_cstring(file_name), "wb")
     if out == nil {
         fmt.eprintln("could not open asset file:", file_name)
@@ -311,7 +295,11 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
         dst := &hha.data[index]
         
         dst.data_offset = auto_cast libc.ftell(out)
-        
+
+        write_slice :: proc(stream: ^libc.FILE, data: []$T) {
+            libc.fwrite(raw_data(data), len(data) * size_of(T), 1, stream)
+        }
+                
         defer free_all(context.allocator)
         switch v in src {
           case SourceBitmapInfo:
@@ -319,23 +307,25 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
             bitmap := load_bmp(v.filename)
             
             info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
-            libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
+            write_slice(out, bitmap.memory)
           case SourceFontGlyphInfo:
             info := &dst.info.bitmap
             bitmap := load_glyph_bitmap(v.font, v.codepoint, info)
             
-            libc.fwrite(&bitmap.memory[0], cast(uint) (info.dimension.x * info.dimension.y) * size_of([4]u8), 1, out)
+            info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
+            write_slice(out, bitmap.memory)
           case SourceFontInfo:
             finalize_font_kerning(v.font)
             
-            glyph_count     := v.font.glyph_count
+            glyph_count := v.font.glyph_count
             
-            codepoints_size := glyph_count * size_of(v.font.glyphs[0])
-            libc.fwrite(&v.font.glyphs[0], cast(uint) codepoints_size, 1, out)
+            info := &dst.info.font
+            info.one_past_highest_codepoint = v.font.one_past_highest_codepoint
+            write_slice(out, v.font.glyphs[:glyph_count])
             
             for glyph_index in 0..<glyph_count {
-                horizontal_advance_slice_size := glyph_count * size_of(v.font.horizontal_advances[0])
-                libc.fwrite(&v.font.horizontal_advances[glyph_index * v.font.max_glyph_count], cast(uint) horizontal_advance_slice_size, 1, out)
+                start := glyph_index * v.font.max_glyph_count
+                write_slice(out, v.font.horizontal_advances[start:][:glyph_count])
             }
           case SourceSoundInfo:
             info := &dst.info.sound
@@ -345,7 +335,7 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
             info.channel_count = wav.channel_count
             
             for channel in wav.channels[:wav.channel_count] {
-                libc.fwrite(&channel[0], cast(uint) info.sample_count * size_of(i16), 1, out)
+                write_slice(out, channel)
             }
         }
     }
@@ -370,7 +360,7 @@ add_asset :: proc(hha: ^HHA) -> (asset_index: u32, data: ^AssetData, src: ^Sourc
     
     asset_index = hha.type.one_past_last_index
     hha.type.one_past_last_index += 1
-    src = &hha.sources[asset_index]
+    src  = &hha.sources[asset_index]
     data = &hha.data[asset_index]
     
     data.first_tag_index         = hha.tag_count
@@ -405,18 +395,17 @@ add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0
     return result
 }
 
-add_font_asset :: proc(hha: ^HHA, font: ^SourceFont) -> (u32) {
+add_font_asset :: proc(hha: ^HHA, source: ^SourceFont) -> (u32) {
     result, data, src := add_asset(hha)
     
-    data.info.font.glyph_count = font.glyph_count
+    src^ = SourceFontInfo{ source }
     
     ascent, descent, linegap: i32
-    tt.GetFontVMetrics(&font.font, &ascent, &descent, &linegap)
-    data.info.font.ascent  = cast(f32) ascent  * font.scale_factor
-    data.info.font.descent = cast(f32) descent * font.scale_factor
-    data.info.font.linegap = cast(f32) linegap * font.scale_factor
-    
-    src^ = SourceFontInfo{ font }
+    tt.GetFontVMetrics(&source.font, &ascent, &descent, &linegap)
+    data.info.font.ascent  = cast(f32) ascent  * source.scale_factor
+    data.info.font.descent = cast(f32) descent * source.scale_factor
+    data.info.font.linegap = cast(f32) linegap * source.scale_factor
+    data.info.font.glyph_count = source.glyph_count
     
     return result
 }
@@ -434,8 +423,10 @@ add_character_asset :: proc(hha: ^HHA, font: ^SourceFont, codepoint: rune) {
     glyph_index := font.glyph_count
     font.glyph_count += 1
     glyph := &font.glyphs[glyph_index]
+    
     glyph.bitmap    = cast(BitmapId) bitmap_id
     glyph.codepoint = codepoint
+    
     font.glyph_index_from_codepoint[codepoint] = glyph_index
 }
 
@@ -469,51 +460,58 @@ load_font :: proc(path_to_font: string) -> (result: SourceFont) {
     }
     
     ok = auto_cast tt.InitFont(&result.font, raw_data(font_file), 0)
-    assert(ok)
+    assert(ok, "Failed to initialize font :(")
     
     // TODO(viktor): how large should the glyphs be rendered?
     pixels : f32 = 150
     result.scale_factor = tt.ScaleForPixelHeight(&result.font, pixels)
     
-    result.min_codepoint = max(rune)
-    result.max_codepoint = min(rune)
-    
     MaxCodepoint :: 0x10FFFF
     result.glyph_index_from_codepoint = make([]u32, MaxCodepoint)
+    result.one_past_highest_codepoint = 0
     
-    // NOTE(viktor): 8k characters should be more than enough for _anybody_
-    result.max_glyph_count = 8 * 1024
-    result.glyph_count = 0 
-    result.glyphs      = make([]GlyphInfo, result.max_glyph_count)
+    // NOTE(viktor): 4k characters should be more than enough for _anybody_
+    result.max_glyph_count = 4 * 1024
+    result.glyphs = make([]GlyphInfo, result.max_glyph_count)
+    
+    // NOTE(viktor): reserve space for the null glyph
+    result.glyph_count = 1
+    result.glyphs[0]   = {}
 
     result.horizontal_advances = make([]f32, result.max_glyph_count*result.max_glyph_count)
-    for &a in result.horizontal_advances {
-        a = 0
-    }
 
     return result
 }
-            
+
 finalize_font_kerning :: proc(font: ^SourceFont) {
+    assert(font.scale_factor != 0)
     kerning_count := tt.GetKerningTableLength(&font.font)
     kerning_table := make([]tt.kerningentry, kerning_count)
     tt.GetKerningTable(&font.font, raw_data(kerning_table), kerning_count)
-    for entry in kerning_table {
-        count := cast(rune) font.max_glyph_count
-        if 0 < entry.glyph1 && entry.glyph1 < count && 0 < entry.glyph2 && entry.glyph2 < count {
-            first  := font.glyph_index_from_codepoint[entry.glyph1]
-            second := font.glyph_index_from_codepoint[entry.glyph2]
-            font.horizontal_advances[first * font.max_glyph_count + second] += cast(f32) entry.advance * font.scale_factor
-        }
-    }
     
+    for entry in kerning_table {
+        first  := font.glyph_index_from_codepoint[entry.glyph1]
+        second := font.glyph_index_from_codepoint[entry.glyph2]
+        
+        count := font.max_glyph_count
+        if 0 < first && first < count && 0 < second && second < count {
+            font.horizontal_advances[first * count + second] += cast(f32) entry.advance * font.scale_factor
+        }
+        
+    }
 }
 
 load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo) -> (result: SourceBitmap) {
+    assert(font.scale_factor != 0)
     glyph_index := font.glyph_index_from_codepoint[codepoint]
+    assert(glyph_index != 0)
+    
+    if font.one_past_highest_codepoint <= codepoint {
+        font.one_past_highest_codepoint = codepoint + 1
+    }
     
     w, h, xoff, yoff: i32
-    // TODO(viktor): works after odin dev-2025-01
+    // TODO(viktor): works after odin dev-225-01
     // mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale_factor, codepoint, &w, &h, &xoff, &yoff)[:w*h]
     _mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale_factor, codepoint, &w, &h, &xoff, &yoff)
     mono_bitmap := _mono_bitmap[:w*h]
@@ -523,12 +521,6 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
     result.width  = w+2
     result.height = h+2
     result.memory = make([][4]u8, result.width*result.height)
-    for &p in result.memory do p = 0
-    
-    info.dimension = vec_cast(u32, result.width, result.height)
-    
-    info.align_percentage.x = (1) / cast(f32) result.width
-    info.align_percentage.y = (1 + cast(f32) (yoff + h)) / cast(f32) result.height
     
     for y in 0..<h {
         for x in 0..<w {
@@ -539,14 +531,19 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
         }
     }
     
-    for other_glyph_index in 0..<font.max_glyph_count {
-        advance := &font.horizontal_advances[other_glyph_index * font.max_glyph_count + glyph_index]
-        advance^ += cast(f32) w
-        if other_glyph_index != 0 {
-            other_advance := &font.horizontal_advances[other_glyph_index * font.max_glyph_count + glyph_index]
-            other_advance^ += cast(f32) -xoff
-        }
+    info.dimension = vec_cast(u32, result.width, result.height)
+    info.align_percentage.x = (1) / cast(f32) result.width
+    info.align_percentage.y = (1 + cast(f32) (yoff + h)) / cast(f32) result.height
+    
+    advanceWidth, leftSideBearing: i32
+    tt.GetCodepointHMetrics(&font.font, codepoint, &advanceWidth, &leftSideBearing)
+    for other_glyph_index in 1..<font.max_glyph_count {
+        current_other := &font.horizontal_advances[glyph_index * font.max_glyph_count + other_glyph_index]
+        current_other^ += cast(f32) (advanceWidth) * font.scale_factor
+        // other_current := &font.horizontal_advances[other_glyph_index * font.max_glyph_count + glyph_index]
+        // other_current^ += cast(f32) (-leftSideBearing) * font.scale_factor
     }
+    
     return result
 }
 

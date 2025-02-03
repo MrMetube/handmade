@@ -44,7 +44,6 @@ AssetTypeId :: enum u32 {
 
 AssetTagId :: enum {
     FacingDirection, // NOTE(viktor): angle in radians
-    Codepoint, // NOTE(viktor): utf8 codepoint for font
 }
 
 // 
@@ -59,18 +58,19 @@ Header :: struct #packed {
     asset_type_count: u32,
     asset_count:      u32,
     
+    // offsets in the file at which data starts
     tags:        u64, // [tag_count]AssetTag
     asset_types: u64, // [asset_type_count]AssetType
     assets:      u64, // [asset_count]AssetData
 }
 
 AssetData :: struct #packed {
-    data_offset: u64,
-    
     first_tag_index:         u32,
     one_past_last_tag_index: u32,
     
-    info : struct #raw_union {
+    data_offset: u64,
+    
+    info: struct #raw_union {
         bitmap: BitmapInfo,
         sound:  SoundInfo,
         font:   FontInfo,
@@ -92,25 +92,23 @@ SoundInfo :: struct #packed {
     //     samples: [channel_count][sample_count] i16
 }
 
-GlyphInfo :: struct #packed {
-    codepoint: rune,
-    bitmap:    BitmapId,
+SoundChain :: enum u32 {
+    None, Loop, Advance,
 }
 
-// TODO(viktor): coult these be polymorphic structs?
-// i.e. FontInfo :: struct($codepoint_count: u32) #packed {
 FontInfo :: struct #packed {
     ascent:  f32,
     descent: f32,
     linegap: f32,
     
+    one_past_highest_codepoint: rune,
     glyph_count: u32,
     // NOTE(viktor): Data is:
-    //     glyphs:             [glyph_count] GlyphInfo,
-    //     horizontal_advance: [glyph_count][glyph_count] f32,
+    //     glyphs:   [glyph_count] GlyphInfo,
+    //     advances: [glyph_count][glyph_count] f32,
 }
 
-SoundChain :: enum u32 {
-    None, Loop, Advance,
+GlyphInfo :: struct #packed {
+    codepoint: rune,
+    bitmap:    BitmapId,
 }
-

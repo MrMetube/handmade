@@ -20,7 +20,7 @@ import win "core:sys/windows"
     - QueryCancelAutoplay
     - WM_ACTIVATEAPP (for when we are not the active application)
     - Blit speed improvements (BitBlt)
-    - Hardware acceleration (OpenGL or Direct3D or BOTH ?? )
+    - Hardware acceleration (OpenGL or Direct3D or Vulkan or BOTH ?? )
     - GetKeyboardLayout (for French keyboards, international WASD support)
 
     Just a partial list of stuff !!
@@ -34,11 +34,12 @@ HighPriorityWorkQueueThreadCount :: 8
 LowPriorityWorkQueueThreadCount  :: 2
 
 
-// Resolution := [2]i32 {2560, 1440}
-Resolution := [2]i32 {1920, 1080}
-// Resolution := [2]i32 {1280, 720}
+// Resolution :: [2]i32 {2560, 1440}
+// Resolution :: [2]i32 {1920, 1080}
+Resolution :: [2]i32 {1280, 720}
+// Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 = 72
+MonitorRefreshHz: u32 : 72
 
 
 PermanentStorageSize := megabytes(256)
