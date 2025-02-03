@@ -8,12 +8,20 @@ DebugRecord :: struct {
     counts:    DebugRecordCounts,
 }
 
-DebugRecordCounts :: bit_field i64 {
-    hit_count:   i32 | 32,
-    cycle_count: i32 | 32,
+DebugRecordCounts :: struct {
+    hit_count:   i32,
+    cycle_count: i32,
 }
 
 DebugRecords: map[runtime.Source_Code_Location]DebugRecord
+
+init_debug_records :: proc() {
+    DebugRecords = make_map_cap(type_of(DebugRecords), 512)
+    
+    // NOTE(viktor): remove the allocator
+    raw := cast(^runtime.Raw_Map) &DebugRecords
+    raw.allocator = runtime.nil_allocator()
+}
 
 overlay_cycle_counters :: proc() {
     when INTERNAL {
@@ -26,35 +34,33 @@ overlay_cycle_counters :: proc() {
         Debug_text_line(title)
         for _, &record in DebugRecords {
             counts := transmute(DebugRecordCounts) atomic_exchange(cast(^i64) &record.counts, 0)
-            
-            cycles_per_hit := safe_ratio_0(cast(f32) counts.cycle_count, cast(f32) counts.hit_count)
-            when true {
-                text := fmt.tprintf("%s %vcy, %vh, %.0f cy/h", record.procedure, counts.cycle_count, counts.hit_count, cycles_per_hit)
-            } else {
-                text := fmt.tprintf("%s:%d:%d: %s %vcy, %vh, %.0f cy/h", record.file_path, record.line, record.column, record.procedure, cast(i64) record.cycle_count, record.hit_count, cycles_per_hit)
+            if counts.hit_count > 0 {
+                cycles_per_hit := safe_ratio_0(cast(f32) counts.cycle_count, cast(f32) counts.hit_count)
+                text := fmt.tprintf("%28s(% 4d) % 15vcy, % 10vh, % 12.0f cy/h", record.procedure, record.line, counts.cycle_count, counts.hit_count, cycles_per_hit)
+                Debug_text_line(text)
             }
-            Debug_text_line(text)
         }
     }
 }
 
 @(deferred_out=end_timed_block)
 timed_block :: #force_inline proc(loc := #caller_location, #any_int hit_count: i32 = 1) -> (record: ^DebugRecord, start: i64, hit_count_out: i32) { 
+    // TODO(viktor): @CompilerBug repro: Why can I use record here, when it is only using the loc?
+    // if record not_in DebugRecords {
     // TODO(viktor): Check the overhead of this
-    ok: bool
-    record, ok = &DebugRecords[loc]
-    if !ok {
+    if loc not_in DebugRecords {
         DebugRecords[loc] = {}
-        record, ok = &DebugRecords[loc]
-        assert(ok)
+    } else {
+        record = &DebugRecords[loc]
+        record.loc = loc
     }
-    
-    record.loc = loc
     return record, read_cycle_counter(), hit_count
 }
 
 end_timed_block :: #force_inline proc(record: ^DebugRecord, start: i64, hit_count: i32) {
-    end := read_cycle_counter()
-    counts := DebugRecordCounts{ hit_count = hit_count, cycle_count = cast(i32) (end - start) }
-    atomic_add(cast(^i64) &record.counts, transmute(i64) counts)
+    if record != nil {
+        end := read_cycle_counter()
+        counts := DebugRecordCounts{ hit_count = hit_count, cycle_count = cast(i32) (end - start) }
+        atomic_add(cast(^i64) &record.counts,  transmute(i64) counts)
+    }
 }

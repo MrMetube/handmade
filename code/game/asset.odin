@@ -480,7 +480,6 @@ begin_asset_lock :: proc(assets: ^Assets) {
             break
         }
     }
-    
 }
 end_asset_lock :: proc(assets: ^Assets) {
     complete_previous_writes_before_future_writes()

@@ -252,6 +252,10 @@ when INTERNAL {
 
 @(export) 
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
+    if input.reloaded_executable {
+        init_debug_records()
+    }
+    
     timed_block()
 
     Platform = memory.Platform_api
@@ -478,6 +482,11 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     }
     
     if input.reloaded_executable {
+        when INTERNAL {
+            init_debug_records()
+        }
+        
+        
         // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
         when false {
             for &ground_buffer in tran_state.ground_buffers {
