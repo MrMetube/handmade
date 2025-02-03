@@ -1,6 +1,6 @@
 package game
 
-import "core:fmt"
+import hha "./asset_builder"
 import "core:simd"
 import "core:simd/x86"
 
@@ -167,6 +167,7 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+    timed_block()
     assert(group.inside_render)
     
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
@@ -269,22 +270,26 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
 
 
 when INTERNAL {
-    font_scale : f32 = 0.5
+    font_scale : f32 = 1
     cp_y: f32
     left_edge: f32
     font_id: FontId
+    font: ^Font
     
     Debug_reset :: proc(width, height: i32) {
+        timed_block()
         begin_render(Debug_render_group)
         orthographic(Debug_render_group, {width, height}, 1)
         
-        font_id = best_match_font_from(Debug_render_group.assets, AssetTypeId.Font, {}, {})
-        font := get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
+        font_id = best_match_font_from(Debug_render_group.assets, .Font, #partial { .FontType = cast(f32) hha.AssetFontType.Debug }, #partial { .FontType = 1 })
+        font = get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
         
         baseline :f32= 10
         if font != nil {
             font_info := get_font_info(Debug_render_group.assets, font_id)
             baseline = get_baseline(font_info)
+        } else {
+            load_font(Debug_render_group.assets, font_id, false)
         }
         
         cp_y      =  0.5 * cast(f32) height - baseline * font_scale
@@ -295,7 +300,6 @@ when INTERNAL {
         if Debug_render_group != nil {
             assert(Debug_render_group.inside_render)
             
-            font := get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
             if font != nil {
                 font_info := get_font_info(Debug_render_group.assets, font_id)
                 cp_x := left_edge
@@ -311,14 +315,12 @@ when INTERNAL {
                     info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
                     
                     if info != nil && codepoint != ' ' {
-                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0}, {1, 0.76, 0.37, 1})
+                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0})
                     }
                 }
                 
                 advance_y := get_line_advance(font_info)
                 cp_y -= font_scale * advance_y
-            } else {
-                load_font(Debug_render_group.assets, font_id, false)
             }
         }
     }
@@ -566,12 +568,13 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
             draw_rectangle(target, y, size, Red * 0.7, clip_rect, even)
 
         case:
-            fmt.panicf("Unhandled Entry: %v", header.type)
+            panic("Unhandled Entry")
         }
     }
 }
 
 draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
+    timed_block()
     rounded_center := round(center, i32)
 
     left   := rounded_center.x - bitmap.width  / 2
@@ -1035,6 +1038,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 }
 
 draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rect: Rectangle2i, even: b32){
+    timed_block()
     rounded_center := floor(center, i32)
     rounded_size   := floor(size, i32)
 
@@ -1094,6 +1098,7 @@ sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, 
     point in z, given in meters
 */
 sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
+    timed_block()
     assert(environment_map.LOD[0].memory != nil)
 
     // NOTE(viktor): pick which LOD to sample from

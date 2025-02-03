@@ -88,7 +88,6 @@ main :: proc() {
     debug_exe := "debug.exe" 
     if .Platform in targetsToBuild && !is_running(debug_exe) {
         copy_over(`..\code\game\common.odin`, `..\code\copypasta_common.odin`, "package game", "package main")
-        copy_over(`..\code\game\debug.odin`, `..\code\copypasta_debug.odin`, "package game", "package main")
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, windows, internal, optimizations, (pedantic when false else ""))
     }
     

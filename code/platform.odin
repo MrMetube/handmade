@@ -501,30 +501,6 @@ main :: proc() {
 
             if game_lib_is_valid {
                 update_and_render(&game_memory, offscreen_buffer, new_input)
-                
-                handle_debug_cycle_counters :: proc(game_memory: ^GameMemory) {
-                    when INTERNAL {
-                        title := "Debug Game Cycle Counts"
-                        longest_name_length := len(title)
-                        for _, record in DebugRecords {
-                            name_string := fmt.tprint(record.procedure)
-                            longest_name_length = max(longest_name_length, len(name_string))
-                        }
-                        
-                        format := fmt.tprintf("%%%ds:", longest_name_length)
-                        
-                        fmt.printfln(format, title)
-                        format = fmt.tprintf("%s %% 10vcy, %% 10vh, %% 10v cy/h", format)
-                        for _, &record in DebugRecords {
-                            denom := record.hit_count == 0 ? 1 : record.hit_count
-                            fmt.printfln(format, record.procedure, record.cycle_count, record.hit_count, cast(i64) record.cycle_count / denom)
-                            record.hit_count = 0
-                            record.cycle_count = 0
-                        }
-                    }
-                }
-                
-                handle_debug_cycle_counters(&game_memory)
             }
 
             sound_is_valid = true

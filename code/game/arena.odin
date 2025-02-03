@@ -39,6 +39,7 @@ push_struct :: #force_inline proc(arena: ^Arena, $T: typeid, #any_int alignment:
 }
 
 push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, #any_int alignment: u64 = 4) -> (result: [^]u8) {
+    timed_block()
     alignment_offset := arena_alignment_offset(arena, alignment)
 
     size := size_init + alignment_offset
@@ -68,17 +69,20 @@ push_string :: #force_inline proc(arena: ^Arena, s: string) -> (result: string) 
 zero :: proc { zero_size, zero_struct, zero_slice }
 
 zero_size :: #force_inline proc(memory: rawpointer, size: u64) {
+    timed_block()
     mem := (cast([^]u8)memory)[:size]
     for &b in mem {
         b = {}
     }
 }
 zero_struct :: #force_inline proc(s: ^$T) {
+    timed_block()
     s^ = {}
 }
 
 zero_slice :: #force_inline proc(data: []$T){
     // TODO(viktor): check this guy for performance
+    timed_block()
     if data != nil {
         for &entry in data {
             entry = {}

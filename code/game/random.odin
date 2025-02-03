@@ -15,6 +15,7 @@ seed_random_series :: proc(seed: u32) -> (result: RandomSeries) {
 
 // TODO(viktor): maybe make type a parameter?
 next_random_u32 :: proc(series: ^RandomSeries) -> (result: u32) {
+    timed_block()
     result = random_number_table[series.index]
     series.index += 1
     if series.index >= len(random_number_table) {

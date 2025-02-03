@@ -89,6 +89,20 @@ GameMemory :: struct {
     debug:    DEBUG_code,
 }
 
+when INTERNAL { 
+    DEBUG_code :: struct {
+        read_entire_file:  DebugReadEntireFile,
+        write_entire_file: DebugWriteEntireFile,
+        free_file_memory:  DebugFreeFileMemory,
+    }
+
+    DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
+    DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
+    DebugFreeFileMemory  :: #type proc(memory: []u8)
+    
+    DEBUG_GLOBAL_memory: ^GameMemory
+}
+
 PlatformAPI :: struct {
     enqueue_work:      PlatformEnqueueWork,
     complete_all_work: PlatformCompleteAllWork,
@@ -142,6 +156,9 @@ atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new:
 }
 volatile_load      :: intrinsics.volatile_load
 volatile_store     :: intrinsics.volatile_store
+atomic_add         :: intrinsics.atomic_add
+read_cycle_counter :: intrinsics.read_cycle_counter
+atomic_exchange    :: intrinsics.atomic_exchange
 
 @(enable_target_feature="sse")
 complete_previous_writes_before_future_writes :: proc "contextless" () {

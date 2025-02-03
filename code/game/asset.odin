@@ -335,15 +335,13 @@ get_line_advance :: proc(info: ^hha.FontInfo) -> (result: f32) {
 
 get_bitmap_for_glyph :: proc(font: ^Font, info: ^hha.FontInfo, codepoint: rune) -> (result: BitmapId) {
     glyph := get_glyph_from_codepoint(font, info, codepoint)
-    
     entry := font.glyphs[glyph]
     
+    // TODO(viktor): why is this not handled by the null glyph1?!
     if(entry.codepoint == codepoint) {
         result = font.bitmap_id_offset + entry.bitmap
-    } else {
-        // NOTE(viktor): The desired codepoint is not available in the font
-        // TODO(viktor): How should this be handled?
     }
+    
     return result
 }
 
@@ -508,6 +506,7 @@ remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
 }
 
 acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
+    timed_block()
     size := div.total + size_of(AssetMemoryHeader)
     
     block := find_block_for_size(assets, size)
@@ -663,6 +662,7 @@ LoadAssetWork :: struct {
 }
 
 load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
+    timed_block()
     Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
     if Platform_no_file_errors(work.handle) {
         switch work.kind {
@@ -738,6 +738,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
 }
 
 allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32, asset: ^Asset) -> (memory: rawpointer, memory_size: u64 ) {
+    timed_block()
     divider: Divider
     total: u64
     switch kind {
@@ -829,6 +830,7 @@ divider_acquire :: proc(divider: ^Divider, header: ^AssetMemoryHeader) -> (total
     
     return total_memory
 }
+
 divider_reserve :: proc(divider: ^Divider, $E: typeid, #any_int count: u64) {
     entry := &divider.entries[divider.size_count]
     divider.size_count += 1
@@ -839,12 +841,14 @@ divider_reserve :: proc(divider: ^Divider, $E: typeid, #any_int count: u64) {
     assert(info.size == size_of(E))
     divider.total += cast(u64) info.size * entry.count
 }
+
 divider_designate :: proc(divider: ^Divider, slice: ^[]$E) {
     entry := &divider.entries[divider.slice_count]
     divider.slice_count += 1
     entry.slice = cast(^[]u8) slice
     assert(entry.element == E)
 }
+
 divider_hand_over :: proc(divider: ^Divider) {
     // NOTE(viktor): all the memory after the header should have been divvied up
     assert(divider.slice_count == divider.size_count)

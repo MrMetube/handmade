@@ -1,7 +1,6 @@
 package game
 
 import "base:intrinsics"
-import "core:fmt"
 
 INTERNAL :: #config(INTERNAL, false)
 
@@ -1024,7 +1023,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     
     if Debug_render_group != nil {
         Debug_reset(buffer.width, buffer.height)
-        overlay_cycle_counters(memory)
+        overlay_cycle_counters()
         tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
         end_render(Debug_render_group)
     }
@@ -1040,20 +1039,6 @@ output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     
     output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
-}
-    
-overlay_cycle_counters :: proc(game_memory: ^GameMemory) {
-    when INTERNAL {
-        // Debug_text_line("贺佳樱我爱你")
-        // Debug_text_line("AVA: WA ty fi ij `^?'\"")
-        // Debug_text_line("0123456789°")
-        Debug_text_line("Debug Game Cycle Counts:")
-        
-        for _, record in DebugRecords {
-            denom := record.hit_count == 0 ? 1 : record.hit_count
-            Debug_text_line(record.procedure)
-        }
-    }
 }
 
 begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
@@ -1157,6 +1142,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
 }
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
+    timed_block()
     result = {
         memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
@@ -1177,6 +1163,7 @@ FillGroundChunkWork :: struct {
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    timed_block()
     work := cast(^FillGroundChunkWork) data
 
     
@@ -1375,6 +1362,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
 }
 
 add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32) {
+    timed_block()
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do swap(&a, &b)
@@ -1407,6 +1395,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
 }
 
 clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
+    timed_block()
     // TODO(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
     // NOTE(viktor): One way to make removal easy would be to always

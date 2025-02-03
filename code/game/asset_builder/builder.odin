@@ -41,7 +41,7 @@ SourceBitmap :: struct {
 
 SourceFont :: struct {
     font:         tt.fontinfo,
-    scale_factor: f32,
+    scale: f32,
     
     max_glyph_count: u32,
     glyph_count:     u32,
@@ -186,20 +186,25 @@ write_fonts :: proc() {
     hha := make_hha()
     defer output_hha_file(`.\fonts.hha`, hha)
     
-    // @Leak
-    debug_font := load_font(`C:\Windows\Fonts\LiberationSans-Regular.ttf`)
-    // debug_font := load_font(`C:\Windows\Fonts\arial.ttf`)
-    // debug_font := load_font(`C:\Users\Viktor\Downloads\Noto_Sans_SC\static\NotoSansSC-Regular.ttf`)
-
+    // chinese_font := load_font(`C:\Users\Viktor\Downloads\Noto_Sans_SC\static\NotoSansSC-Regular.ttf`)
+    // for c in "贺佳樱我爱你" do add_character_asset(hha, &debug_font, c)
+    fonts := [?]struct {type: AssetFontType, font: ^SourceFont}{
+        { .Default, load_font(64, `C:\Windows\Fonts\LiberationSans-Regular.ttf`) },
+        { .Debug,   load_font(20, `C:\Users\Viktor\AppData\Local\Microsoft\Windows\Fonts\VictorMono-Bold.otf`) },
+    }
+    
     begin_asset_type(hha, .FontGlyph)
-    for c in rune(1)..<127 do add_character_asset(hha, &debug_font, c)
-    for c in "贺佳樱我爱你" do add_character_asset(hha, &debug_font, c)
-    for c in "°" do add_character_asset(hha, &debug_font, c)
-
+    for &it in fonts {
+        for c in rune(1)..<127 do add_character_asset(hha, it.font, c)
+        for c in "°ßöüäÖÜÄ" do add_character_asset(hha, it.font, c)
+    }
     end_asset_type(hha)
     
     begin_asset_type(hha, .Font)
-    add_font_asset(hha, &debug_font)
+    for it in fonts {
+        add_font_asset(hha, it.font)
+        add_tag(hha, .FontType, cast(f32) it.type)
+    }
     end_asset_type(hha)
 }
 
@@ -402,9 +407,9 @@ add_font_asset :: proc(hha: ^HHA, source: ^SourceFont) -> (u32) {
     
     ascent, descent, linegap: i32
     tt.GetFontVMetrics(&source.font, &ascent, &descent, &linegap)
-    data.info.font.ascent  = cast(f32) ascent  * source.scale_factor
-    data.info.font.descent = cast(f32) descent * source.scale_factor
-    data.info.font.linegap = cast(f32) linegap * source.scale_factor
+    data.info.font.ascent  = cast(f32) ascent  * source.scale
+    data.info.font.descent = cast(f32) descent * source.scale
+    data.info.font.linegap = cast(f32) linegap * source.scale
     data.info.font.glyph_count = source.glyph_count
     
     return result
@@ -452,19 +457,18 @@ end_asset_type :: proc(hha: ^HHA) {
     hha.asset_index = 0
 }
 
-load_font :: proc(path_to_font: string) -> (result: SourceFont) {
+load_font :: proc(pixels: f32, path_to_font: string) -> (result: ^SourceFont) {
     font_file, ok := os.read_entire_file(path_to_font)
     if !ok {
         fmt.println(os.error_string(cast(os.Platform_Error) win.GetLastError()))
         assert(false)
     }
     
+    result = new(SourceFont)
     ok = auto_cast tt.InitFont(&result.font, raw_data(font_file), 0)
     assert(ok, "Failed to initialize font :(")
     
-    // TODO(viktor): how large should the glyphs be rendered?
-    pixels : f32 = 150
-    result.scale_factor = tt.ScaleForPixelHeight(&result.font, pixels)
+    result.scale = tt.ScaleForPixelHeight(&result.font, pixels)
     
     MaxCodepoint :: 0x10FFFF
     result.glyph_index_from_codepoint = make([]u32, MaxCodepoint)
@@ -484,7 +488,7 @@ load_font :: proc(path_to_font: string) -> (result: SourceFont) {
 }
 
 finalize_font_kerning :: proc(font: ^SourceFont) {
-    assert(font.scale_factor != 0)
+    assert(font.scale != 0)
     kerning_count := tt.GetKerningTableLength(&font.font)
     kerning_table := make([]tt.kerningentry, kerning_count)
     tt.GetKerningTable(&font.font, raw_data(kerning_table), kerning_count)
@@ -495,14 +499,14 @@ finalize_font_kerning :: proc(font: ^SourceFont) {
         
         count := font.max_glyph_count
         if 0 < first && first < count && 0 < second && second < count {
-            font.horizontal_advances[first * count + second] += cast(f32) entry.advance * font.scale_factor
+            font.horizontal_advances[first * count + second] += cast(f32) entry.advance * font.scale
         }
         
     }
 }
 
 load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo) -> (result: SourceBitmap) {
-    assert(font.scale_factor != 0)
+    assert(font.scale != 0)
     glyph_index := font.glyph_index_from_codepoint[codepoint]
     assert(glyph_index != 0)
     
@@ -513,7 +517,7 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
     w, h, xoff, yoff: i32
     // TODO(viktor): works after odin dev-225-01
     // mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale_factor, codepoint, &w, &h, &xoff, &yoff)[:w*h]
-    _mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale_factor, codepoint, &w, &h, &xoff, &yoff)
+    _mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale, codepoint, &w, &h, &xoff, &yoff)
     mono_bitmap := _mono_bitmap[:w*h]
     defer tt.FreeBitmap(raw_data(mono_bitmap), nil)
     
@@ -539,7 +543,7 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
     tt.GetCodepointHMetrics(&font.font, codepoint, &advanceWidth, &leftSideBearing)
     for other_glyph_index in 1..<font.max_glyph_count {
         current_other := &font.horizontal_advances[glyph_index * font.max_glyph_count + other_glyph_index]
-        current_other^ += cast(f32) (advanceWidth) * font.scale_factor
+        current_other^ += cast(f32) (advanceWidth) * font.scale
         // other_current := &font.horizontal_advances[other_glyph_index * font.max_glyph_count + glyph_index]
         // other_current^ += cast(f32) (-leftSideBearing) * font.scale_factor
     }

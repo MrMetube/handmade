@@ -42,8 +42,14 @@ AssetTypeId :: enum u32 {
     Font, FontGlyph,
 }
 
+AssetFontType :: enum {
+    Default = 0,
+    Debug   = 10,
+}
+
 AssetTagId :: enum {
     FacingDirection, // NOTE(viktor): angle in radians
+    FontType,        // NOTE(viktor): see AssetFontType
 }
 
 // 

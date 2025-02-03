@@ -64,6 +64,7 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
 }
 
 change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+    timed_block()
     // TODO(viktor): if the entity moves  into the camera bounds, shoulds this force the entity into the high set immediatly?
     assert((old_p == nil || is_valid(old_p^)))
     assert((new_p == nil || is_valid(new_p^)))
@@ -172,6 +173,7 @@ get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) 
     return get_chunk_3(arena, world, point.chunk.x, point.chunk.y, point.chunk.z)
 }
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_z: i32) -> ^Chunk {
+    timed_block()
     ChunkSafeMargin :: 256
 
     assert(chunk_x > min(i32) + ChunkSafeMargin)
