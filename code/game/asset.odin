@@ -127,7 +127,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         
         // TODO(viktor): which arena?
         assets.files = push(arena, AssetFile, file_group.file_count)
-        for &file, index in assets.files {
+        for &file in assets.files {
             file.handle = Platform.open_next_file(&file_group)
             file.tag_base = total_tag_count
             
@@ -183,7 +183,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
             file.font_bitmap_id_offset = 0
             
             if Platform_no_file_errors(&file.handle) {
-                for source_type, source_index in file.asset_type_array {
+                for source_type in file.asset_type_array {
                     if source_type.id == id {
                         if source_type.id == .FontGlyph {
                             file.font_bitmap_id_offset = cast(BitmapId) (asset_count - source_type.first_asset_index)
@@ -451,7 +451,7 @@ begin_generation :: #force_inline proc(assets: ^Assets) -> (result: AssetGenerat
 }
 
 end_generation :: #force_inline proc(assets: ^Assets, generation: AssetGenerationId) {
-    for &in_flight, index in assets.in_flight_generations[:assets.in_flight_generation_count] {
+    for &in_flight in assets.in_flight_generations[:assets.in_flight_generation_count] {
         if in_flight == generation {
             assets.in_flight_generation_count -= 1
             if assets.in_flight_generation_count > 0 {
@@ -739,7 +739,6 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
 allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32, asset: ^Asset) -> (memory: rawpointer, memory_size: u64 ) {
     timed_block()
     divider: Divider
-    total: u64
     switch kind {
       case .Font: // [Header][Glyphs][Advances][UnicodeMap]
         info := asset.data.info.font

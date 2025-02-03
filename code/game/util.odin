@@ -2,8 +2,16 @@ package game
 
 import "base:intrinsics"
 import "base:runtime"
-import "core:math"
-import "core:simd"
+
+White    :: v4{1,1,1, 1}
+Gray     :: v4{0.5,0.5,0.5, 1}
+Black    :: v4{0,0,0, 1}
+Blue     :: v4{0.08, 0.49, 0.72, 1}
+Yellow   :: v4{0.91, 0.81, 0.09, 1}
+Orange   :: v4{1, 0.71, 0.2, 1}
+Green    :: v4{0, 0.59, 0.28, 1}
+Red      :: v4{1, 0.09, 0.24, 1}
+DarkGreen:: v4{0, 0.07, 0.0353, 1}
 
 f32x4 :: #simd[4]f32
 u32x4 :: #simd[4]u32

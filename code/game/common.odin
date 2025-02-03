@@ -80,17 +80,30 @@ GameMemory :: struct {
     // NOTE: REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
+    debug_storage:     []u8,
 
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
     
     Platform_api: PlatformAPI,
 
-    debug:    DEBUG_code,
+    debug: DebugCode,
 }
 
+
+
 when INTERNAL { 
-    DEBUG_code :: struct {
+        
+    DebugFrameInfo :: struct {
+        executable_ready,
+        input_processed,
+        game_updated,
+        audio_updated,
+        framerate_sleep_complete,
+        end_of_frame: f32,
+    }
+
+    DebugCode :: struct {
         read_entire_file:  DebugReadEntireFile,
         write_entire_file: DebugWriteEntireFile,
         free_file_memory:  DebugFreeFileMemory,

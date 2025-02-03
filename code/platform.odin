@@ -1,10 +1,11 @@
 package main
 
-import "base:intrinsics"
 import "base:runtime"
 
 import "core:fmt"
 import win "core:sys/windows"
+
+INTERNAL :: #config(INTERNAL, false)
 
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
@@ -26,6 +27,7 @@ import win "core:sys/windows"
     Just a partial list of stuff !!
 */
 
+
 // 
 // Config
 // 
@@ -43,13 +45,12 @@ MonitorRefreshHz: u32 : 72
 
 
 PermanentStorageSize :: 256 * Megabyte
-TransientStorageSize :: 1 * Gigabyte
+TransientStorageSize ::   1 * Gigabyte
+DebugStorageSize     ::   1 * Gigabyte when INTERNAL else 0
 
 //   
 //  Globals
 //   
-
-INTERNAL :: #config(INTERNAL, false)
 
 GLOBAL_Running: b32
 
@@ -231,14 +232,6 @@ main :: proc() {
 
     sound_is_valid: b32
 
-    when false &&  INTERNAL {
-        audio_latency_bytes:     u32
-        audio_latency_seconds:   f32
-        debug_last_time_markers: [36]DebugTimeMarker
-    }
-
-
-
     //   
     //  Input Setup
     //   
@@ -285,7 +278,7 @@ main :: proc() {
     { // NOTE(viktor): initialize game_memory
         base_address := cast(rawpointer) cast(uintpointer) (1 * Terabyte) when INTERNAL else 0
 
-        total_size := cast(uint) (PermanentStorageSize + TransientStorageSize)
+        total_size := cast(uint) (PermanentStorageSize + TransientStorageSize + DebugStorageSize)
 
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         // TODO(viktor): why limit ourselves?
@@ -311,8 +304,10 @@ main :: proc() {
             }
         }
 
+        // :PointerArithmetic
         game_memory.permanent_storage = storage_ptr[0:][:PermanentStorageSize]
         game_memory.transient_storage = storage_ptr[PermanentStorageSize:][:TransientStorageSize]
+        game_memory.debug_storage     = storage_ptr[TransientStorageSize:][:DebugStorageSize]
         
         when INTERNAL {
             game_memory.debug = {
@@ -335,28 +330,26 @@ main :: proc() {
 
     last_counter := get_wall_clock()
     flip_counter := get_wall_clock()
-    last_cycle_count := intrinsics.read_cycle_counter()
 
 
-
-    //   
-    //   
-    //   
-    //  
+    ////////////////////////////////////////////////
     //  Game Loop
     //  
-    //   
-    //   
-    //   
     for GLOBAL_Running {
-        //   
+        ////////////////////////////////////////////////
+        //  Debug Info
+        frame_info: DebugFrameInfo
+        
+        
+        ////////////////////////////////////////////////
         //  Hot Reload
-        //   
         new_input.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
             // NOTE(viktor): clear out the queue, as they may call into unloaded game code
             complete_all_work(&high_queue)
             complete_all_work(&low_queue)
+            assert(high_queue.completion_count == high_queue.completion_goal)
+            assert(low_queue.completion_count  == low_queue.completion_goal)
             
             // TODO: if this is too slow the audio and the whole game will lag
             unload_game_lib()
@@ -364,10 +357,10 @@ main :: proc() {
             
             new_input.reloaded_executable = true
         }
+        frame_info.executable_ready = get_seconds_elapsed(last_counter, get_wall_clock())
 
-        //   
+        ////////////////////////////////////////////////   
         //  Input
-        //   
         {
             new_input.delta_time = target_seconds_per_frame
             { // Mouse Input 
@@ -478,13 +471,13 @@ main :: proc() {
                 }
             }
         }
+        frame_info.input_processed = get_seconds_elapsed(last_counter, get_wall_clock())
 
         if GlobalPause do continue
 
 
-        //   
+        ////////////////////////////////////////////////
         //  Update, Sound and Render
-        //   
         {
             offscreen_buffer := Bitmap{
                 memory = GLOBAL_back_buffer.memory,
@@ -500,8 +493,11 @@ main :: proc() {
             }
 
             if game_lib_is_valid {
-                update_and_render(&game_memory, offscreen_buffer, new_input)
+                game_update_and_render(&game_memory, offscreen_buffer, new_input)
             }
+            frame_info.game_updated = get_seconds_elapsed(last_counter, get_wall_clock())
+
+            swap(&old_input, &new_input)
 
             sound_is_valid = true
             play_cursor, write_cursor: win.DWORD
@@ -571,32 +567,18 @@ main :: proc() {
                 bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
                 
                 if game_lib_is_valid {
-                    output_sound_samples(&game_memory, sound_buffer)
+                    game_output_sound_samples(&game_memory, sound_buffer)
                 }
-
-                when false &&  INTERNAL {
-                    GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result)
-                    debug_last_time_markers[0].output_play_cursor           = play_cursor
-                    debug_last_time_markers[0].output_write_cursor          = write_cursor
-                    debug_last_time_markers[0].output_location              = byte_to_lock
-                    debug_last_time_markers[0].output_byte_count            = bytes_to_write
-                    debug_last_time_markers[0].expected_frame_boundary_byte = expected_frame_boundary_byte
-
-                    audio_latency_bytes = ((write_cursor - play_cursor) + sound_output.buffer_size) % sound_output.buffer_size
-                    audio_latency_seconds = (cast(f32)audio_latency_bytes / cast(f32)sound_output.bytes_per_sample) / cast(f32)sound_output.samples_per_second
-
-                    // fmt.printfln("PC %v WC %v Delta %v Seconds %vs", play_cursor, write_cursor, audio_latency_bytes, audio_latency_seconds)
-                }
+                frame_info.audio_updated = get_seconds_elapsed(last_counter, get_wall_clock())
 
                 fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
             } else {
                 sound_is_valid = false
             }
 
-            swap(&old_input, &new_input)
         }
 
-        //   
+        ////////////////////////////////////////////////
         //  Display Frame & Performance Counters
         //   
         {
@@ -616,51 +598,30 @@ main :: proc() {
             } else {
                 // TODO: Missed frame, Logging, maybe because window was moved
             }
-
-            end_counter := get_wall_clock()
-            end_cycle_count := intrinsics.read_cycle_counter()
-
-            window_width, window_height := get_window_dimension(window)
-            when false && INTERNAL {
-                DEBUG_sync_display(GLOBAL_back_buffer, debug_last_time_markers[:], sound_output, target_seconds_per_frame)
-            }
+            frame_info.framerate_sleep_complete = get_seconds_elapsed(last_counter, get_wall_clock())
 
             {
+                window_width, window_height := get_window_dimension(window)
                 device_context := win.GetDC(window)
                 display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
                 win.ReleaseDC(window, device_context)
             }
 
             flip_counter = get_wall_clock()
-            when false && INTERNAL {
-                play_cursor, write_cursor : win.DWORD
-                GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor)
-                debug_last_time_markers[0].flip_play_cursor = play_cursor
-                debug_last_time_markers[0].flip_write_cursor = write_cursor
+            end_counter := get_wall_clock()
+
+            frame_info.end_of_frame = get_seconds_elapsed(last_counter, end_counter)
+            if game_debug_frame_end != nil {
+                game_debug_frame_end(&game_memory, frame_info)
             }
 
-
-            when INTERNAL && false {
-                cycles_elapsed        := end_cycle_count - last_cycle_count
-                mega_cycles_per_frame := f32(cycles_elapsed) / (1000 * 1000)
-                ms_per_frame          := get_seconds_elapsed(last_counter, end_counter) * 1000
-                frames_per_second     := 1000 / ms_per_frame
-                fmt.printfln("ms/f: %2.02f - fps: %4.02f - Megacycles/f: %3.02f", ms_per_frame, frames_per_second, mega_cycles_per_frame)
-            }
-
-            last_cycle_count = end_cycle_count
             last_counter = end_counter
-            when false && INTERNAL {
-                #reverse for cursor, index in debug_last_time_markers {
-                    if index < len(debug_last_time_markers)-1 do debug_last_time_markers[index+1] = cursor
-                }
-            }
         }
     }
 }
 
 get_wall_clock :: #force_inline proc() -> i64 {
-    result : win.LARGE_INTEGER
+    result: win.LARGE_INTEGER
     win.QueryPerformanceCounter(&result)
     return cast(i64) result
 }
@@ -989,7 +950,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         win.EndPaint(window, &paint)
     case win.WM_SETCURSOR: 
         if GLOBAL_debug_show_cursor {
-
+            // NOTE(viktor): Don't do anything
         } else {
             win.SetCursor(nil)
         }

@@ -99,7 +99,6 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
     }
 
     // NOTE(viktor): Sum all sounds
-    in_pointer := &mixer.first_playing_sound
     for playing_sound_pointer := &mixer.first_playing_sound; playing_sound_pointer^ != nil;  {
         playing_sound := playing_sound_pointer^
         
@@ -141,7 +140,6 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 // TODO(viktor): IMPORTANT(viktor): Fix the alignment of sounds
                 // assert(len(sound.channels[0]) & 3 == 0) 
                 samples_in_sound := cast(i32) len(sound.channels[0])
-                chunks_in_sound := samples_in_sound / 4
                 
                 real_chunks_remaining_in_sound := cast(f32) (samples_in_sound - round(playing_sound.samples_played, i32)) / d_sample_chunk
                 chunks_remaining_in_sound := round(real_chunks_remaining_in_sound, i32)
@@ -202,7 +200,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                     d1 := x86._mm_load_ps(auto_cast dest_1)
                     
                     d0 += master_volume_0 * volume_0 * sample_value
-                    d1 += master_volume_0 * volume_1 * sample_value
+                    d1 += master_volume_1 * volume_1 * sample_value
                     
                     x86._mm_store_ps(cast([^]f32) dest_0, d0)
                     x86._mm_store_ps(cast([^]f32) dest_1, d1)

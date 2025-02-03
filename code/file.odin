@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "core:mem"
 import win "core:sys/windows"
 
 FileHandle :: struct {

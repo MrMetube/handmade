@@ -80,7 +80,7 @@ AssetData :: struct #packed {
         bitmap: BitmapInfo,
         sound:  SoundInfo,
         font:   FontInfo,
-    }
+    },
 }
 
 BitmapInfo :: struct #packed {

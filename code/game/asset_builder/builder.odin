@@ -189,8 +189,8 @@ write_fonts :: proc() {
     // chinese_font := load_font(`C:\Users\Viktor\Downloads\Noto_Sans_SC\static\NotoSansSC-Regular.ttf`)
     // for c in "贺佳樱我爱你" do add_character_asset(hha, &debug_font, c)
     fonts := [?]struct {type: AssetFontType, font: ^SourceFont}{
-        { .Default, load_font(64, `C:\Windows\Fonts\LiberationSans-Regular.ttf`) },
-        { .Debug,   load_font(20, `C:\Users\Viktor\AppData\Local\Microsoft\Windows\Fonts\VictorMono-Bold.otf`) },
+        { .Default, load_font(100, `C:\Windows\Fonts\LiberationSans-Regular.ttf`) },
+        { .Debug,   load_font(40,  `C:\Users\Viktor\AppData\Local\Microsoft\Windows\Fonts\VictorMono-Bold.otf`) },
     }
     
     begin_asset_type(hha, .FontGlyph)

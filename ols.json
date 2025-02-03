@@ -6,8 +6,5 @@
     
     "enable_procedure_context": true,
     "enable_procedure_snippet": true,
-    "enable_document_symbols": true,
-    "enable_semantic_tokens": true,
-    "enable_rename": true,
-    "enable_hover": true
+    "enable_document_symbols": true
 }

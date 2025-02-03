@@ -1,6 +1,7 @@
 package game
 
 import "base:intrinsics"
+import "core:fmt"
 
 INTERNAL :: #config(INTERNAL, false)
 
@@ -17,8 +18,6 @@ INTERNAL :: #config(INTERNAL, false)
         - or if necessary make utilities to these operations
     
     - Debug code
-        - Fonts
-        - Logging
         - Diagramming
         - (a little gui) switches / sliders / etc
         - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
@@ -88,16 +87,6 @@ INTERNAL :: #config(INTERNAL, false)
       - World generation
 */
 
-White    :: v4{1,1,1, 1}
-Gray     :: v4{0.5,0.5,0.5, 1}
-Black    :: v4{0,0,0, 1}
-Blue     :: v4{0.08, 0.49, 0.72, 1}
-Yellow   :: v4{0.91, 0.81, 0.09, 1}
-Orange   :: v4{1, 0.71, 0.2, 1}
-Green    :: v4{0, 0.59, 0.28, 1}
-Red      :: v4{1, 0.09, 0.24, 1}
-DarkGreen:: v4{0, 0.07, 0.0353, 1}
-
 State :: struct {
     is_initialized: b32,
 
@@ -140,8 +129,6 @@ State :: struct {
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(State{}.collision_rule_hash) & ( len(State{}.collision_rule_hash) - 1 ) == 0)
 
-ParticleCellSize :: 16
-
 TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
@@ -159,13 +146,10 @@ TransientState :: struct {
     low_priority_queue:  ^PlatformWorkQueue,
     
     env_size: [2]i32,
-    using _ : struct #raw_union {
-        using _ : struct {
-            env_bottom, env_middle, env_top: EnvironmentMap,
-        },
-        envs: [3]EnvironmentMap,
-    },
+    envs: [3]EnvironmentMap,
 }
+
+ParticleCellSize :: 16
 
 ParticleCell :: struct {
     density: f32,
@@ -195,31 +179,6 @@ GroundBuffer :: struct {
     p: WorldPosition, // NOTE(viktor): this is the center of the bitmap
 }
 
-EntityType :: enum u32 {
-    Nil, 
-    
-    Space,
-    
-    Hero, Wall, Familiar, Monster, Arrow, Stairwell,
-}
-
-HitPointPartCount :: 4
-HitPoint :: struct {
-    flags: u8,
-    filled_amount: u8,
-}
-
-EntityIndex :: u32
-StorageIndex :: distinct EntityIndex
-
-StoredEntity :: struct {
-    // TODO(viktor): its kind of busted that ps can be invalid  here
-    // AND we stored whether they would be invalid in the flags field...
-    // Can we do something better here?
-    sim: Entity,
-    p: WorldPosition,
-}
-
 ControlledHero :: struct {
     storage_index: StorageIndex,
 
@@ -229,35 +188,84 @@ ControlledHero :: struct {
     dz: f32,
 }
 
-PairwiseCollsionRuleFlag :: enum {
-    ShouldCollide,
-    Temporary,
-}
-
-PairwiseCollsionRule :: struct {
-    can_collide: b32,
-    index_a, index_b: StorageIndex,
-
-    next_in_hash: ^PairwiseCollsionRule,
-}
-
 // NOTE(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
 when INTERNAL {
-    Debug: DEBUG_code
+    Debug: DebugCode
     Debug_render_group: ^RenderGroup
 }
 
-@(export) 
-update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
-    if input.reloaded_executable {
+@export
+debug_frame_end :: proc(memory: ^GameMemory, frame_info: DebugFrameInfo) {
+    if memory.debug_storage == nil do return
+    
+    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
+    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+    
+    count: u32
+    for _, record in GameDebugRecords {
+        state := &debug_state.couter_states[count]
+        count += 1
+        
+        state.loc                    = record.loc
+        state.snapshots[state.index] = record.counts
+        state.index += 1
+        if state.index >= len(state.snapshots) {
+            state.index = 0
+        }
+    }
+}
+
+overlay_debug_info :: proc(memory: ^GameMemory) {
+    if memory.debug_storage == nil do return
+    
+    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
+    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+    
+    if GameDebugRecords == nil {
         init_debug_records()
     }
     
-    timed_block()
+    // NOTE(viktor): kerning and unicode test lines
+    // Debug_text_line("贺佳樱我爱你")
+    // Debug_text_line("AVA: WA ty fi ij `^?'\"")
+    // Debug_text_line("0123456789°")
+    
+    Debug_text_line("Debug Game Cycle Counts:")
+    for state in debug_state.couter_states {
+        cycles := debug_statistic_begin()
+        hits   := debug_statistic_begin()
+        cphs   := debug_statistic_begin()
+        
+        for snapshot in state.snapshots {
+            using snapshot
+            
+            denom := hit_count if hit_count != 0 else 1
+            cycles_per_hit := cycle_count / denom
+            
+            debug_statistic_accumulate(&cycles, cycle_count)
+            debug_statistic_accumulate(&hits,   hit_count)
+            debug_statistic_accumulate(&cphs,   cycles_per_hit)
+        }
+        debug_statistic_end(&cycles)
+        debug_statistic_end(&hits)
+        debug_statistic_end(&cphs)
+        
+        if hits.max != 0 {
+            Debug_text_line(fmt.tprintf("%s(% 4d): min : avg : max", state.procedure, state.line))
+            Debug_text_line(fmt.tprintf("  Cycles:     % 15.0f : % 15.0f : % 15.0f", cycles.min, cycles.avg, cycles.max))
+            Debug_text_line(fmt.tprintf("  Hits:       % 15.0f : % 15.0f : % 15.0f", hits.min,   hits.avg,   hits.max))
+            Debug_text_line(fmt.tprintf("  Cycles/Hit: % 15.0f : % 15.0f : % 15.0f", cphs.min,   cphs.avg,   cphs.max))
+        }
+    }
+}
 
+@export
+update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
+    timed_block()
+    
     Platform = memory.Platform_api
     
     when INTERNAL {
@@ -268,9 +276,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         
     ground_buffer_size :: 512
     
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Permanent Initialization
-    // ---------------------- ---------------------- ----------------------
+    ////////////////////////////////////////////////
+    // Permanent Initialization
+    // 
     assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
     state := cast(^State) raw_data(memory.permanent_storage)
     if !state.is_initialized {
@@ -304,7 +312,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         state.familiar_collision      = make_simple_grounded_collision(state, {0.5, 0.5, 1})
         state.standart_room_collision = make_simple_grounded_collision(state, V3(vec_cast(f32, tiles_per_screen) * tile_size_in_meters, state.typical_floor_height * 0.9))
 
-        //
+        ////////////////////////////////////////////////
         // "World Gen"
         //
         
@@ -432,9 +440,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         state.is_initialized = true
     }
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Transient Initialization
-    // ---------------------- ---------------------- ----------------------
+    ////////////////////////////////////////////////
+    // Transient Initialization
+    //
     assert(size_of(TransientState) <= len(memory.transient_storage), "The Transient State cannot fit inside the permanent memory")
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if !tran_state.is_initialized {
@@ -482,11 +490,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     }
     
     if input.reloaded_executable {
-        when INTERNAL {
-            init_debug_records()
-        }
-        
-        
         // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
         when false {
             for &ground_buffer in tran_state.ground_buffers {
@@ -500,9 +503,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         // make_sphere_diffuse_map(tran_state.test_diffuse)
     }
     
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Input
-    // ---------------------- ---------------------- ----------------------
+    ////////////////////////////////////////////////
+    // Input
+    // 
 
     world := state.world
     
@@ -577,9 +580,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
         }
     }
 
-    // ---------------------- ---------------------- ----------------------
-    // ---------------------- Update and Render
-    // ---------------------- ---------------------- ----------------------
+    ////////////////////////////////////////////////
+    // Update and Render
+    // 
     
     when false {
         // NOTE(viktor): enable this to test weird screen sizes
@@ -708,7 +711,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
             ddp: v3
             move_spec := default_move_spec()
             
-            // 
+            ////////////////////////////////////////////////
             // Pre-physics entity work
             // 
             switch entity.type {
@@ -793,7 +796,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
 
             render_group.transform.offset = get_entity_ground_point(&entity)
 
-            // 
+            ////////////////////////////////////////////////
             // Post-physics entity work
             // 
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
@@ -813,7 +816,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
                 
-                when false { // NOTE(viktor): Particle system test
+                when false { 
+                    ////////////////////////////////////////////////
+                    // NOTE(viktor): Particle system test
                     for _ in 0..<4 {
                         particle := &state.particles[state.next_particle]
                         state.next_particle += 1
@@ -951,7 +956,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     }
     render_group.transform.offset = 0
     
-    when false { // NOTE(viktor): Coordinate System and Environment Map Test
+    when false { 
+        ////////////////////////////////////////////////
+        // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
     
         for it, it_index in tran_state.envs {
@@ -1032,7 +1039,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
     
     if Debug_render_group != nil {
         Debug_reset(buffer.width, buffer.height)
-        overlay_cycle_counters()
+        overlay_debug_info(memory)
         tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
         end_render(Debug_render_group)
     }
@@ -1042,7 +1049,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input){
 // millisecond or so.
 // TODO: reduce the pressure on the performance of this function by measuring
 // TODO: Allow sample offsets here for more robust platform options
-@(export)
+@export 
 output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
     state      := cast(^State)          raw_data(memory.permanent_storage)
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
@@ -1151,12 +1158,11 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
 }
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
-    timed_block()
     result = {
         memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
         width  = dim.x,
         height = dim.y,
-        width_over_height = safe_ratio_1(cast(f32) dim.x,  cast(f32) dim.y)
+        width_over_height = safe_ratio_1(cast(f32) dim.x,  cast(f32) dim.y),
     }
     
     return result
@@ -1172,7 +1178,7 @@ FillGroundChunkWork :: struct {
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    timed_block()
+    // timed_block()
     work := cast(^FillGroundChunkWork) data
 
     
@@ -1228,7 +1234,7 @@ fill_ground_chunk :: proc(tran_state: ^TransientState, state: ^State, ground_buf
             tran_state = tran_state, 
             state = state,
             ground_buffer = ground_buffer, 
-            p = p
+            p = p,
         }
         
         ground_buffer.p = p
@@ -1257,176 +1263,4 @@ make_simple_grounded_collision :: proc(state: ^State, dim: v3) -> (result: ^Enti
     result.volumes[0] = result.total_volume
 
     return result
-}
-
-get_low_entity :: #force_inline proc(state: ^State, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
-    if storage_index > 0 && storage_index <= state.stored_entity_count {
-        entity = &state.stored_entities[storage_index]
-    }
-
-    return entity
-}
-
-add_stored_entity :: proc(state: ^State, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    assert(state.world != nil)
-    
-    index = state.stored_entity_count
-    state.stored_entity_count += 1
-    assert(state.stored_entity_count < len(state.stored_entities))
-    stored = &state.stored_entities[index]
-    stored.sim = { type = type }
-
-    stored.sim.collision = state.null_collision
-    stored.p = null_position()
-
-    change_entity_location(&state.world_arena, state.world, index, stored, p)
-
-    return index, stored
-}
-
-add_grounded_entity :: proc(state: ^State, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    index, stored = add_stored_entity(state, type, p)
-    stored.sim.collision = collision
-
-    return index, stored
-}
-
-add_arrow :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_stored_entity(state, .Arrow, null_position())
-    
-    entity.sim.collision = state.arrow_collision
-    entity.sim.flags += {.Moveable}
-
-    return index, entity
-}
-
-add_wall :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Wall, p, state.wall_collision)
-
-    entity.sim.flags += {.Collides}
-
-    return index, entity
-}
-
-add_stairs :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Stairwell, p, state.stairs_collision)
-
-    entity.sim.flags += {.Collides}
-    entity.sim.walkable_height = state.typical_floor_height
-    entity.sim.walkable_dim    = entity.sim.collision.total_volume.dim.xy
-
-    return index, entity
-}
-
-add_player :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Hero, state.camera_p, state.player_collision)
-
-    entity.sim.flags += {.Collides, .Moveable}
-
-    init_hitpoints(entity, 3)
-
-    arrow_index, _ := add_arrow(state)
-    entity.sim.arrow.index = arrow_index
-
-    if state.camera_following_index == 0 {
-        state.camera_following_index = index
-    }
-
-    return index, entity
-}
-
-add_monster :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Monster, p, state.monstar_collision)
-
-    entity.sim.flags += {.Collides, .Moveable}
-
-    init_hitpoints(entity, 3)
-
-    return index, entity
-}
-
-add_familiar :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Familiar, p, state.familiar_collision)
-
-    entity.sim.flags += {.Moveable}
-
-    return index, entity
-}
-
-add_standart_room :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Space, p, state.standart_room_collision)
-
-    entity.sim.flags += { .Traversable }
-
-    return index, entity
-}
-
-init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
-    assert(count < len(entity.sim.hit_points))
-
-    entity.sim.hit_point_max = count
-    for &hit_point in entity.sim.hit_points[:count] {
-        hit_point = { filled_amount = HitPointPartCount }
-    }
-}
-
-add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32) {
-    timed_block()
-    // TODO(viktor): collapse this with should_collide
-    a, b := a, b
-    if a > b do swap(&a, &b)
-    // TODO(viktor): BETTER HASH FUNCTION!!!
-    found: ^PairwiseCollsionRule
-    hash_bucket := a & (len(state.collision_rule_hash) - 1)
-    for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
-        if rule.index_a == a && rule.index_b == b {
-            found = rule
-            break
-        }
-    }
-
-    if found == nil {
-        found = state.first_free_collision_rule
-        if found != nil {
-            state.first_free_collision_rule = found.next_in_hash
-        } else {
-            found = push(&state.world_arena, PairwiseCollsionRule)
-        }
-        found.next_in_hash = state.collision_rule_hash[hash_bucket]
-        state.collision_rule_hash[hash_bucket] = found
-    }
-
-    if found != nil {
-        found.index_a = a
-        found.index_b = b
-        found.can_collide = should_collide
-    }
-}
-
-clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
-    timed_block()
-    // TODO(viktor): need to make a better data structute that allows for
-    // the removal of collision rules without searching the entire table
-    // NOTE(viktor): One way to make removal easy would be to always
-    // add _both_ orders of the pairs of storage indices to the
-    // hash table, so no matter which position the entity is in,
-    // you can always find it. Then, when you do your first pass
-    // through for removal, you just remember the original top
-    // of the free list, and when you're done, do a pass through all
-    // the new things on the free list, and remove the reverse of
-    // those pairs.
-    for hash_bucket in 0..<len(state.collision_rule_hash) {
-        for rule := &state.collision_rule_hash[hash_bucket]; rule^ != nil;  {
-            if rule^.index_a == storage_index || rule^.index_b == storage_index {
-                removed_rule := rule^
-
-                rule^ = (rule^).next_in_hash
-
-                removed_rule.next_in_hash = state.first_free_collision_rule
-                state.first_free_collision_rule = removed_rule
-            } else {
-                rule = &(rule^.next_in_hash)
-            }
-        }
-    }
 }

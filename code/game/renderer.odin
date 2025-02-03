@@ -270,7 +270,7 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
 
 
 when INTERNAL {
-    font_scale : f32 = 1
+    font_scale : f32 = 0.5
     cp_y: f32
     left_edge: f32
     font_id: FontId
@@ -424,8 +424,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 
     assert(data.group != nil)
     assert(data.target.memory != nil)
-    
-    timed_block()
 
     render_to_output(data.group, data.target, data.clip_rect, true)
     render_to_output(data.group, data.target, data.clip_rect, false)
@@ -627,12 +625,12 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     optimization_mode="favor_size",
 )
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
-    timed_block()
+    // timed_block()
     assert(texture.memory != nil)
-    assert(len(texture.memory) <= 2160 * 1444 * 2)
     assert(texture.width  >= 0)
     assert(texture.height >= 0)
-    assert(texture.width  >  0)
+    assert(auto_cast len(texture.memory) == texture.height * texture.width)
+    assert(texture.width_over_height >  0)
 
     // NOTE(viktor): premultiply color
     color := color
@@ -736,7 +734,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-        timed_block(hit_count = rectangle_clamped_area(fill_rect) / 2)
+        // timed_block(hit_count = rectangle_clamped_area(fill_rect) / 2)
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
