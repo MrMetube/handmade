@@ -6,20 +6,54 @@ import "core:hash"
 import "base:runtime"
 import "base:intrinsics"
 
+
+////////////////////////////////////////////////
+
+GlobalCurrentDebugEventsArrayIndex: u32
+GlobalDebugEventsState: DebugEventsState
+
+DebugEventsStorage:    [2][16*65536]DebugEvent
+DebugEventsState :: bit_field u64 {
+    // @Volatile Later on we transmute this to a u64 to 
+    // atomically increment one of the fields
+    events_index: u32 | 32,
+    array_index:  u32 | 32,
+}
+
+DebugEvent  :: struct {
+    clock: i64,
+    
+    thread_index: u32,
+    core_index:   u32,
+    record_index: u32,
+    
+    type: DebugEventType,
+}
+
+DebugEventType :: enum u8 {
+    BeginBlock, EndBlock,
+}
+
+////////////////////////////////////////////////
+
 GameDebugRecords: DebugRecords
-
-
 
 DebugRecords      :: [512]DebugRecordsEntry
 DebugRecordsEntry :: struct{
     hash:   u32,
+    index:  u32,
     loc:    runtime.Source_Code_Location,
     record: DebugRecord,
 }
 
+DebugRecord :: struct {
+    counts: DebugCounterSnapshot,
+}
+
+////////////////////////////////////////////////
+
 DebugState :: struct {
-    count:         u32,
-    couter_states: [512]DebugCounterState,
+    counter_states: [512]DebugCounterState,
     
     index:         u32,
     frame_infos:   [144]DebugFrameInfo,
@@ -27,22 +61,19 @@ DebugState :: struct {
 
 DebugCounterState :: struct {
     using loc: runtime.Source_Code_Location,
-    index:     u32,
     snapshots: [144]DebugCounterSnapshot,
 }
 
 DebugCounterSnapshot :: struct {
-    hit_count:   i32,
-    cycle_count: i32,
-}
-
-DebugRecord :: struct {
-    counts: DebugCounterSnapshot,
+    hit_count:   i64,
+    cycle_count: i64,
 }
 
 DebugStatistic :: struct {
     min, max, avg, count: f64
 }
+
+////////////////////////////////////////////////
 
 @export
 debug_frame_end :: proc(memory: ^GameMemory, frame_info: DebugFrameInfo) {
@@ -51,30 +82,45 @@ debug_frame_end :: proc(memory: ^GameMemory, frame_info: DebugFrameInfo) {
     assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
     
+    #assert(len(DebugEventsStorage) == 2)
+    events_state := atomic_exchange(&GlobalDebugEventsState, { events_index = 0, array_index = GlobalCurrentDebugEventsArrayIndex == 1 ? 0 : 1 })
+    GlobalCurrentDebugEventsArrayIndex += 1
+    GlobalCurrentDebugEventsArrayIndex &= 1
+    zero_slice(DebugEventsStorage[events_state.array_index == 0 ? 1 : 0][:])
+    
     debug_state.frame_infos[debug_state.index] = frame_info
     debug_state.index += 1
     if debug_state.index >= len(debug_state.frame_infos) {
         debug_state.index = 0
     }
     
-    debug_state.count = 0
-    for &entry in GameDebugRecords {
-        if entry.hash != NilHashValue {
-            loc    := entry.loc
-            record := &entry.record
-            
-            state := &debug_state.couter_states[debug_state.count]
-            debug_state.count += 1
-            
-            state.loc                    = loc
-            state.snapshots[state.index] = record.counts
-            
-            record.counts = {}
-            
-            state.index += 1
-            if state.index >= len(state.snapshots) {
-                state.index = 0
-            }
+    // Clear out counter states, even if no event is associated with it.
+    for &counter in debug_state.counter_states {
+        counter.snapshots[debug_state.index] = {}
+    }
+    
+    events := DebugEventsStorage[events_state.array_index][:events_state.events_index]
+    for event in events {
+        entry := &GameDebugRecords[event.record_index]
+        assert(entry.index == event.record_index)
+        entry.record.counts = {}
+        
+        counter := &debug_state.counter_states[event.record_index]
+        if counter.loc == {} {
+            counter.loc = entry.loc
+        } else {
+            // :HotReload The static strings to the file and procedure do not survive a reload.
+            assert(counter.loc.line   == entry.loc.line)
+            assert(counter.loc.column == entry.loc.column)
+        }
+        
+        snapshot := &counter.snapshots[debug_state.index]
+        switch event.type {
+          case .BeginBlock:
+            snapshot.hit_count   += 1
+            snapshot.cycle_count -= event.clock
+          case .EndBlock:
+            snapshot.cycle_count += event.clock
         }
     }
 }
@@ -91,7 +137,9 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     // Debug_text_line("0123456789°")
     
     text_line("Debug Game Cycle Counts:")
-    for state, state_index in debug_state.couter_states[:debug_state.count] {
+    for state in debug_state.counter_states {
+        if state.loc == {} do continue
+        
         cycles := debug_statistic_begin()
         hits   := debug_statistic_begin()
         cphs   := debug_statistic_begin()
@@ -117,7 +165,11 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
                 for snapshot, index in state.snapshots {
                     proportion := cast(f32) snapshot.cycle_count * scale
                     height := chart_height * proportion
-                    push_rectangle(Debug_render_group, {cast(f32) index * width + 0.5*width, height * 0.5 + chart_min_y, 0}, {width, height}, {proportion,0.7,0.8,1})
+                    push_rectangle(Debug_render_group, 
+                        {cast(f32) index * width + 0.5*width, height * 0.5 + chart_min_y, 0}, 
+                        {width, height}, 
+                        {proportion, 0.7, 0.8, 1},
+                    )
                 }
             }
             
@@ -129,7 +181,7 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     target_frames_per_seconds :: 72.0
     bar_width :: 5
     bar_spacing :: 3
-    chart_height :: 150
+    chart_height :: 120
     
     full_width := cast(f32) len(debug_state.frame_infos) * (bar_width + bar_spacing) - bar_spacing
     pad_x := Debug_render_group.transform.screen_center.x - full_width * 0.5
@@ -238,11 +290,49 @@ text_line :: proc(text: string) {
     }
 }
 
+////////////////////////////////////////////////
+        
+record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u32) {
+    events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugEventsState, 1)
+    event := &DebugEventsStorage[events.array_index][events.events_index]
+    event^ = {
+        type         = type,
+        clock        = read_cycle_counter(),
+        thread_index = 0,
+        core_index   = 0,
+        record_index = record_index,
+    }
+}
 
+@(deferred_out=end_timed_block)
+timed_block :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (record: ^DebugRecord, record_index: u32, start: i64, hit_count_out: i64) { 
+    // TODO(viktor): Check the overhead of this
+    ok: b32
+    record, record_index, ok = get(&GameDebugRecords, loc)
+    if !ok {
+        record, record_index = put(&GameDebugRecords, loc)
+    }
+    
+    //
+    
+    record_debug_event(.BeginBlock, record_index)
+    
+    return record, record_index, read_cycle_counter(), hit_count
+}
+
+end_timed_block :: #force_inline proc(record: ^DebugRecord, record_index: u32, start: i64, hit_count: i64) {
+    assert(record != nil)
+    {
+        end := read_cycle_counter()
+        counts := DebugCounterSnapshot{ hit_count = hit_count, cycle_count = (end - start) }
+        #assert(size_of(DebugCounterSnapshot) == size_of(i128))
+        atomic_add(cast(^i128) &record.counts,  transmute(i128) counts)
+
+        record_debug_event(.EndBlock, record_index)
+    }
+}
 
 ////////////////////////////////////////////////
-
-
 
 debug_statistic_begin :: #force_inline proc() -> (result: DebugStatistic) {
     result = {
@@ -270,29 +360,19 @@ debug_statistic_end :: #force_inline proc(stat: ^DebugStatistic) {
     }
 }
 
-@(deferred_out=end_timed_block)
-timed_block :: #force_inline proc(loc := #caller_location, #any_int hit_count: i32 = 1) -> (record: ^DebugRecord, start: i64, hit_count_out: i32) { 
-    // TODO(viktor): @CompilerBug repro: Why can I use record here, when it is only using the loc?
-    // if record not_in GameDebugRecords {
-    // TODO(viktor): Check the overhead of this
-    ok: b32
-    record, ok = get(&GameDebugRecords, loc)
-    if !ok {
-        put(&GameDebugRecords, loc, {})
-    }
-    return record, read_cycle_counter(), hit_count
-}
-
-end_timed_block :: #force_inline proc(record: ^DebugRecord, start: i64, hit_count: i32) {
-    if record != nil {
-        end := read_cycle_counter()
-        counts := DebugCounterSnapshot{ hit_count = hit_count, cycle_count = cast(i32) (end - start) }
-        atomic_add(cast(^i64) &record.counts,  transmute(i64) counts)
-    }
-}
-
 ////////////////////////////////////////////////
-// HashTable
+// HashTable Implementation for the DebugRecords
+//   TODO(viktor): as all the hashes of the source code locations
+//   are known at compile time, it should be possible to bake these 
+//   into the table and hash O(1) retrieval and storage.
+//   This would require the build script to aggregate all the 
+//   invocations of of timed_block() and generate a hash for each
+//   and insert it into the source code.
+//
+//   The language default map type is not thread-safe.
+//   This is _not_ a general implementation and assumes
+//   a fixed size backing array and will fail if it
+//   should "grow".
 
 @(private="file")
 get_hash :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result: u32) {
@@ -312,9 +392,9 @@ get_hash :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (res
 }
 
 @(private="file")
-find :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result: ^DebugRecordsEntry, hash_value: u32) {
+find :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result: ^DebugRecordsEntry, hash_value, hash_index: u32) {
     hash_value = get_hash(ht, value)
-    hash_index := hash_value
+    hash_index = hash_value
     for {
         result = &ht[hash_index]
         if result.hash == NilHashValue || result.hash == hash_value && result.loc == value {
@@ -326,28 +406,35 @@ find :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result:
             assert(false, "cannot insert")
         }
     }
-    return result, hash_value
+    return result, hash_value, hash_index
 }
 
 @(private="file")
 NilHashValue :: 0
 
 @(private="file")
-put :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location, record: DebugRecord) {
-    entry, hash_value := find(ht, value)
+put :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result: ^DebugRecord, hash_index: u32) {
+    entry: ^DebugRecordsEntry
+    hash_value: u32
+    entry, hash_value, hash_index = find(ht, value)
     
-    entry.hash   = hash_value
-    entry.loc    = value
-    entry.record = record
+    entry.hash  = hash_value
+    entry.index = hash_index
+    entry.loc   = value
+    result      = &entry.record
+    
+    return result, hash_index
 }
 
 @(private="file")
-get :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (record: ^DebugRecord, ok: b32) #optional_ok {
-    entry, hash_value := find(ht, value)
+get :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (record: ^DebugRecord, hash_index: u32, ok: b32) {
+    entry: ^DebugRecordsEntry
+    hash_value: u32
+    entry, hash_value, hash_index = find(ht, value)
     
     if entry != nil && entry.hash == hash_value && entry.loc == value {
-        return &entry.record, true
+        return &entry.record, hash_index, true
     } else {
-        return nil, false
+        return nil, NilHashValue, false
     }
 }

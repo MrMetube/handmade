@@ -46,7 +46,7 @@ MonitorRefreshHz: u32 : 72
 
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
-DebugStorageSize     ::   1 * Gigabyte when INTERNAL else 0
+DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
 //   
 //  Globals
