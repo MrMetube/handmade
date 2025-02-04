@@ -1,7 +1,5 @@
 package game
 
-INTERNAL :: #config(INTERNAL, false)
-
 /*
     TODO(viktor):
     ARCHITECTURE EXPLORATION

@@ -1,6 +1,6 @@
 {
     "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
-    "checker_args": "-define:INTERNAL=true -define:BUILD=true -define:PLATFORM=true",
+    "checker_args": "-define:INTERNAL=true -define:BUILD=true -define:TRANSLATION_UNIT=0",
 
     "enable_format": false,
     

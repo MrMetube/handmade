@@ -5,8 +5,6 @@ import "base:runtime"
 import "core:fmt"
 import win "core:sys/windows"
 
-INTERNAL :: #config(INTERNAL, false)
-
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
     - Threading (launch a thread)
@@ -107,7 +105,7 @@ ReplayBuffer :: struct {
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
-
+    
     //   
     //   Platform Setup
     //   
@@ -339,6 +337,7 @@ main :: proc() {
         ////////////////////////////////////////////////
         //  Debug Info
         frame_info: DebugFrameInfo
+        record_timestap(&frame_info, last_counter, "end frame")
         
         
         ////////////////////////////////////////////////

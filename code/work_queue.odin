@@ -84,6 +84,10 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
 thread_proc :: proc "stdcall" (parameter: rawpointer) -> win.DWORD {
     context = runtime.default_context()
     
+    // 0 Should be reserved for the main thread
+    context.user_index = cast(int) win.GetCurrentThreadId()
+    assert(context.user_index != 0)
+    
     queue := cast(^PlatformWorkQueue) parameter
     for {
         if do_next_work_queue_entry(queue) { 
