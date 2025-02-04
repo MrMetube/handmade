@@ -93,14 +93,15 @@ GameMemory :: struct {
 
 
 when INTERNAL { 
-        
+    
+    DebugFrameTimestamp :: struct {
+        name:    string,
+        seconds: f32,
+    }
     DebugFrameInfo :: struct {
-        executable_ready,
-        input_processed,
-        game_updated,
-        audio_updated,
-        framerate_sleep_complete,
-        end_of_frame: f32,
+        total_seconds: f32,
+        count:         u32,
+        timestamps:    [64]DebugFrameTimestamp
     }
 
     DebugCode :: struct {

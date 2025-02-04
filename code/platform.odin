@@ -357,7 +357,8 @@ main :: proc() {
             
             new_input.reloaded_executable = true
         }
-        frame_info.executable_ready = get_seconds_elapsed(last_counter, get_wall_clock())
+        
+        record_timestap(&frame_info, last_counter, "executable ready")
 
         ////////////////////////////////////////////////   
         //  Input
@@ -471,8 +472,9 @@ main :: proc() {
                 }
             }
         }
-        frame_info.input_processed = get_seconds_elapsed(last_counter, get_wall_clock())
-
+        
+        record_timestap(&frame_info, last_counter, "input processed")
+        
         if GlobalPause do continue
 
 
@@ -495,8 +497,8 @@ main :: proc() {
             if game_lib_is_valid {
                 game_update_and_render(&game_memory, offscreen_buffer, new_input)
             }
-            frame_info.game_updated = get_seconds_elapsed(last_counter, get_wall_clock())
-
+            record_timestap(&frame_info, last_counter, "game updated")
+    
             swap(&old_input, &new_input)
 
             sound_is_valid = true
@@ -569,8 +571,8 @@ main :: proc() {
                 if game_lib_is_valid {
                     game_output_sound_samples(&game_memory, sound_buffer)
                 }
-                frame_info.audio_updated = get_seconds_elapsed(last_counter, get_wall_clock())
-
+                record_timestap(&frame_info, last_counter, "audio updated")
+        
                 fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
             } else {
                 sound_is_valid = false
@@ -598,8 +600,8 @@ main :: proc() {
             } else {
                 // TODO: Missed frame, Logging, maybe because window was moved
             }
-            frame_info.framerate_sleep_complete = get_seconds_elapsed(last_counter, get_wall_clock())
-
+            record_timestap(&frame_info, last_counter, "framerate sleep complete")
+    
             {
                 window_width, window_height := get_window_dimension(window)
                 device_context := win.GetDC(window)
@@ -610,7 +612,8 @@ main :: proc() {
             flip_counter = get_wall_clock()
             end_counter := get_wall_clock()
 
-            frame_info.end_of_frame = get_seconds_elapsed(last_counter, end_counter)
+                
+            frame_info.total_seconds = get_seconds_elapsed(last_counter, end_counter)
             if game_debug_frame_end != nil {
                 game_debug_frame_end(&game_memory, frame_info)
             }
@@ -620,6 +623,10 @@ main :: proc() {
     }
 }
 
+record_timestap :: proc(frame_info: ^DebugFrameInfo, last_counter: i64, name: string) {
+    frame_info.timestamps[frame_info.count] = { name, get_seconds_elapsed(last_counter, get_wall_clock()) }
+    frame_info.count += 1
+}
 get_wall_clock :: #force_inline proc() -> i64 {
     result: win.LARGE_INTEGER
     win.QueryPerformanceCounter(&result)

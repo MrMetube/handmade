@@ -1,8 +1,5 @@
 package game
 
-import "base:intrinsics"
-import "core:fmt"
-
 INTERNAL :: #config(INTERNAL, false)
 
 /*
@@ -195,71 +192,6 @@ Platform: PlatformAPI
 when INTERNAL {
     Debug: DebugCode
     Debug_render_group: ^RenderGroup
-}
-
-@export
-debug_frame_end :: proc(memory: ^GameMemory, frame_info: DebugFrameInfo) {
-    if memory.debug_storage == nil do return
-    
-    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
-    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
-    
-    count: u32
-    for _, record in GameDebugRecords {
-        state := &debug_state.couter_states[count]
-        count += 1
-        
-        state.loc                    = record.loc
-        state.snapshots[state.index] = record.counts
-        state.index += 1
-        if state.index >= len(state.snapshots) {
-            state.index = 0
-        }
-    }
-}
-
-overlay_debug_info :: proc(memory: ^GameMemory) {
-    if memory.debug_storage == nil do return
-    
-    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
-    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
-    
-    if GameDebugRecords == nil {
-        init_debug_records()
-    }
-    
-    // NOTE(viktor): kerning and unicode test lines
-    // Debug_text_line("贺佳樱我爱你")
-    // Debug_text_line("AVA: WA ty fi ij `^?'\"")
-    // Debug_text_line("0123456789°")
-    
-    Debug_text_line("Debug Game Cycle Counts:")
-    for state in debug_state.couter_states {
-        cycles := debug_statistic_begin()
-        hits   := debug_statistic_begin()
-        cphs   := debug_statistic_begin()
-        
-        for snapshot in state.snapshots {
-            using snapshot
-            
-            denom := hit_count if hit_count != 0 else 1
-            cycles_per_hit := cycle_count / denom
-            
-            debug_statistic_accumulate(&cycles, cycle_count)
-            debug_statistic_accumulate(&hits,   hit_count)
-            debug_statistic_accumulate(&cphs,   cycles_per_hit)
-        }
-        debug_statistic_end(&cycles)
-        debug_statistic_end(&hits)
-        debug_statistic_end(&cphs)
-        
-        if hits.max != 0 {
-            Debug_text_line(fmt.tprintf("%s(% 4d): min : avg : max", state.procedure, state.line))
-            Debug_text_line(fmt.tprintf("  Cycles:     % 15.0f : % 15.0f : % 15.0f", cycles.min, cycles.avg, cycles.max))
-            Debug_text_line(fmt.tprintf("  Hits:       % 15.0f : % 15.0f : % 15.0f", hits.min,   hits.avg,   hits.max))
-            Debug_text_line(fmt.tprintf("  Cycles/Hit: % 15.0f : % 15.0f : % 15.0f", cphs.min,   cphs.avg,   cphs.max))
-        }
-    }
 }
 
 @export
@@ -1038,7 +970,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     check_arena(&tran_state.arena)
     
     if Debug_render_group != nil {
-        Debug_reset(buffer.width, buffer.height)
+        reset_debug_renderer(buffer.width, buffer.height)
         overlay_debug_info(memory)
         tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
         end_render(Debug_render_group)

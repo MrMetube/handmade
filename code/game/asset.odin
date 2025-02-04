@@ -507,11 +507,11 @@ remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
 acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
     timed_block()
     size := div.total + size_of(AssetMemoryHeader)
+    begin_asset_lock(assets)
+    defer end_asset_lock(assets)
     
     block := find_block_for_size(assets, size)
     
-    begin_asset_lock(assets)
-    defer end_asset_lock(assets)
     
     for {
         if block != nil && block.size >= size {
@@ -661,7 +661,6 @@ LoadAssetWork :: struct {
 }
 
 load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
-    timed_block()
     Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
     if Platform_no_file_errors(work.handle) {
         switch work.kind {

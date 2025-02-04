@@ -75,7 +75,6 @@ change_pitch :: proc(mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
 
 @(enable_target_feature="sse,sse2")
 output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
-    timed_block()
     mixer_memory := begin_temporary_memory(temporary_arena)
     defer end_temporary_memory(mixer_memory)
 

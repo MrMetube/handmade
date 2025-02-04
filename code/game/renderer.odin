@@ -1,6 +1,5 @@
 package game
 
-import hha "./asset_builder"
 import "core:simd"
 import "core:simd/x86"
 
@@ -202,6 +201,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32
     if group.renders_in_background && bitmap == nil {
         load_bitmap(group.assets, id, true)
         bitmap = get_bitmap(group.assets, id, group.generation_id)
+        assert(bitmap != nil)
     }
     
     if bitmap != nil {
@@ -266,64 +266,6 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, siz
     // NOTE(viktor): Left and Right
     push_rectangle(group, offset - {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
     push_rectangle(group, offset + {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
-}
-
-
-when INTERNAL {
-    font_scale : f32 = 0.5
-    cp_y: f32
-    left_edge: f32
-    font_id: FontId
-    font: ^Font
-    
-    Debug_reset :: proc(width, height: i32) {
-        timed_block()
-        begin_render(Debug_render_group)
-        orthographic(Debug_render_group, {width, height}, 1)
-        
-        font_id = best_match_font_from(Debug_render_group.assets, .Font, #partial { .FontType = cast(f32) hha.AssetFontType.Debug }, #partial { .FontType = 1 })
-        font = get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
-        
-        baseline :f32= 10
-        if font != nil {
-            font_info := get_font_info(Debug_render_group.assets, font_id)
-            baseline = get_baseline(font_info)
-        } else {
-            load_font(Debug_render_group.assets, font_id, false)
-        }
-        
-        cp_y      =  0.5 * cast(f32) height - baseline * font_scale
-        left_edge = -0.5 * cast(f32) width
-    }
-
-    Debug_text_line :: proc(text: string) {
-        if Debug_render_group != nil {
-            assert(Debug_render_group.inside_render)
-            
-            if font != nil {
-                font_info := get_font_info(Debug_render_group.assets, font_id)
-                cp_x := left_edge
-                
-                previous_codepoint: rune
-                for codepoint in text {
-                    defer previous_codepoint = codepoint
-                    
-                    advance_x := get_horizontal_advance_for_pair(font, font_info, previous_codepoint, codepoint)
-                    cp_x += advance_x * font_scale
-                    
-                    bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
-                    info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
-                    
-                    if info != nil && codepoint != ' ' {
-                        push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0})
-                    }
-                }
-                
-                advance_y := get_line_advance(font_info)
-                cp_y -= font_scale * advance_y
-            }
-        }
-    }
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
@@ -625,17 +567,18 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     optimization_mode="favor_size",
 )
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
-    // timed_block()
-    assert(texture.memory != nil)
-    assert(texture.width  >= 0)
-    assert(texture.height >= 0)
-    assert(auto_cast len(texture.memory) == texture.height * texture.width)
-    assert(texture.width_over_height >  0)
+    timed_block()
+    // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
+    if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&
+        (auto_cast len(texture.memory) == texture.height * texture.width) &&
+        (texture.width_over_height >  0)) {
+        return
+    } 
 
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a
-/* 
+    /* 
     length_x_axis := length(x_axis)
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
@@ -644,7 +587,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
     // to have control over the amount of scaling in the z direction that
     // the normals appear to have
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
- */
+    */
     inverted_infinity_rectangle :: #force_inline proc() -> (result: Rectangle2i) {
         result.min = max(i32)
         result.max = min(i32)
@@ -734,7 +677,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-        // timed_block(hit_count = rectangle_clamped_area(fill_rect) / 2)
+        timed_block(hit_count = rectangle_clamped_area(fill_rect) / 2)
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
