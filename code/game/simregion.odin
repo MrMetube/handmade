@@ -70,7 +70,7 @@ SimRegion :: struct {
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
 begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
-    timed_block()
+    timed_function()
     // TODO(viktor): make storedEntities part of world
     region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
@@ -119,7 +119,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: World
 }
 
 end_sim :: proc(region: ^SimRegion, state: ^State) {
-    timed_block()
+    timed_function()
     // TODO(viktor): make storedEntities part of world
     for entity in region.entities[:region.entity_count] {
         assert(entity.storage_index != 0)
@@ -264,7 +264,7 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
 
 
 move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
-    timed_block()
+    timed_function()
     assert(.Nonspatial not_in entity.flags)
     
     if entity.type == .Hero {

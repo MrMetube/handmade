@@ -131,3 +131,10 @@ pointer_step :: proc(t: ^$T, #any_int step: i64) ->(result: ^T) {
     result = &ts[step]
     return result
 }
+
+modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where intrinsics.type_is_numeric(N) {
+    value^ += addend
+    if value^ >= one_past_maximum {
+        value^ = 0
+    }
+}

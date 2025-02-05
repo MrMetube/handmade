@@ -26,7 +26,7 @@ import win "core:sys/windows"
 */
 
 
-// 
+////////////////////////////////////////////////
 // Config
 // 
 
@@ -46,11 +46,11 @@ PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
 DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
-//   
+////////////////////////////////////////////////
 //  Globals
 //   
 
-GLOBAL_Running: b32
+GlobalRunning: b32
 
 GLOBAL_back_buffer:  OffscreenBuffer
 GLOBAL_sound_buffer: ^IDirectSoundBuffer
@@ -62,7 +62,7 @@ GlobalPause := false
 GLOBAL_debug_show_cursor: b32
 GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
-//   
+////////////////////////////////////////////////
 //  Types
 //   
 
@@ -103,10 +103,10 @@ ReplayBuffer :: struct {
 }
 
 main :: proc() {
-    when INTERNAL do fmt.print("\033[2J") // NOTE: clear the terminal
+    when INTERNAL do fmt.print("\033[2J") // clear the terminal
     win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
     
-    //   
+    ////////////////////////////////////////////////
     //   Platform Setup
     //   
     state: PlatformState
@@ -127,7 +127,7 @@ main :: proc() {
     desired_scheduler_ms :: 1
     sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
     
-    GLOBAL_Running = true
+    GlobalRunning = true
 
     high_queue: PlatformWorkQueue
     init_work_queue(&high_queue, HighPriorityWorkQueueThreadCount)
@@ -135,7 +135,7 @@ main :: proc() {
     low_queue: PlatformWorkQueue
     init_work_queue(&low_queue,  LowPriorityWorkQueueThreadCount)
 
-    //   
+    ////////////////////////////////////////////////
     //  Windows Setup
     //   
 
@@ -157,7 +157,7 @@ main :: proc() {
         resize_DIB_section(&GLOBAL_back_buffer, Resolution.x, Resolution.y)
 
         if win.RegisterClassW(&window_class) == 0 {
-            return // TODO Logging
+            return // @Logging 
         }
 
 
@@ -187,7 +187,7 @@ main :: proc() {
 
 
 
-    //   
+    ////////////////////////////////////////////////
     //  Video Setup
     //   
 
@@ -210,7 +210,7 @@ main :: proc() {
 
 
 
-    //   
+    ////////////////////////////////////////////////
     //  Sound Setup
     //   
 
@@ -230,7 +230,7 @@ main :: proc() {
 
     sound_is_valid: b32
 
-    //   
+    ////////////////////////////////////////////////
     //  Input Setup
     //   
 
@@ -240,7 +240,7 @@ main :: proc() {
     old_input, new_input := input[0], input[1]
 
 
-    //   
+    ////////////////////////////////////////////////
     //  Memory Setup
     //   
 
@@ -298,7 +298,7 @@ main :: proc() {
             if buffer_storage_ptr != nil {
                 buffer.memory_block = buffer_storage_ptr[:total_size]
             } else {
-                // TODO: Diagnostic
+                // @Logging 
             }
         }
 
@@ -317,7 +317,7 @@ main :: proc() {
     }
 
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
-        return // TODO: logging
+        return // @Logging 
     }
 
 
@@ -333,15 +333,13 @@ main :: proc() {
     ////////////////////////////////////////////////
     //  Game Loop
     //  
-    for GLOBAL_Running {
-        ////////////////////////////////////////////////
-        //  Debug Info
-        frame_info: DebugFrameInfo
-        record_timestap(&frame_info, last_counter, "end frame")
-        
+    for GlobalRunning {
+        game.frame_marker()
         
         ////////////////////////////////////////////////
         //  Hot Reload
+        executable_refresh := game.begin_timed_block("executable refresh")
+        
         new_input.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
             // NOTE(viktor): clear out the queue, as they may call into unloaded game code
@@ -357,10 +355,12 @@ main :: proc() {
             new_input.reloaded_executable = true
         }
         
-        record_timestap(&frame_info, last_counter, "executable ready")
-
+        
+        game.end_timed_block(executable_refresh)
         ////////////////////////////////////////////////   
         //  Input
+        input_processed := game.begin_timed_block("input processed")
+        
         {
             new_input.delta_time = target_seconds_per_frame
             { // Mouse Input 
@@ -465,21 +465,19 @@ main :: proc() {
                     process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -Threshold ? 1 : 0)
                     process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  Threshold ? 1 : 0)
 
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do GLOBAL_Running = false
+                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do GlobalRunning = false
                 } else {
                     new_controller.is_connected = false
                 }
             }
         }
         
-        record_timestap(&frame_info, last_counter, "input processed")
-        
-        if GlobalPause do continue
-
-
+        game.end_timed_block(input_processed)
         ////////////////////////////////////////////////
-        //  Update, Sound and Render
-        {
+        //  Update and Render
+        game_updated := game.begin_timed_block("game updated")
+        
+        if !GlobalPause {
             offscreen_buffer := Bitmap{
                 memory = GLOBAL_back_buffer.memory,
                 width  = GLOBAL_back_buffer.width,
@@ -494,12 +492,18 @@ main :: proc() {
             }
 
             if game_lib_is_valid {
-                game_update_and_render(&game_memory, offscreen_buffer, new_input)
+                game.update_and_render(&game_memory, offscreen_buffer, new_input)
             }
-            record_timestap(&frame_info, last_counter, "game updated")
-    
+            
             swap(&old_input, &new_input)
-
+        }
+        
+        game.end_timed_block(game_updated)
+        ////////////////////////////////////////////////
+        // Sound Output
+        audio_update := game.begin_timed_block("audio update")
+            
+        if !GlobalPause {
             sound_is_valid = true
             play_cursor, write_cursor: win.DWORD
             audio_counter := get_wall_clock()
@@ -568,22 +572,23 @@ main :: proc() {
                 bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
                 
                 if game_lib_is_valid {
-                    game_output_sound_samples(&game_memory, sound_buffer)
+                    game.output_sound_samples(&game_memory, sound_buffer)
                 }
-                record_timestap(&frame_info, last_counter, "audio updated")
         
                 fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
             } else {
                 sound_is_valid = false
             }
-
         }
-
+        
+        game.end_timed_block(audio_update)
         ////////////////////////////////////////////////
-        //  Display Frame & Performance Counters
-        //   
+        //  Display Frame
+        frame_end_sleep := game.begin_timed_block("frame end sleep")
+        
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
+
             if seconds_elapsed_for_frame < target_seconds_per_frame {
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
@@ -591,41 +596,54 @@ main :: proc() {
                 }
                 test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
                 if test_seconds_elapsed < target_seconds_per_frame {
-                    // TODO: Log sleep miss here
+                    // @Logging sleep missed
                 }
                 for seconds_elapsed_for_frame < target_seconds_per_frame {
                     seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
                 }
             } else {
-                // TODO: Missed frame, Logging, maybe because window was moved
-            }
-            record_timestap(&frame_info, last_counter, "framerate sleep complete")
-    
-            {
-                window_width, window_height := get_window_dimension(window)
-                device_context := win.GetDC(window)
-                display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
-                win.ReleaseDC(window, device_context)
+                // @Logging Missed frame, maybe because window was moved
             }
 
-            flip_counter = get_wall_clock()
-            end_counter := get_wall_clock()
-
-                
-            frame_info.total_seconds = get_seconds_elapsed(last_counter, end_counter)
-            if game_debug_frame_end != nil {
-                game_debug_frame_end(&game_memory, frame_info)
-            }
-
-            last_counter = end_counter
+            window_width, window_height := get_window_dimension(window)
+            device_context := win.GetDC(window)
+            display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
+            win.ReleaseDC(window, device_context)
         }
+
+        game.end_timed_block(frame_end_sleep)
+        ////////////////////////////////////////////////
+        //  Performance Counters
+
+        flip_counter = get_wall_clock()
+        end_counter := get_wall_clock()
+
+        
+        if game.debug_frame_end != nil {
+            game.debug_frame_end(&game_memory)
+        }
+
+        last_counter = end_counter
     }
 }
 
-record_timestap :: proc(frame_info: ^DebugFrameInfo, last_counter: i64, name: string) {
-    frame_info.timestamps[frame_info.count] = { name, get_seconds_elapsed(last_counter, get_wall_clock()) }
-    frame_info.count += 1
+////////////////////////////////////////////////
+// Exports to the game
+//
+
+allocate_memory : PlatformAllocateMemory : proc(size: u64) -> (result: rawpointer) {
+    result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    return result
 }
+
+deallocate_memory : PlatformDeallocateMemory : proc(memory: rawpointer) {
+    win.VirtualFree(memory, 0, win.MEM_RELEASE)
+}
+
+////////////////////////////////////////////////
+// Performance Timers
+//
+
 get_wall_clock :: #force_inline proc() -> i64 {
     result: win.LARGE_INTEGER
     win.QueryPerformanceCounter(&result)
@@ -636,30 +654,7 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
     return f32(end - start) / f32(GLOBAL_perf_counter_frequency)
 }
 
-get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
-    FILE_ATTRIBUTE_DATA :: struct {
-        dwFileAttributes : win.DWORD,
-        ftCreationTime : win.FILETIME,
-        ftLastAccessTime : win.FILETIME,
-        ftLastWriteTime : win.FILETIME,
-        nFileSizeHigh : win.DWORD,
-        nFileSizeLow : win.DWORD,
-    }
-
-    file_information : FILE_ATTRIBUTE_DATA
-    if win.GetFileAttributesExW(filename, win.GetFileExInfoStandard, &file_information) {
-        last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)
-    }
-    return last_write_time
-}
-
-build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
-    return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
-}
-
-
-
-//   
+////////////////////////////////////////////////   
 //  Record and Replay
 //   
 
@@ -722,10 +717,9 @@ end_replaying_input :: proc(state: ^PlatformState) {
     state.input_replay_index = 0
 }
 
-//   
+////////////////////////////////////////////////   
 //  Sound Buffer
-//   
-
+//
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     region1, region2 : rawpointer
@@ -796,7 +790,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 
 
 
-//   
+////////////////////////////////////////////////   
 //  Window Drawing
 //   
 
@@ -924,7 +918,7 @@ toggle_fullscreen :: proc(window: win.HWND) {
 }
 
 
-//   
+////////////////////////////////////////////////   
 //  Windows Messages
 //   
 
@@ -934,9 +928,9 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         context = runtime.default_context()
         assert(false, "keyboard-event came in through a non-dispatched event")
     case win.WM_CLOSE: // TODO: Handle this with a message to the user
-        GLOBAL_Running = false
+        GlobalRunning = false
     case win.WM_DESTROY: // TODO: handle this as an error - recreate window?
-        GLOBAL_Running = false
+        GlobalRunning = false
     case win.WM_ACTIVATEAPP:
         LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
         LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color.
@@ -978,7 +972,7 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
     for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
         switch message.message {
         case win.WM_QUIT:
-            GLOBAL_Running = false
+            GlobalRunning = false
         case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
             vk_code := message.wParam
 
@@ -1010,7 +1004,7 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                 case win.VK_RIGHT:
                     process_win_keyboard_message(&keyboard_controller.button_right  , is_down)
                 case win.VK_ESCAPE:
-                    GLOBAL_Running = false
+                    GlobalRunning = false
                     process_win_keyboard_message(&keyboard_controller.back          , is_down)
                 case win.VK_SPACE:
                     process_win_keyboard_message(&keyboard_controller.start         , is_down)
@@ -1029,7 +1023,7 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                 case win.VK_P:
                     if is_down do GlobalPause = !GlobalPause
                 case win.VK_F4:
-                    if is_down && alt_down do GLOBAL_Running = false
+                    if is_down && alt_down do GlobalRunning = false
                 case win.VK_RETURN:
                     if is_down && alt_down do toggle_fullscreen(message.hwnd)
                     
@@ -1042,11 +1036,6 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
     }
 }
 
-allocate_memory : PlatformAllocateMemory : proc(size: u64) -> (result: rawpointer) {
-    result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-    return result
-}
-
-deallocate_memory : PlatformDeallocateMemory : proc(memory: rawpointer) {
-    win.VirtualFree(memory, 0, win.MEM_RELEASE)
+build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
+    return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
 }

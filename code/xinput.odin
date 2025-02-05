@@ -10,18 +10,18 @@ init_xInput :: proc() {
 
     xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
     if xInput_lib == nil {
-        // TODO Diagnostics
+        // @Logging 
         xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("XInput9_1_0.dll"))
     }
     if xInput_lib == nil {
-        // TODO Diagnostics
+        // @Logging 
         xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))
     }
     if (xInput_lib != nil) {
         XInputGetState = cast(ProcXInputGetState) win.GetProcAddress(xInput_lib, "XInputGetState")
         XInputSetState = cast(ProcXInputSetState) win.GetProcAddress(xInput_lib, "XInputSetState")
     } else {
-        // TODO Diagnostics
+        // @Logging 
     }
 }
 
@@ -47,24 +47,6 @@ XINPUT_VIBRATION :: struct {
 
 
 
-// ---------------------- Internal stuff
-
-
-
-@(private="file")
-ProcXInputGetState :: #type proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD
-@(private="file")
-ProcXInputSetState :: #type proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD
-
-@(private="file")
-XInputGetStateStub : ProcXInputGetState = proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD { 
-    return ERROR_DEVICE_NOT_CONNECTED
-}
-@(private="file")
-XInputSetStateStub : ProcXInputSetState = proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD { 
-    return ERROR_DEVICE_NOT_CONNECTED
-}
-
 ERROR_DEVICE_NOT_CONNECTED :: 0x048F
 
 XUSER_MAX_COUNT :: 4
@@ -88,3 +70,12 @@ XINPUT_GAMEPAD_Y              :: 0x8000
 XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE  :: 7849
 XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE :: 8689
 XINPUT_GAMEPAD_TRIGGER_THRESHOLD    :: 30
+
+
+// ---------------------- Internal stuff
+
+@(private="file") ProcXInputGetState :: #type proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD
+@(private="file") ProcXInputSetState :: #type proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD
+
+@(private="file") XInputGetStateStub : ProcXInputGetState = proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE )        -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }
+@(private="file") XInputSetStateStub : ProcXInputSetState = proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }

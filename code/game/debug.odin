@@ -8,78 +8,198 @@ import "base:intrinsics"
 
 ////////////////////////////////////////////////
 
-DebugState :: struct {
-    counter_states: [MaxTranslationUnits][512]DebugCounterState,
+GlobalDebugTable: DebugTable
+
+DebugTable :: struct {
+    // @Correctness No attempt is currently made to ensure that the final
+    // debug records being written to the event array actually complete
+    // their output prior to the swap of the event array index.
+    current_events_index: u32,
+    events_state:   DebugEventsState,
+    events:         [64][16*65536]DebugEvent,
     
-    index:         u32,
-    frame_infos:   [144]DebugFrameInfo,
+    records: DebugRecords,
+}
+
+DebugEvent  :: struct {
+    clock: i64,
+    
+    thread_index: u16,
+    core_index:   u16,
+    record_index: u32,
+    
+    type: DebugEventType,
+}
+
+DebugEventsState :: bit_field u64 {
+    // @Volatile Later on we transmute this to a u64 to 
+    // atomically increment one of the fields
+    events_index: u32 | 32,
+    array_index:  u32 | 32,
+}
+
+DebugEventType :: enum u8 {
+    BeginBlock, EndBlock,
+    FrameMarker,
+}
+
+////////////////////////////////////////////////
+
+DebugState :: struct {
+    index:          u32,
+    counter_states: [512]DebugCounterState,
 }
 
 DebugCounterState :: struct {
-    using loc: runtime.Source_Code_Location,
+	loc: DebugRecordLocation,
     snapshots: [144]DebugCounterSnapshot,
 }
+
+////////////////////////////////////////////////
+
+DebugRecords :: [512]DebugRecord
+DebugRecord  :: struct {
+    hash:  u32,
+    index: u32,
+    loc:   DebugRecordLocation,
+}
+
+DebugRecordLocation :: struct {
+    file_path: string,
+	line:      i32,
+	name:      string,
+}
+////////////////////////////////////////////////
+
+DebugCounterSnapshot :: struct {
+    hit_count:   i64,
+    cycle_count: i64,
+}
+
+////////////////////////////////////////////////
 
 DebugStatistic :: struct {
     min, max, avg, count: f64
 }
 
 ////////////////////////////////////////////////
+// Exports
 
 @export
-debug_frame_end :: proc(memory: ^GameMemory, frame_info: DebugFrameInfo) {
+debug_frame_end :: proc(memory: ^GameMemory) {
     if memory.debug_storage == nil do return
     
     assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
     
-    GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0
+    modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
-    #assert(len(GlobalDebugTable.events) == 2)
-    zero_slice(GlobalDebugTable.events[events_state.array_index == 0 ? 1 : 0][:])
     
-    debug_state.frame_infos[debug_state.index] = frame_info
-    debug_state.index += 1
-    if debug_state.index >= len(debug_state.frame_infos) {
-        debug_state.index = 0
-    }
-    
-    // Clear out counter states, even if no event is associated with it.
-    for unit in 0..<MaxTranslationUnits {
-        for &counter in debug_state.counter_states[unit] {
-            counter.snapshots[debug_state.index] = {}
-        }
-    }
+    modular_add(&debug_state.index, 1, len(debug_state.counter_states[0].snapshots))
     
     events := GlobalDebugTable.events[events_state.array_index][:events_state.events_index]
     for event in events {
-        entry := &GlobalDebugTable.records[event.translation_unit][event.record_index]
-        assert(entry.index == event.record_index)
-        
-        counter := &debug_state.counter_states[event.translation_unit][event.record_index]
-        if counter.loc == {} {
-            counter.loc = entry.loc
-        } else {
-            // :HotReload The static strings to the file and procedure do not survive a reload.
-            assert(counter.loc.line   == entry.loc.line)
-            assert(counter.loc.column == entry.loc.column)
+        entry := &GlobalDebugTable.records[event.record_index]
+        if entry.index != event.record_index {
+            // :HotReload we clear the records on reload because the hashing will not
+            // produce the same mapping due to threading and conditional calls, thereby
+            // invalidating certain records/hash slots
+            continue
         }
+        
+        counter := &debug_state.counter_states[event.record_index]
+        counter.loc = entry.loc
         
         snapshot := &counter.snapshots[debug_state.index]
         switch event.type {
         case .BeginBlock:
             snapshot.hit_count   += 1
             snapshot.cycle_count -= event.clock
-            snapshot.depth += 1
         case .EndBlock:
             snapshot.cycle_count += event.clock
-            snapshot.depth -= 1
+        case .FrameMarker:
+            
         }
     }
 }
 
+@export
+frame_marker :: #force_inline proc(loc := #caller_location) {
+    record_debug_event(.FrameMarker, NilHashValue)
+    frame_marker := &GlobalDebugTable.records[NilHashValue]
+    frame_marker.loc.file_path = loc.file_path
+    frame_marker.loc.line = loc.line
+    frame_marker.loc.name = "Frame Marker"
+    frame_marker.index = NilHashValue
+    frame_marker.hash  = NilHashValue
+}
+
+@export
+begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
+    ok: b32
+    
+    key := DebugRecordLocation{
+        name      = name,
+        file_path = loc.file_path,
+        line      = loc.line,
+    }
+    
+    // TODO(viktor): Check the overhead of this
+    result.hit_count = hit_count
+    result.record_index, ok = get(&GlobalDebugTable.records, key)
+    if !ok {
+        result.record_index = put(&GlobalDebugTable.records, key)
+    }
+    
+    record_debug_event(.BeginBlock, result.record_index)
+    
+    return result
+    
+}
+
+@export
+end_timed_block:: #force_inline proc(block: TimedBlock) {
+    // TODO(viktor): check manual blocks are closed once and exactly once
+    // TODO(viktor): record the hit count here
+    record_debug_event(.EndBlock, block.record_index)
+}
+
+////////////////////////////////////////////////
+
+@(deferred_out=end_timed_block)
+timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
+    return begin_timed_block(name, loc, hit_count)
+}
+
+@(deferred_out=end_timed_function)
+timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) { 
+    return begin_timed_function(loc, hit_count)
+}
+
+begin_timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) { 
+    return begin_timed_block(loc.procedure, loc, hit_count)
+}
+
+end_timed_function :: #force_inline proc(block: TimedBlock) {
+    end_timed_block(block)
+}
+
+record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u32) {
+    events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
+    event := &GlobalDebugTable.events[events.array_index][events.events_index]
+    event^ = {
+        type         = type,
+        clock        = read_cycle_counter(),
+        thread_index = cast(u16) context.user_index,
+        core_index   = 0,
+        record_index = record_index,
+    }
+}
+
+////////////////////////////////////////////////
+
 overlay_debug_info :: proc(memory: ^GameMemory) {
-    timed_block()
+    timed_function()
     
     if memory.debug_storage == nil do return
     
@@ -92,49 +212,43 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     // Debug_text_line("0123456789°")
     
     text_line("Debug Game Cycle Counts:")
-    for unit in 0..<MaxTranslationUnits {
-        for state in debug_state.counter_states[unit] {
-            if state.loc == {} do continue
+    for state in debug_state.counter_states {
+        if state.loc == {} do continue
+        
+        cycles := debug_statistic_begin()
+        hits   := debug_statistic_begin()
+        cphs   := debug_statistic_begin()
+        
+        for snapshot in state.snapshots {
+            denom := snapshot.hit_count if snapshot.hit_count != 0 else 1
+            cycles_per_hit := snapshot.cycle_count / denom
             
-            cycles := debug_statistic_begin()
-            hits   := debug_statistic_begin()
-            cphs   := debug_statistic_begin()
-            
-            for snapshot in state.snapshots {
-                if snapshot.depth != 0 {
-                    continue
-                    // Its either a bug or the events for this snapshot are running parallel over multiple frames
+            debug_statistic_accumulate(&cycles, snapshot.cycle_count)
+            debug_statistic_accumulate(&hits,   snapshot.hit_count)
+            debug_statistic_accumulate(&cphs,   cycles_per_hit)
+        }
+        debug_statistic_end(&cycles)
+        debug_statistic_end(&hits)
+        debug_statistic_end(&cphs)
+        
+        if Debug_render_group != nil {
+            chart_min_y := cp_y
+            chart_height := ascent * font_scale - 2
+            width : f32 = 4
+            if cycles.max > 0 {
+                scale := 1 / cast(f32) cycles.max
+                for snapshot, index in state.snapshots {
+                    proportion := cast(f32) snapshot.cycle_count * scale
+                    height := chart_height * proportion
+                    push_rectangle(Debug_render_group, 
+                        {cast(f32) index * width + 0.5*width, height * 0.5 + chart_min_y, 0}, 
+                        {width, height}, 
+                        {proportion, 0.7, 0.8, 1},
+                    )
                 }
-                denom := snapshot.hit_count if snapshot.hit_count != 0 else 1
-                cycles_per_hit := snapshot.cycle_count / denom
-                
-                debug_statistic_accumulate(&cycles, snapshot.cycle_count)
-                debug_statistic_accumulate(&hits,   snapshot.hit_count)
-                debug_statistic_accumulate(&cphs,   cycles_per_hit)
             }
-            debug_statistic_end(&cycles)
-            debug_statistic_end(&hits)
-            debug_statistic_end(&cphs)
             
-            if Debug_render_group != nil {
-                chart_min_y := cp_y
-                chart_height := ascent * font_scale - 2
-                width : f32 = 4
-                if cycles.max > 0 {
-                    scale := 1 / cast(f32) cycles.max
-                    for snapshot, index in state.snapshots {
-                        proportion := cast(f32) snapshot.cycle_count * scale
-                        height := chart_height * proportion
-                        push_rectangle(Debug_render_group, 
-                            {cast(f32) index * width + 0.5*width, height * 0.5 + chart_min_y, 0}, 
-                            {width, height}, 
-                            {proportion, 0.7, 0.8, 1},
-                        )
-                    }
-                }
-                
-                text_line(fmt.tprintf("%28s(% 4d): % 12.0f : % 6.0f : % 10.0f", state.procedure, state.line, cycles.avg, hits.avg, cphs.avg))
-            }
+            text_line(fmt.tprintf("%28s(% 4d): % 12.0f : % 6.0f : % 10.0f", state.loc.name, state.loc.line, cycles.avg, hits.avg, cphs.avg))
         }
     }
     
@@ -142,7 +256,8 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     bar_width    :: 5
     bar_spacing  :: 3
     chart_height :: 120
-    
+ 
+    when false {
     full_width := cast(f32) len(debug_state.frame_infos) * (bar_width + bar_spacing) - bar_spacing
     pad_x := Debug_render_group.transform.screen_center.x - full_width * 0.5
     pad_y :: 20
@@ -192,6 +307,7 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
             )
         }
     }
+    }
 }
 
 font_scale : f32 = 0.5
@@ -201,7 +317,7 @@ font_id: FontId
 font: ^Font
 
 reset_debug_renderer :: proc(width, height: i32) {
-    timed_block()
+    timed_function()
     begin_render(Debug_render_group)
     orthographic(Debug_render_group, {width, height}, 1)
     
@@ -247,6 +363,79 @@ text_line :: proc(text: string) {
             advance_y := get_line_advance(font_info)
             cp_y -= font_scale * advance_y
         }
+    }
+}
+
+////////////////////////////////////////////////
+// HashTable Implementation for the DebugRecords
+//   TODO(viktor): as all the hashes of the source code locations
+//   are known at compile time, it should be possible to bake these 
+//   into the table and hash O(1) retrieval and storage.
+//   This would require the build script to aggregate all the 
+//   invocations of of timed_block() and generate a hash for each
+//   and insert it into the source code.
+//
+//   The language default map type is not thread-safe.
+//   This is _not_ a general implementation and assumes
+//   a fixed size backing array and will fail if it
+//   should "grow".
+
+find :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (result: ^DebugRecord, hash_value, hash_index: u32) {
+    hash_value = get_hash(ht, value)
+    hash_index = hash_value
+    for {
+        result = &ht[hash_index]
+        if result.hash == NilHashValue || result.hash == hash_value && result.loc == value {
+            break
+        }
+        modular_add(&hash_index, 1 ,len(ht))
+        
+        if hash_index == hash_value {
+            assert(false, "cannot insert")
+        }
+    }
+    return result, hash_value, hash_index
+}
+
+get_hash :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (result: u32) {
+    result = cast(u32) (313 + value.line * 464) % len(ht)
+    
+    if result == NilHashValue {
+        strings := [2]u32{
+            hash.djb2(transmute([]u8) value.file_path),
+            hash.djb2(transmute([]u8) value.name),
+        }
+        bytes := (cast([^]u8) &strings[0])[:size_of(strings)]
+        result = hash.djb2(bytes) % len(ht)
+        assert(result != NilHashValue)
+    }
+    
+    return result
+}
+
+NilHashValue :: 0
+
+put :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (hash_index: u32) {
+    entry: ^DebugRecord
+    hash_value: u32
+    entry, hash_value, hash_index = find(ht, value)
+    
+    entry.hash  = hash_value
+    entry.index = hash_index
+    entry.loc   = value
+    
+    return hash_index
+}
+
+get :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (hash_index: u32, ok: b32) {
+    entry: ^DebugRecord
+    hash_value: u32
+    entry, hash_value, hash_index = find(ht, value)
+    
+    if entry != nil && entry.hash == hash_value && entry.loc == value {
+        return hash_index, true
+    } else {
+        return NilHashValue, false
     }
 }
 

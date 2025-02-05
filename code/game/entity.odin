@@ -185,7 +185,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
 }
 
 add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32) {
-    timed_block()
+    timed_function()
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do swap(&a, &b)
@@ -218,7 +218,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
 }
 
 clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
-    timed_block()
+    timed_function()
     // TODO(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
     // NOTE(viktor): One way to make removal easy would be to always

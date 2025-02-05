@@ -84,14 +84,14 @@ main :: proc() {
             
             fmt.fprint(lock, "WAITING FOR PDB")
             pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -define:TRANSLATION_UNIT=1 -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when GamePedantic else ""))
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when GamePedantic else ""))
         }
     }
     
     debug_exe := "debug.exe" 
     if .Platform in targetsToBuild && !is_running(debug_exe) {
         copy_over(`..\code\game\common.odin`, `..\code\copypasta_common.odin`, "package game", "package main")
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -define:TRANSLATION_UNIT=0 -out:.\`, debug_exe, flags, debug, windows, internal, optimizations, (pedantic when PlatformPedantic else ""))
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, windows, internal, optimizations, (pedantic when PlatformPedantic else ""))
     }
     
     os.exit(0)

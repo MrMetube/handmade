@@ -6,7 +6,6 @@ import "core:simd/x86"
 import "core:hash"
 
 INTERNAL :: #config(INTERNAL, false)
-TRANSLATION_UNIT :: #config(TRANSLATION_UNIT, -1)
 
 ////////////////////////////////////////////////
 // Common Game Definitions
@@ -98,194 +97,20 @@ GameMemory :: struct {
 ////////////////////////////////////////////////
 // Common Debug Definitions
 
-when INTERNAL { 
-    
-    DebugFrameTimestamp :: struct {
-        name:    string,
-        seconds: f32,
-    }
-    DebugFrameInfo :: struct {
-        total_seconds: f32,
-        count:         u32,
-        timestamps:    [64]DebugFrameTimestamp
-    }
-
-    DebugCode :: struct {
-        read_entire_file:  DebugReadEntireFile,
-        write_entire_file: DebugWriteEntireFile,
-        free_file_memory:  DebugFreeFileMemory,
-    }
-
-    DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
-    DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
-    DebugFreeFileMemory  :: #type proc(memory: []u8)
-    
-    DEBUG_GLOBAL_memory: ^GameMemory
+TimedBlock :: struct {
+    record_index: u32, 
+    hit_count:    i64
 }
 
-
-
-////////////////////////////////////////////////
-
-@export
-GlobalDebugTable: DebugTable
-MaxTranslationUnits :: 2
-
-DebugTable :: struct {
-    // @Correctness No attempt is currently made to ensure that the final
-    // debug records being written to the event array actually complete
-    // their output prior to the swap of the event array index.
-    current_events_index: u32,
-    events_state:   DebugEventsState,
-    events:         [2][16*65536]DebugEvent,
-    
-    records: [MaxTranslationUnits]DebugRecords,
+DebugCode :: struct {
+    read_entire_file:  DebugReadEntireFile,
+    write_entire_file: DebugWriteEntireFile,
+    free_file_memory:  DebugFreeFileMemory,
 }
 
-DebugEventsState :: bit_field u64 {
-    // @Volatile Later on we transmute this to a u64 to 
-    // atomically increment one of the fields
-    events_index: u32 | 32,
-    array_index:  u32 | 32,
-}
-
-DebugEvent  :: struct {
-    clock: i64,
-    
-    thread_index: u16,
-    core_index:   u16,
-    record_index: u32,
-    
-    translation_unit: u8,
-    type: DebugEventType,
-}
-
-DebugEventType :: enum u8 {
-    BeginBlock, EndBlock,
-}
-
-DebugRecords :: [512]DebugRecord
-DebugRecord  :: struct {
-    hash:  u32,
-    index: u32,
-    loc:   runtime.Source_Code_Location,
-}
-
-////////////////////////////////////////////////
-
-DebugCounterSnapshot :: struct {
-    hit_count:   i64,
-    cycle_count: i64,
-    depth: u32,
-}
-
-////////////////////////////////////////////////
-
-record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u32) {
-    events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
-    event := &GlobalDebugTable.events[events.array_index][events.events_index]
-    event^ = {
-        type         = type,
-        clock        = read_cycle_counter(),
-        thread_index = cast(u16) context.user_index,
-        core_index   = 0,
-        translation_unit = TRANSLATION_UNIT,
-        record_index = record_index,
-    }
-}
-
-@(deferred_out=end_timed_block)
-timed_block :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (record_index: u32, hit_count_out: i64) { 
-    records := &GlobalDebugTable.records[TRANSLATION_UNIT]
-    ok: b32
-    // TODO(viktor): Check the overhead of this
-    record_index, ok = get(records, loc)
-    if !ok {
-        record_index = put(records, loc)
-    }
-    
-    record_debug_event(.BeginBlock, record_index)
-    
-    return record_index, hit_count
-}
-
-end_timed_block :: #force_inline proc(record_index: u32, hit_count: i64) {
-    // TODO(viktor): record the hit count here
-    record_debug_event(.EndBlock, record_index)
-}
-
-////////////////////////////////////////////////
-// HashTable Implementation for the DebugRecords
-//   TODO(viktor): as all the hashes of the source code locations
-//   are known at compile time, it should be possible to bake these 
-//   into the table and hash O(1) retrieval and storage.
-//   This would require the build script to aggregate all the 
-//   invocations of of timed_block() and generate a hash for each
-//   and insert it into the source code.
-//
-//   The language default map type is not thread-safe.
-//   This is _not_ a general implementation and assumes
-//   a fixed size backing array and will fail if it
-//   should "grow".
-
-find :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result: ^DebugRecord, hash_value, hash_index: u32) {
-    hash_value = get_hash(ht, value)
-    hash_index = hash_value
-    for {
-        result = &ht[hash_index]
-        if result.hash == NilHashValue || result.hash == hash_value && result.loc == value {
-            break
-        }
-        hash_index += 1
-        
-        if hash_index == hash_value {
-            assert(false, "cannot insert")
-        }
-    }
-    return result, hash_value, hash_index
-}
-
-get_hash :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (result: u32) {
-    result = cast(u32) (value.column * 391 + value.line * 464) % len(ht)
-    
-    if result == NilHashValue {
-        strings := [2]u32{
-            hash.djb2(transmute([]u8) value.file_path),
-            hash.djb2(transmute([]u8) value.procedure),
-        }
-        bytes := (cast([^]u8) &strings[0])[:size_of(strings)]
-        result = hash.djb2(bytes) % len(ht)
-        assert(result != NilHashValue)
-    }
-    
-    return result
-}
-
-NilHashValue :: 0
-
-put :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (hash_index: u32) {
-    entry: ^DebugRecord
-    hash_value: u32
-    entry, hash_value, hash_index = find(ht, value)
-    
-    entry.hash  = hash_value
-    entry.index = hash_index
-    entry.loc   = value
-    
-    return hash_index
-}
-
-get :: proc(ht: ^DebugRecords, value: runtime.Source_Code_Location) -> (hash_index: u32, ok: b32) {
-    entry: ^DebugRecord
-    hash_value: u32
-    entry, hash_value, hash_index = find(ht, value)
-    
-    if entry != nil && entry.hash == hash_value && entry.loc == value {
-        return hash_index, true
-    } else {
-        return NilHashValue, false
-    }
-}
+DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
+DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
+DebugFreeFileMemory  :: #type proc(memory: []u8)
 
 ////////////////////////////////////////////////
 // Platform API
@@ -312,8 +137,8 @@ PlatformAllocateMemory   :: #type proc(size: u64) -> rawpointer
 PlatformDeallocateMemory :: #type proc(memory:rawpointer)
 
 PlatformFileType   :: enum { AssetFile }
-PlatformFileHandle :: struct{ no_errors:  b32, _platform: rawpointer }
-PlatformFileGroup  :: struct{ file_count: u32, _platform: rawpointer }
+PlatformFileHandle :: struct { no_errors:  b32, _platform: rawpointer }
+PlatformFileGroup  :: struct { file_count: u32, _platform: rawpointer }
 
 PlatformBeginProcessingAllFilesOfType :: #type proc(type: PlatformFileType) -> PlatformFileGroup
 PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: ^PlatformFileGroup)

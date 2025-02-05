@@ -383,7 +383,7 @@ best_match_font_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, mat
     return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
 best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
-    timed_block()
+    timed_function()
     type := assets.types[id]
 
     if type.first_asset_index != type.one_past_last_index {
@@ -439,7 +439,7 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 // Memory Management
 
 begin_generation :: #force_inline proc(assets: ^Assets) -> (result: AssetGenerationId) {
-    timed_block()
+    timed_function()
     begin_asset_lock(assets)
     
     result = assets.next_generation
@@ -507,7 +507,7 @@ remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
 }
 
 acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
-    timed_block()
+    timed_function()
     size := div.total + size_of(AssetMemoryHeader)
     begin_asset_lock(assets)
     defer end_asset_lock(assets)
@@ -663,7 +663,7 @@ LoadAssetWork :: struct {
 }
 
 load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
-    timed_block()
+    timed_function()
     Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
     if Platform_no_file_errors(work.handle) {
         switch work.kind {
@@ -739,7 +739,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
 }
 
 allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32, asset: ^Asset) -> (memory: rawpointer, memory_size: u64 ) {
-    timed_block()
+    timed_function()
     divider: Divider
     switch kind {
       case .Font: // [Header][Glyphs][Advances][UnicodeMap]

@@ -8,17 +8,17 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
 
     dSound_lib := win.LoadLibraryW(win.utf8_to_wstring("dsound.dll"))
     if dSound_lib == nil {
-        // TODO Diagnostics
+        // @Logging 
     }
 
     DirectSoundCreate := cast(ProcDirectSoundCreate) win.GetProcAddress(dSound_lib, "DirectSoundCreate")
     if DirectSoundCreate == nil {
-        // TODO Diagnostics
+        // @Logging 
     }
 
     direct_sound : ^IDirectSound
     if result := DirectSoundCreate(nil, &direct_sound, nil); win.FAILED(result) {
-        // TODO Diagnostics
+        // @Logging 
     }
 
     wave_format: WAVEFORMATEX = {
@@ -30,7 +30,7 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
         nAvgBytesPerSec = samples_per_second * 2 * size_of(i16),
     }
     if result := direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY); win.FAILED(result) {
-        // TODO Diagnostics
+        // @Logging 
     }
 
     fake_sound_buffer_description: DSBUFFERDESC = {
@@ -40,11 +40,11 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
     
     fake_sound_buffer_for_setup: ^IDirectSoundBuffer
     if result := direct_sound->CreateSoundBuffer(&fake_sound_buffer_description, &fake_sound_buffer_for_setup, nil); win.FAILED(result) {
-        // TODO Diagnostics
+        // @Logging 
     }
     
     if result := fake_sound_buffer_for_setup->SetFormat(&wave_format); win.FAILED(result) {
-        // TODO Diagnostics
+        // @Logging 
     }
 
     actual_sound_buffer_description := DSBUFFERDESC{
@@ -59,7 +59,7 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
     }
     
     if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &GLOBAL_sound_buffer, nil); win.FAILED(result) {
-        // TODO Diagnostics
+        // @Logging 
     }
 }
 

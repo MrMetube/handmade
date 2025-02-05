@@ -1,19 +1,25 @@
 package main
 
+import "base:runtime"
 import win "core:sys/windows"
 
-game_update_and_render:    UpdateAndRender
-game_output_sound_samples: OutputSoundSamples
-game_debug_frame_end:      DebugFrameEnd
+game: GameApi
+
+GameApi :: struct {
+    update_and_render:    UpdateAndRender,
+    output_sound_samples: OutputSoundSamples,
+    debug_frame_end:      DebugFrameEnd,
+    begin_timed_block:    BeginTimedBlock,
+    end_timed_block:      EndTimedBlock,
+    frame_marker:         FrameMarker,
+}
 
 load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
     if game_lib == nil {
-        assert(game_update_and_render    == nil, "Game.dll has already been initialized")
-        assert(game_output_sound_samples == nil, "Game.dll has already been initialized")
-        assert(game_debug_frame_end      == nil, "Game.dll has already been initialized")
+        assert(game == {}, "Game.dll has already been initialized")
     } else {
         if !win.FreeLibrary(game_lib) {
-            // TODO: Diagnotics
+            // @Logging 
         }
     }
     
@@ -23,19 +29,21 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
         game_lib = win.LoadLibraryW(temp_dll_name)
 
         if (game_lib != nil) {
-            game_update_and_render    = auto_cast win.GetProcAddress(game_lib, "update_and_render")
-            game_output_sound_samples = auto_cast win.GetProcAddress(game_lib, "output_sound_samples")
-            game_debug_frame_end      = auto_cast win.GetProcAddress(game_lib, "debug_frame_end")
+            game.update_and_render    = auto_cast win.GetProcAddress(game_lib, "update_and_render")
+            game.output_sound_samples = auto_cast win.GetProcAddress(game_lib, "output_sound_samples")
+            game.debug_frame_end      = auto_cast win.GetProcAddress(game_lib, "debug_frame_end")
+            game.begin_timed_block    = auto_cast win.GetProcAddress(game_lib, "begin_timed_block")
+            game.end_timed_block      = auto_cast win.GetProcAddress(game_lib, "end_timed_block")
+            game.frame_marker         = auto_cast win.GetProcAddress(game_lib, "frame_marker")
 
-            is_valid = game_update_and_render != nil && game_output_sound_samples != nil
+            is_valid = game.update_and_render != nil && game.output_sound_samples != nil
         } else {
-            // TODO: Diagnostics
+            // @Logging 
         }
     }
 
     if !is_valid {
-        game_update_and_render    = nil
-        game_output_sound_samples = nil
+        game = {}
     }
     
     return is_valid, last_write_time
@@ -44,13 +52,28 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
 unload_game_lib :: proc() {
     if game_lib != nil {
         if !win.FreeLibrary(game_lib) {
-            // TODO: Diagnotics
+            // @Logging 
         }
         game_lib = nil
     }
-    game_update_and_render    = nil
-    game_output_sound_samples = nil
-    game_debug_frame_end      = nil
+    game = {}
+}
+
+get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
+    FILE_ATTRIBUTE_DATA :: struct {
+        dwFileAttributes: win.DWORD,
+        ftCreationTime:   win.FILETIME,
+        ftLastAccessTime: win.FILETIME,
+        ftLastWriteTime:  win.FILETIME,
+        nFileSizeHigh:    win.DWORD,
+        nFileSizeLow:     win.DWORD,
+    }
+
+    file_information: FILE_ATTRIBUTE_DATA
+    if win.GetFileAttributesExW(filename, win.GetFileExInfoStandard, &file_information) {
+        last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)
+    }
+    return last_write_time
 }
 
 ////////////////////////////////////////////////
@@ -59,9 +82,9 @@ unload_game_lib :: proc() {
 @(private="file")
 game_lib: win.HMODULE
 
-@(private="file")
-UpdateAndRender    :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: Input)
-@(private="file")
-OutputSoundSamples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
-@(private="file")
-DebugFrameEnd      :: #type proc(memory: ^GameMemory, frame_info: DebugFrameInfo)
+@(private="file") UpdateAndRender    :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: Input)
+@(private="file") OutputSoundSamples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
+@(private="file") DebugFrameEnd      :: #type proc(memory: ^GameMemory)
+@(private="file") BeginTimedBlock    :: #type proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock) 
+@(private="file") EndTimedBlock      :: #type proc(block: TimedBlock)
+@(private="file") FrameMarker        :: #type proc(loc := #caller_location)

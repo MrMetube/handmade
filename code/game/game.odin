@@ -188,20 +188,18 @@ PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
 when INTERNAL {
-    Debug: DebugCode
+    // Debug: DebugCode
     Debug_render_group: ^RenderGroup
 }
 
 @export
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
-    timed_block()
+    timed_function()
     
     Platform = memory.Platform_api
     
     when INTERNAL {
-        // NOTE(viktor): used by performance counters
-        DEBUG_GLOBAL_memory = memory
-        Debug = memory.debug
+        // Debug = memory.debug
     }
         
     ground_buffer_size :: 512
@@ -420,6 +418,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     }
     
     if input.reloaded_executable {
+        // :HotReload 
+        zero(GlobalDebugTable.records[:])
+        
         // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
         when false {
             for &ground_buffer in tran_state.ground_buffers {
@@ -1108,7 +1109,7 @@ FillGroundChunkWork :: struct {
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    // timed_block()
+    timed_function()
     work := cast(^FillGroundChunkWork) data
 
     
