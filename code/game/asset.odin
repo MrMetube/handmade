@@ -32,6 +32,8 @@ AssetTypeId :: hha.AssetTypeId
 AssetTag    :: hha.AssetTag
 AssetTagId  :: hha.AssetTagId
 
+AssetFontType :: hha.AssetFontType
+
 AssetState :: enum u8 { Unloaded, Queued, Loaded, Operating }
 
 Asset :: struct {

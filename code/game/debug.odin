@@ -1,22 +1,21 @@
 package game
 
-import hha "./asset_builder"
 import "core:fmt"
-import "core:hash"
-import "base:runtime"
-import "base:intrinsics"
+import "core:hash" // TODO(viktor): I do not need this
 
 ////////////////////////////////////////////////
 
 GlobalDebugTable: DebugTable
 
+EventsHistorySize :: 64
 DebugTable :: struct {
     // @Correctness No attempt is currently made to ensure that the final
     // debug records being written to the event array actually complete
     // their output prior to the swap of the event array index.
     current_events_index: u32,
     events_state:   DebugEventsState,
-    events:         [64][16*65536]DebugEvent,
+    event_count:    [EventsHistorySize]u32,
+    events:         [EventsHistorySize][16*65536]DebugEvent,
     
     records: DebugRecords,
 }
@@ -39,20 +38,37 @@ DebugEventsState :: bit_field u64 {
 }
 
 DebugEventType :: enum u8 {
-    BeginBlock, EndBlock,
     FrameMarker,
+    BeginBlock, 
+    EndBlock,
 }
 
 ////////////////////////////////////////////////
 
 DebugState :: struct {
-    index:          u32,
-    counter_states: [512]DebugCounterState,
+    inititalized: b32,
+    
+    // NOTE(viktor): Collation
+    arena: Arena,
+    collation_memory: TemporaryMemory,
+    
+    frame_bar_scale:      f32,
+    frame_bar_lane_count: u32,
+    
+    frame_count: u32,
+    frames:      []DebugFrame,
 }
 
-DebugCounterState :: struct {
-	loc: DebugRecordLocation,
-    snapshots: [144]DebugCounterSnapshot,
+DebugFrame :: struct {
+    begin_clock,
+    end_clock:    i64,
+    region_count: u32,
+    regions:      []DebugRegion,
+}
+
+DebugRegion :: struct {
+    lane_index:   u32,
+    t_min, t_max: f32,
 }
 
 ////////////////////////////////////////////////
@@ -68,12 +84,6 @@ DebugRecordLocation :: struct {
     file_path: string,
 	line:      i32,
 	name:      string,
-}
-////////////////////////////////////////////////
-
-DebugCounterSnapshot :: struct {
-    hit_count:   i64,
-    cycle_count: i64,
 }
 
 ////////////////////////////////////////////////
@@ -91,35 +101,93 @@ debug_frame_end :: proc(memory: ^GameMemory) {
     
     assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+
+    if !debug_state.inititalized {
+        defer debug_state.inititalized = true
+        // :PointerArithmetic
+        init_arena(&debug_state.arena, memory.debug_storage[size_of(DebugState):])
+        debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
+    }
+    end_temporary_memory(debug_state.collation_memory)
+    debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
     
     modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
     
-    modular_add(&debug_state.index, 1, len(debug_state.counter_states[0].snapshots))
+    GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
     
-    events := GlobalDebugTable.events[events_state.array_index][:events_state.events_index]
-    for event in events {
-        entry := &GlobalDebugTable.records[event.record_index]
-        if entry.index != event.record_index {
-            // :HotReload we clear the records on reload because the hashing will not
-            // produce the same mapping due to threading and conditional calls, thereby
-            // invalidating certain records/hash slots
-            continue
-        }
+    collate_debug_records(debug_state, GlobalDebugTable.events_state.array_index)
+    
+    collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u32) {
+        debug_state.frames = push(&debug_state.arena, DebugFrame, EventsHistorySize * 2)
+        debug_state.frame_bar_lane_count = 0
+        debug_state.frame_bar_scale = 1
+        debug_state.frame_count = 0
         
-        counter := &debug_state.counter_states[event.record_index]
-        counter.loc = entry.loc
+        current_frame: ^DebugFrame
         
-        snapshot := &counter.snapshots[debug_state.index]
-        switch event.type {
-        case .BeginBlock:
-            snapshot.hit_count   += 1
-            snapshot.cycle_count -= event.clock
-        case .EndBlock:
-            snapshot.cycle_count += event.clock
-        case .FrameMarker:
+        events_index := invalid_events_index
+        modular_add(&events_index, 1, EventsHistorySize)
+        for {
+            if events_index == invalid_events_index do break
+            defer modular_add(&events_index, 1, EventsHistorySize)
             
+            for event in GlobalDebugTable.events[events_index][:GlobalDebugTable.event_count[events_index]] {
+                if event.type == .FrameMarker {
+                    if current_frame != nil {
+                        current_frame.end_clock = event.clock
+                    }
+                    
+                    current_frame = &debug_state.frames[debug_state.frame_count]
+                    modular_add(&debug_state.frame_count, 1, auto_cast len(debug_state.frames))
+                    current_frame^ = {
+                        begin_clock  = event.clock,
+                        end_clock    = -1,
+                        region_count = 0,
+                    }
+                    current_frame.regions = push(&debug_state.arena, DebugRegion, len(DebugRecords))
+                    
+                } else if current_frame != nil {
+                    source := &GlobalDebugTable.records[event.record_index]
+                    relative_clock := event.clock - current_frame.begin_clock
+                    lane_index := event.thread_index
+                    
+                    switch event.type {
+                        case .FrameMarker: unreachable()
+                        case .BeginBlock:
+                        case .EndBlock:
+                      }
+                }
+            }
         }
+        
+        return 
+        // modular_add(&debug_state.index, 1, len(debug_state.counter_states[0].snapshots))
+        
+        // events := GlobalDebugTable.events[events_state.array_index][:events_state.events_index]
+        // for event in events {
+        //     entry := &GlobalDebugTable.records[event.record_index]
+        //     if entry.index != event.record_index {
+        //         // :HotReload we clear the records on reload because the hashing will not
+        //         // produce the same mapping due to threading and conditional calls, thereby
+        //         // invalidating certain records/hash slots
+        //         continue
+        //     }
+            
+        //     counter := &debug_state.counter_states[event.record_index]
+        //     counter.loc = entry.loc
+            
+        //     snapshot := &counter.snapshots[debug_state.index]
+        //     switch event.type {
+        //     case .BeginBlock:
+        //         snapshot.hit_count   += 1
+        //         snapshot.cycle_count -= event.clock
+        //     case .EndBlock:
+        //         snapshot.cycle_count += event.clock
+        //     case .FrameMarker:
+                
+        //     }
+        // }
     }
 }
 
@@ -166,6 +234,164 @@ end_timed_block:: #force_inline proc(block: TimedBlock) {
 
 ////////////////////////////////////////////////
 
+overlay_debug_info :: proc(memory: ^GameMemory) {
+    timed_function()
+    
+    if memory.debug_storage == nil do return
+    
+    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
+    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+
+    
+    
+    target_fps   :: 72.0
+    scale        := debug_state.frame_bar_scale
+    
+    lane_count   := cast(f32) debug_state.frame_bar_lane_count
+    lane_width   :: 8
+    bar_width    := lane_width * lane_count
+    bar_padding  :: 2
+    chart_height :: 120
+
+    full_width ::  500 //cast(f32) len(debug_state.frame_infos) * (bar_width + bar_spacing) - bar_spacing
+    pad_x :: 20 // Debug_render_group.transform.screen_center.x - full_width * 0.5
+    pad_y :: 20
+    
+    chart_left := left_edge + pad_x
+    chart_bottom := -Debug_render_group.transform.screen_center.y + pad_y
+    target_height: f32 = chart_height * 2
+    target_padding :: 40
+    target_width := full_width + target_padding
+    background_color :: v4{0.08, 0.08, 0.3, 1}
+    for frame, frame_index in debug_state.frames[:debug_state.frame_count] {
+        stack_x := chart_left + (bar_width * bar_padding) * cast(f32) frame_index
+        stack_y := chart_bottom
+        for region, region_index in frame.regions[:frame.region_count] {
+            phase := cast(f32) (region_index) / cast(f32) len(frame.regions)-1
+            color := v4{phase*phase, 1-phase, phase, 1}
+            
+            y_min := stack_y + scale * region.t_min
+            y_max := stack_y + scale * region.t_max
+            
+            push_rectangle(Debug_render_group, {stack_x + 0.5 * lane_width + lane_width * cast(f32) region.lane_index, (y_min + y_max)*0.5, 0}, { lane_width, (y_max - y_min)}, color)
+            // stack separator
+            // push_rectangle(Debug_render_group, {stack_x, stack_y, 0} + offset_p + {0.5*(size.x), 0, 0}, {size.x+2, 1}, background_color)
+        }
+    }
+
+    when false {
+        text_line("Debug Game Cycle Counts:")
+        for state in debug_state.counter_states {
+            if state.loc == {} do continue
+            
+            cycles := debug_statistic_begin()
+            hits   := debug_statistic_begin()
+            cphs   := debug_statistic_begin()
+            
+            for snapshot in state.snapshots {
+                denom := snapshot.hit_count if snapshot.hit_count != 0 else 1
+                cycles_per_hit := snapshot.cycle_count / denom
+                
+                debug_statistic_accumulate(&cycles, snapshot.cycle_count)
+                debug_statistic_accumulate(&hits,   snapshot.hit_count)
+                debug_statistic_accumulate(&cphs,   cycles_per_hit)
+            }
+            debug_statistic_end(&cycles)
+            debug_statistic_end(&hits)
+            debug_statistic_end(&cphs)
+            
+            if Debug_render_group != nil {
+                chart_bottom := cp_y
+                chart_height := ascent * font_scale - 2
+                width : f32 = 4
+                if cycles.max > 0 {
+                    scale := 1 / cast(f32) cycles.max
+                    for snapshot, index in state.snapshots {
+                        proportion := cast(f32) snapshot.cycle_count * scale
+                        height := chart_height * proportion
+                        push_rectangle(Debug_render_group, 
+                            {cast(f32) index * width + 0.5*width, height * 0.5 + chart_bottom, 0}, 
+                            {width, height}, 
+                            {proportion, 0.7, 0.8, 1},
+                        )
+                    }
+                }
+                
+                text_line(fmt.tprintf("%28s(% 4d): % 12.0f : % 6.0f : % 10.0f", state.loc.name, state.loc.line, cycles.avg, hits.avg, cphs.avg))
+            }
+        }
+
+        push_rectangle(Debug_render_group, 
+            {chart_left + 0.5 * full_width, chart_bottom + (target_height) * 0.5, 0}, 
+            {target_width, target_height}, 
+            background_color
+        )
+    }
+}
+
+font_scale : f32 = 0.5
+cp_y, ascent: f32
+left_edge: f32
+font_id: FontId
+font: ^Font
+
+reset_debug_renderer :: proc(width, height: i32) {
+    timed_function()
+    begin_render(Debug_render_group)
+    orthographic(Debug_render_group, {width, height}, 1)
+    
+    font_id = best_match_font_from(Debug_render_group.assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
+    font = get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
+    
+    baseline :f32= 10
+    if font != nil {
+        font_info := get_font_info(Debug_render_group.assets, font_id)
+        baseline = get_baseline(font_info)
+        ascent = get_baseline(font_info)
+    } else {
+        load_font(Debug_render_group.assets, font_id, false)
+    }
+    
+    cp_y      =  0.5 * cast(f32) height - baseline * font_scale
+    left_edge = -0.5 * cast(f32) width
+}
+
+text_line :: proc(text: string) {
+    // NOTE(viktor): kerning and unicode test lines
+    // Debug_text_line("贺佳樱我爱你")
+    // Debug_text_line("AVA: WA ty fi ij `^?'\"")
+    // Debug_text_line("0123456789°")
+    
+    if Debug_render_group != nil {
+        assert(Debug_render_group.inside_render)
+        
+        if font != nil {
+            font_info := get_font_info(Debug_render_group.assets, font_id)
+            cp_x := left_edge
+            
+            previous_codepoint: rune
+            for codepoint in text {
+                defer previous_codepoint = codepoint
+                
+                advance_x := get_horizontal_advance_for_pair(font, font_info, previous_codepoint, codepoint)
+                cp_x += advance_x * font_scale
+                
+                bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
+                info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
+                
+                if info != nil && codepoint != ' ' {
+                    push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0})
+                }
+            }
+            
+            advance_y := get_line_advance(font_info)
+            cp_y -= font_scale * advance_y
+        }
+    }
+}
+
+////////////////////////////////////////////////
+
 @(deferred_out=end_timed_block)
 timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
     return begin_timed_block(name, loc, hit_count)
@@ -193,176 +419,6 @@ record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u3
         thread_index = cast(u16) context.user_index,
         core_index   = 0,
         record_index = record_index,
-    }
-}
-
-////////////////////////////////////////////////
-
-overlay_debug_info :: proc(memory: ^GameMemory) {
-    timed_function()
-    
-    if memory.debug_storage == nil do return
-    
-    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
-    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
-    
-    // NOTE(viktor): kerning and unicode test lines
-    // Debug_text_line("贺佳樱我爱你")
-    // Debug_text_line("AVA: WA ty fi ij `^?'\"")
-    // Debug_text_line("0123456789°")
-    
-    text_line("Debug Game Cycle Counts:")
-    for state in debug_state.counter_states {
-        if state.loc == {} do continue
-        
-        cycles := debug_statistic_begin()
-        hits   := debug_statistic_begin()
-        cphs   := debug_statistic_begin()
-        
-        for snapshot in state.snapshots {
-            denom := snapshot.hit_count if snapshot.hit_count != 0 else 1
-            cycles_per_hit := snapshot.cycle_count / denom
-            
-            debug_statistic_accumulate(&cycles, snapshot.cycle_count)
-            debug_statistic_accumulate(&hits,   snapshot.hit_count)
-            debug_statistic_accumulate(&cphs,   cycles_per_hit)
-        }
-        debug_statistic_end(&cycles)
-        debug_statistic_end(&hits)
-        debug_statistic_end(&cphs)
-        
-        if Debug_render_group != nil {
-            chart_min_y := cp_y
-            chart_height := ascent * font_scale - 2
-            width : f32 = 4
-            if cycles.max > 0 {
-                scale := 1 / cast(f32) cycles.max
-                for snapshot, index in state.snapshots {
-                    proportion := cast(f32) snapshot.cycle_count * scale
-                    height := chart_height * proportion
-                    push_rectangle(Debug_render_group, 
-                        {cast(f32) index * width + 0.5*width, height * 0.5 + chart_min_y, 0}, 
-                        {width, height}, 
-                        {proportion, 0.7, 0.8, 1},
-                    )
-                }
-            }
-            
-            text_line(fmt.tprintf("%28s(% 4d): % 12.0f : % 6.0f : % 10.0f", state.loc.name, state.loc.line, cycles.avg, hits.avg, cphs.avg))
-        }
-    }
-    
-    target_frames_per_seconds :: 72.0
-    bar_width    :: 5
-    bar_spacing  :: 3
-    chart_height :: 120
- 
-    when false {
-    full_width := cast(f32) len(debug_state.frame_infos) * (bar_width + bar_spacing) - bar_spacing
-    pad_x := Debug_render_group.transform.screen_center.x - full_width * 0.5
-    pad_y :: 20
-    
-    chart_left := left_edge + pad_x
-    chart_min_y := -Debug_render_group.transform.screen_center.y + pad_y
-    target_height: f32 = chart_height * 2
-    target_padding :: 40
-    target_width := full_width + target_padding
-    background_color :: v4{0.08, 0.08, 0.3, 1}
-    push_rectangle(Debug_render_group, 
-        {chart_left + 0.5 * full_width, chart_min_y + (target_height) * 0.5, 0}, 
-        {target_width, target_height}, 
-        background_color
-    )
-    
-    scale :f32: target_frames_per_seconds
-    for &info, info_index in debug_state.frame_infos {
-        prev_stamp: f32
-        total: f32
-        for stamp, stamp_index in info.timestamps[:info.count] {
-            defer prev_stamp = stamp.seconds
-            elapsed := stamp.seconds - prev_stamp
-            defer total += elapsed
-            
-            proportion := elapsed * scale
-            height := chart_height * proportion
-            when !false { // NOTE(viktor): exagerate small timestamps
-                MinHeight :: 3
-                if height < MinHeight {
-                    height = MinHeight
-                    elapsed = MinHeight / (chart_height * scale)
-                }
-            }
-            offset_x := cast(f32) info_index * (bar_width + bar_spacing)
-            offset_y := total * scale * chart_height
-            phase := cast(f32) (stamp_index) / cast(f32) (info.count-1)
-            push_rectangle(Debug_render_group, 
-                {chart_left + offset_x + 0.5*bar_width, chart_min_y + offset_y + 0.5*height, 0}, 
-                {bar_width, height}, 
-                {phase*phase, 1-phase, phase, 1},
-            )
-            push_rectangle(Debug_render_group, 
-                {chart_left + offset_x + 0.5*(bar_width), chart_min_y + offset_y, 0}, 
-                {bar_width+2, 1}, 
-                background_color,
-            )
-        }
-    }
-    }
-}
-
-font_scale : f32 = 0.5
-cp_y, ascent: f32
-left_edge: f32
-font_id: FontId
-font: ^Font
-
-reset_debug_renderer :: proc(width, height: i32) {
-    timed_function()
-    begin_render(Debug_render_group)
-    orthographic(Debug_render_group, {width, height}, 1)
-    
-    font_id = best_match_font_from(Debug_render_group.assets, .Font, #partial { .FontType = cast(f32) hha.AssetFontType.Debug }, #partial { .FontType = 1 })
-    font = get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
-    
-    baseline :f32= 10
-    if font != nil {
-        font_info := get_font_info(Debug_render_group.assets, font_id)
-        baseline = get_baseline(font_info)
-        ascent = get_baseline(font_info)
-    } else {
-        load_font(Debug_render_group.assets, font_id, false)
-    }
-    
-    cp_y      =  0.5 * cast(f32) height - baseline * font_scale
-    left_edge = -0.5 * cast(f32) width
-}
-
-text_line :: proc(text: string) {
-    if Debug_render_group != nil {
-        assert(Debug_render_group.inside_render)
-        
-        if font != nil {
-            font_info := get_font_info(Debug_render_group.assets, font_id)
-            cp_x := left_edge
-            
-            previous_codepoint: rune
-            for codepoint in text {
-                defer previous_codepoint = codepoint
-                
-                advance_x := get_horizontal_advance_for_pair(font, font_info, previous_codepoint, codepoint)
-                cp_x += advance_x * font_scale
-                
-                bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
-                info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
-                
-                if info != nil && codepoint != ' ' {
-                    push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, {cp_x, cp_y, 0})
-                }
-            }
-            
-            advance_y := get_line_advance(font_info)
-            cp_y -= font_scale * advance_y
-        }
     }
 }
 
@@ -449,7 +505,7 @@ debug_statistic_begin :: #force_inline proc() -> (result: DebugStatistic) {
     return result
 }
 
-debug_statistic_accumulate :: #force_inline proc(stat: ^DebugStatistic, value: $N) where intrinsics.type_is_numeric(N) {
+debug_statistic_accumulate :: #force_inline proc(stat: ^DebugStatistic, value: $N) {
     value := cast(f64) value
     stat.min    = min(stat.min, value)
     stat.max    = max(stat.max, value)

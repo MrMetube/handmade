@@ -21,12 +21,23 @@ PlatformWorkQueueEntry :: struct {
     data:     rawpointer,
 }
 
-init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: win.LONG) {
-    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, thread_count, nil)
-        
-    thread_id: win.DWORD
-    for _ in 0..<thread_count {
-        win.CreateThread(nil, 0, thread_proc, queue, 0, &thread_id)
+CreateThreadInfo :: struct {
+    queue: ^PlatformWorkQueue,
+    index: u32,
+    self:  ^CreateThreadInfo,
+}
+
+init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: u32, thread_id_offset: u32) {
+    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, cast(i32) thread_count, nil)
+    
+    for thread_index in 0..<thread_count {
+        info := new(CreateThreadInfo)
+        info^ = {
+            queue = queue,
+            index = thread_index + thread_id_offset,
+            self  = info,
+        }
+        win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
     }
 }
 
@@ -84,11 +95,11 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
 thread_proc :: proc "stdcall" (parameter: rawpointer) -> win.DWORD {
     context = runtime.default_context()
     
-    // 0 Should be reserved for the main thread
-    context.user_index = cast(int) win.GetCurrentThreadId()
-    assert(context.user_index != 0)
+    info := cast(^CreateThreadInfo) parameter
+    queue := info.queue
+    context.user_index = cast(int) info.index
+    free(info.self)
     
-    queue := cast(^PlatformWorkQueue) parameter
     for {
         if do_next_work_queue_entry(queue) { 
             INFINITE :: transmute(win.DWORD) i32(-1)

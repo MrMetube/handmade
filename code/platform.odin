@@ -130,10 +130,10 @@ main :: proc() {
     GlobalRunning = true
 
     high_queue: PlatformWorkQueue
-    init_work_queue(&high_queue, HighPriorityWorkQueueThreadCount)
+    init_work_queue(&high_queue, HighPriorityWorkQueueThreadCount, 1)
     
     low_queue: PlatformWorkQueue
-    init_work_queue(&low_queue,  LowPriorityWorkQueueThreadCount)
+    init_work_queue(&low_queue,  LowPriorityWorkQueueThreadCount, 1+HighPriorityWorkQueueThreadCount)
 
     ////////////////////////////////////////////////
     //  Windows Setup
