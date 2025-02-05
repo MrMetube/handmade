@@ -3,8 +3,16 @@ package main
 import "base:runtime"
 import win "core:sys/windows"
 
-game: GameApi
+game: GameApi = stubbed
 
+@(private="file")
+stubbed := GameApi {
+    frame_marker      =  proc(loc := #caller_location) {},
+    begin_timed_block =  proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock)  { return result },
+    end_timed_block   =  proc(block: TimedBlock) {},
+}
+
+@(private="file")
 GameApi :: struct {
     update_and_render:    UpdateAndRender,
     output_sound_samples: OutputSoundSamples,
@@ -16,7 +24,7 @@ GameApi :: struct {
 
 load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
     if game_lib == nil {
-        assert(game == {}, "Game.dll has already been initialized")
+        assert(game == stubbed, "Game.dll has already been initialized")
     } else {
         if !win.FreeLibrary(game_lib) {
             // @Logging 
@@ -43,7 +51,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
     }
 
     if !is_valid {
-        game = {}
+        game = stubbed
     }
     
     return is_valid, last_write_time
@@ -56,7 +64,7 @@ unload_game_lib :: proc() {
         }
         game_lib = nil
     }
-    game = {}
+    game = stubbed
 }
 
 get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {

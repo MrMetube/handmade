@@ -166,7 +166,7 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
-    timed_function()
+    // timed_function()
     assert(group.inside_render)
     
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
@@ -437,6 +437,7 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i, even: b32) {
+    // timed_function()
     assert(group.inside_render)
     
     null_pixels_to_meters :: 1
@@ -514,7 +515,7 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
 }
 
 draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
-    timed_function()
+    // timed_function()
     rounded_center := round(center, i32)
 
     left   := rounded_center.x - bitmap.width  / 2
@@ -567,7 +568,7 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     optimization_mode="favor_size",
 )
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
-    timed_function()
+    // timed_function()
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
     if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&
         (auto_cast len(texture.memory) == texture.height * texture.width) &&
@@ -677,7 +678,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-        timed_block("pixel", hit_count = rectangle_clamped_area(fill_rect) / 2)
+        // timed_block("pixel", hit_count = rectangle_clamped_area(fill_rect) / 2)
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
@@ -832,7 +833,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
 }
 
 draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture, normal_map: Bitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
-    timed_function()
+    // timed_function()
     assert(texture.memory != nil)
 
     // NOTE(viktor): premultiply color
@@ -979,7 +980,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 }
 
 draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rect: Rectangle2i, even: b32){
-    timed_function()
+    // timed_function()
     rounded_center := floor(center, i32)
     rounded_size   := floor(size, i32)
 
@@ -1039,7 +1040,7 @@ sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, 
     point in z, given in meters
 */
 sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
-    timed_function()
+    // timed_function()
     assert(environment_map.LOD[0].memory != nil)
 
     // NOTE(viktor): pick which LOD to sample from

@@ -1109,7 +1109,7 @@ FillGroundChunkWork :: struct {
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    timed_function()
+    // timed_function()
     work := cast(^FillGroundChunkWork) data
 
     

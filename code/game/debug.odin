@@ -113,15 +113,14 @@ DebugStatistic :: struct {
 }
 
 ////////////////////////////////////////////////
-// Exports
 
 @export
 debug_frame_end :: proc(memory: ^GameMemory) {
     if memory.debug_storage == nil do return
-    
     assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
 
+    
     if !debug_state.inititalized {
         defer debug_state.inititalized = true
         // :PointerArithmetic
@@ -140,50 +139,7 @@ debug_frame_end :: proc(memory: ^GameMemory) {
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
     
     collate_debug_records(debug_state, GlobalDebugTable.events_state.array_index)
-    k := 123
 }
-
-@export
-frame_marker :: #force_inline proc(loc := #caller_location) {
-    record_debug_event(.FrameMarker, NilHashValue)
-    frame_marker := &GlobalDebugTable.records[NilHashValue]
-    frame_marker.loc.file_path = loc.file_path
-    frame_marker.loc.line = loc.line
-    frame_marker.loc.name = "Frame Marker"
-    frame_marker.index = NilHashValue
-    frame_marker.hash  = NilHashValue
-}
-
-@export
-begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
-    ok: b32
-    
-    key := DebugRecordLocation{
-        name      = name,
-        file_path = loc.file_path,
-        line      = loc.line,
-    }
-    
-    // TODO(viktor): Check the overhead of this
-    result.hit_count = hit_count
-    result.record_index, ok = get(&GlobalDebugTable.records, key)
-    if !ok {
-        result.record_index = put(&GlobalDebugTable.records, key)
-    }
-    
-    record_debug_event(.BeginBlock, result.record_index)
-    
-    return result
-}
-
-@export
-end_timed_block:: #force_inline proc(block: TimedBlock) {
-    // TODO(viktor): check manual blocks are closed once and exactly once
-    // TODO(viktor): record the hit count here
-    record_debug_event(.EndBlock, block.record_index)
-}
-
-////////////////////////////////////////////////
 
 collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u32) {
     debug_state.frames = push(&debug_state.arena, DebugFrame, DebugMaxHistoryLength * 2)
@@ -270,7 +226,6 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                             debug_state.first_free_block = matching_block
                             
                             thread.first_open_block = matching_block.parent
-                            matching_block^ = {}
                             
                         } else {
                             // TODO(viktor): Record span that goes to the beginning of the frame
@@ -285,11 +240,9 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
 
 overlay_debug_info :: proc(memory: ^GameMemory) {
     if memory.debug_storage == nil do return
-    
     assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
 
-    
     
     target_fps   :: 72.0
     
@@ -299,16 +252,22 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     bar_padding  :: 2
     chart_height :: 120
 
-    full_width ::  500 //cast(f32) len(debug_state.frame_infos) * (bar_width + bar_spacing) - bar_spacing
-    pad_x :: 20 // Debug_render_group.transform.screen_center.x - full_width * 0.5
+    full_width ::  1200
+    pad_x :: 20
     pad_y :: 20
     
     chart_left := left_edge + pad_x
     chart_bottom := -Debug_render_group.transform.screen_center.y + pad_y
     target_height: f32 = chart_height * 2
     target_padding :: 40
-    target_width := full_width + target_padding
+    target_width :f32= full_width + target_padding
     background_color :: v4{0.08, 0.08, 0.3, 1}
+    
+    push_rectangle(Debug_render_group, 
+        {chart_left + 0.5 * target_width, chart_bottom + (target_height) * 0.5, 0}, 
+        {target_width, target_height}, 
+        background_color
+    )
     
     scale := debug_state.frame_bar_scale * chart_height
     for frame, frame_index in debug_state.frames[:debug_state.frame_count] {
@@ -369,11 +328,7 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
             }
         }
 
-        push_rectangle(Debug_render_group, 
-            {chart_left + 0.5 * full_width, chart_bottom + (target_height) * 0.5, 0}, 
-            {target_width, target_height}, 
-            background_color
-        )
+        
     }
 }
 
@@ -440,14 +395,49 @@ text_line :: proc(text: string) {
 
 ////////////////////////////////////////////////
 
+@export
+frame_marker :: #force_inline proc(loc := #caller_location) {
+    record_debug_event(.FrameMarker, NilHashValue)
+    frame_marker := &GlobalDebugTable.records[NilHashValue]
+    frame_marker.loc.file_path = loc.file_path
+    frame_marker.loc.line = loc.line
+    frame_marker.loc.name = "Frame Marker"
+    frame_marker.index = NilHashValue
+    frame_marker.hash  = NilHashValue
+}
+
+@export
+begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
+    ok: b32
+    
+    key := DebugRecordLocation{
+        name      = name,
+        file_path = loc.file_path,
+        line      = loc.line,
+    }
+    
+    // TODO(viktor): Check the overhead of this
+    result.hit_count = hit_count
+    result.record_index, ok = get(&GlobalDebugTable.records, key)
+    if !ok {
+        result.record_index = put(&GlobalDebugTable.records, key)
+    }
+    
+    record_debug_event(.BeginBlock, result.record_index)
+    
+    return result
+}
+
+@export
+end_timed_block:: #force_inline proc(block: TimedBlock) {
+    // TODO(viktor): check manual blocks are closed once and exactly once
+    // TODO(viktor): record the hit count here
+    record_debug_event(.EndBlock, block.record_index)
+}
+
 @(deferred_out=end_timed_block)
 timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
     return begin_timed_block(name, loc, hit_count)
-}
-
-@(deferred_out=end_timed_function)
-timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) { 
-    return begin_timed_function(loc, hit_count)
 }
 
 begin_timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) { 
@@ -456,6 +446,11 @@ begin_timed_function :: #force_inline proc(loc := #caller_location, #any_int hit
 
 end_timed_function :: #force_inline proc(block: TimedBlock) {
     end_timed_block(block)
+}
+
+@(deferred_out=end_timed_function)
+timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) { 
+    return begin_timed_function(loc, hit_count)
 }
 
 record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u32) {
