@@ -3,10 +3,12 @@ package game
 import "core:fmt"
 import "core:hash" // TODO(viktor): I do not need this
 
+PROFILE  :: #config(PROFILE, false)
+
 ////////////////////////////////////////////////
 
 DebugMaxThreadCount     :: 256
-DebugMaxHistoryLength   :: 64
+DebugMaxHistoryLength   :: 36
 DebugMaxRegionsPerFrame :: 65536
 
 GlobalDebugTable: DebugTable
@@ -27,14 +29,14 @@ DebugState :: struct {
     frames:      []DebugFrame,
     
     threads:          []DebugThread,
-    first_free_block: ^DebugOpenBlock,
 }
 
 DebugFrame :: struct {
     begin_clock,
-    end_clock:    i64,
-    region_count: u32,
-    regions:      []DebugRegion,
+    end_clock:       i64,
+    seconds_elapsed: f32,
+    region_count:    u32,
+    regions:         []DebugRegion,
 }
 
 DebugRegion :: struct {
@@ -44,6 +46,8 @@ DebugRegion :: struct {
 
 DebugThread :: struct {
     thread_index:     u32, // Also used as a lane_index
+    
+    first_free_block: ^DebugOpenBlock,
     first_open_block: ^DebugOpenBlock,
 }
 
@@ -65,17 +69,23 @@ DebugTable :: struct {
     event_count:    [DebugMaxHistoryLength]u32,
     events:         [DebugMaxHistoryLength][16*65536]DebugEvent,
     
-    records: DebugRecords,
+    records: [DebugMaxThreadCount]DebugRecords,
 }
 
-DebugEvent  :: struct {
+DebugEvent :: struct {
     clock: i64,
-    
-    thread_index: u16,
-    core_index:   u16,
+    as: struct #raw_union {
+        block: struct {
+            thread_index: u16,
+            core_index:   u16,                    
+        },
+        frame_marker: struct {
+            seconds_elapsed: f32,
+        }
+    },
     record_index: u32,
-    
     type: DebugEventType,
+    
 }
 
 DebugEventsState :: bit_field u64 {
@@ -86,9 +96,9 @@ DebugEventsState :: bit_field u64 {
 }
 
 DebugEventType :: enum u8 {
-    FrameMarker,
     BeginBlock, 
     EndBlock,
+    FrameMarker,
 }
 
 ////////////////////////////////////////////////
@@ -126,8 +136,6 @@ debug_frame_end :: proc(memory: ^GameMemory) {
         // :PointerArithmetic
         init_arena(&debug_state.arena, memory.debug_storage[size_of(DebugState):])
         debug_state.threads = push(&debug_state.arena, DebugThread, DebugMaxThreadCount)
-        debug_state.first_free_block = nil
-        
         debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
     }
     end_temporary_memory(debug_state.collation_memory)
@@ -138,12 +146,11 @@ debug_frame_end :: proc(memory: ^GameMemory) {
     
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
     
-    collate_debug_records(debug_state, GlobalDebugTable.events_state.array_index)
+    collate_debug_records(debug_state, events_state.array_index)
 }
 
 collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u32) {
-    debug_state.frames = push(&debug_state.arena, DebugFrame, DebugMaxHistoryLength * 2)
-    debug_state.frame_bar_lane_count = 0
+    debug_state.frames = push(&debug_state.arena, DebugFrame, DebugMaxHistoryLength)
     debug_state.frame_bar_scale = 1.0 / 60_000_000.0//1
     debug_state.frame_count = 0
     
@@ -159,8 +166,9 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
             if event.type == .FrameMarker {
                 if current_frame != nil {
                     current_frame.end_clock = event.clock
-                    clocks := cast(f32) (current_frame.end_clock - current_frame.begin_clock)
+                    current_frame.seconds_elapsed = event.as.frame_marker.seconds_elapsed
                     
+                    clocks := cast(f32) (current_frame.end_clock - current_frame.begin_clock)
                     if clocks != 0 {
                         // scale := 1.0 / clocks
                         // debug_state.frame_bar_scale = min(debug_state.frame_bar_scale, scale)
@@ -171,23 +179,24 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                 modular_add(&debug_state.frame_count, 1, auto_cast len(debug_state.frames))
 
                 current_frame^ = {
-                    begin_clock  = event.clock,
-                    end_clock    = -1,
-                    region_count = 0,
-                    regions      = push(&debug_state.arena, DebugRegion, DebugMaxRegionsPerFrame)
+                    begin_clock     = event.clock,
+                    end_clock       = -1,
+                    regions         = push(&debug_state.arena, DebugRegion, DebugMaxRegionsPerFrame)
                 }
             } else if current_frame != nil {
-                source := &GlobalDebugTable.records[event.record_index]
+                debug_state.frame_bar_lane_count = max(debug_state.frame_bar_lane_count, cast(u32) event.as.block.thread_index)
+                
+                source := &GlobalDebugTable.records[event.as.block.thread_index][event.record_index]
                 frame_relative_clock := event.clock - current_frame.begin_clock
-                thread := &debug_state.threads[event.thread_index]
+                thread := &debug_state.threads[event.as.block.thread_index]
                 frame_index := debug_state.frame_count-1
                 
                 switch event.type {
-                  case .FrameMarker: unreachable()
-                  case .BeginBlock:
-                    block := debug_state.first_free_block
+                case .FrameMarker: unreachable()
+                case .BeginBlock:
+                    block := thread.first_free_block
                     if block != nil {
-                        debug_state.first_free_block = block.next_free
+                        thread.first_free_block = block.next_free
                     } else {
                         block = push(&debug_state.arena, DebugOpenBlock)
                     }
@@ -197,23 +206,29 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                         parent        = thread.first_open_block
                     }
                     thread.first_open_block = block
-                  case .EndBlock:
+                case .EndBlock:
                     matching_block := thread.first_open_block
-                    if matching_block != nil && matching_block.frame_index == frame_index {
+                    if matching_block != nil {
                         opening_event := matching_block.opening_event
                         if opening_event != nil &&
-                           opening_event.thread_index == event.thread_index &&
-                           opening_event.record_index == event.record_index {
-                            
+                        opening_event.as.block.thread_index == event.as.block.thread_index &&
+                        
+                        opening_event.record_index == event.record_index {
                             if matching_block.frame_index == frame_index {
                                 if matching_block.parent == nil {
-                                    region := &current_frame.regions[current_frame.region_count]
-                                    current_frame.region_count += 1
+                                    t_min := cast(f32) (opening_event.clock - current_frame.begin_clock)
+                                    t_max := cast(f32) (event.clock - current_frame.begin_clock)
                                     
-                                    region^ = {
-                                        lane_index = thread.thread_index,
-                                        t_min = cast(f32) (opening_event.clock - current_frame.begin_clock),
-                                        t_max = cast(f32) (event.clock - current_frame.begin_clock) ,
+                                    threshold :: 0.01
+                                    if t_max - t_min > threshold {
+                                        region := &current_frame.regions[current_frame.region_count]
+                                        current_frame.region_count += 1
+                                        
+                                        region^ = {
+                                            lane_index = cast(u32) event.as.block.thread_index,
+                                            t_min = t_min,
+                                            t_max = t_max,
+                                        }
                                     }
                                 } else {
                                     // TODO(viktor): nested regions
@@ -222,11 +237,11 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                                 // TODO(viktor): Record all frames in between and begin/end spans
                             }
                             
-                            matching_block.next_free = debug_state.first_free_block
-                            debug_state.first_free_block = matching_block
+                            // TODO(viktor): These free list do not behave well with either multi threading and or the frame boundaries which free the temporary memory 
+                            // matching_block.next_free = thread.first_free_block
+                            // thread.first_free_block = matching_block
                             
                             thread.first_open_block = matching_block.parent
-                            
                         } else {
                             // TODO(viktor): Record span that goes to the beginning of the frame
                         }
@@ -244,102 +259,71 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
 
     
-    target_fps   :: 72.0
-    
-    lane_count   := cast(f32) debug_state.frame_bar_lane_count
-    lane_width   :: 8
-    bar_width    := lane_width * lane_count
-    bar_padding  :: 2
-    chart_height :: 120
+    target_fps :: 30
 
-    full_width ::  1200
-    pad_x :: 20
-    pad_y :: 20
+    pad_x :: 10
+    pad_y :: 100
     
+    lane_count   := cast(f32) debug_state.frame_bar_lane_count +1 
+    full_width   := (Debug_render_group.transform.screen_center.x - pad_x) * 2
+    
+    bar_padding  :: 1
+    bar_width    := full_width / cast(f32) len(debug_state.frames) - bar_padding
+    lane_width   := bar_width / lane_count
+    chart_height :: 100
+        
     chart_left := left_edge + pad_x
     chart_bottom := -Debug_render_group.transform.screen_center.y + pad_y
     target_height: f32 = chart_height * 2
-    target_padding :: 40
-    target_width :f32= full_width + target_padding
-    background_color :: v4{0.08, 0.08, 0.3, 1}
+    target_width :f32= full_width
+    background_color :: v4{1, 1, 1, 1}
     
     push_rectangle(Debug_render_group, 
         {chart_left + 0.5 * target_width, chart_bottom + (target_height) * 0.5, 0}, 
-        {target_width, target_height}, 
+        {target_width, 1}, 
         background_color
     )
     
     scale := debug_state.frame_bar_scale * chart_height
     for frame, frame_index in debug_state.frames[:debug_state.frame_count] {
-        stack_x := chart_left + (bar_width * bar_padding) * cast(f32) frame_index
+        stack_x := chart_left + (bar_width + bar_padding) * cast(f32) frame_index
         stack_y := chart_bottom
         for region, region_index in frame.regions[:frame.region_count] {
-            phase := cast(f32) (region_index) / cast(f32) len(frame.regions)-1
-            color := v4{phase*phase, 1-phase, phase, 1}
             
             y_min := stack_y + scale * region.t_min
             y_max := stack_y + scale * region.t_max
             
+            when false {
+                phase := (scale * region.t_min) / chart_height
+                color := v4{phase*phase, 1-phase, phase, 1}
+            } else {
+                colors := [?]v4{ 
+                    {0.2, 0.2, 0.7, 1},
+                    {0.2, 0.7, 0.7, 1},
+                    {0.2, 0.7, 0.2, 1},
+                    {0.2, 0.7, 0.7, 1},
+                    {0.7, 0.2, 0.2, 1},
+                    {0.7, 0.7, 0.2, 1},
+                }
+                color := colors[region_index % len(colors)]
+            }
+        
             push_rectangle(Debug_render_group, {stack_x + 0.5 * lane_width + lane_width * cast(f32) region.lane_index, (y_min + y_max)*0.5, 0}, { lane_width, (y_max - y_min)}, color)
-            // stack separator
-            // push_rectangle(Debug_render_group, {stack_x, stack_y, 0} + offset_p + {0.5*(size.x), 0, 0}, {size.x+2, 1}, background_color)
         }
     }
-
-    when false {
-        text_line("Debug Game Cycle Counts:")
-        for state in debug_state.counter_states {
-            if state.loc == {} do continue
-            
-            cycles := debug_statistic_begin()
-            hits   := debug_statistic_begin()
-            cphs   := debug_statistic_begin()
-            
-            for snapshot in state.snapshots {
-                denom := snapshot.hit_count if snapshot.hit_count != 0 else 1
-                cycles_per_hit := snapshot.cycle_count / denom
-                
-                debug_statistic_accumulate(&cycles, snapshot.cycle_count)
-                debug_statistic_accumulate(&hits,   snapshot.hit_count)
-                debug_statistic_accumulate(&cphs,   cycles_per_hit)
-            }
-            debug_statistic_end(&cycles)
-            debug_statistic_end(&hits)
-            debug_statistic_end(&cphs)
-            
-            if Debug_render_group != nil {
-                chart_bottom := cp_y
-                chart_height := ascent * font_scale - 2
-                width : f32 = 4
-                if cycles.max > 0 {
-                    scale := 1 / cast(f32) cycles.max
-                    for snapshot, index in state.snapshots {
-                        proportion := cast(f32) snapshot.cycle_count * scale
-                        height := chart_height * proportion
-                        push_rectangle(Debug_render_group, 
-                            {cast(f32) index * width + 0.5*width, height * 0.5 + chart_bottom, 0}, 
-                            {width, height}, 
-                            {proportion, 0.7, 0.8, 1},
-                        )
-                    }
-                }
-                
-                text_line(fmt.tprintf("%28s(% 4d): % 12.0f : % 6.0f : % 10.0f", state.loc.name, state.loc.line, cycles.avg, hits.avg, cphs.avg))
-            }
-        }
-
-        
+    
+    if debug_state.frame_count > 0 {
+        text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
     }
 }
 
-font_scale : f32 = 0.5
+font_scale : f32 = 1
 cp_y, ascent: f32
 left_edge: f32
 font_id: FontId
 font: ^Font
 
 reset_debug_renderer :: proc(width, height: i32) {
-    timed_function()
     begin_render(Debug_render_group)
     orthographic(Debug_render_group, {width, height}, 1)
     
@@ -395,44 +379,35 @@ text_line :: proc(text: string) {
 
 ////////////////////////////////////////////////
 
-@export
-frame_marker :: #force_inline proc(loc := #caller_location) {
-    record_debug_event(.FrameMarker, NilHashValue)
-    frame_marker := &GlobalDebugTable.records[NilHashValue]
-    frame_marker.loc.file_path = loc.file_path
-    frame_marker.loc.line = loc.line
-    frame_marker.loc.name = "Frame Marker"
-    frame_marker.index = NilHashValue
-    frame_marker.hash  = NilHashValue
-}
-
-@export
+@(export)
 begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
-    ok: b32
+    when !PROFILE do return result
     
+    records := &GlobalDebugTable.records[context.user_index]
+
     key := DebugRecordLocation{
         name      = name,
         file_path = loc.file_path,
         line      = loc.line,
     }
-    
+    ok: b32
     // TODO(viktor): Check the overhead of this
-    result.hit_count = hit_count
-    result.record_index, ok = get(&GlobalDebugTable.records, key)
+    result.record_index, ok = get(records, key)
     if !ok {
-        result.record_index = put(&GlobalDebugTable.records, key)
+        result.record_index = put(records, key)
     }
+    result.hit_count = hit_count
     
-    record_debug_event(.BeginBlock, result.record_index)
+    record_debug_event_block(.BeginBlock, result.record_index)
     
     return result
 }
 
-@export
+@(export, disabled=!PROFILE)
 end_timed_block:: #force_inline proc(block: TimedBlock) {
     // TODO(viktor): check manual blocks are closed once and exactly once
     // TODO(viktor): record the hit count here
-    record_debug_event(.EndBlock, block.record_index)
+    record_debug_event_block(.EndBlock, block.record_index)
 }
 
 @(deferred_out=end_timed_block)
@@ -453,16 +428,44 @@ timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count
     return begin_timed_function(loc, hit_count)
 }
 
-record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u32) {
+@(export, disabled=!PROFILE)
+frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location) {
+    record_debug_event_frame_marker(seconds_elapsed)
+    
+    frame_marker := &GlobalDebugTable.records[context.user_index][NilHashValue]
+    frame_marker.loc.file_path = loc.file_path
+    frame_marker.loc.line = loc.line
+    frame_marker.loc.name = "Frame Marker"
+    frame_marker.index = NilHashValue
+    frame_marker.hash  = NilHashValue
+}
+
+record_debug_event_frame_marker :: #force_inline proc (seconds_elapsed: f32) {
+    event := record_debug_event_common(.FrameMarker, NilHashValue)
+    event.as.frame_marker = {
+        seconds_elapsed = seconds_elapsed,
+    }
+}
+record_debug_event_block :: #force_inline proc (type: DebugEventType, record_index: u32) {
+    event := record_debug_event_common(type, record_index)
+    event.as.block = {
+        thread_index = cast(u16) context.user_index,
+        core_index   = 0,
+    }
+}
+@require_results
+record_debug_event_common :: #force_inline proc (type: DebugEventType, record_index: u32) -> (event: ^DebugEvent) {
+    when !PROFILE do return
+    
     events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
-    event := &GlobalDebugTable.events[events.array_index][events.events_index]
+    event = &GlobalDebugTable.events[events.array_index][events.events_index]
     event^ = {
         type         = type,
         clock        = read_cycle_counter(),
-        thread_index = cast(u16) context.user_index,
-        core_index   = 0,
         record_index = record_index,
     }
+    
+    return event
 }
 
 ////////////////////////////////////////////////
@@ -479,6 +482,10 @@ record_debug_event :: #force_inline proc (type: DebugEventType, record_index: u3
 //   a fixed size backing array and will fail if it
 //   should "grow".
 
+@(private="file")
+NilHashValue :: 0
+
+@(private="file")
 find :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (result: ^DebugRecord, hash_value, hash_index: u32) {
     hash_value = get_hash(ht, value)
     hash_index = hash_value
@@ -496,6 +503,7 @@ find :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (result: ^DebugRe
     return result, hash_value, hash_index
 }
 
+@(private="file")
 get_hash :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (result: u32) {
     result = cast(u32) (313 + value.line * 464) % len(ht)
     
@@ -512,8 +520,7 @@ get_hash :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (result: u32)
     return result
 }
 
-NilHashValue :: 0
-
+@(private="file")
 put :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (hash_index: u32) {
     entry: ^DebugRecord
     hash_value: u32
@@ -526,6 +533,7 @@ put :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (hash_index: u32) 
     return hash_index
 }
 
+@(private="file")
 get :: proc(ht: ^DebugRecords, value: DebugRecordLocation) -> (hash_index: u32, ok: b32) {
     entry: ^DebugRecord
     hash_value: u32

@@ -1,7 +1,5 @@
 package main
 
-import "base:runtime"
-
 import "core:fmt"
 import win "core:sys/windows"
 
@@ -39,7 +37,7 @@ LowPriorityWorkQueueThreadCount  :: 2
 Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 72
+MonitorRefreshHz: u32 : 30
 
 
 PermanentStorageSize :: 256 * Megabyte
@@ -55,7 +53,7 @@ GlobalRunning: b32
 GLOBAL_back_buffer:  OffscreenBuffer
 GLOBAL_sound_buffer: ^IDirectSoundBuffer
 
-GLOBAL_perf_counter_frequency: win.LARGE_INTEGER
+GlobalPerformanceCounterFrequency: f64
 
 GlobalPause := false
 
@@ -104,7 +102,11 @@ ReplayBuffer :: struct {
 
 main :: proc() {
     when INTERNAL do fmt.print("\033[2J") // clear the terminal
-    win.QueryPerformanceFrequency(&GLOBAL_perf_counter_frequency)
+    {
+        frequency: win.LARGE_INTEGER
+        win.QueryPerformanceFrequency(&frequency)
+        GlobalPerformanceCounterFrequency = cast(f64) frequency
+    }
     
     ////////////////////////////////////////////////
     //   Platform Setup
@@ -332,10 +334,9 @@ main :: proc() {
 
     ////////////////////////////////////////////////
     //  Game Loop
-    //  
+    // 
+    frame_marker_clock: i64
     for GlobalRunning {
-        game.frame_marker()
-        
         ////////////////////////////////////////////////
         //  Hot Reload
         executable_refresh := game.begin_timed_block("executable refresh")
@@ -609,20 +610,22 @@ main :: proc() {
             device_context := win.GetDC(window)
             display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
             win.ReleaseDC(window, device_context)
+            
+            flip_counter = get_wall_clock()
         }
 
         game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
-        //  Performance Counters
-
-        flip_counter = get_wall_clock()
-        end_counter := get_wall_clock()
-
+        // TODO(viktor): this block is not closed until after colation, once that case is handled reenable
+        // debug_colation := game.begin_timed_block("debug colation")
         
-        if game.debug_frame_end != nil {
-            game.debug_frame_end(&game_memory)
-        }
-
+        game.debug_frame_end(&game_memory)
+        
+        // game.end_timed_block(debug_colation)
+        
+        
+        end_counter := get_wall_clock()
+        game.frame_marker(get_seconds_elapsed(last_counter, end_counter))
         last_counter = end_counter
     }
 }
@@ -651,7 +654,7 @@ get_wall_clock :: #force_inline proc() -> i64 {
 }
 
 get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
-    return f32(end - start) / f32(GLOBAL_perf_counter_frequency)
+    return cast(f32) (cast(f64) (end - start) / GlobalPerformanceCounterFrequency)
 }
 
 ////////////////////////////////////////////////   
@@ -841,20 +844,22 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
         b, g, r, pad: u8,
     }
 
-    // TODO(viktor): can we avoid this without forcing the game to have to handle the windows color component order?
-    if fix_windows_colors {
-        for y in 0..<buffer.height {
-            for x in 0..<buffer.width {
-                useful_color := &buffer.memory[y * buffer.pitch + x]
-                windows_color:= WindowsColor{
-                    r = useful_color.r,
-                    g = useful_color.g,
-                    b = useful_color.b,
+    if !GlobalPause {
+        // TODO(viktor): can we avoid this without forcing the game to have to handle the windows color component order?
+        if fix_windows_colors {
+            for y in 0..<buffer.height {
+                for x in 0..<buffer.width {
+                    useful_color := &buffer.memory[y * buffer.pitch + x]
+                    windows_color:= WindowsColor{
+                        r = useful_color.r,
+                        g = useful_color.g,
+                        b = useful_color.b,
+                    }
+                    useful_color^ = transmute(Color) windows_color
                 }
-                useful_color^ = transmute(Color) windows_color
             }
         }
-    }
+    }    
         
     if window_width >= buffer.width*2 && window_height >= buffer.height*2 {
         offset := [2]i32{window_width - buffer.width*2, window_height - buffer.height*2} / 2
@@ -925,8 +930,7 @@ toggle_fullscreen :: proc(window: win.HWND) {
 main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
     switch message {
     case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
-        context = runtime.default_context()
-        assert(false, "keyboard-event came in through a non-dispatched event")
+        assert_contextless(false, "keyboard-event came in through a non-dispatched event")
     case win.WM_CLOSE: // TODO: Handle this with a message to the user
         GlobalRunning = false
     case win.WM_DESTROY: // TODO: handle this as an error - recreate window?

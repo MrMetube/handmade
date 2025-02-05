@@ -1,6 +1,9 @@
 package main
 
 import "base:runtime"
+import "core:fmt"
+import "core:os"
+import "core:thread"
 import "base:intrinsics"
 import win "core:sys/windows"
 
@@ -29,15 +32,20 @@ CreateThreadInfo :: struct {
 
 init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: u32, thread_id_offset: u32) {
     queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, cast(i32) thread_count, nil)
-    
-    for thread_index in 0..<thread_count {
+
+    for thread_index in thread_id_offset..<thread_count + thread_id_offset {
         info := new(CreateThreadInfo)
         info^ = {
             queue = queue,
-            index = thread_index + thread_id_offset,
+            index = thread_index,
             self  = info,
         }
-        win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
+        // NOTE(viktor): When I use the windows call i can at most create 4 threads at once,
+        // any more calls to create thread in this call of the init function fail silently
+        // A further call for the low_priority_queue then is able to create 4 more threads.
+        //     result := win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
+        
+        thread.create_and_start_with_data(info, thread_proc)
     }
 }
 
@@ -83,7 +91,7 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
             entry := &queue.entries[index]
             entry.callback(entry.data)
             
-            intrinsics.atomic_add(&queue.completion_count, 1)
+            atomic_add(&queue.completion_count, 1)
         }
     } else {
         should_sleep = true
@@ -92,7 +100,7 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
     return should_sleep
 }
 
-thread_proc :: proc "stdcall" (parameter: rawpointer) -> win.DWORD {
+thread_proc :: proc (parameter: rawpointer) {
     context = runtime.default_context()
     
     info := cast(^CreateThreadInfo) parameter

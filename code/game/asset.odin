@@ -385,7 +385,7 @@ best_match_font_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, mat
     return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
 best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
-    // timed_function()
+    timed_function()
     type := assets.types[id]
 
     if type.first_asset_index != type.one_past_last_index {
@@ -487,7 +487,7 @@ begin_asset_lock :: proc(assets: ^Assets) {
 }
 end_asset_lock :: proc(assets: ^Assets) {
     complete_previous_writes_before_future_writes()
-    assets.memory_operation_lock = 0
+    volatile_store(&assets.memory_operation_lock, 0)
 }
 
 insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {

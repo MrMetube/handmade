@@ -418,9 +418,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     }
     
     if input.reloaded_executable {
-        // :HotReload 
-        zero(GlobalDebugTable.records[:])
-        
         // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
         when false {
             for &ground_buffer in tran_state.ground_buffers {
@@ -1109,7 +1106,7 @@ FillGroundChunkWork :: struct {
 }
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    // timed_function()
+    timed_function()
     work := cast(^FillGroundChunkWork) data
 
     

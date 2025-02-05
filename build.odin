@@ -2,6 +2,7 @@
 
 package build
 
+import "base:intrinsics"
 import "core:os"
 import win "core:sys/windows"
 import "core:fmt"
@@ -15,7 +16,8 @@ debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 
-optimizations :: " -o:none " when true else " -o:speed "
+profile          := true
+optimizations    := false ? " -o:speed " : " -o:none "
 
 GamePedantic     :: false
 PlatformPedantic :: false
@@ -84,14 +86,16 @@ main :: proc() {
             
             fmt.fprint(lock, "WAITING FOR PDB")
             pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when GamePedantic else ""))
+            #assert(intrinsics.type_is_boolean(type_of(profile)))
+            profile_str := fmt.tprintf(" -define:PROFILE=%v ", profile)
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, profile_str, (pedantic when GamePedantic else ""))
         }
     }
     
     debug_exe := "debug.exe" 
     if .Platform in targetsToBuild && !is_running(debug_exe) {
         copy_over(`..\code\game\common.odin`, `..\code\copypasta_common.odin`, "package game", "package main")
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, windows, internal, optimizations, (pedantic when PlatformPedantic else ""))
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, windows, internal, optimizations , (pedantic when PlatformPedantic else ""))
     }
     
     os.exit(0)
