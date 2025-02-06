@@ -81,8 +81,7 @@ RenderGroupEntryBitmap :: struct {
 
 RenderGroupEntryRectangle :: struct {
     color:  v4,
-    p:     v2,
-    size:  v2,
+    rect: Rectangle2,
 }
 
 RenderGroupEntryCoordinateSystem :: struct {
@@ -237,10 +236,13 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, heigh
     }
 }
 
-push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}) {
+push_rectangle :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, color := v4{1,1,1,1}) {
     assert(group.inside_render)
     
-    p := V3(offset.xy + size * 0.5, 0)
+    offset := rectangle_get_center(rec)
+    size   := rectangle_get_diameter(rec)
+
+    p := V3(offset + size * 0.5, 0)
     basis_p, scale, valid := project_with_transform(group.transform, p)
     
     if valid {
@@ -248,24 +250,25 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, c
         alpha := v4{1,1,1, group.global_alpha}
 
         if element != nil {
-            element.color     = color * alpha
-            element.size      = scale * size
-            element.p         = basis_p - 0.5 * element.size
+            element.color = color * alpha
+            element.rect  = rectangle_center_diameter(basis_p - 0.5 * scale * size, scale * size)
         }
     }
 }
 
-push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v3, size: v2, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v2, size: v2, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
     assert(group.inside_render)
     
     // TODO(viktor): there are rounding issues with draw_rectangle
-    // NOTE(viktor): Top and Bottom
-    push_rectangle(group, offset - {0, size.y*0.5, 0}, {size.x+thickness, thickness}, color)
-    push_rectangle(group, offset + {0, size.y*0.5, 0}, {size.x+thickness, thickness}, color)
+    // @Cleanup offset and size params to rect itself?
+    
+    // Top and Bottom
+    push_rectangle(group, rectangle_center_diameter(offset.xy - {0, size.y*0.5}, v2{size.x+thickness, thickness}), color)
+    push_rectangle(group, rectangle_center_diameter(offset.xy + {0, size.y*0.5}, v2{size.x+thickness, thickness}), color)
 
-    // NOTE(viktor): Left and Right
-    push_rectangle(group, offset - {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
-    push_rectangle(group, offset + {size.x*0.5, 0, 0}, {thickness, size.y-thickness}, color)
+    // Left and Right
+    push_rectangle(group, rectangle_center_diameter(offset.xy - {size.x*0.5, 0}, v2{thickness, size.y-thickness}), color)
+    push_rectangle(group, rectangle_center_diameter(offset.xy + {size.x*0.5, 0}, v2{thickness, size.y-thickness}), color)
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
@@ -292,7 +295,8 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
         for index in 0..<entity.hit_point_max {
             hit_point := entity.hit_points[index]
             color := hit_point.filled_amount == 0 ? Gray : Red
-            push_rectangle(group, {health_x, -offset_y, 0}, health_size, color)
+            // @Cleanup rect
+            push_rectangle(group, rectangle_center_diameter(v2{health_x, -offset_y}, health_size), color)
             health_x += spacing_between
         }
     }
@@ -362,8 +366,6 @@ TileRenderWork :: struct {
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    timed_function()
-    
     data := cast(^TileRenderWork) data
 
     assert(data.group != nil)
@@ -439,7 +441,6 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
 }
 
 render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i, even: b32) {
-    timed_function()
     assert(group.inside_render)
     
     null_pixels_to_meters :: 1
@@ -455,13 +456,13 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, group.transform.screen_center, group.transform.screen_center * 2, entry.color, clip_rect, even)
+            draw_rectangle(target, rectangle_min_diameter(v2{0, 0}, group.transform.screen_center*2), entry.color, clip_rect, even)
 
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, entry.p, entry.size, entry.color, clip_rect, even)
+            draw_rectangle(target, entry.rect, entry.color, clip_rect, even)
 
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
@@ -506,9 +507,9 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
             y := p + entry.y_axis
             size := v2{10, 10}
 
-            draw_rectangle(target, p, size, Red, clip_rect, even)
-            draw_rectangle(target, x, size, Red * 0.7, clip_rect, even)
-            draw_rectangle(target, y, size, Red * 0.7, clip_rect, even)
+            draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect, even)
+            draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect, even)
+            draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect, even)
 
         case:
             panic("Unhandled Entry")
@@ -981,15 +982,12 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     }
 }
 
-draw_rectangle :: proc(buffer: Bitmap, center: v2, size: v2, color: v4, clip_rect: Rectangle2i, even: b32){
+draw_rectangle :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: Rectangle2i, even: b32){
     // timed_function()
-    rounded_center := floor(center, i32)
-    rounded_size   := floor(size, i32)
+    rounded_center := floor(rectangle_get_center(rect), i32)
+    rounded_size   := floor(rectangle_get_diameter(rect), i32)
 
-    fill_rect := Rectangle2i{
-        rounded_center - rounded_size / 2, 
-        rounded_center - rounded_size / 2 + rounded_size,
-    }
+    fill_rect := rectangle_center_diameter(rounded_center, rounded_size)
     
     fill_rect = rectangle_intersection(fill_rect, clip_rect)
     if !even == (fill_rect.min.y & 1 != 0) {

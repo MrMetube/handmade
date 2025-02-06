@@ -870,8 +870,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Rock), 1.5)
     
             case .Stairwell: 
-                push_rectangle(render_group, 0,                              entity.walkable_dim, color = Blue)
-                push_rectangle(render_group, {0, 0, entity.walkable_height}, entity.walkable_dim, color = Orange * {1, 1, 1, 0.5})
+                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue)
             
             case .Space: 
                 when false {
@@ -967,7 +966,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     if Debug_render_group != nil {
         reset_debug_renderer(buffer.width, buffer.height)
-        overlay_debug_info(memory)
+        overlay_debug_info(memory, input)
         tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
         end_render(Debug_render_group)
     }

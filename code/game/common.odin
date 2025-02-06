@@ -11,6 +11,10 @@ INTERNAL :: #config(INTERNAL, false)
 // Common Game Definitions
 // 
 
+v2 :: [2]f32
+v3 :: [3]f32
+v4 :: [4]f32
+
 rawpointer  :: rawptr
 uintpointer :: uintptr
 
@@ -72,8 +76,8 @@ Input :: struct {
             mouse_extra1, mouse_extra2 : InputButton,
         },
     },
-    mouse_position: [2]i32,
-    mouse_wheel:    i32,
+    mouse_position: v2,
+    mouse_wheel:    f32,
 
     controllers: [5]InputController,
 }

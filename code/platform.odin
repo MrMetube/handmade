@@ -37,7 +37,7 @@ LowPriorityWorkQueueThreadCount  :: 2
 Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 30
+MonitorRefreshHz: u32 : 72
 
 
 PermanentStorageSize :: 256 * Megabyte
@@ -364,11 +364,21 @@ main :: proc() {
         
         {
             new_input.delta_time = target_seconds_per_frame
+            
             { // Mouse Input 
-                mouse : win.POINT
+                mouse: win.POINT
                 win.GetCursorPos(&mouse)
                 win.ScreenToClient(window, &mouse)
-                new_input.mouse_position = transmute([2]i32) mouse
+                mouse_p := transmute([2]i32) mouse
+                new_input.mouse_position = v2{ 
+                    (-0.5 * cast(f32) GLOBAL_back_buffer.width + 0.5) + cast(f32) mouse.x,
+                    (0.5 * cast(f32) GLOBAL_back_buffer.height + 0.5) - cast(f32) mouse.y,
+                }
+                
+                for &button, index in new_input.mouse_buttons {
+                    button.ended_down = old_input.mouse_buttons[index].ended_down
+                    button.half_transition_count = 0
+                }
                 // TODO: support mouse wheel
                 new_input.mouse_wheel = 0
                 is_down_mask := transmute(win.SHORT) u16(1 << 15)
@@ -398,7 +408,7 @@ main :: proc() {
             // TODO: should we poll this more frequently
             // TODO: only check connected controllers, catch messages on connect / disconnect
             for controller_index in 0..<max_controller_count {
-                controller_state : XINPUT_STATE
+                controller_state: XINPUT_STATE
 
                 our_controller_index := controller_index+1
 
@@ -616,12 +626,11 @@ main :: proc() {
 
         game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
-        // TODO(viktor): this block is not closed until after colation, once that case is handled reenable
-        // debug_colation := game.begin_timed_block("debug colation")
+        debug_colation := game.begin_timed_block("debug colation")
         
         game.debug_frame_end(&game_memory)
         
-        // game.end_timed_block(debug_colation)
+        game.end_timed_block(debug_colation)
         
         
         end_counter := get_wall_clock()

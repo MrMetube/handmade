@@ -249,14 +249,13 @@ write_sounds :: proc() {
             sample_count = section
         }
         
-        this_index := add_sound_asset(hha, "../assets/Light Ambience 3.wav", first_sample_index, sample_count)
+        this_index := add_sound_asset(hha, "../assets/Light Ambience 4.wav", first_sample_index, sample_count)
         if first_sample_index + section < total_sample_count {
             hha.data[this_index].info.sound.chain = .Advance
         }
     }
     
     // add_sound_asset("../assets/Light Ambience 2.wav")
-    // add_sound_asset("../assets/Light Ambience 3.wav")
     // add_sound_asset("../assets/Light Ambience 4.wav")
     // add_sound_asset("../assets/Light Ambience 5.wav")
     end_asset_type(hha)

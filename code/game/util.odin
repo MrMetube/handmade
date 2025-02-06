@@ -3,6 +3,11 @@ package game
 import "base:intrinsics"
 import "base:runtime"
 
+was_pressed :: #force_inline proc(button: InputButton) -> (result:b32) {
+    result = button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
+    return result
+}
+
 White    :: v4{1,1,1, 1}
 Gray     :: v4{0.5,0.5,0.5, 1}
 Black    :: v4{0,0,0, 1}

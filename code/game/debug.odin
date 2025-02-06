@@ -8,7 +8,7 @@ PROFILE  :: #config(PROFILE, false)
 ////////////////////////////////////////////////
 
 DebugMaxThreadCount     :: 256
-DebugMaxHistoryLength   :: 36
+DebugMaxHistoryLength   :: 8
 DebugMaxRegionsPerFrame :: 65536
 
 GlobalDebugTable: DebugTable
@@ -17,6 +17,7 @@ GlobalDebugTable: DebugTable
 
 DebugState :: struct {
     inititalized: b32,
+    paused: b32,
     
     // NOTE(viktor): Collation
     arena: Arena,
@@ -40,6 +41,8 @@ DebugFrame :: struct {
 }
 
 DebugRegion :: struct {
+    record:       DebugRecordLocation,
+    cycle_count:  i64,
     lane_index:   u32,
     t_min, t_max: f32,
 }
@@ -138,6 +141,7 @@ debug_frame_end :: proc(memory: ^GameMemory) {
         debug_state.threads = push(&debug_state.arena, DebugThread, DebugMaxThreadCount)
         debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
     }
+    
     end_temporary_memory(debug_state.collation_memory)
     debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
     
@@ -146,7 +150,9 @@ debug_frame_end :: proc(memory: ^GameMemory) {
     
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
     
-    collate_debug_records(debug_state, events_state.array_index)
+    if !debug_state.paused {
+        collate_debug_records(debug_state, events_state.array_index)
+    }
 }
 
 collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u32) {
@@ -166,6 +172,7 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
             if event.type == .FrameMarker {
                 if current_frame != nil {
                     current_frame.end_clock = event.clock
+                    modular_add(&debug_state.frame_count, 1, auto_cast len(debug_state.frames))
                     current_frame.seconds_elapsed = event.as.frame_marker.seconds_elapsed
                     
                     clocks := cast(f32) (current_frame.end_clock - current_frame.begin_clock)
@@ -176,7 +183,6 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                 }
                 
                 current_frame = &debug_state.frames[debug_state.frame_count]
-                modular_add(&debug_state.frame_count, 1, auto_cast len(debug_state.frames))
 
                 current_frame^ = {
                     begin_clock     = event.clock,
@@ -225,6 +231,8 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                                         current_frame.region_count += 1
                                         
                                         region^ = {
+                                            record      = source.loc,
+                                            cycle_count = event.clock - opening_event.clock,
                                             lane_index = cast(u32) event.as.block.thread_index,
                                             t_min = t_min,
                                             t_max = t_max,
@@ -253,13 +261,17 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
     }
 }
 
-overlay_debug_info :: proc(memory: ^GameMemory) {
+overlay_debug_info :: proc(memory: ^GameMemory, input: Input) {
     if memory.debug_storage == nil do return
     assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
     debug_state := cast(^DebugState) raw_data(memory.debug_storage)
 
+    mouse_p := input.mouse_position
+    if was_pressed(input.mouse_left) {
+        debug_state.paused = !debug_state.paused
+    }
     
-    target_fps :: 30
+    target_fps :: 72
 
     pad_x :: 10
     pad_y :: 100
@@ -273,16 +285,19 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
     chart_height :: 100
         
     chart_left := left_edge + pad_x
-    chart_bottom := -Debug_render_group.transform.screen_center.y + pad_y
+    chart_bottom := 0.5 * cast(f32) -GlobalHeight + pad_y
     target_height: f32 = chart_height * 2
     target_width :f32= full_width
     background_color :: v4{1, 1, 1, 1}
     
     push_rectangle(Debug_render_group, 
-        {chart_left + 0.5 * target_width, chart_bottom + (target_height) * 0.5, 0}, 
-        {target_width, 1}, 
+        rectangle_min_diameter(v2{chart_left, chart_bottom + target_height * 0.5}, v2{target_width, 1}), 
         background_color
     )
+      
+    if debug_state.frame_count > 0 {
+        text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
+    }
     
     scale := debug_state.frame_bar_scale * chart_height
     for frame, frame_index in debug_state.frames[:debug_state.frame_count] {
@@ -292,6 +307,10 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
             
             y_min := stack_y + scale * region.t_min
             y_max := stack_y + scale * region.t_max
+
+            x_min := stack_x + 0.5 * lane_width + lane_width * cast(f32) region.lane_index
+            x_max := x_min + lane_width
+            rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
             
             when false {
                 phase := (scale * region.t_min) / chart_height
@@ -307,13 +326,14 @@ overlay_debug_info :: proc(memory: ^GameMemory) {
                 }
                 color := colors[region_index % len(colors)]
             }
-        
-            push_rectangle(Debug_render_group, {stack_x + 0.5 * lane_width + lane_width * cast(f32) region.lane_index, (y_min + y_max)*0.5, 0}, { lane_width, (y_max - y_min)}, color)
+                        
+            push_rectangle(Debug_render_group, rect, color)
+            if rectangle_contains(rect, mouse_p) {
+                record := region.record
+                
+                text_line(fmt.tprintf("%s - %d cycles [%s:% 4d]", record.name, region.cycle_count, record.file_path, record.line))
+            }
         }
-    }
-    
-    if debug_state.frame_count > 0 {
-        text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
     }
 }
 
@@ -322,10 +342,16 @@ cp_y, ascent: f32
 left_edge: f32
 font_id: FontId
 font: ^Font
+GlobalWidth: i32
+GlobalHeight: i32
 
 reset_debug_renderer :: proc(width, height: i32) {
     begin_render(Debug_render_group)
     orthographic(Debug_render_group, {width, height}, 1)
+    
+    
+    GlobalWidth = width
+    GlobalHeight = height
     
     font_id = best_match_font_from(Debug_render_group.assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
     font = get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)

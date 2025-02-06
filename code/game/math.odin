@@ -9,10 +9,6 @@ import "core:simd"
 // ---------------------- Types
 // ---------------------- ---------------------- ----------------------
 
-v2 :: [2]f32
-v3 :: [3]f32
-v4 :: [4]f32
-
 Rectangle   :: struct($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
@@ -329,7 +325,10 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
 // ---------------------- Rectangle operations
 // ---------------------- ---------------------- ----------------------
 
-@(require_results) rectangle_min_dim  :: #force_inline proc(min, dim: $T) -> Rectangle(T) {
+@(require_results) rectangle_min_max  :: #force_inline proc(min, max: $T) -> Rectangle(T) {
+    return { min, max }
+}
+@(require_results) rectangle_min_diameter  :: #force_inline proc(min, dim: $T) -> Rectangle(T) {
     return { min, min + dim }
 }
 @(require_results) rectangle_center_diameter :: #force_inline proc(center, diameter: $T) -> Rectangle(T) {
@@ -340,6 +339,9 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
 }
 @(require_results) rectangle_get_diameter :: #force_inline proc(rec: Rectangle($T)) -> (result: T) {
     return rec.max - rec.min
+}
+@(require_results) rectangle_get_center :: #force_inline proc(rec: Rectangle($T)) -> (result: T) {
+    return rec.min + 0.5 * rectangle_get_diameter(rec)
 }
 
 @(require_results) rectangle_add_radius :: #force_inline proc(rec: $R/Rectangle($T), radius: T) -> (result: R) {
