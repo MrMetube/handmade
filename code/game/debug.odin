@@ -8,23 +8,26 @@ PROFILE  :: #config(PROFILE, false)
 ////////////////////////////////////////////////
 
 DebugMaxThreadCount     :: 256
-DebugMaxHistoryLength   :: 12
+DebugMaxHistoryLength   :: 6
 DebugMaxRegionsPerFrame :: 14000
 
-GlobalDebugTable: DebugTable
+GlobalDebugTable:  DebugTable
+GlobalDebugMemory: ^GameMemory
 
 ////////////////////////////////////////////////
 
 DebugState :: struct {
     inititalized: b32,
     paused:       b32,
+    debug_arena:   Arena,
     
     // NOTE(viktor): Collation
-    arena:            Arena,
+    collation_arena:  Arena,
     collation_memory: TemporaryMemory,
     collation_index:  u32,
     collation_frame:  ^DebugFrame,
     scopes_to_record: []^DebugRecord,
+    
     
     frame_bar_scale:      f32,
     frame_bar_lane_count: u32,
@@ -33,6 +36,20 @@ DebugState :: struct {
     frames:      []DebugFrame,
     
     threads: []DebugThread,
+    
+    // NOTE(viktor): Overlay rendering
+    render_group: ^RenderGroup,
+    
+    work_queue: ^PlatformWorkQueue, 
+    buffer:     Bitmap,
+    
+    profile_rect: Rectangle2,
+    font_scale:   f32,
+    cp_y:         f32,
+    ascent:       f32,
+    left_edge:    f32,
+    font_id:      FontId,
+    font:         ^Font,
 }
 
 DebugFrame :: struct {
@@ -125,16 +142,45 @@ DebugRecordLocation :: struct {
 
 ////////////////////////////////////////////////
 
-refresh_collation :: proc(debug_state: ^DebugState) {
-    restart_collation(debug_state, GlobalDebugTable.events_state.array_index)
-    collate_debug_records(debug_state, GlobalDebugTable.events_state.array_index)
+get_debug_state :: proc() -> (debug_state: ^DebugState) {
+    return get_debug_state_with_memory(GlobalDebugMemory)
+}
+get_debug_state_with_memory :: proc(memory: ^GameMemory) -> (debug_state: ^DebugState) {
+    assert(len(memory.debug_storage) >= size_of(DebugState))
+    debug_state = cast(^DebugState) raw_data(memory.debug_storage)
+    assert(debug_state.inititalized)
+    
+    return debug_state
 }
 
-restart_collation :: proc(debug_state: ^DebugState, invalid_index: u32) {
-    end_temporary_memory(debug_state.collation_memory)
-    debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
+@export
+debug_frame_end :: proc(memory: ^GameMemory) {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+
+    modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
+    events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
+    GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
     
-    debug_state.frames = push(&debug_state.arena, DebugFrame, DebugMaxHistoryLength)
+    if !debug_state.paused {
+        if debug_state.collation_index >= DebugMaxHistoryLength-1 {
+            restart_collation(events_state.array_index)
+        }
+        
+        collate_debug_records(events_state.array_index)
+    }
+}
+
+////////////////////////////////////////////////
+
+restart_collation :: proc(invalid_index: u32) {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+    
+    end_temporary_memory(debug_state.collation_memory)
+    debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
+    
+    debug_state.frames = push(&debug_state.collation_arena, DebugFrame, DebugMaxHistoryLength)
     debug_state.frame_bar_scale = 1.0 / 60_000_000.0//1
     debug_state.frame_count = 0
     
@@ -142,37 +188,18 @@ restart_collation :: proc(debug_state: ^DebugState, invalid_index: u32) {
     debug_state.collation_frame = nil
 }
 
-@export
-debug_frame_end :: proc(memory: ^GameMemory) {
-    if memory.debug_storage == nil do return
-    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
-    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
-
-    modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
-    events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
-    GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
+refresh_collation :: proc() {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
     
-    if !debug_state.inititalized {
-        defer debug_state.inititalized = true
-        // :PointerArithmetic
-        init_arena(&debug_state.arena, memory.debug_storage[size_of(DebugState):])
-        debug_state.threads = push(&debug_state.arena, DebugThread, DebugMaxThreadCount)
-        debug_state.scopes_to_record = push(&debug_state.arena, ^DebugRecord, DebugMaxThreadCount)
-        
-        debug_state.collation_memory = begin_temporary_memory(&debug_state.arena)
-        restart_collation(debug_state, events_state.array_index)
-    }
-    
-    if !debug_state.paused {
-        if debug_state.collation_index >= DebugMaxHistoryLength-1 {
-            restart_collation(debug_state, events_state.array_index)
-        }
-        
-        collate_debug_records(debug_state, events_state.array_index)
-    }
+    restart_collation(GlobalDebugTable.events_state.array_index)
+    collate_debug_records(GlobalDebugTable.events_state.array_index)
 }
 
-collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u32) {
+collate_debug_records :: proc(invalid_events_index: u32) {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+    
     // @Hack why should this need to be reset? Think dont guess
     for &thread in debug_state.threads do thread.first_open_block = nil
     
@@ -199,7 +226,7 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                 debug_state.collation_frame^ = {
                     begin_clock     = event.clock,
                     end_clock       = -1,
-                    regions         = push(&debug_state.arena, DebugRegion, DebugMaxRegionsPerFrame)
+                    regions         = push(&debug_state.collation_arena, DebugRegion, DebugMaxRegionsPerFrame)
                 }
             } else if debug_state.collation_frame != nil {
                 debug_state.frame_bar_lane_count = max(debug_state.frame_bar_lane_count, cast(u32) event.as.block.thread_index)
@@ -216,7 +243,7 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
                     if block != nil {
                         thread.first_free_block = block.next_free
                     } else {
-                        block = push(&debug_state.arena, DebugOpenBlock)
+                        block = push(&debug_state.collation_arena, DebugOpenBlock)
                     }
                     block^ = {
                         frame_index   = frame_index,
@@ -276,11 +303,67 @@ collate_debug_records :: proc(debug_state: ^DebugState, invalid_events_index: u3
     }
 }
 
-overlay_debug_info :: proc(memory: ^GameMemory, input: Input) {
-    if memory.debug_storage == nil do return
-    assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
-    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+////////////////////////////////////////////////
 
+debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformWorkQueue, buffer: Bitmap) {
+    assert(len(memory.debug_storage) >= size_of(DebugState))
+    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+    
+    if !debug_state.inititalized {
+        debug_state.inititalized = true
+        // :PointerArithmetic
+        init_arena(&debug_state.debug_arena, memory.debug_storage[size_of(DebugState):])
+        sub_arena(&debug_state.collation_arena, &debug_state.debug_arena, 64 * Megabyte)
+        
+        debug_state.work_queue = work_queue
+        debug_state.buffer     = buffer
+        
+        debug_state.threads = push(&debug_state.collation_arena, DebugThread, DebugMaxThreadCount)
+        debug_state.scopes_to_record = push(&debug_state.collation_arena, ^DebugRecord, DebugMaxThreadCount)
+        
+        debug_state.font_scale = 0.6
+        
+        debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
+        restart_collation(GlobalDebugTable.events_state.array_index)
+    }
+    
+    if debug_state.render_group == nil {
+        debug_state.render_group = make_render_group(&debug_state.debug_arena, assets, 32 * Megabyte, false)
+        assert(debug_state.render_group != nil)
+    }
+    if debug_state.render_group.inside_render do return 
+    
+    begin_render(debug_state.render_group)
+    
+    debug_state.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
+    debug_state.font = get_font(assets, debug_state.font_id, debug_state.render_group.generation_id)
+    
+    baseline :f32= 10
+    if debug_state.font != nil {
+        font_info := get_font_info(assets, debug_state.font_id)
+        baseline = get_baseline(font_info)
+        debug_state.ascent = get_baseline(font_info)
+    } else {
+        load_font(debug_state.render_group.assets, debug_state.font_id, false)
+    }
+    
+    debug_state.cp_y      =  0.5 * cast(f32) buffer.height - baseline * debug_state.font_scale
+    debug_state.left_edge = -0.5 * cast(f32) buffer.width
+}
+
+debug_end_and_overlay :: proc(input: Input) {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+    
+    overlay_debug_info(input)
+    tiled_render_group_to_output(debug_state.work_queue, debug_state.render_group, debug_state.buffer)
+    end_render(debug_state.render_group)
+}
+
+overlay_debug_info :: proc(input: Input) {
+    debug_state := get_debug_state()
+    if debug_state == nil || debug_state.render_group == nil do return
+    
     mouse_p := input.mouse_position
     if was_pressed(input.mouse_right) {
         debug_state.paused = !debug_state.paused
@@ -288,67 +371,43 @@ overlay_debug_info :: proc(memory: ^GameMemory, input: Input) {
     
     target_fps :: 72
 
-    pad_x :: 80
-    pad_y :: 80
+    pad_x :: 20
+    pad_y :: 20
     
-    lane_count   := cast(f32) debug_state.frame_bar_lane_count +1 
-    full_width   := GlobalWidth - pad_x
-    full_height  := GlobalHeight - pad_y
+    orthographic(debug_state.render_group, {debug_state.buffer.width, debug_state.buffer.height}, 0.5)
     
-    bar_padding  :: 2
-    bar_height   := full_height / cast(f32) len(debug_state.frames) - bar_padding
-    lane_height  := bar_height / lane_count
-    chart_width  :: 600.0
+    debug_state.profile_rect = rectangle_min_max(v2{50, 50}, v2{200, 200})
+    push_rectangle(debug_state.render_group, debug_state.profile_rect, {0.08, 0.08, 0.2, 1} )
     
-    chart_left :f32= -0.5 * full_width
-    chart_top  :f32= 0.5 * full_height - pad_y
-    target_left: f32 = chart_width
-    target_height :f32= full_height
+    bar_padding :: 2
+    lane_count  := cast(f32) debug_state.frame_bar_lane_count +1 
+    lane_height :f32
+    frame_count := cast(f32) len(debug_state.frames)
+    if frame_count > 0 && lane_count > 0 {
+        lane_height = ((rectangle_get_diameter(debug_state.profile_rect).y / frame_count) - bar_padding) / lane_count
+    }
     
-    push_rectangle(Debug_render_group, 
-        rectangle_min_diameter(v2{chart_left + target_left * 0.5, chart_top + target_height}, v2{1, target_height}), 
-        v4{1, 1, 1, 1}
-    )
-      
+    bar_height       := lane_height * lane_count
+    bar_plus_spacing := bar_height + bar_padding
+    
+    full_height := bar_plus_spacing * frame_count
+    
+    chart_left  := debug_state.profile_rect.min.x
+    chart_top   := debug_state.profile_rect.max.y - bar_plus_spacing
+    chart_width := rectangle_get_diameter(debug_state.profile_rect).x
+    
+    scale := debug_state.frame_bar_scale * chart_width
+    
     if debug_state.frame_count > 0 {
         push_text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
     }
     
-    hsv_to_rgb :: proc(hsv: v3) -> (rgb: v3) {
-        hue, sat, val := hsv[0], hsv[1], hsv[2]
-        
-        if sat == 0 do return {val, val, val}
-    
-        h_i := floor(hue * 6, i32);
-        hue_fraction := hue * 6 - cast(f32) h_i
-        p := val * (1 - sat)
-        q := val * (1 - hue_fraction * sat)
-        t := val * (1 - (1 - hue_fraction) * sat)
-    
-        switch h_i {
-        case 0: return {val, t, p}
-        case 1: return {q, val, p}
-        case 2: return {p, val, t}
-        case 3: return {p, q, val}
-        case 4: return {t, p, val}
-        case 5: return {val, p, q}
-        case 6: return {val, t, q} // @Hack its ai code, get a real implementation
-        }
-        return 
-    }
-    colors: [10]v4
-    for &color, i in colors {
-        color.rgb = hsv_to_rgb({1/cast(f32)(i+1), 0.6, 0.9})
-        color.a = 1
-    }
-    
     hot_region: ^DebugRegion
-    scale := debug_state.frame_bar_scale * chart_width
     for frame_index in 0..<len(debug_state.frames) {
         frame := &debug_state.frames[(frame_index + cast(int) debug_state.collation_index) % len(debug_state.frames)]
         
         stack_x := chart_left
-        stack_y := chart_top - (bar_height + bar_padding) * cast(f32) frame_index
+        stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
         for &region, region_index in frame.regions[:frame.region_count] {
             
             x_min := stack_x + scale * region.t_min
@@ -357,11 +416,11 @@ overlay_debug_info :: proc(memory: ^GameMemory, input: Input) {
             y_min := stack_y + 0.5 * lane_height + lane_height * cast(f32) region.lane_index
             y_max := y_min + lane_height
             rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
-
-            color := colors[(17*region.record.hash) % len(colors)]
-            color = colors[region.record.hash % len(colors)]
+            
+            color_wheel := color_wheel
+            color := color_wheel[region.record.hash * 13 % len(color_wheel)]
                         
-            push_rectangle(Debug_render_group, rect, color)
+            push_rectangle(debug_state.render_group, rect, color)
             if rectangle_contains(rect, mouse_p) {
                 record := region.record
                 if was_pressed(input.mouse_left) {
@@ -379,79 +438,49 @@ overlay_debug_info :: proc(memory: ^GameMemory, input: Input) {
         } else {
             for &scope in debug_state.scopes_to_record do scope = nil
         }
-        refresh_collation(debug_state)
+        refresh_collation()
     }
-}
-
-font_scale : f32 = 0.6
-cp_y:f32
-ascent: f32
-left_edge: f32
-font_id: FontId
-font: ^Font
-GlobalWidth: f32
-GlobalHeight: f32
-
-reset_debug_renderer :: proc(width, height: i32) {
-    begin_render(Debug_render_group)
-    orthographic(Debug_render_group, {width, height}, 1)
-    
-    
-    GlobalWidth  = cast(f32) width
-    GlobalHeight = cast(f32) height
-    
-    font_id = best_match_font_from(Debug_render_group.assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
-    font = get_font(Debug_render_group.assets, font_id, Debug_render_group.generation_id)
-    
-    baseline :f32= 10
-    if font != nil {
-        font_info := get_font_info(Debug_render_group.assets, font_id)
-        baseline = get_baseline(font_info)
-        ascent = get_baseline(font_info)
-    } else {
-        load_font(Debug_render_group.assets, font_id, false)
-    }
-    
-    cp_y      =  0.5 * cast(f32) height - baseline * font_scale
-    left_edge = -0.5 * cast(f32) width
 }
 
 push_text_at :: proc(text: string, p:v2) {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
     // TODO(viktor): kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
     // 贺佳樱我爱你
     // 0123456789°
     p := p
-    if font != nil {
-        font_info := get_font_info(Debug_render_group.assets, font_id)
+    if debug_state.font != nil {
+        font_info := get_font_info(debug_state.render_group.assets, debug_state.font_id)
     
         previous_codepoint: rune
         for codepoint in text {
             defer previous_codepoint = codepoint
             
-            advance_x := get_horizontal_advance_for_pair(font, font_info, previous_codepoint, codepoint)
-            p.x += advance_x * font_scale
+            advance_x := get_horizontal_advance_for_pair(debug_state.font, font_info, previous_codepoint, codepoint)
+            p.x += advance_x * debug_state.font_scale
             
-            bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
-            info := get_bitmap_info(Debug_render_group.assets, bitmap_id)
+            bitmap_id := get_bitmap_for_glyph(debug_state.font, font_info, codepoint)
+            info := get_bitmap_info(debug_state.render_group.assets, bitmap_id)
             
             if info != nil && codepoint != ' ' {
-                push_bitmap(Debug_render_group, bitmap_id, cast(f32) info.dimension.y * font_scale, V3(p, 0))
+                push_bitmap(debug_state.render_group, bitmap_id, cast(f32) info.dimension.y * debug_state.font_scale, V3(p, 0))
             }
         }
     }
 }
 
 push_text_line :: proc(text: string) {
-    if Debug_render_group != nil {
-        assert(Debug_render_group.inside_render)
-        
-        push_text_at(text, {left_edge, cp_y})
-        if font != nil {
-            font_info := get_font_info(Debug_render_group.assets, font_id)
-            advance_y := get_line_advance(font_info)
-            cp_y -= font_scale * advance_y
-        }
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+    
+    assert(debug_state.render_group.inside_render)
+    
+    push_text_at(text, {debug_state.left_edge, debug_state.cp_y})
+    if debug_state.font != nil {
+        font_info := get_font_info(debug_state.render_group.assets, debug_state.font_id)
+        advance_y := get_line_advance(font_info)
+        debug_state.cp_y -= debug_state.font_scale * advance_y
     }
 }
 

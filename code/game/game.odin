@@ -187,11 +187,6 @@ ControlledHero :: struct {
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
-when INTERNAL {
-    // Debug: DebugCode
-    Debug_render_group: ^RenderGroup
-}
-
 @export
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     timed_function()
@@ -199,7 +194,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     Platform = memory.Platform_api
     
     when INTERNAL {
-        // Debug = memory.debug
+        if memory.debug_storage == nil do return
+        assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
+        GlobalDebugMemory = memory
     }
         
     ground_buffer_size :: 512
@@ -386,9 +383,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
         tran_state.assets = make_assets(&tran_state.arena, 64 * Megabyte, tran_state)
         
-        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, 32 * Megabyte, false)
-        
-        play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+        // play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
         state.music = state.mixer.first_playing_sound
         state.mixer.master_volume = 0.25
         
@@ -424,12 +419,12 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 ground_buffer.p = null_position()
             }
         }
-        // TODO(viktor): The global doesnt get saved between reloads, save it instead of leaking that memory
-        Debug_render_group = make_render_group(&tran_state.arena, tran_state.assets, 32 * Megabyte, false)
         
         // make_sphere_normal_map(tran_state.test_normal, 0)
         // make_sphere_diffuse_map(tran_state.test_diffuse)
     }
+    
+    debug_reset(memory, tran_state.assets, tran_state.high_priority_queue, buffer)
     
     ////////////////////////////////////////////////
     // Input
@@ -964,12 +959,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
     
-    if Debug_render_group != nil {
-        reset_debug_renderer(buffer.width, buffer.height)
-        overlay_debug_info(memory, input)
-        tiled_render_group_to_output(tran_state.high_priority_queue, Debug_render_group, buffer)
-        end_render(Debug_render_group)
-    }
+    debug_end_and_overlay(input)
 }
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a

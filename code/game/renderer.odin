@@ -167,7 +167,6 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 }
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
-    timed_function()
     assert(group.inside_render)
     
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
