@@ -174,8 +174,8 @@ main :: proc() {
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
-            GLOBAL_back_buffer.width  + 50,
-            GLOBAL_back_buffer.height + 50,
+            GLOBAL_back_buffer.width  + 16, // add for the window frame
+            GLOBAL_back_buffer.height + 39,
             nil,
             nil,
             window_class.hInstance,
@@ -339,7 +339,7 @@ main :: proc() {
     for GlobalRunning {
         ////////////////////////////////////////////////
         //  Hot Reload
-        executable_refresh := game.begin_timed_block("executable refresh")
+        // executable_refresh := game.begin_timed_block("executable refresh")
         
         new_input.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
@@ -357,7 +357,7 @@ main :: proc() {
         }
         
         
-        game.end_timed_block(executable_refresh)
+        // game.end_timed_block(executable_refresh)
         ////////////////////////////////////////////////   
         //  Input
         input_processed := game.begin_timed_block("input processed")
@@ -594,10 +594,9 @@ main :: proc() {
         
         game.end_timed_block(audio_update)
         ////////////////////////////////////////////////
-        //  Display Frame
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         
-        {
+        when false {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
 
             if seconds_elapsed_for_frame < target_seconds_per_frame {
@@ -615,7 +614,13 @@ main :: proc() {
             } else {
                 // @Logging Missed frame, maybe because window was moved
             }
-
+        }
+        
+        game.end_timed_block(frame_end_sleep)
+        ////////////////////////////////////////////////
+        frame_display := game.begin_timed_block("frame display")
+        
+        {
             window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
             display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
@@ -624,13 +629,12 @@ main :: proc() {
             flip_counter = get_wall_clock()
         }
 
-        game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
-        debug_colation := game.begin_timed_block("debug colation")
+        // debug_colation := game.begin_timed_block("debug colation")
         
         game.debug_frame_end(&game_memory)
         
-        game.end_timed_block(debug_colation)
+        // game.end_timed_block(debug_colation)
         
         
         end_counter := get_wall_clock()

@@ -118,6 +118,7 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
 }
 
 begin_render :: proc(group: ^RenderGroup) {
+    timed_function()
     assert(!group.inside_render)
     
     group.generation_id = begin_generation(group.assets)
@@ -125,6 +126,7 @@ begin_render :: proc(group: ^RenderGroup) {
 }
 
 end_render :: proc(group: ^RenderGroup) {
+    timed_function()
     assert(group.inside_render)
     
     end_generation(group.assets, group.generation_id)
@@ -366,6 +368,7 @@ TileRenderWork :: struct {
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    timed_function()
     data := cast(^TileRenderWork) data
 
     assert(data.group != nil)
@@ -376,6 +379,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 }
 
 tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap) {
+    timed_function()
     assert(group.inside_render)
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
     
@@ -425,6 +429,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
 }
 
 render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
+    timed_function()
     assert(group.inside_render)
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
     
@@ -984,12 +989,12 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 
 draw_rectangle :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: Rectangle2i, even: b32){
     // timed_function()
-    rounded_center := floor(rectangle_get_center(rect), i32)
-    rounded_size   := floor(rectangle_get_diameter(rect), i32)
+    rounded_min := floor(rect.min, i32)
+    rounded_max := floor(rect.max, i32)
 
-    fill_rect := rectangle_center_diameter(rounded_center, rounded_size)
-    
+    fill_rect := rectangle_min_max(rounded_min, rounded_max)
     fill_rect = rectangle_intersection(fill_rect, clip_rect)
+    
     if !even == (fill_rect.min.y & 1 != 0) {
         fill_rect.min.y += 1
     }

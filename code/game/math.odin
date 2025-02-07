@@ -332,7 +332,7 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     return { min, min + dim }
 }
 @(require_results) rectangle_center_diameter :: #force_inline proc(center, diameter: $T) -> Rectangle(T) {
-    return { center - (diameter * 0.5), center + (diameter * 0.5) }
+    return { center - (diameter / 2), center + (diameter / 2) }
 }
 @(require_results) rectangle_center_half_diameter :: #force_inline proc(center, half_diameter: $T) -> Rectangle(T) {
     return { center - half_diameter, center + half_diameter }

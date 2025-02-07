@@ -21,7 +21,7 @@ push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int len: 
     data := cast([^]Element) push_size(arena, size, alignment)
     result = data[:len]
     
-    if clear_to_zero {   
+    if clear_to_zero {
         zero_slice(result)
     }
     
