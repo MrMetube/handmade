@@ -37,6 +37,9 @@ DebugState :: struct {
     
     threads: []DebugThread,
     
+    
+    compiling:      b32,
+    compiler:       DebugExecutingProcess,
     menu_p:         v2,
     hot_menu_index: i32,
     profile_on:     b32,
@@ -168,6 +171,10 @@ debug_frame_end :: proc(memory: ^GameMemory) {
     modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
+    
+    if memory.reloaded_executable {
+        restart_collation(GlobalDebugTable.events_state.array_index)
+    }
     
     if !debug_state.paused {
         if debug_state.collation_index >= DebugMaxHistoryLength-1 {
@@ -395,6 +402,8 @@ overlay_debug_info :: proc(input: Input) {
           case 4:// "Toggle Entity Bounds", 
           case 5:// "Toggle World Chunk Bounds", 
         }
+        
+        write_handmade_config()
     }
      
     target_fps :: 72
@@ -403,11 +412,20 @@ overlay_debug_info :: proc(input: Input) {
     pad_y :: 20
     
     orthographic(debug_state.render_group, {debug_state.buffer.width, debug_state.buffer.height}, 1)
-
+    
+    if debug_state.compiling {
+        state := Platform.debug.get_process_state(debug_state.compiler)
+        if state.is_running {
+            push_text_line("Recompiling...")
+        } else {
+            debug_state.compiling = false
+        }
+    }
+    
     if debug_state.framerate_on {
         push_text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
     }
-    
+
     if debug_state.profile_on {
         debug_state.profile_rect = rectangle_center_diameter(v2{0, 0}, v2{600, 600})
         push_rectangle(debug_state.render_group, debug_state.profile_rect, {0.08, 0.08, 0.2, 1} )
@@ -472,6 +490,23 @@ overlay_debug_info :: proc(input: Input) {
     }
 }
 
+write_handmade_config :: proc() {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+    
+    if debug_state.compiling do return
+    debug_state.compiling = true
+    
+    contents := fmt.tprintf(`package game
+
+DEBUG_UseDebugCamera :: %v
+`, !DEBUG_UseDebugCamera)
+
+    HandmadeConfigFilename :: "../code/game/debug_config.odin"
+    Platform.debug.write_entire_file(HandmadeConfigFilename, transmute([]u8) contents)
+    debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game` )
+}
+
 debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
     menu_items := [?]string {
         "Toggle Profiler Graph",
@@ -485,7 +520,7 @@ debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
     best_distance_squared := length_squared(debug_state.menu_p - mouse_p)
     hot_index :i32 = -1
     
-    radius :f32= 200
+    radius :f32= 150
     angle := Tau / cast(f32) len(menu_items)
     for item, item_index in menu_items {
         item_angle := angle * cast(f32) item_index

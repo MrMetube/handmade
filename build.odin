@@ -10,8 +10,7 @@ import "core:log"
 import "core:strings"
 import "base:runtime"
 
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing `
-windows  :: " -subsystem:windows "
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
@@ -95,7 +94,7 @@ main :: proc() {
     debug_exe := "debug.exe" 
     if .Platform in targetsToBuild && !is_running(debug_exe) {
         copy_over(`..\code\game\common.odin`, `..\code\copypasta_common.odin`, "package game", "package main")
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, windows, internal, optimizations , (pedantic when PlatformPedantic else ""))
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PlatformPedantic else ""))
     }
     
     os.exit(0)
@@ -250,6 +249,14 @@ is_running :: proc(exe_name: string) -> (running: b32) {
     return false
 }
 
+/* TODO(viktor): cmd.exe /C also 
+    STARTF_USESHOWWINDOW :: 0x00000001
+    startup_info := win.STARTUPINFOW{
+        cb          = size_of(win.STARTUPINFOW),
+        dwFlags     = STARTF_USESHOWWINDOW,
+        wShowWindow = auto_cast win.SW_HIDE,
+    }
+ */
 run_command_or_exit :: proc(program: string, args: ..string) {
     if !run_command(program, ..args) {
         os.exit(1)

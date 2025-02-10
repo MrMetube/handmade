@@ -343,12 +343,10 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
     distance_above_target := transform.distance_above_target
     
     if !transform.orthographic {
-        base_z : f32//base_p.z
+        base_z: f32//base_p.z
         
-        //
         // Debug camera
-        //
-        when false {
+        when DEBUG_UseDebugCamera {
             // TODO(viktor): how do we want to control the debug camera?
             distance_above_target *= 5
         }

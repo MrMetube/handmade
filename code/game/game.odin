@@ -412,7 +412,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         tran_state.is_initialized = true
     }
     
-    if input.reloaded_executable {
+    if memory.reloaded_executable {
         // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
         when false {
             for &ground_buffer in tran_state.ground_buffers {

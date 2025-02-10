@@ -66,7 +66,6 @@ InputController :: struct {
 
 Input :: struct {
     delta_time: f32,
-    reloaded_executable: b32,
 
     using _mouse_buttons_array_and_enum : struct #raw_union {
         mouse_buttons: [5]InputButton,
@@ -84,6 +83,7 @@ Input :: struct {
 #assert(size_of(Input{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(Input{}._mouse_buttons_array_and_enum._buttons_enum))
 
 GameMemory :: struct {
+    reloaded_executable: b32,
     // NOTE: REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
@@ -93,8 +93,6 @@ GameMemory :: struct {
     low_priority_queue:  ^PlatformWorkQueue,
     
     Platform_api: PlatformAPI,
-
-    debug: DebugCode,
 }
 
 
@@ -107,14 +105,28 @@ TimedBlock :: struct {
 }
 
 DebugCode :: struct {
-    read_entire_file:  DebugReadEntireFile,
-    write_entire_file: DebugWriteEntireFile,
-    free_file_memory:  DebugFreeFileMemory,
+    read_entire_file:       DebugReadEntireFile,
+    write_entire_file:      DebugWriteEntireFile,
+    free_file_memory:       DebugFreeFileMemory,
+    execute_system_command: DebugExecuteSystemCommand,
+    get_process_state:      DebugGetProcessState,
 }
 
-DebugReadEntireFile  :: #type proc(filename: string) -> (result: []u8)
-DebugWriteEntireFile :: #type proc(filename: string, memory: []u8) -> b32
-DebugFreeFileMemory  :: #type proc(memory: []u8)
+DebugProcessState :: struct {
+    started_successfully: b32,
+    is_running:           b32,
+    return_code:          i32,
+}
+
+DebugExecutingProcess :: struct {
+    os_handle: uintpointer,
+}
+
+DebugReadEntireFile       :: #type proc(filename: string) -> (result: []u8)
+DebugWriteEntireFile      :: #type proc(filename: string, memory: []u8) -> b32
+DebugFreeFileMemory       :: #type proc(memory: []u8)
+DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
+DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
 
 ////////////////////////////////////////////////
 // Platform API
@@ -131,6 +143,8 @@ PlatformAPI :: struct {
     open_next_file:                     PlatformOpenNextFile,
     read_data_from_file:                PlatformReadDataFromFile,
     mark_file_error:                    PlatformMarkFileError,
+    
+    debug: DebugCode,
 }
 
 PlatformWorkQueueCallback :: #type proc(data: rawpointer)

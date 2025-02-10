@@ -212,7 +212,6 @@ main :: proc() {
 
     ////////////////////////////////////////////////
     //  Sound Setup
-    //   
 
     sound_output: SoundOutput
     sound_output.samples_per_second = 48000
@@ -232,7 +231,6 @@ main :: proc() {
 
     ////////////////////////////////////////////////
     //  Input Setup
-    //   
 
     init_xInput()
 
@@ -242,7 +240,6 @@ main :: proc() {
 
     ////////////////////////////////////////////////
     //  Memory Setup
-    //   
 
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
@@ -308,10 +305,12 @@ main :: proc() {
         game_memory.debug_storage     = storage_ptr[TransientStorageSize:][:DebugStorageSize]
         
         when INTERNAL {
-            game_memory.debug = {
-                read_entire_file  = DEBUG_read_entire_file,
-                write_entire_file = DEBUG_write_entire_file,
-                free_file_memory  = DEBUG_free_file_memory,
+            game_memory.Platform_api.debug = {
+                read_entire_file       = DEBUG_read_entire_file,
+                write_entire_file      = DEBUG_write_entire_file,
+                free_file_memory       = DEBUG_free_file_memory,
+                execute_system_command = DEBUG_execute_system_command,
+                get_process_state      = DEBUG_get_process_state,
             }
         }
     }
@@ -322,9 +321,8 @@ main :: proc() {
 
 
 
-    //   
+    ////////////////////////////////////////////////
     //  Timer Setup
-    //   
 
     last_counter := get_wall_clock()
     flip_counter := get_wall_clock()
@@ -339,7 +337,7 @@ main :: proc() {
         //  Hot Reload
         // executable_refresh := game.begin_timed_block("executable refresh")
         
-        new_input.reloaded_executable = false
+        game_memory.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
             // NOTE(viktor): clear out the queue, as they may call into unloaded game code
             complete_all_work(&high_queue)
@@ -351,7 +349,7 @@ main :: proc() {
             unload_game_lib()
             game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
             
-            new_input.reloaded_executable = true
+            game_memory.reloaded_executable = true
         }
         
         
@@ -503,7 +501,7 @@ main :: proc() {
             if game_lib_is_valid {
                 game.update_and_render(&game_memory, offscreen_buffer, new_input)
             }
-            
+        
             swap(&old_input, &new_input)
         }
         
@@ -628,12 +626,11 @@ main :: proc() {
         }
 
         ////////////////////////////////////////////////
-        // debug_colation := game.begin_timed_block("debug colation")
+        debug_colation := game.begin_timed_block("debug colation")
         
         game.debug_frame_end(&game_memory)
         
-        // game.end_timed_block(debug_colation)
-        
+        game.end_timed_block(debug_colation)
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))

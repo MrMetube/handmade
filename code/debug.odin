@@ -58,6 +58,47 @@ when INTERNAL {
             win.VirtualFree(raw_data(memory), 0, win.MEM_RELEASE)
         }
     }
+    
+    DEBUG_get_process_state : DebugGetProcessState : proc(process: DebugExecutingProcess) -> (result: DebugProcessState) {
+        handle := cast(win.HANDLE) process.os_handle
+        if handle != win.INVALID_HANDLE_VALUE {
+            result.started_successfully = true
+            
+            result.is_running = win.WaitForSingleObject(handle, 0) != win.WAIT_OBJECT_0
+            if !result.is_running {
+                win.GetExitCodeProcess(handle, cast(^win.DWORD) &result.return_code)
+                win.CloseHandle(handle)
+            }
+        }
+        
+        return result
+    }
+    
+    DEBUG_execute_system_command : DebugExecuteSystemCommand : proc(directory, command, command_line: string) -> (result: DebugExecutingProcess) {
+        STARTF_USESHOWWINDOW :: 0x00000001
+        
+        startup_info := win.STARTUPINFOW{
+            cb          = size_of(win.STARTUPINFOW),
+            dwFlags     = STARTF_USESHOWWINDOW,
+            wShowWindow = auto_cast win.SW_HIDE,
+        }
+        process_info := win.PROCESS_INFORMATION{}
+        
+        if win.CreateProcessW(
+            win.utf8_to_wstring(command), 
+            win.utf8_to_wstring(command_line), 
+            nil, nil, 
+            false, 0, 
+            nil, win.utf8_to_wstring(directory), 
+            &startup_info, &process_info,
+        ) {
+            result.os_handle = cast(uintpointer) process_info.hProcess
+        } else {
+            result.os_handle = cast(uintpointer) win.INVALID_HANDLE_VALUE
+        }
+        
+        return result
+    }
 
     when false {
         DebugTimeMarker :: struct {
