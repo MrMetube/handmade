@@ -258,6 +258,11 @@ V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
     return result
 }
 
+@(require_results) arm :: #force_inline proc(angle: f32) -> (result: v2) {
+    result = v2{cos(angle), sin(angle)}
+    return result
+}
+
 @(require_results) dot :: #force_inline proc(a, b: $V/[$N]f32) -> (result: f32) {
     result = a.x * b.x + a.y * b.y
     when N >= 3 do result += a.z * b.z
@@ -337,6 +342,18 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
 @(require_results) rectangle_center_half_diameter :: #force_inline proc(center, half_diameter: $T) -> Rectangle(T) {
     return { center - half_diameter, center + half_diameter }
 }
+
+@(require_results) inverted_infinity_rectangle :: #force_inline proc($R: typeid) -> (result: R) {
+    T :: intrinsics.type_field_type(R, "min")
+    #assert(intrinsics.type_is_subtype_of(R, Rectangle(T)))
+    E :: intrinsics.type_elem_type(T)
+    
+    result.min = max(E)
+    result.max = min(E)
+    
+    return result
+}
+
 @(require_results) rectangle_get_diameter :: #force_inline proc(rec: Rectangle($T)) -> (result: T) {
     return rec.max - rec.min
 }

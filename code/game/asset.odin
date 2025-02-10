@@ -28,6 +28,10 @@ FontId   :: hha.FontId
 SoundId  :: hha.SoundId
 BitmapId :: hha.BitmapId
 
+FontInfo   :: hha.FontInfo
+SoundInfo  :: hha.SoundInfo
+BitmapInfo :: hha.BitmapInfo
+
 AssetTypeId :: hha.AssetTypeId
 AssetTag    :: hha.AssetTag
 AssetTagId  :: hha.AssetTagId
@@ -286,21 +290,21 @@ is_valid_asset :: #force_inline proc(id: $T/u32) -> (result: b32) {
     return result
 }
 
-get_bitmap_info :: proc(assets: ^Assets, id: BitmapId) -> (result: ^hha.BitmapInfo) {
+get_bitmap_info :: proc(assets: ^Assets, id: BitmapId) -> (result: ^BitmapInfo) {
     if is_valid_asset(id) {
         result = &assets.assets[id].info.bitmap
     }
     return result
 }
 
-get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^hha.SoundInfo) {
+get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^SoundInfo) {
     if is_valid_asset(id) {
         result = &assets.assets[id].info.sound
     }
     return result
 }
 
-get_font_info :: proc(assets: ^Assets, id: FontId) -> (result: ^hha.FontInfo) {
+get_font_info :: proc(assets: ^Assets, id: FontId) -> (result: ^FontInfo) {
     if is_valid_asset(id) {
         result = &assets.assets[id].info.font
     }

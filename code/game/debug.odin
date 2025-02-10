@@ -37,6 +37,11 @@ DebugState :: struct {
     
     threads: []DebugThread,
     
+    menu_p:         v2,
+    hot_menu_index: i32,
+    profile_on:     b32,
+    framerate_on:   b32,
+    
     // NOTE(viktor): Overlay rendering
     render_group: ^RenderGroup,
     
@@ -48,8 +53,10 @@ DebugState :: struct {
     cp_y:         f32,
     ascent:       f32,
     left_edge:    f32,
+    
     font_id:      FontId,
     font:         ^Font,
+    font_info:    ^FontInfo,
 }
 
 DebugFrame :: struct {
@@ -322,6 +329,7 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
         debug_state.scopes_to_record = push(&debug_state.collation_arena, ^DebugRecord, DebugMaxThreadCount)
         
         debug_state.font_scale = 0.6
+        debug_state.hot_menu_index = -1
         
         debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
         restart_collation(GlobalDebugTable.events_state.array_index)
@@ -336,13 +344,13 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
     begin_render(debug_state.render_group)
     
     debug_state.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
-    debug_state.font = get_font(assets, debug_state.font_id, debug_state.render_group.generation_id)
+    debug_state.font    = get_font(assets, debug_state.font_id, debug_state.render_group.generation_id)
     
     baseline :f32= 10
     if debug_state.font != nil {
-        font_info := get_font_info(assets, debug_state.font_id)
-        baseline = get_baseline(font_info)
-        debug_state.ascent = get_baseline(font_info)
+        debug_state.font_info = get_font_info(assets, debug_state.font_id)
+        baseline = get_baseline(debug_state.font_info)
+        debug_state.ascent = get_baseline(debug_state.font_info)
     } else {
         load_font(debug_state.render_group.assets, debug_state.font_id, false)
     }
@@ -363,111 +371,162 @@ debug_end_and_overlay :: proc(input: Input) {
 overlay_debug_info :: proc(input: Input) {
     debug_state := get_debug_state()
     if debug_state == nil || debug_state.render_group == nil do return
-    
+
     mouse_p := input.mouse_position
     if was_pressed(input.mouse_right) {
-        debug_state.paused = !debug_state.paused
     }
-    
+       
+    if input.mouse_right.ended_down {
+        if input.mouse_right.half_transition_count > 0 {
+            debug_state.menu_p = mouse_p
+        }
+        debug_main_menu(debug_state, mouse_p)
+    } else if input.mouse_right.half_transition_count > 0 {
+        debug_main_menu(debug_state, mouse_p)
+        switch debug_state.hot_menu_index {
+          case 0:// "Toggle Profiler Graph",
+            debug_state.profile_on = !debug_state.profile_on
+          case 1:// "Toggle Framerate Counter",
+            debug_state.framerate_on = !debug_state.framerate_on
+          case 2:// "Toggle Profiler Pause",
+            debug_state.paused = !debug_state.paused
+          case 3:// "Mark Loop Point",
+            
+          case 4:// "Toggle Entity Bounds", 
+          case 5:// "Toggle World Chunk Bounds", 
+        }
+    }
+     
     target_fps :: 72
 
     pad_x :: 20
     pad_y :: 20
     
-    orthographic(debug_state.render_group, {debug_state.buffer.width, debug_state.buffer.height}, 0.5)
-    
-    debug_state.profile_rect = rectangle_min_max(v2{50, 50}, v2{200, 200})
-    push_rectangle(debug_state.render_group, debug_state.profile_rect, {0.08, 0.08, 0.2, 1} )
-    
-    bar_padding :: 2
-    lane_count  := cast(f32) debug_state.frame_bar_lane_count +1 
-    lane_height :f32
-    frame_count := cast(f32) len(debug_state.frames)
-    if frame_count > 0 && lane_count > 0 {
-        lane_height = ((rectangle_get_diameter(debug_state.profile_rect).y / frame_count) - bar_padding) / lane_count
-    }
-    
-    bar_height       := lane_height * lane_count
-    bar_plus_spacing := bar_height + bar_padding
-    
-    full_height := bar_plus_spacing * frame_count
-    
-    chart_left  := debug_state.profile_rect.min.x
-    chart_top   := debug_state.profile_rect.max.y - bar_plus_spacing
-    chart_width := rectangle_get_diameter(debug_state.profile_rect).x
-    
-    scale := debug_state.frame_bar_scale * chart_width
-    
-    if debug_state.frame_count > 0 {
+    orthographic(debug_state.render_group, {debug_state.buffer.width, debug_state.buffer.height}, 1)
+
+    if debug_state.framerate_on {
         push_text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
     }
     
-    hot_region: ^DebugRegion
-    for frame_index in 0..<len(debug_state.frames) {
-        frame := &debug_state.frames[(frame_index + cast(int) debug_state.collation_index) % len(debug_state.frames)]
+    if debug_state.profile_on {
+        debug_state.profile_rect = rectangle_min_max(v2{50, 50}, v2{200, 200})
+        push_rectangle(debug_state.render_group, debug_state.profile_rect, {0.08, 0.08, 0.2, 1} )
         
-        stack_x := chart_left
-        stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
-        for &region, region_index in frame.regions[:frame.region_count] {
+        bar_padding :: 2
+        lane_count  := cast(f32) debug_state.frame_bar_lane_count +1 
+        lane_height :f32
+        frame_count := cast(f32) len(debug_state.frames)
+        if frame_count > 0 && lane_count > 0 {
+            lane_height = ((rectangle_get_diameter(debug_state.profile_rect).y / frame_count) - bar_padding) / lane_count
+        }
+        
+        bar_height       := lane_height * lane_count
+        bar_plus_spacing := bar_height + bar_padding
+        
+        full_height := bar_plus_spacing * frame_count
+        
+        chart_left  := debug_state.profile_rect.min.x
+        chart_top   := debug_state.profile_rect.max.y - bar_plus_spacing
+        chart_width := rectangle_get_diameter(debug_state.profile_rect).x
+        
+        scale := debug_state.frame_bar_scale * chart_width
+        
+        hot_region: ^DebugRegion
+        for frame_index in 0..<len(debug_state.frames) {
+            frame := &debug_state.frames[(frame_index + cast(int) debug_state.collation_index) % len(debug_state.frames)]
             
-            x_min := stack_x + scale * region.t_min
-            x_max := stack_x + scale * region.t_max
+            stack_x := chart_left
+            stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
+            for &region, region_index in frame.regions[:frame.region_count] {
+                
+                x_min := stack_x + scale * region.t_min
+                x_max := stack_x + scale * region.t_max
 
-            y_min := stack_y + 0.5 * lane_height + lane_height * cast(f32) region.lane_index
-            y_max := y_min + lane_height
-            rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
-            
-            color_wheel := color_wheel
-            color := color_wheel[region.record.hash * 13 % len(color_wheel)]
-                        
-            push_rectangle(debug_state.render_group, rect, color)
-            if rectangle_contains(rect, mouse_p) {
-                record := region.record
-                if was_pressed(input.mouse_left) {
-                    hot_region = &region
+                y_min := stack_y + 0.5 * lane_height + lane_height * cast(f32) region.lane_index
+                y_max := y_min + lane_height
+                rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
+                
+                color_wheel := color_wheel
+                color := color_wheel[region.record.hash * 13 % len(color_wheel)]
+                            
+                push_rectangle(debug_state.render_group, rect, color)
+                if rectangle_contains(rect, mouse_p) {
+                    record := region.record
+                    if was_pressed(input.mouse_left) {
+                        hot_region = &region
+                    }
+                    text := fmt.tprintf("%s - %d cycles [%s:% 4d]", record.loc.name, region.cycle_count, record.loc.file_path, record.loc.line)
+                    debug_push_text(text, mouse_p)
                 }
-                text := fmt.tprintf("%s - %d cycles [%s:% 4d]", record.loc.name, region.cycle_count, record.loc.file_path, record.loc.line)
-                push_text_at(text, mouse_p)
             }
         }
-    }
-    
-    if was_pressed(input.mouse_left) {
-        if hot_region != nil {
-            debug_state.scopes_to_record[hot_region.lane_index] = hot_region.record
-        } else {
-            for &scope in debug_state.scopes_to_record do scope = nil
+        
+        if was_pressed(input.mouse_left) {
+            if hot_region != nil {
+                debug_state.scopes_to_record[hot_region.lane_index] = hot_region.record
+            } else {
+                for &scope in debug_state.scopes_to_record do scope = nil
+            }
+            refresh_collation()
         }
-        refresh_collation()
     }
 }
 
-push_text_at :: proc(text: string, p:v2) {
+debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
+    menu_items := [?]string {
+        "Toggle Profiler Graph",
+        "Toggle Framerate Counter",
+        "Toggle Profiler Pause",
+        "Mark Loop Point",
+        "Toggle Entity Bounds", 
+        "Toggle World Chunk Bounds", 
+    }
+    
+    best_distance_squared := length_squared(debug_state.menu_p - mouse_p)
+    hot_index :i32 = -1
+    
+    radius :f32= 200
+    angle := Tau / cast(f32) len(menu_items)
+    for item, item_index in menu_items {
+        item_angle := angle * cast(f32) item_index
+        text_rect := debug_measure_text(item)
+        p := debug_state.menu_p + arm(item_angle) * radius
+        
+        distance_squared := length_squared(p - mouse_p)
+        if best_distance_squared > distance_squared {
+            best_distance_squared = distance_squared
+            hot_index = auto_cast item_index
+        }
+        
+        p +=  -0.5 * rectangle_get_diameter(text_rect)
+        color : v4 = 1
+        if auto_cast item_index == debug_state.hot_menu_index {
+            color = Blue
+        }
+        debug_push_text(item, p, color)
+    }
+    
+    debug_state.hot_menu_index = hot_index
+}
+
+debug_push_text :: proc(text: string, p: v2, color: v4 = 1) {
     debug_state := get_debug_state()
     if debug_state == nil do return
-    // TODO(viktor): kerning and unicode test lines
-    // AVA: WA ty fi ij `^?'\"
-    // 贺佳樱我爱你
-    // 0123456789°
-    p := p
-    if debug_state.font != nil {
-        font_info := get_font_info(debug_state.render_group.assets, debug_state.font_id)
     
-        previous_codepoint: rune
-        for codepoint in text {
-            defer previous_codepoint = codepoint
-            
-            advance_x := get_horizontal_advance_for_pair(debug_state.font, font_info, previous_codepoint, codepoint)
-            p.x += advance_x * debug_state.font_scale
-            
-            bitmap_id := get_bitmap_for_glyph(debug_state.font, font_info, codepoint)
-            info := get_bitmap_info(debug_state.render_group.assets, bitmap_id)
-            
-            if info != nil && codepoint != ' ' {
-                push_bitmap(debug_state.render_group, bitmap_id, cast(f32) info.dimension.y * debug_state.font_scale, V3(p, 0))
-            }
-        }
+    if debug_state.font != nil {
+        text_op(.Draw, debug_state.render_group, debug_state.font, debug_state.font_info, text, p, debug_state.font_scale, color)
     }
+}
+
+debug_measure_text :: proc(text: string) -> (result: Rectangle2) {
+    debug_state := get_debug_state()
+    if debug_state == nil do return
+    
+    if debug_state.font != nil {
+        result = text_op(.Measure, debug_state.render_group, debug_state.font, debug_state.font_info, text, {0, 0}, debug_state.font_scale)
+    }
+    
+    return result
 }
 
 push_text_line :: proc(text: string) {
@@ -476,12 +535,51 @@ push_text_line :: proc(text: string) {
     
     assert(debug_state.render_group.inside_render)
     
-    push_text_at(text, {debug_state.left_edge, debug_state.cp_y})
+    debug_push_text(text, {debug_state.left_edge, debug_state.cp_y})
     if debug_state.font != nil {
-        font_info := get_font_info(debug_state.render_group.assets, debug_state.font_id)
-        advance_y := get_line_advance(font_info)
+        advance_y := get_line_advance(debug_state.font_info)
         debug_state.cp_y -= debug_state.font_scale * advance_y
     }
+}
+
+TextRenderOperation:: enum {
+    Measure, Draw, 
+}
+
+text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = 1) -> (result: Rectangle2) {
+    result = inverted_infinity_rectangle(Rectangle2)
+    // TODO(viktor): kerning and unicode test lines
+    // AVA: WA ty fi ij `^?'\"
+    // 贺佳樱我爱你
+    // 0123456789°
+    p := p
+    previous_codepoint: rune
+    for codepoint in text {
+        defer previous_codepoint = codepoint
+        
+        advance_x := get_horizontal_advance_for_pair(font, font_info, previous_codepoint, codepoint)
+        p.x += advance_x * font_scale
+        
+        bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
+        info := get_bitmap_info(group.assets, bitmap_id)
+        
+        height := cast(f32) info.dimension.y * font_scale
+        switch operation {
+          case .Draw: 
+            if codepoint != ' ' {
+                push_bitmap(group, bitmap_id, height, V3(p, 0), color)
+            }
+          case .Measure:
+            bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)
+            if bitmap != nil {
+                dim := get_used_bitmap_dim(group, bitmap^, height, V3(p, 0))
+                glyph_rect := rectangle_min_diameter(dim.p.xy, dim.size)
+                result = rectangle_union(result, glyph_rect)
+            }
+        }
+    }
+    
+    return result
 }
 
 ////////////////////////////////////////////////

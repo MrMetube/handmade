@@ -26,7 +26,6 @@ import win "core:sys/windows"
 
 ////////////////////////////////////////////////
 // Config
-// 
 
 HighPriorityWorkQueueThreadCount :: 8
 LowPriorityWorkQueueThreadCount  :: 2
@@ -46,7 +45,6 @@ DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
 ////////////////////////////////////////////////
 //  Globals
-//   
 
 GlobalRunning: b32
 
