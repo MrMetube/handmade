@@ -38,10 +38,12 @@ color_wheel :: [?]v4 {
     {0.18,0.75, 0.44, 1},
 }
 
+f32x8 :: #simd[8]f32
+u32x8 :: #simd[8]u32
+i32x8 :: #simd[8]i32
+
 f32x4 :: #simd[4]f32
-u32x4 :: #simd[4]u32
 i32x4 :: #simd[4]i32
-i16x8 :: #simd[8]i16
 
 @(disabled=ODIN_DISABLE_ASSERT)
 assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {

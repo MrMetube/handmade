@@ -1076,7 +1076,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
-        memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 16),
+        memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 32),
         width  = dim.x,
         height = dim.y,
         width_over_height = safe_ratio_1(cast(f32) dim.x,  cast(f32) dim.y),

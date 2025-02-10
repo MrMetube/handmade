@@ -409,7 +409,7 @@ overlay_debug_info :: proc(input: Input) {
     }
     
     if debug_state.profile_on {
-        debug_state.profile_rect = rectangle_min_max(v2{50, 50}, v2{200, 200})
+        debug_state.profile_rect = rectangle_center_diameter(v2{0, 0}, v2{600, 600})
         push_rectangle(debug_state.render_group, debug_state.profile_rect, {0.08, 0.08, 0.2, 1} )
         
         bar_padding :: 2

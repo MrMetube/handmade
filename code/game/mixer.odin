@@ -119,6 +119,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 volume   := playing_sound.current_volume
                 d_volume := seconds_per_sample * playing_sound.d_current_volume
                 d_volume_chunk := 4 * d_volume
+                // TODO(viktor): go to 8 wide simd
                 master_volume_0 := cast(f32x4) mixer.master_volume[0]
                 master_volume_1 := cast(f32x4) mixer.master_volume[1]
                 
