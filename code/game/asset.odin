@@ -320,7 +320,7 @@ get_next_sound_in_chain :: #force_inline proc(assets: ^Assets, id: SoundId) -> (
     return result
 }
 
-get_horizontal_advance_for_pair :: proc(font: ^Font, info: ^hha.FontInfo, previous_codepoint, codepoint: rune) -> (result: f32) {
+get_horizontal_advance_for_pair :: proc(font: ^Font, info: ^FontInfo, previous_codepoint, codepoint: rune) -> (result: f32) {
     previous_glyph := get_glyph_from_codepoint(font, info, previous_codepoint)
     glyph          := get_glyph_from_codepoint(font, info, codepoint)
     
@@ -329,12 +329,12 @@ get_horizontal_advance_for_pair :: proc(font: ^Font, info: ^hha.FontInfo, previo
     return result
 }
 
-get_baseline :: proc(info: ^hha.FontInfo) -> (result: f32) {
+get_baseline :: proc(info: ^FontInfo) -> (result: f32) {
     result = info.ascent
     return result
 }
 
-get_line_advance :: proc(info: ^hha.FontInfo) -> (result: f32) {
+get_line_advance :: proc(info: ^FontInfo) -> (result: f32) {
     result = info.ascent - info.descent + info.linegap
     return result
 }

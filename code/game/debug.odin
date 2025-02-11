@@ -3,116 +3,6 @@ package game
 import "core:fmt"
 import "core:hash" // TODO(viktor): I do not need this
 
-DebugVariableValue :: union { 
-    b32, 
-    DebugVariableGroup
-}
-
-DebugVariable :: struct {
-    name:   string,
-    value:  DebugVariableValue,
-    parent: ^DebugVariable,
-    next:   ^DebugVariable,
-}
-
-DebugVariableGroup :: struct {
-    expanded: b32,
-    
-    first_child: ^DebugVariable,
-    last_child:  ^DebugVariable,
-}
-
-init_debug_variables :: proc () {
-        
-    DebugVariableDefinitionContext :: struct {
-        arena:       ^Arena,
-        group:       ^DebugVariable,
-    }
-
-    push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value: DebugVariableValue) -> (result: ^DebugVariable) {
-
-        result = push(ctx.arena, DebugVariable)
-        result.name   = name
-        result.value  = value
-        result.parent = ctx.group
-        
-        if ctx.group != nil {
-            group := &ctx.group.value.(DebugVariableGroup)
-            if group != nil {
-                if group.last_child != nil {
-                    group.last_child.next = result
-                    group.last_child      = result
-                } else {
-                    group.first_child = result
-                    group.last_child  = result
-                }
-            }
-        }
-                
-        return result
-    }
-    
-    begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) {
-        group := push_variable(ctx, group_name, DebugVariableGroup{})
-        ctx.group = group
-    }
-    
-    add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) {
-        var := push_variable(ctx, variable_name, value)
-    }
-    
-    end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, ) {
-        assert(ctx.group != nil)
-        ctx.group = ctx.group.parent
-    }
-    debug_state := get_debug_state()
-    assert(debug_state != nil)
-    ctx := DebugVariableDefinitionContext { arena = &debug_state.debug_arena }
-    begin_variable_group(&ctx, "Root")
-    
-    begin_variable_group(&ctx, "Profiling")
-        add_variable(&ctx, DEBUG_Profiling)
-        add_variable(&ctx, DEBUG_ShowFramerate)
-        add_variable(&ctx, DEBUG_ShowProfilingGraph)
-    end_variable_group(&ctx, )
-    
-
-    begin_variable_group(&ctx, "Audio")
-        add_variable(&ctx, DEBUG_SoundPanningWithMouse)
-        add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
-    end_variable_group(&ctx, )
-
-    begin_variable_group(&ctx, "Rendering")
-        add_variable(&ctx, DEBUG_UseDebugCamera)
-    
-        add_variable(&ctx, DEBUG_RenderSingleThreaded)
-        add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
-        
-        begin_variable_group(&ctx, "Bounds")
-            add_variable(&ctx, DEBUG_ShowSpaceBounds)
-            add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
-        end_variable_group(&ctx, )
-        
-        begin_variable_group(&ctx, "ParticleSystem")
-            add_variable(&ctx, DEBUG_ParticleSystemTest)
-            add_variable(&ctx, DEBUG_ParticleGrid)
-        end_variable_group(&ctx, )
-        
-        begin_variable_group(&ctx, "CoordinateSystem")
-            add_variable(&ctx, DEBUG_CoordinateSystemTest)
-            add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
-            add_variable(&ctx, DEBUG_ShowLightingSampling)
-        end_variable_group(&ctx, )
-    end_variable_group(&ctx, )
-
-    begin_variable_group(&ctx, "Entities")
-        add_variable(&ctx, DEBUG_FamiliarFollowsHero)
-        add_variable(&ctx, DEBUG_HeroJumping)
-    end_variable_group(&ctx, )
-    
-    debug_state.root_group = ctx.group
-}
-
 DebugMaxThreadCount     :: 256
 DebugMaxHistoryLength   :: 6
 DebugMaxRegionsPerFrame :: 14000
@@ -143,13 +33,13 @@ DebugState :: struct {
     
     threads: []DebugThread,
     
-    root_group:     ^DebugVariable,
-    compiling:      b32,
-    compiler:       DebugExecutingProcess,
-    menu_p:         v2,
-    hot_menu_index: i32,
-    profile_on:     b32,
-    framerate_on:   b32,
+    root_group:   ^DebugVariable,
+    compiling:    b32,
+    compiler:     DebugExecutingProcess,
+    menu_p:       v2,
+    hot_variable: ^DebugVariable,
+    profile_on:   b32,
+    framerate_on: b32,
     
     // NOTE(viktor): Overlay rendering
     render_group: ^RenderGroup,
@@ -258,6 +148,33 @@ DebugRecordLocation :: struct {
 
 ////////////////////////////////////////////////
 
+DebugVariableValue :: union { 
+    b32, 
+    i32,
+    u32,
+    f32,
+    v2,
+    v3,
+    v4,
+    DebugVariableGroup
+}
+
+DebugVariable :: struct {
+    name:   string,
+    value:  DebugVariableValue,
+    parent: ^DebugVariable,
+    next:   ^DebugVariable,
+}
+
+DebugVariableGroup :: struct {
+    expanded: b32,
+    
+    first_child: ^DebugVariable,
+    last_child:  ^DebugVariable,
+}
+
+////////////////////////////////////////////////
+
 get_debug_state :: proc() -> (debug_state: ^DebugState) {
     return get_debug_state_with_memory(GlobalDebugMemory)
 }
@@ -311,14 +228,9 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
         debug_state.scopes_to_record = push(&debug_state.collation_arena, ^DebugRecord, DebugMaxThreadCount)
         
         debug_state.font_scale = 0.6
-        debug_state.hot_menu_index = -1
         
         debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
         restart_collation(GlobalDebugTable.events_state.array_index)
-    }
-    
-    if memory.reloaded_executable {
-        init_debug_variables()
     }
     
     if debug_state.render_group == nil {
@@ -493,27 +405,7 @@ overlay_debug_info :: proc(input: Input) {
     if debug_state == nil || debug_state.render_group == nil do return
 
     mouse_p := input.mouse_position
-    if was_pressed(input.mouse_right) {
-    }
-       
-    if input.mouse_right.ended_down {
-        if input.mouse_right.half_transition_count > 0 {
-            debug_state.menu_p = mouse_p
-        }
-        debug_main_menu(debug_state, mouse_p)
-    } else if input.mouse_right.half_transition_count > 0 {
-        debug_main_menu(debug_state, mouse_p)
-        when false do if debug_state.hot_menu_index >= 0 {
-            hot_variable := &DebugVariableList[debug_state.hot_menu_index]
-            switch v in hot_variable.value {
-            case b32:
-                hot_variable.value = !v
-            }
-            
-        }
-        write_handmade_config()
-    }
-     
+    
     target_fps :: 72
 
     pad_x :: 20
@@ -532,6 +424,27 @@ overlay_debug_info :: proc(input: Input) {
     
     if DEBUG_ShowFramerate {
         push_text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
+    }
+    
+    debug_main_menu(debug_state, mouse_p)
+    if input.mouse_right.ended_down {
+        if input.mouse_right.half_transition_count > 0 {
+            debug_state.menu_p = mouse_p
+        }
+    } else if was_pressed(input.mouse_left) {
+        if debug_state.hot_variable != nil {
+            reload := true
+            switch &value in debug_state.hot_variable.value {
+              case DebugVariableGroup:
+                value.expanded = !value.expanded
+                reload = false
+              case b32:
+                value = !value
+              case i32, u32, f32, v2, v3, v4:
+            }
+            
+            if reload do write_handmade_config()
+        }
     }
     
     if DEBUG_ShowProfilingGraph {
@@ -605,33 +518,49 @@ write_handmade_config :: proc() {
     if debug_state.compiling do return
     debug_state.compiling = true
     
-    write :: proc(contents: []u8, cursor: ^u32, line: string) {
-        dest := contents[cursor^:]
+    write :: proc(buffer: []u8, line: string) -> (result: u32) {
         for r, i in line {
             assert(r < 256, "no unicode in config")
-            dest[i] = cast(u8) r
+            buffer[i] = cast(u8) r
         }
-        cursor^ += auto_cast len(line)
+        
+        result = auto_cast len(line)
+        return result
     }
     
-    contents: [4096]u8
+    contents: [4096*4]u8
     cursor: u32
-    write(contents[:], &cursor, "package game\n\n")
+    cursor += write(contents[cursor:], "package game\n\n")
     
     start := debug_state.root_group.value.(DebugVariableGroup).first_child
     for var := start; var != nil;  {
-        switch v in var.value {
+        next: ^DebugVariable
+        defer var = next
+        
+        t: typeid
+        switch value in var.value {
           case DebugVariableGroup:
-            write(contents[:], &cursor, fmt.tprintfln("// %s", var.name))
-            var = v.first_child
-          case b32:
-            write(contents[:], &cursor, fmt.tprintfln("%s :: %v", var.name, var.value))
-            for var != nil {
-                if var.next != nil {
-                    var = var.next
+            cursor += write(contents[cursor:], fmt.tprintfln("// %s", var.name))
+            next = value.first_child
+          case b32: t = b32
+          case f32: t = f32
+          case i32: t = i32
+          case u32: t = u32
+          case v2:  t = v2
+          case v3:  t = v3
+          case v4:  t = v4
+        }
+        
+        if next == nil {
+            cursor += write(contents[cursor:], fmt.tprintfln("%s :%w: %w", var.name, t, var.value))
+            
+            next = var
+            for next != nil {
+                if next.next != nil {
+                    next = next.next
                     break
                 } else {
-                    var = var.parent
+                    next = next.parent
                 }
             }
         }
@@ -639,7 +568,7 @@ write_handmade_config :: proc() {
     
     HandmadeConfigFilename :: "../code/game/debug_config.odin"
     Platform.debug.write_entire_file(HandmadeConfigFilename, contents[:cursor])
-    debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game` )
+    debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game`)
 }
 
 debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
@@ -647,37 +576,155 @@ debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
     //     "Toggle Profiler Pause",
     //     "Mark Loop Point",
     // }
-    when false {
-    menu_items := DebugVariableList
+    if debug_state.font_info == nil do return
     
-    best_distance_squared := length_squared(debug_state.menu_p - mouse_p)
-    hot_index :i32 = -1
+    p := v2{ debug_state.left_edge, debug_state.cp_y}
+    line_advance := get_line_advance(debug_state.font_info) * debug_state.font_scale
+    depth: f32
     
-    radius :f32= 250
-    angle := Tau / cast(f32) len(menu_items)
-    for item, item_index in menu_items {
-        item_angle := angle * cast(f32) item_index
-        text_rect := debug_measure_text(item.name)
-        p := debug_state.menu_p + arm(item_angle) * radius
-        
-        distance_squared := length_squared(p - mouse_p)
-        if best_distance_squared > distance_squared {
-            best_distance_squared = distance_squared
-            hot_index = auto_cast item_index
-        }
-        
-        p +=  -0.5 * rectangle_get_diameter(text_rect)
+    debug_state.hot_variable = nil
+    
+    start := debug_state.root_group.value.(DebugVariableGroup).first_child
+    for var := start; var != nil;  {
+        text:  string
         color := White
-        if auto_cast item_index == debug_state.hot_menu_index {
-            color = Blue
+        
+        depth_delta: f32
+        defer depth += depth_delta
+        
+        next: ^DebugVariable
+        defer var = next
+        
+        switch value in var.value {
+          case DebugVariableGroup:
+            text = fmt.tprintf("%s %v", value.expanded ? "-" : "+",  var.name)
+            if value.expanded {
+                color = Yellow
+                next = value.first_child
+                depth_delta = 1
+            }
+          case b32, u32, i32, f32, v2, v3, v4:
+            text = fmt.tprintf("%s %v", var.name, value)
         }
-        if !item.value.(b32) do color.a = 0.5
-        debug_push_text(item.name, p, color)
+        
+        if next == nil {
+            next = var
+            for next != nil {
+                if next.next != nil {
+                    next = next.next
+                    break
+                } else {
+                    next = next.parent
+                    depth_delta -= 1 
+                }
+            }
+        }
+        
+        text_p := p + {depth*line_advance*2, 0}
+        text_rect := rectangle_add_offset(debug_measure_text(text), text_p)
+        if rectangle_contains(text_rect, mouse_p) {
+            color = Blue
+            debug_state.hot_variable = var
+        }
+        
+        debug_push_text(text, text_p, color)
+        p.y -= line_advance
     }
     
-    debug_state.hot_menu_index = hot_index
+    debug_state.cp_y = p.y
 }
+
+init_debug_variables :: proc () {
+    DebugVariableDefinitionContext :: struct {
+        arena:       ^Arena,
+        group:       ^DebugVariable,
+    }
+
+    push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value: DebugVariableValue) -> (result: ^DebugVariable) {
+        result = push(ctx.arena, DebugVariable)
+        result.name   = push_string(ctx.arena, name)
+        result.value  = value
+        result.parent = ctx.group
+        
+        if ctx.group != nil {
+            group := &ctx.group.value.(DebugVariableGroup)
+            if group != nil {
+                if group.last_child != nil {
+                    group.last_child.next = result
+                    group.last_child      = result
+                } else {
+                    group.first_child = result
+                    group.last_child  = result
+                }
+            }
+        }
+                
+        return result
+    }
+    
+    begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) {
+        group := push_variable(ctx, group_name, DebugVariableGroup{})
+        ctx.group = group
+    }
+    
+    add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) {
+        var := push_variable(ctx, variable_name, value)
+    }
+    
+    end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext) {
+        assert(ctx.group != nil)
+        ctx.group = ctx.group.parent
+    }
+    debug_state := get_debug_state()
+    assert(debug_state != nil)
+    ctx := DebugVariableDefinitionContext { arena = &debug_state.debug_arena }
+    begin_variable_group(&ctx, "Root")
+    
+    begin_variable_group(&ctx, "Profiling")
+        add_variable(&ctx, DEBUG_Profiling)
+        add_variable(&ctx, DEBUG_ShowFramerate)
+        add_variable(&ctx, DEBUG_ShowProfilingGraph)
+    end_variable_group(&ctx)
+    
+
+    begin_variable_group(&ctx, "Audio")
+        add_variable(&ctx, DEBUG_SoundPanningWithMouse)
+        add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
+    end_variable_group(&ctx)
+
+    begin_variable_group(&ctx, "Rendering")
+        add_variable(&ctx, DEBUG_UseDebugCamera)
+        add_variable(&ctx, DEBUG_DebugCameraDistance)
+    
+        add_variable(&ctx, DEBUG_RenderSingleThreaded)
+        add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
+        
+        begin_variable_group(&ctx, "Bounds")
+            add_variable(&ctx, DEBUG_ShowSpaceBounds)
+            add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
+        end_variable_group(&ctx)
+        
+        begin_variable_group(&ctx, "ParticleSystem")
+            add_variable(&ctx, DEBUG_ParticleSystemTest)
+            add_variable(&ctx, DEBUG_ParticleGrid)
+        end_variable_group(&ctx)
+        
+        begin_variable_group(&ctx, "CoordinateSystem")
+            add_variable(&ctx, DEBUG_CoordinateSystemTest)
+            add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
+            add_variable(&ctx, DEBUG_ShowLightingSampling)
+        end_variable_group(&ctx)
+    end_variable_group(&ctx)
+
+    begin_variable_group(&ctx, "Entities")
+        add_variable(&ctx, DEBUG_FamiliarFollowsHero)
+        add_variable(&ctx, DEBUG_HeroJumping)
+    end_variable_group(&ctx)
+    
+    debug_state.root_group = ctx.group
 }
+
+////////////////////////////////////////////////
 
 debug_push_text :: proc(text: string, p: v2, color: v4 = 1) {
     debug_state := get_debug_state()

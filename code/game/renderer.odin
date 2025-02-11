@@ -348,7 +348,7 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
         // Debug camera
         when DEBUG_UseDebugCamera {
             // TODO(viktor): how do we want to control the debug camera?
-            distance_above_target *= 5
+            distance_above_target *= DEBUG_DebugCameraDistance
         }
         
         distance_to_p_z := distance_above_target - p.z
