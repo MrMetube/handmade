@@ -10,12 +10,11 @@ import "core:log"
 import "core:strings"
 import "base:runtime"
 
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows -linker:radlink `
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 
-profile          := true
 optimizations    := false ? " -o:speed " : " -o:none "
 
 GamePedantic     :: false
@@ -35,9 +34,9 @@ Target :: enum {
 TargetFlags :: bit_set[Target]
 
 TargetNames := map[string]Target {
-    "-Game"         = .Game,
-    "-Platform"     = .Platform,
-    "-AssetBuilder" = .AssetBuilder,
+    "Game"         = .Game,
+    "Platform"     = .Platform,
+    "AssetBuilder" = .AssetBuilder,
 }
 
 main :: proc() {
@@ -54,7 +53,7 @@ main :: proc() {
     
     // TODO(viktor): clean up the initial build turd (ie. .\handmade.exe)
     // TODO(viktor): confirm in which directory we are running, handle subdirectories
-    rebuild_yourself(exe_path)
+    go_rebuild_yourself(exe_path)
     
     if !os.exists(build_dir) do os.make_directory(build_dir)
     if !os.exists(data_dir)  do os.make_directory(data_dir) 
@@ -85,9 +84,7 @@ main :: proc() {
             
             fmt.fprint(lock, "WAITING FOR PDB")
             pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
-            #assert(intrinsics.type_is_boolean(type_of(profile)))
-            profile_str := fmt.tprintf(" -define:PROFILE=%v ", profile)
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, profile_str, (pedantic when GamePedantic else ""))
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when GamePedantic else ""))
         }
     }
     
@@ -96,8 +93,6 @@ main :: proc() {
         copy_over(`..\code\game\common.odin`, `..\code\copypasta_common.odin`, "package game", "package main")
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PlatformPedantic else ""))
     }
-    
-    os.exit(0)
 }
 
 
@@ -151,18 +146,8 @@ modified_since :: proc(src, out: string) -> (result: b32) {
     return result
 }
 
-rebuild_yourself :: proc(exe_path: string) {
-    when false {
-        log.Level_Headers = {
-             0..<10 = "DEBUG ",
-            10..<20 = "INFO  ",
-            20..<30 = "WARN  ",
-            30..<40 = "ERROR ",
-            40..<50 = "FATAL ",
-        }
-    } else {
-        log.Level_Headers = { 0..<50 = "" }
-    }
+go_rebuild_yourself :: proc(exe_path: string) {
+    log.Level_Headers = { 0..<50 = "" }
     
     if modified_since(src_path, exe_path) {
         log.info("Rebuilding!")

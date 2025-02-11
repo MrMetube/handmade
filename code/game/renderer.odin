@@ -287,14 +287,14 @@ push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v2, siz
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
-    // p, scale, valid := get_render_entity_basis_p(group.transform, entry, screen_size)
+    basis := project_with_transform(group.transform, 0)
     
-    // if valid {
-    //     result = push_render_element(group, RenderGroupEntryCoordinateSystem)
-    //     if result != nil {
-    //         result.color = color
-    //     }
-    // }
+    if basis.valid {
+        result = push_render_element(group, RenderGroupEntryCoordinateSystem)
+        if result != nil {
+            result.color = color
+        }
+    }
 
     return result
 }
@@ -432,7 +432,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
                 it.clip_rect.max.y = target.height
             }
             
-            when false {
+            when DEBUG_RenderSingleThreaded {
                 do_tile_render_work(it)
             } else {
                 Platform.enqueue_work(queue, do_tile_render_work, it)
@@ -723,7 +723,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 write_mask := clip_mask & simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
 
                 pixel := buffer.memory[y * buffer.width + x:][:8]
-                assert(cast(uintpointer) (&pixel[0]) & 31 == 0)
+                // assert(cast(uintpointer) (&pixel[0]) & 31 == 0)
                 original_pixel := simd.masked_load((&pixel[0]), cast(u32x8) 0, write_mask)
                 
                 u = clamp_01(u)
@@ -980,7 +980,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                     }
 
                     texel.rgb += texel.a * light_color.rgb
-                    when false {
+                    when DEBUG_ShowLightingBounceDirection {
                         // NOTE(viktor): draws the bounce direction
                         texel.rgb = 0.5 + 0.5 * bounce_direction
                         texel.rgb *= texel.a
@@ -1096,9 +1096,9 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
 
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
 
-    when false {
+    when DEBUG_ShowLightingSampling {
         // NOTE(viktor): Turn this on to see where in the map you're sampling!
-        texel := &lod.memory[lod.start + index.y * lod.width + index.x]
+        texel := &lod.memory[index.y * lod.width + index.x]
         texel^ = 255
     }
 

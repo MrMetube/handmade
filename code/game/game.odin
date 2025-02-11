@@ -24,6 +24,7 @@ package game
     - Particle systems
     
     - Rendering
+        - Get rid of "even" scan line notion?
         - Straighten out all coordinate systems!
             - Screen
             - World
@@ -355,7 +356,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         for _ in 0..< 1 {
             familiar_p := new_camera_p.chunk
             familiar_p.x += random_between_i32(&series, 0, 14)
-            familiar_p.y += random_between_i32(&series, 0, 7)
+            familiar_p.y += random_between_i32(&series, 0, 1)
             add_familiar(state, chunk_position_from_tile_positon(world, familiar_p.x, familiar_p.y, familiar_p.z))
         }
          
@@ -383,9 +384,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
         tran_state.assets = make_assets(&tran_state.arena, 64 * Megabyte, tran_state)
         
-        // play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
-        state.music = state.mixer.first_playing_sound
-        state.mixer.master_volume = 0.25
+        state.mixer.master_volume = 0.1
         
         // TODO(viktor): pick a real number here!
         tran_state.ground_buffers = push(&state.world_arena, GroundBuffer, 256)
@@ -413,15 +412,12 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     }
     
     if memory.reloaded_executable {
-        // TODO(viktor): re-enable this? But make sure we dont touch ones in flight?
-        when false {
-            for &ground_buffer in tran_state.ground_buffers {
-                ground_buffer.p = null_position()
-            }
+        for &ground_buffer in tran_state.ground_buffers {
+            ground_buffer.p = null_position()
         }
         
-        // make_sphere_normal_map(tran_state.test_normal, 0)
-        // make_sphere_diffuse_map(tran_state.test_diffuse)
+        make_sphere_normal_map(tran_state.test_normal, 0)
+        make_sphere_diffuse_map(tran_state.test_diffuse)
     }
     
     debug_reset(memory, tran_state.assets, tran_state.high_priority_queue, buffer)
@@ -432,10 +428,33 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
     world := state.world
     
-    when false {
+    when DEBUG_SoundPanningWithMouse {
         // NOTE(viktor): test sound panning with the mouse 
-        music_volume := vec_cast(f32, input.mouse_position) / vec_cast(f32, buffer.width, buffer.height)
+        music_volume := input.mouse_position
+        if state.music == nil {
+            if state.mixer.first_playing_sound == nil {
+                play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+            }
+            state.music = state.mixer.first_playing_sound
+        }
         change_volume(&state.mixer, state.music, 0.01, music_volume)
+    }
+    
+    when DEBUG_SoundPitchingWithMouse {
+        // NOTE(viktor): test sound panning with the mouse 
+        if state.music == nil {
+            if state.mixer.first_playing_sound == nil {
+                play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
+            }
+            state.music = state.mixer.first_playing_sound
+        }
+        
+        delta: f32
+        if was_pressed(input.mouse_middle) {
+            if input.mouse_position.x > 10  do delta = 0.1
+            if input.mouse_position.x < -10 do delta = -0.1
+            change_pitch(&state.mixer, state.music, state.music.d_sample + delta)
+        }
     }
     
     for controller, controller_index in input.controllers {
@@ -470,7 +489,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 }
             }
             
-            when false {
+            when DEBUG_HeroJumping {
                 if controller.start.ended_down {
                     con_hero.dz = 2
                 }
@@ -479,22 +498,15 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             con_hero.darrow = {}
             if controller.button_up.ended_down {
                 con_hero.darrow =  {0, 1}
-                // change_volume(&state.mixer, state.music, 4, {1,1})
             }
             if controller.button_down.ended_down {
                 con_hero.darrow = -{0, 1}
-                // change_volume(&state.mixer, state.music, 10, {0,0})
             }
             if controller.button_left.ended_down {
                 con_hero.darrow = -{1, 0}
-                // change_volume(&state.mixer, state.music, 3, {1,0})
-                // change_pitch(&state.mixer, state.music, state.music.d_sample - 0.1)
-                
             }
             if controller.button_right.ended_down {
                 con_hero.darrow =  {1, 0}
-                // change_volume(&state.mixer, state.music, 3, {0,1})
-                // change_pitch(&state.mixer, state.music, state.music.d_sample + 0.1)
             }
             
             if con_hero.darrow != 0 {
@@ -507,7 +519,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     // Update and Render
     // 
     
-    when false {
+    when DEBUG_TestWeirdScreenSizes {
         // NOTE(viktor): enable this to test weird screen sizes
         buffer := buffer
         buffer.width  = 1279
@@ -540,8 +552,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 ground_chunk_size := world.chunk_dim_meters.x
                 push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
                 
-                when false {
-                    push_rectangle_outline(render_group, offset, ground_chunk_size, Yellow)
+                when DEBUG_ShowGroundChunkBounds {
+                    push_rectangle_outline(render_group, offset.xy, ground_chunk_size, Yellow)
                 }
             }
         }
@@ -691,7 +703,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                         }
                     }
                 }
-                when false {
+                
+                when DEBUG_FamiliarFollowsHero {
                     if closest_hero != nil && closest_hero_dsq > 1 {
                         mpss: f32 = 0.5
                         ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
@@ -721,7 +734,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
             ////////////////////////////////////////////////
             // Post-physics entity work
-            // 
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
             facing_weights := #partial AssetVector{.FacingDirection = 1 }
             
@@ -739,103 +751,109 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
                 
-                when false { 
+                when DEBUG_ParticleSystemTest { 
                     ////////////////////////////////////////////////
                     // NOTE(viktor): Particle system test
-                    for _ in 0..<4 {
-                        particle := &state.particles[state.next_particle]
-                        state.next_particle += 1
-                        if state.next_particle >= len(state.particles) {
-                            state.next_particle = 0
+                    font_id := first_font_from(tran_state.assets, .Font)
+                    font := get_font(tran_state.assets, font_id, render_group.generation_id)
+                    if font == nil {
+                        load_font(tran_state.assets, font_id, false)
+                    } else {
+                        font_info := get_font_info(tran_state.assets, font_id)
+                        for _ in 0..<4 {
+                            particle := &state.particles[state.next_particle]
+                            state.next_particle += 1
+                            if state.next_particle >= len(state.particles) {
+                                state.next_particle = 0
+                            }
+                            particle.p = {random_bilateral(&state.effects_entropy, f32)*0.1, 0, 0}
+                            particle.dp = {random_bilateral(&state.effects_entropy, f32)*0, (random_unilateral(&state.effects_entropy, f32)*0.4)+7, 0}
+                            particle.ddp = {0, -9.8, 0}
+                            particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
+                            particle.dcolor = {0,0,0,-0.2}
+                            
+                            nothings := "NOTHINGS"
+                            
+                            r := random_choice_data(&state.effects_entropy, transmute([]u8) nothings)^
+                            
+                            particle.bitmap_id = get_bitmap_for_glyph(font, font_info, cast(rune) r)
                         }
-                        particle.p = {random_bilateral(&state.effects_entropy, f32)*0.1, 0, 0}
-                        particle.dp = {random_bilateral(&state.effects_entropy, f32)*0, (random_unilateral(&state.effects_entropy, f32)*0.4)+7, 0}
-                        particle.ddp = {0, -9.8, 0}
-                        particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
-                        particle.dcolor = {0,0,0,-0.2}
                         
-                        nothings := "NOTHINGS"
-                        
-                        r := random_choice_data(&state.effects_entropy, transmute([]u8) nothings)^
-                        font_match   := #partial AssetVector{ .Codepoint = cast(f32) r }
-                        font_weights := #partial AssetVector{ .Codepoint = 1 }
-                        
-                        particle.bitmap_id = best_match_bitmap_from(tran_state.assets, AssetTypeId.Font, font_match, font_weights)
-                    }
-                    
-                    for &row in state.cells {
-                        zero(row[:])
-                    }
-                    
-                    grid_scale :f32= 0.3
-                    grid_origin:= v3{-0.5 * grid_scale * ParticleCellSize, 0, 0}
-                    for particle in state.particles {
-                        p := ( particle.p - grid_origin ) / grid_scale
-                        x := truncate(p.x)
-                        y := truncate(p.y)
-                        
-                        x = clamp(x, 1, ParticleCellSize-2)
-                        y = clamp(y, 1, ParticleCellSize-2)
-                        
-                        cell := &state.cells[y][x]
-                        
-                        density: f32 = particle.color.a
-                        cell.density                += density
-                        cell.velocity_times_density += density * particle.dp
-                    }
-        
-                    for row, y in state.cells {
-                        for cell, x in row {
-                            alpha := clamp_01(0.1 * cell.density)
-                            color := v4{1,1,1, alpha}
-                            position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
-                            push_rectangle(render_group, position, grid_scale, color)
+                        for &row in state.cells {
+                            zero(row[:])
                         }
-                    }
+                        
+                        grid_scale :f32= 0.3
+                        grid_origin:= v3{-0.5 * grid_scale * ParticleCellSize, 0, 0}
+                        for particle in state.particles {
+                            p := ( particle.p - grid_origin ) / grid_scale
+                            x := truncate(p.x)
+                            y := truncate(p.y)
+                            
+                            x = clamp(x, 1, ParticleCellSize-2)
+                            y = clamp(y, 1, ParticleCellSize-2)
+                            
+                            cell := &state.cells[y][x]
+                            
+                            density: f32 = particle.color.a
+                            cell.density                += density
+                            cell.velocity_times_density += density * particle.dp
+                        }
+                        
+                        when DEBUG_ParticleGrid {
+                            for row, y in state.cells {
+                                for cell, x in row {
+                                    alpha := clamp_01(0.1 * cell.density)
+                                    color := v4{1,1,1, alpha}
+                                    position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
+                                    push_rectangle(render_group, rectangle_center_diameter(position.xy, grid_scale), color)
+                                }
+                            }
+                        }
+                        
+                        for &particle in state.particles {
+                            p := ( particle.p - grid_origin ) / grid_scale
+                            x := truncate(p.x)
+                            y := truncate(p.y)
+                            
+                            x = clamp(x, 1, ParticleCellSize-2)
+                            y = clamp(y, 1, ParticleCellSize-2)
+                            
+                            cell := &state.cells[y][x]
+                            cell_l := &state.cells[y][x-1]
+                            cell_r := &state.cells[y][x+1]
+                            cell_u := &state.cells[y+1][x]
+                            cell_d := &state.cells[y-1][x]
+                            
+                            dispersion: v3
+                            dc : f32 = 0.3
+                            dispersion += dc * (cell.density - cell_l.density) * v3{-1, 0, 0}
+                            dispersion += dc * (cell.density - cell_r.density) * v3{ 1, 0, 0}
+                            dispersion += dc * (cell.density - cell_d.density) * v3{ 0,-1, 0}
+                            dispersion += dc * (cell.density - cell_u.density) * v3{ 0, 1, 0}
+                            
+                            particle_ddp := particle.ddp + dispersion
+                            // NOTE(viktor): simulate particle forward in time
+                            particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
+                            particle.dp    += particle_ddp * input.delta_time
+                            particle.color += particle.dcolor * input.delta_time
+                            // TODO(viktor): should we just clamp colors in the renderer?
+                            color := clamp_01(particle.color)
+                            if color.a > 0.9 {
+                                color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
+                            }
 
-                    for &particle in state.particles {
-                        p := ( particle.p - grid_origin ) / grid_scale
-                        x := truncate(p.x)
-                        y := truncate(p.y)
-                        
-                        x = clamp(x, 1, ParticleCellSize-2)
-                        y = clamp(y, 1, ParticleCellSize-2)
-                        
-                        cell := &state.cells[y][x]
-                        cell_l := &state.cells[y][x-1]
-                        cell_r := &state.cells[y][x+1]
-                        cell_u := &state.cells[y+1][x]
-                        cell_d := &state.cells[y-1][x]
-                        
-                        dispersion: v3
-                        dc : f32 = 0.3
-                        dispersion += dc * (cell.density - cell_l.density) * v3{-1, 0, 0}
-                        dispersion += dc * (cell.density - cell_r.density) * v3{ 1, 0, 0}
-                        dispersion += dc * (cell.density - cell_d.density) * v3{ 0,-1, 0}
-                        dispersion += dc * (cell.density - cell_u.density) * v3{ 0, 1, 0}
-                        
-                        particle_ddp := particle.ddp + dispersion
-                        // NOTE(viktor): simulate particle forward in time
-                        particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
-                        particle.dp    += particle_ddp * input.delta_time
-                        particle.color += particle.dcolor * input.delta_time
-                        // TODO(viktor): should we just clamp colors in the renderer?
-                        color := clamp_01(particle.color)
-                        if color.a > 0.9 {
-                            color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
+                            if particle.p.y < 0 {
+                                coefficient_of_restitution :f32= 0.3
+                                coefficient_of_friction :f32= 0.7
+                                particle.p.y *= -1
+                                particle.dp.y *= -coefficient_of_restitution
+                                particle.dp.x *= coefficient_of_friction
+                            }
+                            // NOTE(viktor): render the particle
+                            push_bitmap(render_group, particle.bitmap_id, 0.4, particle.p, color)
                         }
-
-                        if particle.p.y < 0 {
-                            coefficient_of_restitution :f32= 0.3
-                            coefficient_of_friction :f32= 0.7
-                            particle.p.y *= -1
-                            particle.dp.y *= -coefficient_of_restitution
-                            particle.dp.x *= coefficient_of_friction
-                        }
-                        // NOTE(viktor): render the particle
-                        push_bitmap(render_group, particle.bitmap_id, 0.1, particle.p, color)
-                    }
-                                        
+                    }             
                 }
 
             case .Arrow:
@@ -868,9 +886,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue)
             
             case .Space: 
-                when false {
+                when DEBUG_ShowSpaceBounds {
                     for volume in entity.collision.volumes {
-                        push_rectangle_outline(render_group, volume.dim.xy, volume.offset, Blue)
+                        push_rectangle_outline(render_group, volume.dim.xy, volume.offset.xy, Blue)
                     }
                 }
             }
@@ -878,7 +896,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     }
     render_group.transform.offset = 0
     
-    when false { 
+    when DEBUG_CoordinateSystemTest { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
@@ -893,15 +911,16 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 for x: i32; x < lod.width; x += checker_dim.x {
                     color := map_color[it_index]
                     size := vec_cast(f32, checker_dim)
-                    draw_rectangle(lod, vec_cast(f32, x, y) + size*0.5, size, on ? color : Black)
+                    draw_rectangle(lod, rectangle_min_diameter(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)}, true)
+                    draw_rectangle(lod, rectangle_min_diameter(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)}, false)
                     on = !on
                 }
                 row_on = !row_on
             }
         }
-        tran_state.env_bottom.pz = -4
-        tran_state.env_middle.pz =  0
-        tran_state.env_top.pz    =  4
+        tran_state.envs[0].pz = -4
+        tran_state.envs[1].pz =  0
+        tran_state.envs[2].pz    =  4
         
         state.time += input.delta_time
         
@@ -911,7 +930,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         } else {
             disp := v2{cos(angle*2) * 100, cos(angle*4.1) * 50}
         }
-        origin := screen_center
+        origin := vec_cast(f32, buffer_size) * 0.5
         scale :: 100
         x_axis := scale * v2{cos(angle), sin(angle)}
         y_axis := perpendicular(x_axis)
@@ -925,9 +944,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             entry.texture = tran_state.test_diffuse
             entry.normal  = tran_state.test_normal
             
-            entry.top    = tran_state.env_top
-            entry.middle = tran_state.env_middle
-            entry.bottom = tran_state.env_bottom
+            entry.top    = tran_state.envs[2]
+            entry.middle = tran_state.envs[1]
+            entry.bottom = tran_state.envs[0]
         }
 
         for it, it_index in tran_state.envs {

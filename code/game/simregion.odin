@@ -168,14 +168,6 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
     return result
 }
 
-when false {
-get_entity_by_storage_index :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex) -> (result: ^Entity) {
-    entry := get_hash_from_index(region, storage_index)
-    result = entry.ptr
-    return result
-}
-}
-
 load_entity_reference :: #force_inline proc(state: ^State, region: ^SimRegion, ref: ^EntityReference) {
     if ref.index != 0 {
         entry := get_hash_from_index(region, ref.index)

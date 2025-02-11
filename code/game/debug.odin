@@ -3,9 +3,25 @@ package game
 import "core:fmt"
 import "core:hash" // TODO(viktor): I do not need this
 
-PROFILE  :: #config(PROFILE, false)
-
-////////////////////////////////////////////////
+DebugVariableList := [?]DebugVariable {
+    {"DEBUG_Profiling",                   DEBUG_Profiling},
+    {"DEBUG_ShowFramerate",               DEBUG_ShowFramerate},
+    {"DEBUG_ShowProfilingGraph",          DEBUG_ShowProfilingGraph},
+    {"DEBUG_UseDebugCamera",              DEBUG_UseDebugCamera},
+    {"DEBUG_ShowGroundChunkBounds",       DEBUG_ShowGroundChunkBounds},
+    {"DEBUG_ParticleSystemTest",          DEBUG_ParticleSystemTest},
+    {"DEBUG_ParticleGrid",                DEBUG_ParticleGrid},
+    {"DEBUG_ShowSpaceBounds",             DEBUG_ShowSpaceBounds},
+    {"DEBUG_CoordinateSystemTest",        DEBUG_CoordinateSystemTest},
+    {"DEBUG_SoundPanningWithMouse",       DEBUG_SoundPanningWithMouse},
+    {"DEBUG_SoundPitchingWithMouse",      DEBUG_SoundPitchingWithMouse},
+    {"DEBUG_TestWeirdScreenSizes",        DEBUG_TestWeirdScreenSizes},
+    {"DEBUG_FamiliarFollowsHero",         DEBUG_FamiliarFollowsHero},
+    {"DEBUG_RenderSingleThreaded",        DEBUG_RenderSingleThreaded},
+    {"DEBUG_ShowLightingBounceDirection", DEBUG_ShowLightingBounceDirection},
+    {"DEBUG_ShowLightingSampling",        DEBUG_ShowLightingSampling},
+    {"DEBUG_HeroJumping",                 DEBUG_HeroJumping},
+}
 
 DebugMaxThreadCount     :: 256
 DebugMaxHistoryLength   :: 6
@@ -390,20 +406,15 @@ overlay_debug_info :: proc(input: Input) {
         debug_main_menu(debug_state, mouse_p)
     } else if input.mouse_right.half_transition_count > 0 {
         debug_main_menu(debug_state, mouse_p)
-        switch debug_state.hot_menu_index {
-          case 0:// "Toggle Profiler Graph",
-            debug_state.profile_on = !debug_state.profile_on
-          case 1:// "Toggle Framerate Counter",
-            debug_state.framerate_on = !debug_state.framerate_on
-          case 2:// "Toggle Profiler Pause",
-            debug_state.paused = !debug_state.paused
-          case 3:// "Mark Loop Point",
+        if debug_state.hot_menu_index >= 0 {
+            hot_variable := &DebugVariableList[debug_state.hot_menu_index]
+            switch v in hot_variable.value {
+            case b32:
+                hot_variable.value = !v
+            }
             
-          case 4:// "Toggle Entity Bounds", 
-          case 5:// "Toggle World Chunk Bounds", 
+            write_handmade_config()
         }
-        
-        write_handmade_config()
     }
      
     target_fps :: 72
@@ -422,11 +433,11 @@ overlay_debug_info :: proc(input: Input) {
         }
     }
     
-    if debug_state.framerate_on {
+    if DEBUG_ShowFramerate {
         push_text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug_state.frames[0].seconds_elapsed*1000))
     }
-
-    if debug_state.profile_on {
+    
+    if DEBUG_ShowProfilingGraph {
         debug_state.profile_rect = rectangle_center_diameter(v2{0, 0}, v2{600, 600})
         push_rectangle(debug_state.render_group, debug_state.profile_rect, {0.08, 0.08, 0.2, 1} )
         
@@ -490,6 +501,12 @@ overlay_debug_info :: proc(input: Input) {
     }
 }
 
+DebugVariableValue :: union { b32 }
+DebugVariable :: struct {
+    name: string,
+    value: DebugVariableValue,
+}
+
 write_handmade_config :: proc() {
     debug_state := get_debug_state()
     if debug_state == nil do return
@@ -497,34 +514,52 @@ write_handmade_config :: proc() {
     if debug_state.compiling do return
     debug_state.compiling = true
     
-    contents := fmt.tprintf(`package game
-
-DEBUG_UseDebugCamera :: %v
-`, !DEBUG_UseDebugCamera)
-
+    contents: [4096]u8
+    cursor: u32
+    {
+        line := "package game\n\n"
+        dest := contents[cursor:]
+        for r, i in line {
+            assert(r < 255, "no unicode in config")
+            dest[i] = cast(u8) r
+        }
+        cursor += auto_cast len(line)
+    }
+    for var in DebugVariableList {
+        line: string
+        switch v in var.value {
+            case b32: 
+                line = fmt.tprintfln("%s :: %v", var.name, var.value)
+        }
+        
+        dest := contents[cursor:]
+        for r, i in line {
+            assert(r < 255, "no unicode in config")
+            dest[i] = cast(u8) r
+        }
+        cursor += auto_cast len(line)
+    }
+    
     HandmadeConfigFilename :: "../code/game/debug_config.odin"
-    Platform.debug.write_entire_file(HandmadeConfigFilename, transmute([]u8) contents)
+    Platform.debug.write_entire_file(HandmadeConfigFilename, contents[:cursor])
     debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game` )
 }
 
 debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
-    menu_items := [?]string {
-        "Toggle Profiler Graph",
-        "Toggle Framerate Counter",
-        "Toggle Profiler Pause",
-        "Mark Loop Point",
-        "Toggle Entity Bounds", 
-        "Toggle World Chunk Bounds", 
-    }
+    // menu_items := [?]string {
+    //     "Toggle Profiler Pause",
+    //     "Mark Loop Point",
+    // }
+    menu_items := DebugVariableList
     
     best_distance_squared := length_squared(debug_state.menu_p - mouse_p)
     hot_index :i32 = -1
     
-    radius :f32= 150
+    radius :f32= 250
     angle := Tau / cast(f32) len(menu_items)
     for item, item_index in menu_items {
         item_angle := angle * cast(f32) item_index
-        text_rect := debug_measure_text(item)
+        text_rect := debug_measure_text(item.name)
         p := debug_state.menu_p + arm(item_angle) * radius
         
         distance_squared := length_squared(p - mouse_p)
@@ -534,11 +569,12 @@ debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
         }
         
         p +=  -0.5 * rectangle_get_diameter(text_rect)
-        color : v4 = 1
+        color := White
         if auto_cast item_index == debug_state.hot_menu_index {
             color = Blue
         }
-        debug_push_text(item, p, color)
+        if !item.value.(b32) do color.a = 0.5
+        debug_push_text(item.name, p, color)
     }
     
     debug_state.hot_menu_index = hot_index
@@ -621,7 +657,7 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
 
 @(export)
 begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
-    when !PROFILE do return result
+    when !DEBUG_Profiling do return result
     
     records := &GlobalDebugTable.records[context.user_index]
 
@@ -643,7 +679,7 @@ begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #a
     return result
 }
 
-@(export, disabled=!PROFILE)
+@(export, disabled=!DEBUG_Profiling)
 end_timed_block:: #force_inline proc(block: TimedBlock) {
     // TODO(viktor): check manual blocks are closed once and exactly once
     // TODO(viktor): record the hit count here
@@ -668,7 +704,7 @@ timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count
     return begin_timed_function(loc, hit_count)
 }
 
-@(export, disabled=!PROFILE)
+@(export, disabled=!DEBUG_Profiling)
 frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location) {
     record_debug_event_frame_marker(seconds_elapsed)
     
@@ -680,12 +716,15 @@ frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location
     frame_marker.hash  = NilHashValue
 }
 
+@(disabled=!DEBUG_Profiling)
 record_debug_event_frame_marker :: #force_inline proc (seconds_elapsed: f32) {
     event := record_debug_event_common(.FrameMarker, NilHashValue)
     event.as.frame_marker = {
         seconds_elapsed = seconds_elapsed,
     }
 }
+
+@(disabled=!DEBUG_Profiling)
 record_debug_event_block :: #force_inline proc (type: DebugEventType, record_index: u32) {
     event := record_debug_event_common(type, record_index)
     event.as.block = {
@@ -693,9 +732,10 @@ record_debug_event_block :: #force_inline proc (type: DebugEventType, record_ind
         core_index   = 0,
     }
 }
+
 @require_results
 record_debug_event_common :: #force_inline proc (type: DebugEventType, record_index: u32) -> (event: ^DebugEvent) {
-    when !PROFILE do return
+    when !DEBUG_Profiling do return
     
     events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
     event = &GlobalDebugTable.events[events.array_index][events.events_index]

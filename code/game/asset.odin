@@ -339,7 +339,7 @@ get_line_advance :: proc(info: ^hha.FontInfo) -> (result: f32) {
     return result
 }
 
-get_bitmap_for_glyph :: proc(font: ^Font, info: ^hha.FontInfo, codepoint: rune) -> (result: BitmapId) {
+get_bitmap_for_glyph :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: BitmapId) {
     glyph := get_glyph_from_codepoint(font, info, codepoint)
     entry := font.glyphs[glyph]
     
@@ -351,7 +351,7 @@ get_bitmap_for_glyph :: proc(font: ^Font, info: ^hha.FontInfo, codepoint: rune) 
     return result
 }
 
-get_glyph_from_codepoint :: proc(font: ^Font, info: ^hha.FontInfo, codepoint: rune) -> (result: u16) {
+get_glyph_from_codepoint :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: u16) {
     if codepoint < info.one_past_highest_codepoint {
         result = font.unicode_map[codepoint]
     }
@@ -367,6 +367,10 @@ first_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (res
 }
 first_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
     result = cast(BitmapId) first_asset_from(assets, id)
+    return result
+}
+first_font_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: FontId) {
+    result = cast(FontId) first_asset_from(assets, id)
     return result
 }
 first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: u32) {
