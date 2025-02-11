@@ -10,7 +10,7 @@ import "core:log"
 import "core:strings"
 import "base:runtime"
 
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows -linker:radlink `
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 

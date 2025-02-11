@@ -3,24 +3,114 @@ package game
 import "core:fmt"
 import "core:hash" // TODO(viktor): I do not need this
 
-DebugVariableList := [?]DebugVariable {
-    {"DEBUG_Profiling",                   DEBUG_Profiling},
-    {"DEBUG_ShowFramerate",               DEBUG_ShowFramerate},
-    {"DEBUG_ShowProfilingGraph",          DEBUG_ShowProfilingGraph},
-    {"DEBUG_UseDebugCamera",              DEBUG_UseDebugCamera},
-    {"DEBUG_ShowGroundChunkBounds",       DEBUG_ShowGroundChunkBounds},
-    {"DEBUG_ParticleSystemTest",          DEBUG_ParticleSystemTest},
-    {"DEBUG_ParticleGrid",                DEBUG_ParticleGrid},
-    {"DEBUG_ShowSpaceBounds",             DEBUG_ShowSpaceBounds},
-    {"DEBUG_CoordinateSystemTest",        DEBUG_CoordinateSystemTest},
-    {"DEBUG_SoundPanningWithMouse",       DEBUG_SoundPanningWithMouse},
-    {"DEBUG_SoundPitchingWithMouse",      DEBUG_SoundPitchingWithMouse},
-    {"DEBUG_TestWeirdScreenSizes",        DEBUG_TestWeirdScreenSizes},
-    {"DEBUG_FamiliarFollowsHero",         DEBUG_FamiliarFollowsHero},
-    {"DEBUG_RenderSingleThreaded",        DEBUG_RenderSingleThreaded},
-    {"DEBUG_ShowLightingBounceDirection", DEBUG_ShowLightingBounceDirection},
-    {"DEBUG_ShowLightingSampling",        DEBUG_ShowLightingSampling},
-    {"DEBUG_HeroJumping",                 DEBUG_HeroJumping},
+DebugVariableValue :: union { 
+    b32, 
+    DebugVariableGroup
+}
+
+DebugVariable :: struct {
+    name:   string,
+    value:  DebugVariableValue,
+    parent: ^DebugVariable,
+    next:   ^DebugVariable,
+}
+
+DebugVariableGroup :: struct {
+    expanded: b32,
+    
+    first_child: ^DebugVariable,
+    last_child:  ^DebugVariable,
+}
+
+init_debug_variables :: proc () {
+        
+    DebugVariableDefinitionContext :: struct {
+        arena:       ^Arena,
+        group:       ^DebugVariable,
+    }
+
+    push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value: DebugVariableValue) -> (result: ^DebugVariable) {
+
+        result = push(ctx.arena, DebugVariable)
+        result.name   = name
+        result.value  = value
+        result.parent = ctx.group
+        
+        if ctx.group != nil {
+            group := &ctx.group.value.(DebugVariableGroup)
+            if group != nil {
+                if group.last_child != nil {
+                    group.last_child.next = result
+                    group.last_child      = result
+                } else {
+                    group.first_child = result
+                    group.last_child  = result
+                }
+            }
+        }
+                
+        return result
+    }
+    
+    begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) {
+        group := push_variable(ctx, group_name, DebugVariableGroup{})
+        ctx.group = group
+    }
+    
+    add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) {
+        var := push_variable(ctx, variable_name, value)
+    }
+    
+    end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, ) {
+        assert(ctx.group != nil)
+        ctx.group = ctx.group.parent
+    }
+    debug_state := get_debug_state()
+    assert(debug_state != nil)
+    ctx := DebugVariableDefinitionContext { arena = &debug_state.debug_arena }
+    begin_variable_group(&ctx, "Root")
+    
+    begin_variable_group(&ctx, "Profiling")
+        add_variable(&ctx, DEBUG_Profiling)
+        add_variable(&ctx, DEBUG_ShowFramerate)
+        add_variable(&ctx, DEBUG_ShowProfilingGraph)
+    end_variable_group(&ctx, )
+    
+
+    begin_variable_group(&ctx, "Audio")
+        add_variable(&ctx, DEBUG_SoundPanningWithMouse)
+        add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
+    end_variable_group(&ctx, )
+
+    begin_variable_group(&ctx, "Rendering")
+        add_variable(&ctx, DEBUG_UseDebugCamera)
+    
+        add_variable(&ctx, DEBUG_RenderSingleThreaded)
+        add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
+        
+        begin_variable_group(&ctx, "Bounds")
+            add_variable(&ctx, DEBUG_ShowSpaceBounds)
+            add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
+        end_variable_group(&ctx, )
+        
+        begin_variable_group(&ctx, "ParticleSystem")
+            add_variable(&ctx, DEBUG_ParticleSystemTest)
+            add_variable(&ctx, DEBUG_ParticleGrid)
+        end_variable_group(&ctx, )
+        
+        begin_variable_group(&ctx, "CoordinateSystem")
+            add_variable(&ctx, DEBUG_CoordinateSystemTest)
+            add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
+            add_variable(&ctx, DEBUG_ShowLightingSampling)
+        end_variable_group(&ctx, )
+    end_variable_group(&ctx, )
+
+    begin_variable_group(&ctx, "Entities")
+        add_variable(&ctx, DEBUG_FamiliarFollowsHero)
+        add_variable(&ctx, DEBUG_HeroJumping)
+    end_variable_group(&ctx, )
+    
+    debug_state.root_group = ctx.group
 }
 
 DebugMaxThreadCount     :: 256
@@ -53,7 +143,7 @@ DebugState :: struct {
     
     threads: []DebugThread,
     
-    
+    root_group:     ^DebugVariable,
     compiling:      b32,
     compiler:       DebugExecutingProcess,
     menu_p:         v2,
@@ -201,6 +291,60 @@ debug_frame_end :: proc(memory: ^GameMemory) {
     }
 }
 
+debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformWorkQueue, buffer: Bitmap) {
+    assert(len(memory.debug_storage) >= size_of(DebugState))
+    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
+    if !debug_state.inititalized {
+        debug_state.inititalized = true
+        // :PointerArithmetic
+        init_arena(&debug_state.debug_arena, memory.debug_storage[size_of(DebugState):])
+        init_debug_variables()
+        
+        sub_arena(&debug_state.collation_arena, &debug_state.debug_arena, 64 * Megabyte)
+        
+        
+        
+        debug_state.work_queue = work_queue
+        debug_state.buffer     = buffer
+        
+        debug_state.threads = push(&debug_state.collation_arena, DebugThread, DebugMaxThreadCount)
+        debug_state.scopes_to_record = push(&debug_state.collation_arena, ^DebugRecord, DebugMaxThreadCount)
+        
+        debug_state.font_scale = 0.6
+        debug_state.hot_menu_index = -1
+        
+        debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
+        restart_collation(GlobalDebugTable.events_state.array_index)
+    }
+    
+    if memory.reloaded_executable {
+        init_debug_variables()
+    }
+    
+    if debug_state.render_group == nil {
+        debug_state.render_group = make_render_group(&debug_state.debug_arena, assets, 32 * Megabyte, false)
+        assert(debug_state.render_group != nil)
+    }
+    if debug_state.render_group.inside_render do return 
+    
+    begin_render(debug_state.render_group)
+    
+    debug_state.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
+    debug_state.font    = get_font(assets, debug_state.font_id, debug_state.render_group.generation_id)
+    
+    baseline :f32= 10
+    if debug_state.font != nil {
+        debug_state.font_info = get_font_info(assets, debug_state.font_id)
+        baseline = get_baseline(debug_state.font_info)
+        debug_state.ascent = get_baseline(debug_state.font_info)
+    } else {
+        load_font(debug_state.render_group.assets, debug_state.font_id, false)
+    }
+    
+    debug_state.cp_y      =  0.5 * cast(f32) buffer.height - baseline * debug_state.font_scale
+    debug_state.left_edge = -0.5 * cast(f32) buffer.width
+}
+
 ////////////////////////////////////////////////
 
 restart_collation :: proc(invalid_index: u32) {
@@ -335,53 +479,6 @@ collate_debug_records :: proc(invalid_events_index: u32) {
 
 ////////////////////////////////////////////////
 
-debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformWorkQueue, buffer: Bitmap) {
-    assert(len(memory.debug_storage) >= size_of(DebugState))
-    debug_state := cast(^DebugState) raw_data(memory.debug_storage)
-    
-    if !debug_state.inititalized {
-        debug_state.inititalized = true
-        // :PointerArithmetic
-        init_arena(&debug_state.debug_arena, memory.debug_storage[size_of(DebugState):])
-        sub_arena(&debug_state.collation_arena, &debug_state.debug_arena, 64 * Megabyte)
-        
-        debug_state.work_queue = work_queue
-        debug_state.buffer     = buffer
-        
-        debug_state.threads = push(&debug_state.collation_arena, DebugThread, DebugMaxThreadCount)
-        debug_state.scopes_to_record = push(&debug_state.collation_arena, ^DebugRecord, DebugMaxThreadCount)
-        
-        debug_state.font_scale = 0.6
-        debug_state.hot_menu_index = -1
-        
-        debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
-        restart_collation(GlobalDebugTable.events_state.array_index)
-    }
-    
-    if debug_state.render_group == nil {
-        debug_state.render_group = make_render_group(&debug_state.debug_arena, assets, 32 * Megabyte, false)
-        assert(debug_state.render_group != nil)
-    }
-    if debug_state.render_group.inside_render do return 
-    
-    begin_render(debug_state.render_group)
-    
-    debug_state.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
-    debug_state.font    = get_font(assets, debug_state.font_id, debug_state.render_group.generation_id)
-    
-    baseline :f32= 10
-    if debug_state.font != nil {
-        debug_state.font_info = get_font_info(assets, debug_state.font_id)
-        baseline = get_baseline(debug_state.font_info)
-        debug_state.ascent = get_baseline(debug_state.font_info)
-    } else {
-        load_font(debug_state.render_group.assets, debug_state.font_id, false)
-    }
-    
-    debug_state.cp_y      =  0.5 * cast(f32) buffer.height - baseline * debug_state.font_scale
-    debug_state.left_edge = -0.5 * cast(f32) buffer.width
-}
-
 debug_end_and_overlay :: proc(input: Input) {
     debug_state := get_debug_state()
     if debug_state == nil do return
@@ -406,15 +503,15 @@ overlay_debug_info :: proc(input: Input) {
         debug_main_menu(debug_state, mouse_p)
     } else if input.mouse_right.half_transition_count > 0 {
         debug_main_menu(debug_state, mouse_p)
-        if debug_state.hot_menu_index >= 0 {
+        when false do if debug_state.hot_menu_index >= 0 {
             hot_variable := &DebugVariableList[debug_state.hot_menu_index]
             switch v in hot_variable.value {
             case b32:
                 hot_variable.value = !v
             }
             
-            write_handmade_config()
         }
+        write_handmade_config()
     }
      
     target_fps :: 72
@@ -501,12 +598,6 @@ overlay_debug_info :: proc(input: Input) {
     }
 }
 
-DebugVariableValue :: union { b32 }
-DebugVariable :: struct {
-    name: string,
-    value: DebugVariableValue,
-}
-
 write_handmade_config :: proc() {
     debug_state := get_debug_state()
     if debug_state == nil do return
@@ -514,30 +605,36 @@ write_handmade_config :: proc() {
     if debug_state.compiling do return
     debug_state.compiling = true
     
+    write :: proc(contents: []u8, cursor: ^u32, line: string) {
+        dest := contents[cursor^:]
+        for r, i in line {
+            assert(r < 256, "no unicode in config")
+            dest[i] = cast(u8) r
+        }
+        cursor^ += auto_cast len(line)
+    }
+    
     contents: [4096]u8
     cursor: u32
-    {
-        line := "package game\n\n"
-        dest := contents[cursor:]
-        for r, i in line {
-            assert(r < 255, "no unicode in config")
-            dest[i] = cast(u8) r
-        }
-        cursor += auto_cast len(line)
-    }
-    for var in DebugVariableList {
-        line: string
+    write(contents[:], &cursor, "package game\n\n")
+    
+    start := debug_state.root_group.value.(DebugVariableGroup).first_child
+    for var := start; var != nil;  {
         switch v in var.value {
-            case b32: 
-                line = fmt.tprintfln("%s :: %v", var.name, var.value)
+          case DebugVariableGroup:
+            write(contents[:], &cursor, fmt.tprintfln("// %s", var.name))
+            var = v.first_child
+          case b32:
+            write(contents[:], &cursor, fmt.tprintfln("%s :: %v", var.name, var.value))
+            for var != nil {
+                if var.next != nil {
+                    var = var.next
+                    break
+                } else {
+                    var = var.parent
+                }
+            }
         }
-        
-        dest := contents[cursor:]
-        for r, i in line {
-            assert(r < 255, "no unicode in config")
-            dest[i] = cast(u8) r
-        }
-        cursor += auto_cast len(line)
     }
     
     HandmadeConfigFilename :: "../code/game/debug_config.odin"
@@ -550,6 +647,7 @@ debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
     //     "Toggle Profiler Pause",
     //     "Mark Loop Point",
     // }
+    when false {
     menu_items := DebugVariableList
     
     best_distance_squared := length_squared(debug_state.menu_p - mouse_p)
@@ -578,6 +676,7 @@ debug_main_menu :: proc(debug_state: ^DebugState, mouse_p: v2) {
     }
     
     debug_state.hot_menu_index = hot_index
+}
 }
 
 debug_push_text :: proc(text: string, p: v2, color: v4 = 1) {
