@@ -33,13 +33,20 @@ DebugState :: struct {
     
     threads: []DebugThread,
     
-    last_mouse_p:     v2,
-    interaction:      DebugInteraction,
-    hot:              ^DebugVariable,
-    interacting_with: ^DebugVariable,
-    next_hot:         ^DebugVariable,
-    root_group:       ^DebugVariable,
-    hierarchy:        DebugVariableHierarchy,
+    
+    last_mouse_p:         v2,
+    interaction:          DebugInteraction,
+    interacting_with:     ^DebugVariable,
+    
+    hot_interaction:      DebugInteraction,
+    next_hot_interaction: DebugInteraction,
+    
+    hot:                  ^DebugVariable,
+    next_hot:             ^DebugVariable,
+    
+    root_group:           ^DebugVariable,
+    hierarchy:            DebugVariableHierarchy,
+    
     
     compiling:    b32,
     compiler:     DebugExecutingProcess,
@@ -53,11 +60,11 @@ DebugState :: struct {
     work_queue: ^PlatformWorkQueue, 
     buffer:     Bitmap,
     
-    profile_rect: Rectangle2,
     font_scale:   f32,
-    cp_y:         f32,
+    top_edge:         f32,
     ascent:       f32,
     left_edge:    f32,
+    right_edge:   f32,
     
     font_id:      FontId,
     font:         ^Font,
@@ -102,6 +109,8 @@ DebugInteraction :: enum {
     Toggle, 
     Drag,
     Tear,
+    
+    ResizeProfile,
 }
 
 ////////////////////////////////////////////////
@@ -164,22 +173,23 @@ DebugRecordLocation :: struct {
 
 ////////////////////////////////////////////////
 
-DebugVariableValue :: union { 
-    b32, 
-    i32,
-    u32,
-    f32,
-    v2,
-    v3,
-    v4,
-    DebugVariableGroup
-}
-
 DebugVariable :: struct {
     name:   string,
     value:  DebugVariableValue,
     parent: ^DebugVariable,
     next:   ^DebugVariable,
+}
+
+DebugVariableValue :: union { 
+    b32, i32, u32, f32, 
+    v2, v3, v4,
+    
+    DebugVariableThreadList,
+    DebugVariableGroup,
+}
+
+DebugVariableThreadList :: struct {
+    dimension: v2,
 }
 
 DebugVariableGroup :: struct {
@@ -208,48 +218,65 @@ get_debug_state_with_memory :: proc(memory: ^GameMemory) -> (debug_state: ^Debug
 
 @export
 debug_frame_end :: proc(memory: ^GameMemory) {
-    debug_state := get_debug_state()
-    if debug_state == nil do return
+    debug := get_debug_state()
+    if debug == nil do return
 
     modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
     
     if memory.reloaded_executable {
-        restart_collation(GlobalDebugTable.events_state.array_index)
+        restart_collation(debug, GlobalDebugTable.events_state.array_index)
     }
     
-    if !debug_state.paused {
-        if debug_state.collation_index >= DebugMaxHistoryLength-1 {
-            restart_collation(events_state.array_index)
+    if !debug.paused {
+        if debug.collation_index >= DebugMaxHistoryLength-1 {
+            restart_collation(debug, events_state.array_index)
         }
         
-        collate_debug_records(events_state.array_index)
+        collate_debug_records(debug, events_state.array_index)
     }
 }
 
 debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformWorkQueue, buffer: Bitmap) {
     assert(len(memory.debug_storage) >= size_of(DebugState))
     debug := cast(^DebugState) raw_data(memory.debug_storage)
+    
     if !debug.inititalized {
         debug.inititalized = true
         // :PointerArithmetic
         init_arena(&debug.debug_arena, memory.debug_storage[size_of(DebugState):])
-        init_debug_variables()
         
+        ctx := DebugVariableDefinitionContext { arena = &debug.debug_arena }
+
+        debug_begin_variable_group(&ctx, "Debugging")
+        
+        init_debug_variables(&ctx)
+
+        debug_begin_variable_group(&ctx, "Profile")
+            debug_begin_variable_group(&ctx, "By Thread")
+                debug_add_variable(&ctx, DebugVariableThreadList{ dimension = {800, 100}}, "")
+            debug_end_variable_group(&ctx)
+            debug_begin_variable_group(&ctx, "By Function")
+                debug_add_variable(&ctx, DebugVariableThreadList{ dimension = {800, 200}}, "")
+            debug_end_variable_group(&ctx)
+        debug_end_variable_group(&ctx)
+        
+        debug.root_group = ctx.group
+        
+
         sub_arena(&debug.collation_arena, &debug.debug_arena, 64 * Megabyte)
-        
-       
-        debug.work_queue = work_queue
-        debug.buffer     = buffer
-        
+                
         debug.threads = push(&debug.collation_arena, DebugThread, DebugMaxThreadCount)
         debug.scopes_to_record = push(&debug.collation_arena, ^DebugRecord, DebugMaxThreadCount)
         
         debug.font_scale = 0.6
+
+        debug.work_queue = work_queue
+        debug.buffer     = buffer
         
         debug.collation_memory = begin_temporary_memory(&debug.collation_arena)
-        restart_collation(GlobalDebugTable.events_state.array_index)
+        restart_collation(debug, GlobalDebugTable.events_state.array_index)
     }
 
     
@@ -265,86 +292,76 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
     debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
     debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
     
-    baseline :f32= 10
     if debug.font != nil {
         debug.font_info = get_font_info(assets, debug.font_id)
-        baseline = get_baseline(debug.font_info)
         debug.ascent = get_baseline(debug.font_info)
     } else {
         load_font(debug.render_group.assets, debug.font_id, false)
     }
     
-    debug.left_edge = -0.5 * cast(f32) buffer.width
-    debug.cp_y      =  0.5 * cast(f32) buffer.height - baseline * debug.font_scale
+    debug.left_edge  = -0.5 * cast(f32) buffer.width
+    debug.right_edge =  0.5 * cast(f32) buffer.width
+    debug.top_edge   =  0.5 * cast(f32) buffer.height
     
     debug.hierarchy.root_group = debug.root_group
-    debug.hierarchy.ui_p = { debug.left_edge, debug.cp_y }
+    debug.hierarchy.ui_p = { debug.left_edge, debug.top_edge }
 }
 
 ////////////////////////////////////////////////
 
-restart_collation :: proc(invalid_index: u32) {
-    debug_state := get_debug_state()
-    if debug_state == nil do return
+restart_collation :: proc(debug: ^DebugState, invalid_index: u32) {
+    end_temporary_memory(debug.collation_memory)
+    debug.collation_memory = begin_temporary_memory(&debug.collation_arena)
     
-    end_temporary_memory(debug_state.collation_memory)
-    debug_state.collation_memory = begin_temporary_memory(&debug_state.collation_arena)
+    debug.frames = push(&debug.collation_arena, DebugFrame, DebugMaxHistoryLength)
+    debug.frame_bar_scale = 1.0 / 60_000_000.0//1
+    debug.frame_count = 0
     
-    debug_state.frames = push(&debug_state.collation_arena, DebugFrame, DebugMaxHistoryLength)
-    debug_state.frame_bar_scale = 1.0 / 60_000_000.0//1
-    debug_state.frame_count = 0
-    
-    debug_state.collation_index = invalid_index + 1
-    debug_state.collation_frame = nil
+    debug.collation_index = invalid_index + 1
+    debug.collation_frame = nil
 }
 
-refresh_collation :: proc() {
-    debug_state := get_debug_state()
-    if debug_state == nil do return
-    
-    restart_collation(GlobalDebugTable.events_state.array_index)
-    collate_debug_records(GlobalDebugTable.events_state.array_index)
+refresh_collation :: proc(debug: ^DebugState) {
+    restart_collation(debug, GlobalDebugTable.events_state.array_index)
+    collate_debug_records(debug, GlobalDebugTable.events_state.array_index)
 }
 
-collate_debug_records :: proc(invalid_events_index: u32) {
-    debug_state := get_debug_state()
-    if debug_state == nil do return
-    
+collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
     // @Hack why should this need to be reset? Think dont guess
-    for &thread in debug_state.threads do thread.first_open_block = nil
+    for &thread in debug.threads do thread.first_open_block = nil
     
-    modular_add(&debug_state.collation_index, 0, DebugMaxHistoryLength)
+    modular_add(&debug.collation_index, 0, DebugMaxHistoryLength)
     for {
-        if debug_state.collation_index == invalid_events_index do break
-        defer modular_add(&debug_state.collation_index, 1, DebugMaxHistoryLength)
+        if debug.collation_index == invalid_events_index do break
+        defer modular_add(&debug.collation_index, 1, DebugMaxHistoryLength)
         
-        for &event in GlobalDebugTable.events[debug_state.collation_index][:GlobalDebugTable.event_count[debug_state.collation_index]] {
+        for &event in GlobalDebugTable.events[debug.collation_index][:GlobalDebugTable.event_count[debug.collation_index]] {
             if event.type == .FrameMarker {
-                if debug_state.collation_frame != nil {
-                    debug_state.collation_frame.end_clock = event.clock
-                    modular_add(&debug_state.frame_count, 1, auto_cast len(debug_state.frames))
-                    debug_state.collation_frame.seconds_elapsed = event.as.frame_marker.seconds_elapsed
+                if debug.collation_frame != nil {
+                    debug.collation_frame.end_clock = event.clock
+                    modular_add(&debug.frame_count, 1, auto_cast len(debug.frames))
+                    debug.collation_frame.seconds_elapsed = event.as.frame_marker.seconds_elapsed
                     
-                    clocks := cast(f32) (debug_state.collation_frame.end_clock - debug_state.collation_frame.begin_clock)
+                    clocks := cast(f32) (debug.collation_frame.end_clock - debug.collation_frame.begin_clock)
                     if clocks != 0 {
                         // scale := 1.0 / clocks
                         // debug_state.frame_bar_scale = min(debug_state.frame_bar_scale, scale)
                     }
                 }
                 
-                debug_state.collation_frame = &debug_state.frames[debug_state.frame_count]
-                debug_state.collation_frame^ = {
+                debug.collation_frame = &debug.frames[debug.frame_count]
+                debug.collation_frame^ = {
                     begin_clock     = event.clock,
                     end_clock       = -1,
-                    regions         = push(&debug_state.collation_arena, DebugRegion, DebugMaxRegionsPerFrame)
+                    regions         = push(&debug.collation_arena, DebugRegion, DebugMaxRegionsPerFrame)
                 }
-            } else if debug_state.collation_frame != nil {
-                debug_state.frame_bar_lane_count = max(debug_state.frame_bar_lane_count, cast(u32) event.as.block.thread_index)
+            } else if debug.collation_frame != nil {
+                debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.as.block.thread_index)
                 
                 source := &GlobalDebugTable.records[event.as.block.thread_index][event.record_index]
-                frame_relative_clock := event.clock - debug_state.collation_frame.begin_clock
-                thread := &debug_state.threads[event.as.block.thread_index]
-                frame_index := debug_state.frame_count-1
+                frame_relative_clock := event.clock - debug.collation_frame.begin_clock
+                thread := &debug.threads[event.as.block.thread_index]
+                frame_index := debug.frame_count-1
                 
                 switch event.type {
                 case .FrameMarker: unreachable()
@@ -353,7 +370,7 @@ collate_debug_records :: proc(invalid_events_index: u32) {
                     if block != nil {
                         thread.first_free_block = block.next_free
                     } else {
-                        block = push(&debug_state.collation_arena, DebugOpenBlock)
+                        block = push(&debug.collation_arena, DebugOpenBlock)
                     }
                     block^ = {
                         frame_index   = frame_index,
@@ -373,14 +390,14 @@ collate_debug_records :: proc(invalid_events_index: u32) {
                                     return 
                                 }
                                 
-                                if record_from(matching_block.parent) == debug_state.scopes_to_record[event.as.block.thread_index] {
-                                    t_min := cast(f32) (opening_event.clock - debug_state.collation_frame.begin_clock)
-                                    t_max := cast(f32) (event.clock - debug_state.collation_frame.begin_clock)
+                                if record_from(matching_block.parent) == debug.scopes_to_record[event.as.block.thread_index] {
+                                    t_min := cast(f32) (opening_event.clock - debug.collation_frame.begin_clock)
+                                    t_max := cast(f32) (event.clock - debug.collation_frame.begin_clock)
                                     
                                     threshold :: 0.001
                                     if t_max - t_min > threshold {
-                                        region := &debug_state.collation_frame.regions[debug_state.collation_frame.region_count]
-                                        debug_state.collation_frame.region_count += 1
+                                        region := &debug.collation_frame.regions[debug.collation_frame.region_count]
+                                        debug.collation_frame.region_count += 1
                                         
                                         region^ = {
                                             record      = source,
@@ -420,6 +437,7 @@ debug_end_and_overlay :: proc(input: Input) {
     if debug == nil do return
     
     debug.next_hot = nil
+    debug.hot_interaction = .None
     
     overlay_debug_info(debug, input)
     
@@ -430,100 +448,104 @@ debug_end_and_overlay :: proc(input: Input) {
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     if debug.render_group == nil do return
 
-    target_fps :: 72
-
-    pad_x :: 20
-    pad_y :: 20
-    
     orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 1)
-    
+
     if debug.compiling {
         state := Platform.debug.get_process_state(debug.compiler)
         if state.is_running {
             debug_push_text_line("Recompiling...")
         } else {
+            assert(state.return_code == 0)
             debug.compiling = false
         }
     }
+
+    debug_main_menu(debug, input)
+    debug_interact(debug, input)
     
     if DEBUG_ShowFramerate {
         debug_push_text_line(fmt.tprintf("Last Frame time: %5.4f ms", debug.frames[0].seconds_elapsed*1000))
     }
-    
-    debug_main_menu(debug, input.mouse.p)
-    debug_interact(debug, input)
-    
-    if DEBUG_ShowProfilingGraph {
-        debug.profile_rect = rectangle_center_diameter(v2{0, 0}, v2{600, 600})
-        push_rectangle(debug.render_group, debug.profile_rect, {0.08, 0.08, 0.2, 1} )
-        
-        bar_padding :: 2
-        lane_count  := cast(f32) debug.frame_bar_lane_count +1 
-        lane_height :f32
-        frame_count := cast(f32) len(debug.frames)
-        if frame_count > 0 && lane_count > 0 {
-            lane_height = ((rectangle_get_diameter(debug.profile_rect).y / frame_count) - bar_padding) / lane_count
-        }
-        
-        bar_height       := lane_height * lane_count
-        bar_plus_spacing := bar_height + bar_padding
-        
-        full_height := bar_plus_spacing * frame_count
-        
-        chart_left  := debug.profile_rect.min.x
-        chart_top   := debug.profile_rect.max.y - bar_plus_spacing
-        chart_width := rectangle_get_diameter(debug.profile_rect).x
-        
-        scale := debug.frame_bar_scale * chart_width
-        
-        hot_region: ^DebugRegion
-        for frame_index in 0..<len(debug.frames) {
-            frame := &debug.frames[(frame_index + cast(int) debug.collation_index) % len(debug.frames)]
-            
-            stack_x := chart_left
-            stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
-            for &region, region_index in frame.regions[:frame.region_count] {
-                
-                x_min := stack_x + scale * region.t_min
-                x_max := stack_x + scale * region.t_max
+}
 
-                y_min := stack_y + 0.5 * lane_height + lane_height * cast(f32) region.lane_index
-                y_max := y_min + lane_height
-                rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
-                
-                color_wheel := color_wheel
-                color := color_wheel[region.record.hash * 13 % len(color_wheel)]
-                            
-                push_rectangle(debug.render_group, rect, color)
-                if rectangle_contains(rect, input.mouse.p) {
-                    record := region.record
-                    if was_pressed(input.mouse.left) {
-                        hot_region = &region
-                    }
-                    text := fmt.tprintf("%s - %d cycles [%s:% 4d]", record.loc.name, region.cycle_count, record.loc.file_path, record.loc.line)
-                    debug_push_text(text, input.mouse.p)
-                }
-            }
-        }
+debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) {
+    push_rectangle(debug.render_group, rect, {0.08, 0.08, 0.2, 1} )
+    
+    target_fps :: 72
+
+    pad_x :: 20
+    pad_y :: 20
+
+    bar_padding :: 2
+    lane_count  := cast(f32) debug.frame_bar_lane_count +1 
+    lane_height :f32
+    frame_count := cast(f32) len(debug.frames)
+    if frame_count > 0 && lane_count > 0 {
+        lane_height = ((rectangle_get_diameter(rect).y / frame_count) - bar_padding) / lane_count
+    }
+    
+    bar_height       := lane_height * lane_count
+    bar_plus_spacing := bar_height + bar_padding
+    
+    full_height := bar_plus_spacing * frame_count
+    
+    chart_left  := rect.min.x
+    chart_top   := rect.max.y - bar_plus_spacing
+    chart_width := rectangle_get_diameter(rect).x
+    
+    scale := debug.frame_bar_scale * chart_width
+    
+    hot_region: ^DebugRegion
+    for frame_index in 0..<len(debug.frames) {
+        frame := &debug.frames[(frame_index + cast(int) debug.collation_index) % len(debug.frames)]
         
-        if was_pressed(input.mouse.left) {
-            if hot_region != nil {
-                debug.scopes_to_record[hot_region.lane_index] = hot_region.record
-            } else {
-                for &scope in debug.scopes_to_record do scope = nil
+        stack_x := chart_left
+        stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
+        for &region, region_index in frame.regions[:frame.region_count] {
+            
+            x_min := stack_x + scale * region.t_min
+            x_max := stack_x + scale * region.t_max
+
+            y_min := stack_y + 0.5 * lane_height + lane_height * cast(f32) region.lane_index
+            y_max := y_min + lane_height
+            stack_rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
+            
+            color_wheel := color_wheel
+            color := color_wheel[region.record.hash * 13 % len(color_wheel)]
+                        
+            push_rectangle(debug.render_group, stack_rect, color)
+            if rectangle_contains(stack_rect, input.mouse.p) {
+                record := region.record
+                if was_pressed(input.mouse.left) {
+                    hot_region = &region
+                }
+                text := fmt.tprintf("%s - %d cycles [%s:% 4d]", record.loc.name, region.cycle_count, record.loc.file_path, record.loc.line)
+                debug_push_text(text, input.mouse.p)
             }
-            refresh_collation()
         }
+    }
+    
+    if was_pressed(input.mouse.left) {
+        if hot_region != nil {
+            debug.scopes_to_record[hot_region.lane_index] = hot_region.record
+        } else {
+            for &scope in debug.scopes_to_record do scope = nil
+        }
+        refresh_collation(debug)
     }
 }
 
 debug_begin_interact :: proc(debug: ^DebugState, input: Input) {
     if debug.hot != nil {
-        #partial switch var in debug.hot.value {
-        case b32, DebugVariableGroup:
-            debug.interaction = .Toggle
-        case f32:
-            debug.interaction = .Drag
+        if debug.hot_interaction == .None {
+            #partial switch var in debug.hot.value {
+              case b32, DebugVariableGroup:
+                debug.interaction = .Toggle
+              case f32:
+                debug.interaction = .Drag
+            }
+        } else {
+            debug.interaction = debug.hot_interaction
         }
         
         if debug.interaction != .None {
@@ -541,9 +563,9 @@ debug_end_interact :: proc(debug: ^DebugState, input: Input) {
     }
     
     if debug.interaction != .NOP {
-        assert(debug.interacting_with != nil)
+        // assert(debug.interacting_with != nil)
         
-        switch debug.interaction {
+        #partial switch debug.interaction {
           case .NOP: unreachable()
           case .Toggle:
             reload := true
@@ -556,7 +578,6 @@ debug_end_interact :: proc(debug: ^DebugState, input: Input) {
             }
             
             if reload do write_handmade_config()
-          case .None, .Drag, .Tear:
         }
     }
 }
@@ -566,20 +587,23 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
     defer debug.last_mouse_p = input.mouse.p
     
     if debug.interaction != .None {
+        var := debug.interacting_with
         // NOTE(viktor): Mouse move interaction
-        switch debug.interaction {
-          case .None: unreachable()
+        #partial switch debug.interaction {
           case .Drag:
-            #partial switch &var in debug.interacting_with.value {
+            #partial switch &value in var.value {
               case f32:
-                var += 0.1 * mouse_dp.y
+                value += 0.1 * mouse_dp.y
             }
-          
-          case .Toggle, .Tear, .NOP:
+          case .ResizeProfile:
+            value := &var.value.(DebugVariableThreadList)
+            value.dimension += mouse_dp * {1,-1}
+            value.dimension.x = max(value.dimension.x, 10)
+            value.dimension.y = max(value.dimension.y, 10)
         }
         
         // NOTE(viktor): Click interaction
-        for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
+        for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_end_interact(debug, input)
             debug_begin_interact(debug, input)
         }
@@ -589,6 +613,7 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
         }
     } else {
         debug.hot = debug.next_hot
+        debug.hot_interaction = debug.next_hot_interaction
         
         for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_begin_interact(debug, input)
@@ -601,21 +626,25 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
     }
 }
 
-debug_main_menu :: proc(debug: ^DebugState, mouse_p: v2) {
+debug_main_menu :: proc(debug: ^DebugState, input: Input) {
     // menu_items := [?]string {
     //     "Toggle Profiler Pause",
     //     "Mark Loop Point",
     // }
     if debug.font_info == nil do return
     
+    mouse_p := input.mouse.p
+    
     p := debug.hierarchy.ui_p
     line_advance := get_line_advance(debug.font_info) * debug.font_scale
     depth: f32
     
-    start := debug.hierarchy.root_group.value.(DebugVariableGroup).first_child
-    for var := start; var != nil;  {
-        text:  string
-        color := White
+    spacing_y :: 4
+    
+    for var := debug.hierarchy.root_group; var != nil;  {
+        text: string
+        is_hot := var == debug.hot
+        color := is_hot ? Blue : White
         
         depth_delta: f32
         defer depth += depth_delta
@@ -623,17 +652,55 @@ debug_main_menu :: proc(debug: ^DebugState, mouse_p: v2) {
         next: ^DebugVariable
         defer var = next
         
+        draw_p: v2
+        bounds: Rectangle2
+        
         switch value in var.value {
-          case DebugVariableGroup:
-            text = fmt.tprintf("%s %v", value.expanded ? "-" : "+",  var.name)
-            if value.expanded {
-                color = Yellow
-                next = value.first_child
-                depth_delta = 1
+          case DebugVariableThreadList:
+            min_corner := p + {depth * 2 * line_advance, -value.dimension.y}
+            max_corner := v2{min_corner.x + value.dimension.x, p.y}
+            size_p := v2{max_corner.x, min_corner.y}
+            bounds = rectangle_min_max(min_corner, max_corner)
+            debug_draw_profile(debug, input, bounds)
+            
+            resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
+
+            handle_color := debug.hot_interaction == .ResizeProfile && is_hot ? Blue : White
+            push_rectangle(debug.render_group, resize_handle, handle_color)
+        
+            if rectangle_contains(resize_handle, mouse_p) {
+                debug.next_hot_interaction = .ResizeProfile
+                debug.next_hot = var
+            } else if rectangle_contains(bounds, mouse_p) {
+                debug.next_hot_interaction = .None
+                debug.next_hot = var
             }
-          case b32, u32, i32, f32, v2, v3, v4:
-            text = fmt.tprintf("%s %v", var.name, value)
+                        
+          case DebugVariableGroup, b32, u32, i32, f32, v2, v3, v4:
+            if group, ok := value.(DebugVariableGroup); ok {
+                text = fmt.tprintf("%s %v", group.expanded ? "-" : "+",  var.name)
+                if group.expanded {
+                    next = group.first_child
+                    depth_delta += 1
+                }
+            } else {
+                text = fmt.tprintf("%s %v", var.name, value)
+            }
+                        
+            left := p.x + depth*line_advance*2
+            top  := p.y
+            bounds = debug_measure_text(text)
+            bounds = rectangle_add_offset(bounds, v2{left, top - rectangle_get_diameter(bounds).y })
+
+            debug_push_text(text, {left, top} - {0, debug.ascent * debug.font_scale}, color)
+            
+            if rectangle_contains(bounds, mouse_p) {
+                debug.next_hot_interaction = .None
+                debug.next_hot = var
+            }
         }
+        
+        p.y = rectangle_get_min(bounds).y - spacing_y
         
         if next == nil {
             next = var
@@ -647,21 +714,9 @@ debug_main_menu :: proc(debug: ^DebugState, mouse_p: v2) {
                 }
             }
         }
-        
-        text_p := p + {depth*line_advance*2, 0}
-        text_rect := rectangle_add_offset(debug_measure_text(text), text_p)
-        if rectangle_contains(text_rect, mouse_p) {
-            debug.next_hot = var
-        }
-        if var == debug.hot {
-            color = Blue
-        }
-        
-        debug_push_text(text, text_p, color)
-        p.y -= line_advance
     }
     
-    debug.cp_y = p.y
+    debug.top_edge = p.y
 }
 
 write_handmade_config :: proc() {
@@ -690,10 +745,16 @@ write_handmade_config :: proc() {
         next: ^DebugVariable
         defer var = next
         
+        should_write := true
         t: typeid
         switch value in var.value {
+          case DebugVariableThreadList: // NOTE(viktor): transient data
+            next = var.next
+            should_write = false
           case DebugVariableGroup:
             cursor += write(contents[cursor:], fmt.tprintfln("// %s", var.name))
+            should_write = false
+            
             next = value.first_child
           case b32: t = b32
           case f32: t = f32
@@ -704,9 +765,11 @@ write_handmade_config :: proc() {
           case v4:  t = v4
         }
         
-        if next == nil {
+        if should_write {
             cursor += write(contents[cursor:], fmt.tprintfln("%s :%w: %w", var.name, t, var.value))
-            
+        }
+        
+        if next == nil {
             next = var
             for next != nil {
                 if next.next != nil {
@@ -724,94 +787,86 @@ write_handmade_config :: proc() {
     debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game`)
 }
 
-init_debug_variables :: proc () {
-    DebugVariableDefinitionContext :: struct {
-        arena:       ^Arena,
-        group:       ^DebugVariable,
-    }
+init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
+    debug_begin_variable_group(ctx, "Profiling")
+        debug_add_variable(ctx, DEBUG_Profiling)
+        debug_add_variable(ctx, DEBUG_ShowFramerate)
+    debug_end_variable_group(ctx)
 
-    push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value: DebugVariableValue) -> (result: ^DebugVariable) {
-        result = push(ctx.arena, DebugVariable)
-        result.name   = push_string(ctx.arena, name)
-        result.value  = value
-        result.parent = ctx.group
+    debug_begin_variable_group(ctx, "Rendering")
+        debug_add_variable(ctx, DEBUG_UseDebugCamera)
+        debug_add_variable(ctx, DEBUG_DebugCameraDistance)
+    
+        debug_add_variable(ctx, DEBUG_RenderSingleThreaded)
+        debug_add_variable(ctx, DEBUG_TestWeirdScreenSizes)
         
-        if ctx.group != nil {
-            group := &ctx.group.value.(DebugVariableGroup)
-            if group != nil {
-                if group.last_child != nil {
-                    group.last_child.next = result
-                    group.last_child      = result
-                } else {
-                    group.first_child = result
-                    group.last_child  = result
-                }
+        debug_begin_variable_group(ctx, "Bounds")
+            debug_add_variable(ctx, DEBUG_ShowSpaceBounds)
+            debug_add_variable(ctx, DEBUG_ShowGroundChunkBounds)
+        debug_end_variable_group(ctx)
+        
+        debug_begin_variable_group(ctx, "ParticleSystem")
+            debug_add_variable(ctx, DEBUG_ParticleSystemTest)
+            debug_add_variable(ctx, DEBUG_ParticleGrid)
+        debug_end_variable_group(ctx)
+        
+        debug_begin_variable_group(ctx, "CoordinateSystem")
+            debug_add_variable(ctx, DEBUG_CoordinateSystemTest)
+            debug_add_variable(ctx, DEBUG_ShowLightingBounceDirection)
+            debug_add_variable(ctx, DEBUG_ShowLightingSampling)
+        debug_end_variable_group(ctx)
+    debug_end_variable_group(ctx)
+
+    debug_begin_variable_group(ctx, "Audio")
+        debug_add_variable(ctx, DEBUG_SoundPanningWithMouse)
+        debug_add_variable(ctx, DEBUG_SoundPitchingWithMouse)
+    debug_end_variable_group(ctx)
+
+    debug_add_variable(ctx, DEBUG_FamiliarFollowsHero)
+    debug_add_variable(ctx, DEBUG_HeroJumping)
+}
+
+DebugVariableDefinitionContext :: struct {
+    arena: ^Arena,
+    group: ^DebugVariable,
+}
+
+push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value: DebugVariableValue) -> (result: ^DebugVariable) {
+    result = push(ctx.arena, DebugVariable)
+    result.name   = push_string(ctx.arena, name)
+    result.value  = value
+    result.parent = ctx.group
+    
+    if ctx.group != nil {
+        group := &ctx.group.value.(DebugVariableGroup)
+        if group != nil {
+            if group.last_child != nil {
+                group.last_child.next = result
+                group.last_child      = result
+            } else {
+                group.first_child = result
+                group.last_child  = result
             }
         }
-                
-        return result
     }
-    
-    begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) {
-        group := push_variable(ctx, group_name, DebugVariableGroup{})
-        ctx.group = group
-    }
-    
-    add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) {
-        var := push_variable(ctx, variable_name, value)
-    }
-    
-    end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext) {
-        assert(ctx.group != nil)
-        ctx.group = ctx.group.parent
-    }
-    debug := get_debug_state()
-    assert(debug != nil)
-    ctx := DebugVariableDefinitionContext { arena = &debug.debug_arena }
-    begin_variable_group(&ctx, "Root")
-    
-    begin_variable_group(&ctx, "Profiling")
-        add_variable(&ctx, DEBUG_Profiling)
-        add_variable(&ctx, DEBUG_ShowFramerate)
-        add_variable(&ctx, DEBUG_ShowProfilingGraph)
-    end_variable_group(&ctx)
-    
+            
+    return result
+}
 
-    begin_variable_group(&ctx, "Audio")
-        add_variable(&ctx, DEBUG_SoundPanningWithMouse)
-        add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
-    end_variable_group(&ctx)
-
-    begin_variable_group(&ctx, "Rendering")
-        add_variable(&ctx, DEBUG_UseDebugCamera)
-        add_variable(&ctx, DEBUG_DebugCameraDistance)
+debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariable) {
+    result = push_variable(ctx, group_name, DebugVariableGroup{})
+    ctx.group = result
     
-        add_variable(&ctx, DEBUG_RenderSingleThreaded)
-        add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
-        
-        begin_variable_group(&ctx, "Bounds")
-            add_variable(&ctx, DEBUG_ShowSpaceBounds)
-            add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
-        end_variable_group(&ctx)
-        
-        begin_variable_group(&ctx, "ParticleSystem")
-            add_variable(&ctx, DEBUG_ParticleSystemTest)
-            add_variable(&ctx, DEBUG_ParticleGrid)
-        end_variable_group(&ctx)
-        
-        begin_variable_group(&ctx, "CoordinateSystem")
-            add_variable(&ctx, DEBUG_CoordinateSystemTest)
-            add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
-            add_variable(&ctx, DEBUG_ShowLightingSampling)
-        end_variable_group(&ctx)
-    end_variable_group(&ctx)
+    return result
+}
 
-    begin_variable_group(&ctx, "Entities")
-        add_variable(&ctx, DEBUG_FamiliarFollowsHero)
-        add_variable(&ctx, DEBUG_HeroJumping)
-    end_variable_group(&ctx)
-    
-    debug.root_group = ctx.group
+debug_add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) -> ^DebugVariable {
+    return push_variable(ctx, variable_name, value)
+}
+
+debug_end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext) {
+    assert(ctx.group != nil)
+    ctx.group = ctx.group.parent
 }
 
 ////////////////////////////////////////////////
@@ -837,15 +892,15 @@ debug_measure_text :: proc(text: string) -> (result: Rectangle2) {
 }
 
 debug_push_text_line :: proc(text: string) {
-    debug_state := get_debug_state()
-    if debug_state == nil do return
+    debug := get_debug_state()
+    if debug == nil do return
     
-    assert(debug_state.render_group.inside_render)
+    assert(debug.render_group.inside_render)
     
-    debug_push_text(text, {debug_state.left_edge, debug_state.cp_y})
-    if debug_state.font != nil {
-        advance_y := get_line_advance(debug_state.font_info)
-        debug_state.cp_y -= debug_state.font_scale * advance_y
+    debug_push_text(text, {debug.left_edge, debug.top_edge} - {0, debug.ascent * debug.font_scale})
+    if debug.font != nil {
+        advance_y := get_line_advance(debug.font_info)
+        debug.top_edge -= debug.font_scale * advance_y
     }
 }
 

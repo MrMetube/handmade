@@ -354,31 +354,29 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     return result
 }
 
-@(require_results) rectangle_get_diameter :: #force_inline proc(rec: Rectangle($T)) -> (result: T) {
-    return rec.max - rec.min
-}
-@(require_results) rectangle_get_center :: #force_inline proc(rec: Rectangle($T)) -> (result: T) {
-    return rec.min + 0.5 * rectangle_get_diameter(rec)
-}
+@(require_results) rectangle_get_max      :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.max }
+@(require_results) rectangle_get_min      :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.min }
+@(require_results) rectangle_get_diameter :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
+@(require_results) rectangle_get_center   :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.min + 0.5 * (rect.max - rect.min) }
 
-@(require_results) rectangle_add_radius :: #force_inline proc(rec: $R/Rectangle($T), radius: T) -> (result: R) {
-    result = rec
+@(require_results) rectangle_add_radius :: #force_inline proc(rect: $R/Rectangle($T), radius: T) -> (result: R) {
+    result = rect
     result.min -= radius
     result.max += radius
     return result
 }
 
-@(require_results) rectangle_add_offset :: #force_inline proc(rec: $R/Rectangle($T), offset: T) -> (result: R) {
-    result.min = rec.min + offset
-    result.max = rec.max + offset
+@(require_results) rectangle_add_offset :: #force_inline proc(rect: $R/Rectangle($T), offset: T) -> (result: R) {
+    result.min = rect.min + offset
+    result.max = rect.max + offset
     
     return result
 }
 
-@(require_results) rectangle_contains :: #force_inline proc(rec: Rectangle($T), point: T) -> (result: b32) {
-    result  = rec.min.x < point.x && point.x < rec.max.x 
-    result &= rec.min.y < point.y && point.y < rec.max.y
-    when len(T) >= 3 do result &= rec.min.z < point.z && point.z < rec.max.z
+@(require_results) rectangle_contains :: #force_inline proc(rect: Rectangle($T), point: T) -> (result: b32) {
+    result  = rect.min.x < point.x && point.x < rect.max.x 
+    result &= rect.min.y < point.y && point.y < rect.max.y
+    when len(T) >= 3 do result &= rect.min.z < point.z && point.z < rect.max.z
     return result
 }
 
@@ -426,15 +424,15 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     return result
 }
 
-@(require_results) rectangle_xy :: #force_inline proc(rec: Rectangle3) -> (result: Rectangle2) {
-    result.min = rec.min.xy
-    result.max = rec.max.xy
+@(require_results) rectangle_xy :: #force_inline proc(rect: Rectangle3) -> (result: Rectangle2) {
+    result.min = rect.min.xy
+    result.max = rect.max.xy
     
     return result
 }
 
-@(require_results) rectangle_clamped_area :: #force_inline proc(rec: Rectangle2i) -> (result: i32) {
-    dimension := rec.max - rec.min
+@(require_results) rectangle_clamped_area :: #force_inline proc(rect: Rectangle2i) -> (result: i32) {
+    dimension := rect.max - rect.min
     if dimension.x > 0 && dimension.y > 0 {
         result = dimension.x * dimension.y
     }
@@ -442,6 +440,6 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     return result
 }
 
-@(require_results) rectangle_has_area :: #force_inline proc(rec: Rectangle2i) -> (result: b32) {
-    return rec.min.x < rec.max.x && rec.min.y < rec.max.y
+@(require_results) rectangle_has_area :: #force_inline proc(rect: Rectangle2i) -> (result: b32) {
+    return rect.min.x < rect.max.x && rect.min.y < rect.max.y
 }

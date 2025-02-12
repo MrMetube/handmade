@@ -1,15 +1,11 @@
 package game
 
 // Profiling
-DEBUG_Profiling :b32: false
-DEBUG_ShowFramerate :b32: false
-DEBUG_ShowProfilingGraph :b32: false
-// Audio
-DEBUG_SoundPanningWithMouse :b32: false
-DEBUG_SoundPitchingWithMouse :b32: false
+DEBUG_Profiling :b32: true
+DEBUG_ShowFramerate :b32: true
 // Rendering
-DEBUG_UseDebugCamera :b32: true
-DEBUG_DebugCameraDistance :f32: 1.80001307
+DEBUG_UseDebugCamera :b32: false
+DEBUG_DebugCameraDistance :f32: 5
 DEBUG_RenderSingleThreaded :b32: false
 DEBUG_TestWeirdScreenSizes :b32: false
 // Bounds
@@ -22,6 +18,11 @@ DEBUG_ParticleGrid :b32: false
 DEBUG_CoordinateSystemTest :b32: false
 DEBUG_ShowLightingBounceDirection :b32: false
 DEBUG_ShowLightingSampling :b32: false
-// Entities
+// Audio
+DEBUG_SoundPanningWithMouse :b32: false
+DEBUG_SoundPitchingWithMouse :b32: false
 DEBUG_FamiliarFollowsHero :b32: false
 DEBUG_HeroJumping :b32: false
+// Profile
+// By Thread
+// By Function

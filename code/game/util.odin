@@ -48,24 +48,20 @@ i32x4 :: #simd[4]i32
 @(disabled=ODIN_DISABLE_ASSERT)
 assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {
     if !condition {
-        // NOTE(viktor): if needed enclose the failure code in the cold proc to improve branch prediction
-        // @(cold)
-        // cold :: proc(message: string, loc: runtime.Source_Code_Location) {
-            runtime.print_caller_location(loc)
-            runtime.print_string(" Assertion failed")
-            if len(message) > 0 {
-                runtime.print_string(": ")
-                runtime.print_string(message)
-            }
-            runtime.print_byte('\n')
-            
-            when ODIN_DEBUG {
-                runtime.debug_trap()
-            } else {
-                runtime.trap()
-            }
-        // }
-        // cold(message, loc)
+        // TODO(viktor): We are not a console application
+        runtime.print_caller_location(loc)
+        runtime.print_string(" Assertion failed")
+        if len(message) > 0 {
+            runtime.print_string(": ")
+            runtime.print_string(message)
+        }
+        runtime.print_byte('\n')
+        
+        when ODIN_DEBUG {
+            runtime.debug_trap()
+        } else {
+            runtime.trap()
+        }
     }
 }
 

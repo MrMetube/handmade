@@ -52,7 +52,11 @@ Transform :: struct {
     scale:  f32,
     offset: v3,
     
-    orthographic: b32,
+    mode: TransformMode,
+}
+
+TransformMode :: enum {
+    None, Perspective, Orthographic,
 }
 
 EnvironmentMap :: struct {
@@ -128,6 +132,7 @@ begin_render :: proc(group: ^RenderGroup) {
 end_render :: proc(group: ^RenderGroup) {
     timed_function()
     assert(group.inside_render)
+    assert(group.transform.mode != .None)
     
     end_generation(group.assets, group.generation_id)
     group.push_buffer_size = 0
@@ -135,7 +140,7 @@ end_render :: proc(group: ^RenderGroup) {
 }
 
 perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
-    group.transform.orthographic = false
+    group.transform.mode = .Perspective
     
     group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
     group.transform.meters_to_pixels_for_monitor = meters_to_pixels
@@ -149,7 +154,7 @@ perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meter
 }
 
 orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels: f32) {
-    group.transform.orthographic = true
+    group.transform.mode = .Orthographic
     
     group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
     group.transform.meters_to_pixels_for_monitor = meters_to_pixels
@@ -168,7 +173,7 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
 
 push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     assert(group.inside_render)
-    assert(group.transform != {})
+    assert(group.transform.mode != .None)
     
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
     size := cast(u32) size_of(T) + header_size
@@ -342,7 +347,7 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
     near_clip_plane :: 0.2
     distance_above_target := transform.distance_above_target
     
-    if !transform.orthographic {
+    if transform.mode == .Perspective {
         base_z: f32//base_p.z
         
         // Debug camera
@@ -398,6 +403,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap) {
     timed_function()
     assert(group.inside_render)
+    assert(group.transform != {})
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
     
     /* TODO(viktor):
