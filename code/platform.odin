@@ -366,24 +366,24 @@ main :: proc() {
                 win.GetCursorPos(&mouse)
                 win.ScreenToClient(window, &mouse)
                 mouse_p := transmute([2]i32) mouse
-                new_input.mouse_position = v2{ 
-                    (-0.5 * cast(f32) GLOBAL_back_buffer.width + 0.5) + cast(f32) mouse.x,
-                    (0.5 * cast(f32) GLOBAL_back_buffer.height + 0.5) - cast(f32) mouse.y,
+                new_input.mouse.p = v2{ 
+                    (-0.5 * cast(f32) GLOBAL_back_buffer.width  + 0.5) + cast(f32) mouse.x,
+                    ( 0.5 * cast(f32) GLOBAL_back_buffer.height + 0.5) - cast(f32) mouse.y,
                 }
                 
-                for &button, index in new_input.mouse_buttons {
-                    button.ended_down = old_input.mouse_buttons[index].ended_down
+                for &button, index in new_input.mouse.buttons {
+                    button.ended_down = old_input.mouse.buttons[index].ended_down
                     button.half_transition_count = 0
                 }
                 // TODO: support mouse wheel
-                new_input.mouse_wheel = 0
-                is_down_mask := transmute(win.SHORT) u16(1 << 15)
+                new_input.mouse.wheel = 0
+                is_down_mask := min(i16) // 1 << 15
                 // TODO: Do we need to update the input button on every event?
-                process_win_keyboard_message(&new_input.mouse_left,   cast(b32) (win.GetKeyState(win.VK_LBUTTON)  & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse_right,  cast(b32) (win.GetKeyState(win.VK_RBUTTON)  & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse_middle, cast(b32) (win.GetKeyState(win.VK_MBUTTON)  & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse_extra1, cast(b32) (win.GetKeyState(win.VK_XBUTTON1) & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse_extra2, cast(b32) (win.GetKeyState(win.VK_XBUTTON2) & is_down_mask))
+                process_win_keyboard_message(&new_input.mouse.left,   cast(b32) (win.GetKeyState(win.VK_LBUTTON)  & is_down_mask))
+                process_win_keyboard_message(&new_input.mouse.right,  cast(b32) (win.GetKeyState(win.VK_RBUTTON)  & is_down_mask))
+                process_win_keyboard_message(&new_input.mouse.middle, cast(b32) (win.GetKeyState(win.VK_MBUTTON)  & is_down_mask))
+                process_win_keyboard_message(&new_input.mouse.extra1, cast(b32) (win.GetKeyState(win.VK_XBUTTON1) & is_down_mask))
+                process_win_keyboard_message(&new_input.mouse.extra2, cast(b32) (win.GetKeyState(win.VK_XBUTTON2) & is_down_mask))
             }
 
             { // Keyboard Input

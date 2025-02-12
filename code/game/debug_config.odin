@@ -9,7 +9,7 @@ DEBUG_SoundPanningWithMouse :b32: false
 DEBUG_SoundPitchingWithMouse :b32: false
 // Rendering
 DEBUG_UseDebugCamera :b32: true
-DEBUG_DebugCameraDistance :f32: 5
+DEBUG_DebugCameraDistance :f32: 1.80001307
 DEBUG_RenderSingleThreaded :b32: false
 DEBUG_TestWeirdScreenSizes :b32: false
 // Bounds

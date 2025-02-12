@@ -38,7 +38,7 @@ Bitmap :: struct {
 }
 
 InputButton :: struct {
-    half_transition_count: i32,
+    half_transition_count: u32,
     ended_down:            b32,
 }
 
@@ -67,20 +67,24 @@ InputController :: struct {
 Input :: struct {
     delta_time: f32,
 
-    using _mouse_buttons_array_and_enum : struct #raw_union {
-        mouse_buttons: [5]InputButton,
-        using _buttons_enum : struct {
-            mouse_left,	mouse_right, 
-            mouse_middle,
-            mouse_extra1, mouse_extra2 : InputButton,
+    mouse: struct {
+        using _buttons_array_and_enum : struct #raw_union {
+            buttons: [5]InputButton,
+            using _buttons_enum : struct {
+                left, 
+                right, 
+                middle,
+                extra1, 
+                extra2: InputButton,
+            },
         },
+        p:     v2,
+        wheel: f32,
     },
-    mouse_position: v2,
-    mouse_wheel:    f32,
 
     controllers: [5]InputController,
 }
-#assert(size_of(Input{}._mouse_buttons_array_and_enum.mouse_buttons) == size_of(Input{}._mouse_buttons_array_and_enum._buttons_enum))
+#assert(size_of(Input{}.mouse._buttons_array_and_enum.buttons) == size_of(Input{}.mouse._buttons_array_and_enum._buttons_enum))
 
 GameMemory :: struct {
     reloaded_executable: b32,

@@ -1,10 +1,6 @@
 package game
 
-/*
-    TODO(viktor):
-    ARCHITECTURE EXPLORATION
-
-    - Renderer Clipping StartMask and Alignment causes issues
+/* TODO(viktor):
     - Dead Lock on Load when a lot of assets are loaded at once
     - font rendering robustness
     
@@ -20,8 +16,6 @@ package game
     
     - Audio
         - Fix clicking Bug at the end of samples
-
-    - Particle systems
     
     - Rendering
         - Get rid of "even" scan line notion?
@@ -32,6 +26,7 @@ package game
         - Lighting
         - Final Optimization    
         
+    ARCHITECTURE EXPLORATION
     - Z !
         - debug drawing of Z levels and inclusion of Z to make sure
         that there are no bugs
@@ -52,35 +47,36 @@ package game
         - Whats the plan for robustness / shape definition ?
         - "Things pushing other things"
 
+    - Animation
+        - Skeletal animation
+
     - Implement multiple sim regions per frame
         - per-entity clocking
         - sim region merging?  for multiple players?
         - simple zoomed out view for testing
 
-    - Rudimentary worldgen (no quality just "what sorts of things" we do
-        - Map displays
-        - Placement of background things
-        - Connectivity?
-        - Non-overlapping?
+    PRODUCTION
+    -> Game
+        - Entity system
+        
+        - Rudimentary worldgen (no quality just "what sorts of things" we do
+            - Map displays
+            - Placement of background things
+            - Connectivity?
+            - Non-overlapping?
 
-    - AI
-        - Rudimentary monstar behaviour
-        * Pathfinding
-        - AI "storage"
+        - AI
+            - Rudimentary monstar behaviour
+            - Pathfinding
+            - AI "storage"
 
+      
     - Metagame / save game?
         - how do you enter a "save slot"?
         - persistent unlocks/etc.
         - Do we allow saved games? Probably yes, just only for "pausing"
-        * continuous save for crash recovery?
+        - continuous save for crash recovery?
 
-        * Animation should probably lead into rendering
-            - Skeletal animation
-
-    PRODUCTION
-    -> Game
-      - Entity system
-      - World generation
 */
 
 State :: struct {
