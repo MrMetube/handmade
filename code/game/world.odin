@@ -9,18 +9,18 @@ World :: struct {
     first_free: ^WorldEntityBlock,
 }
 
-Chunk :: struct {
+Chunk :: SingleLinkedListEntry(ChunkData)
+ChunkData :: struct {
     chunk: [3]i32,
 
     first_block: WorldEntityBlock,
-    next_in_hash: ^Chunk,
 }
 
 // TODO(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
-WorldEntityBlock :: struct {
+WorldEntityBlock :: SingleLinkedListEntry(WorldEntityBlockData)
+WorldEntityBlockData :: struct {
     entity_count: StorageIndex,
     indices: [16]StorageIndex,
-    next: ^WorldEntityBlock,
 }
 
 WorldPosition :: struct {
@@ -86,11 +86,8 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
 
                             if first_block.entity_count == 0 {
                                 if first_block.next != nil {
-                                    next_block := first_block.next
-                                    first_block^ = next_block^
-
-                                    next_block.next = world.first_free
-                                    world.first_free = next_block
+                                    free_block := list_pop(&first_block)
+                                    list_push(&world.first_free, free_block)
                                 }
                             }
                             break outer
@@ -109,14 +106,10 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
             block := &chunk.first_block
             if block.entity_count == len(block.indices) {
                 // NOTE(viktor): We're out of room, get a new block!
-                old_block := world.first_free
-                if old_block != nil {
-                    world.first_free = old_block.next
-                } else {
-                    old_block = push(arena, WorldEntityBlock)
-                }
-                old_block^ = block^
-                block.next = old_block
+                new_block := list_pop(&world.first_free) or_else push(arena, WorldEntityBlock)
+                
+                list_push_sentinel(block, new_block)
+                
                 block.entity_count = 0
             }
             assert(block.entity_count < len(block.indices))
@@ -168,47 +161,47 @@ get_chunk :: proc {
     get_chunk_3,
 }
 
-// TODO(viktor): arena as allocator, maybe on the context?
 get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
-    return get_chunk_3(arena, world, point.chunk.x, point.chunk.y, point.chunk.z)
+    return get_chunk_3(arena, world, point.chunk)
 }
-get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_x, chunk_y, chunk_z: i32) -> ^Chunk {
+get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chunk {
     timed_function()
     ChunkSafeMargin :: 256
 
-    assert(chunk_x > min(i32) + ChunkSafeMargin)
-    assert(chunk_x < max(i32) - ChunkSafeMargin)
-    assert(chunk_y > min(i32) + ChunkSafeMargin)
-    assert(chunk_y < max(i32) - ChunkSafeMargin)
-    assert(chunk_z > min(i32) + ChunkSafeMargin)
-    assert(chunk_z < max(i32) - ChunkSafeMargin)
+    assert(chunk_p.x > min(i32) + ChunkSafeMargin)
+    assert(chunk_p.x < max(i32) - ChunkSafeMargin)
+    assert(chunk_p.y > min(i32) + ChunkSafeMargin)
+    assert(chunk_p.y < max(i32) - ChunkSafeMargin)
+    assert(chunk_p.z > min(i32) + ChunkSafeMargin)
+    assert(chunk_p.z < max(i32) - ChunkSafeMargin)
 
     // TODO(viktor): BETTER HASH FUNCTION !!
-    hash_value := 19*chunk_x + 7*chunk_y + 3*chunk_z
+    hash_value := 19*chunk_p.x + 7*chunk_p.y + 3*chunk_p.z
     hash_slot := hash_value & (len(world.chunk_hash)-1)
 
     assert(hash_slot < len(world.chunk_hash))
 
     world_chunk := &world.chunk_hash[hash_slot]
     for {
-        if chunk_x == world_chunk.chunk.x && chunk_y == world_chunk.chunk.y && chunk_z == world_chunk.chunk.z {
+        if chunk_p == world_chunk.chunk {
             break
         }
 
-        if arena != nil && world_chunk.chunk.x != UninitializedChunk && world_chunk.next_in_hash == nil {
-            world_chunk.next_in_hash = push(arena, Chunk)
-            world_chunk = world_chunk.next_in_hash
+        if arena != nil && world_chunk.chunk.x != UninitializedChunk && world_chunk.next == nil {
+            world_chunk.next = push(arena, Chunk)
+            
+            world_chunk = world_chunk.next
             world_chunk.chunk.x = UninitializedChunk
         }
 
         if arena != nil && world_chunk.chunk.x == UninitializedChunk {
-            world_chunk.chunk = {chunk_x, chunk_y, chunk_z}
-            world_chunk.next_in_hash = nil
+            world_chunk.chunk = chunk_p
+            world_chunk.next = nil
 
             break
         }
 
-        world_chunk = world_chunk.next_in_hash
+        world_chunk = world_chunk.next
         if world_chunk == nil do break
     }
 

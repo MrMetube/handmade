@@ -48,8 +48,8 @@ Asset :: struct {
     state:  AssetState,
 }
 
-AssetMemoryHeader :: struct {
-    next, prev:  ^AssetMemoryHeader,
+AssetMemoryHeader :: LinkedListEntry(AssetMemoryHeaderData)
+AssetMemoryHeaderData :: struct {
     asset_index: u32,
     
     generation_id: AssetGenerationId,
@@ -72,10 +72,10 @@ AssetMemoryBlockFlags :: bit_set[enum u64 {
     Used,
 }]
 
-AssetMemoryBlock :: struct {
-    prev, next: ^AssetMemoryBlock,
-    size:       u64,
-    flags:      AssetMemoryBlockFlags,
+AssetMemoryBlock :: LinkedListEntry(AssetMemoryBlockData)
+AssetMemoryBlockData :: struct {
+    size:  u64,
+    flags: AssetMemoryBlockFlags,
 }
 
 AssetVector :: [AssetTagId]f32
@@ -103,15 +103,13 @@ Font :: struct {
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets, clear_to_zero = true)
     
-    assets.memory_sentinel.next = &assets.memory_sentinel
-    assets.memory_sentinel.prev = &assets.memory_sentinel
+    list_init_sentinel(&assets.memory_sentinel)
     
     insert_block(&assets.memory_sentinel, push(arena, memory_size), memory_size)
     
     assets.tran_state = tran_state
     
-    assets.loaded_asset_sentinel.next = &assets.loaded_asset_sentinel
-    assets.loaded_asset_sentinel.prev = &assets.loaded_asset_sentinel
+    list_init_sentinel(&assets.loaded_asset_sentinel)
     
     for &range in assets.tag_ranges {
         range = 1_000_000_000
@@ -245,8 +243,8 @@ get_asset :: #force_inline proc(assets: ^Assets, id: u32, generation_id: AssetGe
         if asset.state == .Loaded {
             result = asset.header
             
-            remove_asset_header_from_list(result)
-            insert_asset_header_at_front(assets, result)
+            list_remove(result)
+            list_insert(&assets.loaded_asset_sentinel, result)
             
             if asset.header.generation_id < generation_id {
                 asset.header.generation_id = generation_id
@@ -498,24 +496,6 @@ end_asset_lock :: proc(assets: ^Assets) {
     volatile_store(&assets.memory_operation_lock, 0)
 }
 
-insert_asset_header_at_front :: #force_inline proc(assets:^Assets, header: ^AssetMemoryHeader) {
-    sentinel := &assets.loaded_asset_sentinel
-    
-    header.prev = sentinel
-    header.next = sentinel.next
-    
-    header.next.prev = header
-    header.prev.next = header
-}
-
-remove_asset_header_from_list :: proc(header: ^AssetMemoryHeader) {
-    header.prev.next = header.next
-    header.next.prev = header.prev
-    
-    header.next = nil
-    header.prev = nil
-}
-
 acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
     timed_function()
     size := div.total + size_of(AssetMemoryHeader)
@@ -556,12 +536,12 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
             for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
                 asset := &assets.assets[it.asset_index]
                 if asset.state == .Loaded && generation_has_completed(assets, asset.header.generation_id) {
-                    remove_asset_header_from_list(it)
+                    list_remove(it)
                     
                     // :PointerArithmetic
                     block = &(cast([^]AssetMemoryBlock) asset.header)[-1]
                     block.flags -= { .Used }
-                        
+                    
                     if merge_if_possible(assets, block.prev, block) {
                         block = block.prev
                     }
@@ -585,7 +565,7 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
         header.total_size  = size
         header.asset_index = cast(u32) asset_index
         
-        insert_asset_header_at_front(assets, header)
+        list_insert(&assets.loaded_asset_sentinel, header)
     }
 
     return result
@@ -598,11 +578,7 @@ insert_block :: proc(previous: ^AssetMemoryBlock, memory: [^]u8, size: u64) -> (
     
     result.flags = {}
     
-    result.prev = previous
-    result.next = previous.next
-    
-    result.next.prev = result
-    result.prev.next = result
+    list_insert(previous, result)
     
     return result
 }
@@ -624,13 +600,12 @@ find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemory
 }
 
 merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> (result: b32) {
-    if first != &assets.memory_sentinel && second != &assets.memory_sentinel {
+    if first != &assets.memory_sentinel && second != &assets.memory_sentinel && second != nil {
         if .Used not_in first.flags && .Used not_in second.flags {
             // :PointerArithmetic
             expect_second_memory := &(cast([^]u8) first)[size_of(AssetMemoryBlock) + first.size] 
             if cast(rawpointer) second == expect_second_memory {
-                second.next.prev  = second.prev
-                second.prev.next = second.next
+                list_remove(second)
                 
                 first.size += size_of(AssetMemoryBlock) + second.size
                 result = true

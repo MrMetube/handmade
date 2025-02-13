@@ -96,7 +96,7 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: World
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
-                chunk := get_chunk(nil, world, chunk_x, chunk_y, chunk_z)
+                chunk := get_chunk(nil, world, [3]i32{chunk_x, chunk_y, chunk_z})
                 if chunk != nil {
                     for block := &chunk.first_block; block != nil; block = block.next {
                         for storage_index in block.indices[:block.entity_count] {
@@ -510,7 +510,7 @@ can_collide :: proc(state:^State, a, b: ^Entity) -> (result: b32) {
             
             // TODO(viktor): BETTER HASH FUNCTION!!!
             hash_bucket := a.storage_index & (len(state.collision_rule_hash) - 1)
-            for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
+            for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
                 if rule.index_a == a.storage_index && rule.index_b == b.storage_index {
                     result = rule.can_collide
                     break

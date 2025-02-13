@@ -37,11 +37,10 @@ StoredEntity :: struct {
     p: WorldPosition,
 }
 
-PairwiseCollsionRule :: struct {
+PairwiseCollsionRule :: SingleLinkedListEntry(PairwiseCollsionRuleData)
+PairwiseCollsionRuleData :: struct {
     can_collide: b32,
     index_a, index_b: StorageIndex,
-
-    next_in_hash: ^PairwiseCollsionRule,
 }
 
 PairwiseCollsionRuleFlag :: enum {
@@ -192,7 +191,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
     // TODO(viktor): BETTER HASH FUNCTION!!!
     found: ^PairwiseCollsionRule
     hash_bucket := a & (len(state.collision_rule_hash) - 1)
-    for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next_in_hash {
+    for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
         if rule.index_a == a && rule.index_b == b {
             found = rule
             break
@@ -200,14 +199,8 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
     }
 
     if found == nil {
-        found = state.first_free_collision_rule
-        if found != nil {
-            state.first_free_collision_rule = found.next_in_hash
-        } else {
-            found = push(&state.world_arena, PairwiseCollsionRule)
-        }
-        found.next_in_hash = state.collision_rule_hash[hash_bucket]
-        state.collision_rule_hash[hash_bucket] = found
+        found = list_pop(&state.first_free_collision_rule) or_else push(&state.world_arena, PairwiseCollsionRule)
+        list_push(&state.collision_rule_hash[hash_bucket], found)
     }
 
     if found != nil {
@@ -217,7 +210,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
     }
 }
 
-clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
+clear_collision_rules :: proc(state: ^State, storage_index: StorageIndex) {
     timed_function()
     // TODO(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
@@ -230,16 +223,14 @@ clear_collision_rules :: proc(state:^State, storage_index: StorageIndex) {
     // the new things on the free list, and remove the reverse of
     // those pairs.
     for hash_bucket in 0..<len(state.collision_rule_hash) {
-        for rule := &state.collision_rule_hash[hash_bucket]; rule^ != nil;  {
-            if rule^.index_a == storage_index || rule^.index_b == storage_index {
-                removed_rule := rule^
-
-                rule^ = (rule^).next_in_hash
-
-                removed_rule.next_in_hash = state.first_free_collision_rule
-                state.first_free_collision_rule = removed_rule
+        for rule_pointer := &state.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
+            rule := rule_pointer^
+            if rule.index_a == storage_index || rule.index_b == storage_index {
+                // :ListEntryRemovalInLoop
+                list_push(&state.first_free_collision_rule, rule)
+                rule_pointer^ = rule.next
             } else {
-                rule = &(rule^.next_in_hash)
+                rule_pointer = &rule.next
             }
         }
     }
