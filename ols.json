@@ -1,10 +1,12 @@
 {
     "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
-    "checker_args": "-define:INTERNAL=true -define:BUILD=true -define:PROFILE=true",
+    "checker_args": "-define:INTERNAL=true -define:BUILD=true",
 
     "enable_format": false,
     
     "enable_procedure_context": true,
+    "enable_semantic_tokens":   true,
+    "enable_references":        true,
     "enable_procedure_snippet": true,
-    "enable_document_symbols": true
+    "enable_document_symbols":  true
 }

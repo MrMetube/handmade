@@ -30,7 +30,7 @@ list_remove :: #force_inline proc(element: ^LinkedListEntry($T)) {
 
 SingleLinkedListEntry :: struct($T: typeid) {
     using data: T,
-    next: ^SingleLinkedListEntry(T),
+    next:       ^SingleLinkedListEntry(T),
 }
 
 // :ListEntryRemovalInLoop

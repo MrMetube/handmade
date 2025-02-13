@@ -3,6 +3,8 @@ package game
 import "core:fmt"
 import "core:hash" // TODO(viktor): I do not need this
 
+// TODO(viktor): "Mark Loop Point" as debug action
+
 DebugMaxThreadCount     :: 256
 DebugMaxHistoryLength   :: 6
 DebugMaxRegionsPerFrame :: 14000
@@ -44,9 +46,10 @@ DebugState :: struct {
     hot:                  ^DebugVariable,
     next_hot:             ^DebugVariable,
     
-    root_group:           ^DebugVariable,
-    hierarchy:            DebugVariableHierarchy,
-    
+    root_group:           ^DebugVariableReference,
+    hierarchy_sentinel:   DebugVariableHierarchy,
+    dragging_hierarchy:   ^DebugVariableHierarchy,
+    next_hot_hierarchy:   ^DebugVariableHierarchy,
     
     compiling:    b32,
     compiler:     DebugExecutingProcess,
@@ -109,6 +112,7 @@ DebugInteraction :: enum {
     Toggle, 
     Drag,
     Tear,
+    MoveHierarchy,
     
     ResizeProfile,
 }
@@ -173,11 +177,15 @@ DebugRecordLocation :: struct {
 
 ////////////////////////////////////////////////
 
+DebugVariableReference :: struct {
+    var:    ^DebugVariable,
+    parent: ^DebugVariableReference,
+    next:   ^DebugVariableReference,
+}
+
 DebugVariable :: struct {
     name:   string,
     value:  DebugVariableValue,
-    parent: ^DebugVariable,
-    next:   ^DebugVariable,
 }
 
 DebugVariableValue :: union { 
@@ -195,14 +203,22 @@ DebugVariableThreadList :: struct {
 DebugVariableGroup :: struct {
     expanded: b32,
     
-    first_child: ^DebugVariable,
-    last_child:  ^DebugVariable,
+    first_child: ^DebugVariableReference,
+    last_child:  ^DebugVariableReference,
 }
 
-DebugVariableHierarchy :: struct {
+DebugVariableHierarchy :: LinkedListEntry(DebugVariableHierarchyData)
+DebugVariableHierarchyData :: struct {
     ui_p:       v2,
-    root_group: ^DebugVariable,
+    root_group: ^DebugVariableReference,
 }
+
+DebugVariableDefinitionContext :: struct {
+    debug: ^DebugState,
+    arena: ^Arena,
+    group: ^DebugVariableReference,
+}
+
 ////////////////////////////////////////////////
 
 get_debug_state :: proc() -> (debug_state: ^DebugState) {
@@ -247,7 +263,7 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
         // :PointerArithmetic
         init_arena(&debug.debug_arena, memory.debug_storage[size_of(DebugState):])
         
-        ctx := DebugVariableDefinitionContext { arena = &debug.debug_arena }
+        ctx := DebugVariableDefinitionContext { arena = &debug.debug_arena, debug = debug }
 
         debug_begin_variable_group(&ctx, "Debugging")
         
@@ -264,10 +280,10 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
         
         debug.root_group = ctx.group
         
-
+        list_init_sentinel(&debug.hierarchy_sentinel)
+        
         sub_arena(&debug.collation_arena, &debug.debug_arena, 64 * Megabyte)
-                
-        debug.threads = push(&debug.collation_arena, DebugThread, DebugMaxThreadCount)
+        
         debug.scopes_to_record = push(&debug.collation_arena, ^DebugRecord, DebugMaxThreadCount)
         
         debug.font_scale = 0.6
@@ -275,36 +291,32 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
         debug.work_queue = work_queue
         debug.buffer     = buffer
         
+        
+        debug.left_edge  = -0.5 * cast(f32) buffer.width
+        debug.right_edge =  0.5 * cast(f32) buffer.width
+        debug.top_edge   =  0.5 * cast(f32) buffer.height
+        
+        add_hierarchy (debug, debug.root_group, { debug.left_edge, debug.top_edge })
+        
         debug.collation_memory = begin_temporary_memory(&debug.collation_arena)
         restart_collation(debug, GlobalDebugTable.events_state.array_index)
     }
 
-    
     if debug.render_group == nil {
         debug.render_group = make_render_group(&debug.debug_arena, assets, 32 * Megabyte, false)
         assert(debug.render_group != nil)
     }
     if debug.render_group.inside_render do return 
-    
-    begin_render(debug.render_group)
-    
-    
-    debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
-    debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
-    
-    if debug.font != nil {
+
+    if debug.font == nil {
+        debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
+        debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
+        load_font(debug.render_group.assets, debug.font_id, false)
         debug.font_info = get_font_info(assets, debug.font_id)
         debug.ascent = get_baseline(debug.font_info)
-    } else {
-        load_font(debug.render_group.assets, debug.font_id, false)
     }
-    
-    debug.left_edge  = -0.5 * cast(f32) buffer.width
-    debug.right_edge =  0.5 * cast(f32) buffer.width
-    debug.top_edge   =  0.5 * cast(f32) buffer.height
-    
-    debug.hierarchy.root_group = debug.root_group
-    debug.hierarchy.ui_p = { debug.left_edge, debug.top_edge }
+        
+    begin_render(debug.render_group)
 }
 
 ////////////////////////////////////////////////
@@ -314,6 +326,7 @@ restart_collation :: proc(debug: ^DebugState, invalid_index: u32) {
     debug.collation_memory = begin_temporary_memory(&debug.collation_arena)
     
     debug.frames = push(&debug.collation_arena, DebugFrame, DebugMaxHistoryLength)
+    debug.threads = push(&debug.collation_arena, DebugThread, DebugMaxThreadCount)
     debug.frame_bar_scale = 1.0 / 60_000_000.0//1
     debug.frame_count = 0
     
@@ -387,7 +400,7 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                             if matching_block.frame_index == frame_index {
                                 record_from :: #force_inline proc(block: ^DebugOpenBlock) -> (result: ^DebugRecord) {
                                     result = block != nil ? block.source : nil
-                                    return 
+                                    return result
                                 }
                                 
                                 if record_from(matching_block.parent) == debug.scopes_to_record[event.as.block.thread_index] {
@@ -414,9 +427,8 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                                 // TODO(viktor): Record all frames in between and begin/end spans
                             }
                             
-                            // TODO(viktor): These free list do not behave well with either multi threading and or the frame boundaries which free the temporary memory 
-                            // matching_block.next_free = thread.first_free_block
-                            // thread.first_free_block = matching_block
+                            matching_block.next_free = thread.first_free_block
+                            thread.first_free_block = matching_block
                             
                             thread.first_open_block = matching_block.parent
                         } else {
@@ -473,12 +485,9 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
     
     target_fps :: 72
 
-    pad_x :: 20
-    pad_y :: 20
-
     bar_padding :: 2
-    lane_count  := cast(f32) debug.frame_bar_lane_count +1 
     lane_height :f32
+    lane_count  := cast(f32) debug.frame_bar_lane_count +1 
     frame_count := cast(f32) len(debug.frames)
     if frame_count > 0 && lane_count > 0 {
         lane_height = ((rectangle_get_diameter(rect).y / frame_count) - bar_padding) / lane_count
@@ -486,7 +495,6 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
     
     bar_height       := lane_height * lane_count
     bar_plus_spacing := bar_height + bar_padding
-    
     full_height := bar_plus_spacing * frame_count
     
     chart_left  := rect.min.x
@@ -506,19 +514,19 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
             x_min := stack_x + scale * region.t_min
             x_max := stack_x + scale * region.t_max
 
-            y_min := stack_y + 0.5 * lane_height + lane_height * cast(f32) region.lane_index
-            y_max := y_min + lane_height
+            y_min := stack_y + lane_height * cast(f32) region.lane_index
+            y_max := y_min + lane_height - bar_padding
             stack_rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
             
             color_wheel := color_wheel
-            color := color_wheel[region.record.hash * 13 % len(color_wheel)]
+            color_index := region.record.loc.line % len(color_wheel)
+            color := color_wheel[color_index]
                         
             push_rectangle(debug.render_group, stack_rect, color)
             if rectangle_contains(stack_rect, input.mouse.p) {
+                hot_region = &region
+                
                 record := region.record
-                if was_pressed(input.mouse.left) {
-                    hot_region = &region
-                }
                 text := fmt.tprintf("%s - %d cycles [%s:% 4d]", record.loc.name, region.cycle_count, record.loc.file_path, record.loc.line)
                 debug_push_text(text, input.mouse.p)
             }
@@ -528,6 +536,8 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
     if was_pressed(input.mouse.left) {
         if hot_region != nil {
             debug.scopes_to_record[hot_region.lane_index] = hot_region.record
+            // TODO(viktor): @Cleanup clicking regions and variables at the same time should be handled better
+            debug.interaction = .NOP
         } else {
             for &scope in debug.scopes_to_record do scope = nil
         }
@@ -535,50 +545,28 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
     }
 }
 
-debug_begin_interact :: proc(debug: ^DebugState, input: Input) {
-    if debug.hot != nil {
-        if debug.hot_interaction == .None {
-            #partial switch var in debug.hot.value {
-              case b32, DebugVariableGroup:
-                debug.interaction = .Toggle
-              case f32:
-                debug.interaction = .Drag
+debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
+    if debug.hot_interaction != .None {
+        debug.interaction = debug.hot_interaction
+    } else {
+        if debug.hot != nil || debug.dragging_hierarchy != nil {
+            if alt_ui {
+                debug.interaction = .Tear
+            } else {
+                #partial switch var in debug.hot.value {
+                  case b32, DebugVariableGroup:
+                    debug.interaction = .Toggle
+                  case f32:
+                    debug.interaction = .Drag
+                }
             }
         } else {
-            debug.interaction = debug.hot_interaction
+            debug.interaction = .NOP
         }
-        
-        if debug.interaction != .None {
-            debug.interacting_with = debug.hot
-        }
-    } else {
-        debug.interaction = .NOP
-    }
-}
-
-debug_end_interact :: proc(debug: ^DebugState, input: Input) {
-    defer {
-        debug.interaction = .None
-        debug.interacting_with = nil
     }
     
-    if debug.interaction != .NOP {
-        // assert(debug.interacting_with != nil)
-        
-        #partial switch debug.interaction {
-          case .NOP: unreachable()
-          case .Toggle:
-            reload := true
-            #partial switch &value in debug.interacting_with.value {
-            case DebugVariableGroup:
-                value.expanded = !value.expanded
-                reload = false
-            case b32:
-                value = !value
-            }
-            
-            if reload do write_handmade_config()
-        }
+    if debug.interaction != .None {
+        debug.interacting_with = debug.hot
     }
 }
 
@@ -600,12 +588,22 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
             value.dimension += mouse_dp * {1,-1}
             value.dimension.x = max(value.dimension.x, 10)
             value.dimension.y = max(value.dimension.y, 10)
+          case .MoveHierarchy:
+            debug.dragging_hierarchy.ui_p = input.mouse.p
+          case .Tear: 
+            if debug.dragging_hierarchy == nil {
+                root_group := debug_add_root_group(debug, "NewUserGroup")
+                debug_add_variable_reference_to_group(debug, root_group, var)
+                debug.dragging_hierarchy = add_hierarchy(debug, root_group, {0, 0})
+            }
+            debug.dragging_hierarchy.ui_p = input.mouse.p
         }
         
         // NOTE(viktor): Click interaction
+        alt_ui := input.mouse.right.ended_down
         for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_end_interact(debug, input)
-            debug_begin_interact(debug, input)
+            debug_begin_interact(debug, input, alt_ui)
         }
         
         if !input.mouse.left.ended_down {
@@ -613,110 +611,162 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
         }
     } else {
         debug.hot = debug.next_hot
+        debug.dragging_hierarchy = debug.next_hot_hierarchy
         debug.hot_interaction = debug.next_hot_interaction
         
+        alt_ui := input.mouse.right.ended_down
         for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
-            debug_begin_interact(debug, input)
+            debug_begin_interact(debug, input, alt_ui)
             debug_end_interact(debug, input)
         }
         
         if input.mouse.left.ended_down {
-            debug_begin_interact(debug, input)
+            debug_begin_interact(debug, input, alt_ui)
         }
     }
 }
 
+debug_end_interact :: proc(debug: ^DebugState, input: Input) {
+    defer {
+        debug.interaction = .None
+        debug.interacting_with = nil
+    }
+    
+    if debug.interaction != .NOP {
+        reload: b32
+        
+        switch debug.interaction {
+          case .None, .NOP: unreachable()
+          case .MoveHierarchy, .ResizeProfile: 
+            // NOTE(viktor): nothing
+          case .Drag: 
+            reload = true
+          case .Toggle:
+            if debug.interacting_with != nil {
+                switch &value in debug.interacting_with.value {
+                  case f32, u32, i32, v2, v3, v4: unreachable()
+                  case DebugVariableGroup:
+                    value.expanded = !value.expanded
+                  case DebugVariableThreadList:
+                    debug.paused = !debug.paused
+                  case b32:
+                    assert(debug.interacting_with != nil)
+                    value = !value
+                    reload = true
+                }
+            }
+          case .Tear:
+            debug.dragging_hierarchy = nil
+        }
+        
+        if reload do write_handmade_config()
+    }
+}
+
 debug_main_menu :: proc(debug: ^DebugState, input: Input) {
-    // menu_items := [?]string {
-    //     "Toggle Profiler Pause",
-    //     "Mark Loop Point",
-    // }
     if debug.font_info == nil do return
     
-    mouse_p := input.mouse.p
-    
-    p := debug.hierarchy.ui_p
-    line_advance := get_line_advance(debug.font_info) * debug.font_scale
-    depth: f32
-    
-    spacing_y :: 4
-    
-    for var := debug.hierarchy.root_group; var != nil;  {
-        text: string
-        is_hot := var == debug.hot
-        color := is_hot ? Blue : White
+    for hierarchy := debug.hierarchy_sentinel.next; hierarchy != &debug.hierarchy_sentinel; hierarchy = hierarchy.next {
+        mouse_p := input.mouse.p
         
-        depth_delta: f32
-        defer depth += depth_delta
+        p := hierarchy.ui_p
+        line_advance := get_line_advance(debug.font_info) * debug.font_scale
+        depth: f32
         
-        next: ^DebugVariable
-        defer var = next
+        spacing_y :: 4
         
-        draw_p: v2
-        bounds: Rectangle2
-        
-        switch value in var.value {
-          case DebugVariableThreadList:
-            min_corner := p + {depth * 2 * line_advance, -value.dimension.y}
-            max_corner := v2{min_corner.x + value.dimension.x, p.y}
-            size_p := v2{max_corner.x, min_corner.y}
-            bounds = rectangle_min_max(min_corner, max_corner)
-            debug_draw_profile(debug, input, bounds)
+        root := hierarchy.root_group.var.value.(DebugVariableGroup)
+        for ref := root.first_child; ref != nil;  {
+            var := ref.var
             
-            resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
+            text: string
+            is_hot := var == debug.hot
+            color := is_hot ? Blue : White
+            
+            depth_delta: f32
+            defer depth += depth_delta
+            
+            next: ^DebugVariableReference
+            defer ref = next
+            
+            draw_p: v2
+            bounds: Rectangle2
+            
+            switch value in var.value {
+              case DebugVariableThreadList:
+                min_corner := p + {depth * 2 * line_advance, -value.dimension.y}
+                max_corner := v2{min_corner.x + value.dimension.x, p.y}
+                size_p := v2{max_corner.x, min_corner.y}
+                bounds = rectangle_min_max(min_corner, max_corner)
+                debug_draw_profile(debug, input, bounds)
+                
+                resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
 
-            handle_color := debug.hot_interaction == .ResizeProfile && is_hot ? Blue : White
-            push_rectangle(debug.render_group, resize_handle, handle_color)
-        
-            if rectangle_contains(resize_handle, mouse_p) {
-                debug.next_hot_interaction = .ResizeProfile
-                debug.next_hot = var
-            } else if rectangle_contains(bounds, mouse_p) {
-                debug.next_hot_interaction = .None
-                debug.next_hot = var
-            }
-                        
-          case DebugVariableGroup, b32, u32, i32, f32, v2, v3, v4:
-            if group, ok := value.(DebugVariableGroup); ok {
-                text = fmt.tprintf("%s %v", group.expanded ? "-" : "+",  var.name)
-                if group.expanded {
-                    next = group.first_child
-                    depth_delta += 1
+                handle_color := debug.hot_interaction == .ResizeProfile && is_hot ? Blue : White
+                push_rectangle(debug.render_group, resize_handle, handle_color)
+            
+                if rectangle_contains(resize_handle, mouse_p) {
+                    debug.next_hot_interaction = .ResizeProfile
+                    debug.next_hot = var
+                } else if rectangle_contains(bounds, mouse_p) {
+                    debug.next_hot_interaction = .Toggle
+                    debug.next_hot = var
                 }
-            } else {
-                text = fmt.tprintf("%s %v", var.name, value)
-            }
-                        
-            left := p.x + depth*line_advance*2
-            top  := p.y
-            bounds = debug_measure_text(text)
-            bounds = rectangle_add_offset(bounds, v2{left, top - rectangle_get_diameter(bounds).y })
+                            
+              case DebugVariableGroup, b32, u32, i32, f32, v2, v3, v4:
+                if group, ok := value.(DebugVariableGroup); ok {
+                    text = fmt.tprintf("%s %v", group.expanded ? "-" : "+",  var.name)
+                    if group.expanded {
+                        next = group.first_child
+                        depth_delta += 1
+                    }
+                } else {
+                    text = fmt.tprintf("%s %v", var.name, value)
+                }
+                            
+                left := p.x + depth*line_advance*2
+                top  := p.y
+                bounds = debug_measure_text(text)
+                bounds = rectangle_add_offset(bounds, v2{left, top - rectangle_get_diameter(bounds).y })
 
-            debug_push_text(text, {left, top} - {0, debug.ascent * debug.font_scale}, color)
+                debug_push_text(text, {left, top} - {0, debug.ascent * debug.font_scale}, color)
+                
+                if rectangle_contains(bounds, mouse_p) {
+                    debug.next_hot_interaction = .None
+                    debug.next_hot = var
+                }
+            }
             
-            if rectangle_contains(bounds, mouse_p) {
-                debug.next_hot_interaction = .None
-                debug.next_hot = var
+            p.y = rectangle_get_min(bounds).y - spacing_y
+            
+            if next == nil {
+                next = ref
+                for next != nil {
+                    if next.next != nil {
+                        next = next.next
+                        break
+                    } else {
+                        next = next.parent
+                        depth_delta -= 1 
+                    }
+                }
             }
         }
         
-        p.y = rectangle_get_min(bounds).y - spacing_y
+        debug.top_edge = p.y
         
-        if next == nil {
-            next = var
-            for next != nil {
-                if next.next != nil {
-                    next = next.next
-                    break
-                } else {
-                    next = next.parent
-                    depth_delta -= 1 
-                }
-            }
+        move_handle := rectangle_min_diameter(hierarchy.ui_p, v2{8, 8})
+    
+        is_hot := false
+        handle_color := debug.hot_interaction == .ResizeProfile && is_hot ? Blue : White
+        push_rectangle(debug.render_group, move_handle, handle_color)
+    
+        if rectangle_contains(move_handle, mouse_p) {
+            debug.next_hot_interaction = .MoveHierarchy
+            debug.next_hot_hierarchy = hierarchy
         }
     }
     
-    debug.top_edge = p.y
 }
 
 write_handmade_config :: proc() {
@@ -736,23 +786,25 @@ write_handmade_config :: proc() {
         return result
     }
     
+    seen_names: [1024]string
+    seen_names_cursor: u32
     contents: [4096*4]u8
     cursor: u32
     cursor += write(contents[cursor:], "package game\n\n")
     
-    start := debug_state.root_group.value.(DebugVariableGroup).first_child
-    for var := start; var != nil;  {
-        next: ^DebugVariable
-        defer var = next
+    start := debug_state.root_group.var.value.(DebugVariableGroup).first_child
+    for ref := start; ref != nil;  {
+        next: ^DebugVariableReference
+        defer ref = next
         
         should_write := true
         t: typeid
-        switch value in var.value {
+        switch value in ref.var.value {
           case DebugVariableThreadList: // NOTE(viktor): transient data
-            next = var.next
+            next = ref.next
             should_write = false
           case DebugVariableGroup:
-            cursor += write(contents[cursor:], fmt.tprintfln("// %s", var.name))
+            cursor += write(contents[cursor:], fmt.tprintfln("// %s", ref.var.name))
             should_write = false
             
             next = value.first_child
@@ -766,11 +818,23 @@ write_handmade_config :: proc() {
         }
         
         if should_write {
-            cursor += write(contents[cursor:], fmt.tprintfln("%s :%w: %w", var.name, t, var.value))
+            found: b32
+            for name in seen_names[:seen_names_cursor] {
+                if name == ref.var.name {
+                    found = true
+                    break
+                }
+            }
+            
+            if !found {
+                cursor += write(contents[cursor:], fmt.tprintfln("%s :%w: %w", ref.var.name, t, ref.var.value))
+                seen_names[seen_names_cursor] = ref.var.name
+                seen_names_cursor += 1
+            }
         }
         
         if next == nil {
-            next = var
+            next = ref
             for next != nil {
                 if next.next != nil {
                     next = next.next
@@ -787,6 +851,18 @@ write_handmade_config :: proc() {
     debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game`)
 }
 
+add_hierarchy :: proc(debug: ^DebugState, root: ^DebugVariableReference, p: v2) -> (result: ^DebugVariableHierarchy) {
+    result = push(&debug.debug_arena, DebugVariableHierarchy)
+    result^ = {
+        root_group = root,
+        ui_p = p,
+    }
+    
+    list_insert(&debug.hierarchy_sentinel, result)
+    
+    return result
+}
+
 init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
     debug_begin_variable_group(ctx, "Profiling")
         debug_add_variable(ctx, DEBUG_Profiling)
@@ -794,7 +870,7 @@ init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
     debug_end_variable_group(ctx)
 
     debug_begin_variable_group(ctx, "Rendering")
-        debug_add_variable(ctx, DEBUG_UseDebugCamera)
+        debug_cam_ref := debug_add_variable(ctx, DEBUG_UseDebugCamera)
         debug_add_variable(ctx, DEBUG_DebugCameraDistance)
     
         debug_add_variable(ctx, DEBUG_RenderSingleThreaded)
@@ -824,21 +900,50 @@ init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
 
     debug_add_variable(ctx, DEBUG_FamiliarFollowsHero)
     debug_add_variable(ctx, DEBUG_HeroJumping)
-}
-
-DebugVariableDefinitionContext :: struct {
-    arena: ^Arena,
-    group: ^DebugVariable,
-}
-
-push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value: DebugVariableValue) -> (result: ^DebugVariable) {
-    result = push(ctx.arena, DebugVariable)
-    result.name   = push_string(ctx.arena, name)
-    result.value  = value
-    result.parent = ctx.group
     
-    if ctx.group != nil {
-        group := &ctx.group.value.(DebugVariableGroup)
+    debug_add_variable_reference_to_group(ctx.debug, ctx.group, debug_cam_ref.var)
+}
+
+debug_add_root_group :: proc(debug: ^DebugState, group_name: string) -> (result: ^DebugVariableReference) {
+    var := debug_add_variable_unreferenced(debug, DebugVariableGroup{}, group_name)
+    result = debug_add_variable_reference_to_group(debug, nil, var)
+    
+    group := &result.var.value.(DebugVariableGroup)
+    group.expanded = true
+    
+    return result
+}
+
+debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariableReference) {
+    var := debug_add_variable_unreferenced(ctx.debug, DebugVariableGroup{}, group_name)
+    result = debug_add_variable_reference_to_group(ctx.debug, ctx.group, var)
+    
+    group := &result.var.value.(DebugVariableGroup)
+    group.expanded = false
+    ctx.group = result
+    
+    return result
+}
+
+debug_add_variable_unreferenced :: proc(debug: ^DebugState, value: DebugVariableValue, variable_name := #caller_expression(value)) -> (result: ^DebugVariable) {
+    result = push(&debug.debug_arena, DebugVariable)
+    result^ = {
+        name  = push_string(&debug.debug_arena, variable_name),
+        value = value,
+    }
+            
+    return result
+}
+
+debug_add_variable_reference_to_group :: proc(debug: ^DebugState, parent: ^DebugVariableReference, var: ^DebugVariable) -> (result: ^DebugVariableReference) {
+    result = push(&debug.debug_arena, DebugVariableReference)
+    result^ = {
+        var    = var,
+        parent = parent,
+    }
+    
+    if parent != nil {
+        group := &parent.var.value.(DebugVariableGroup)
         if group != nil {
             if group.last_child != nil {
                 group.last_child.next = result
@@ -849,19 +954,15 @@ push_variable :: proc(ctx: ^DebugVariableDefinitionContext, name: string, value:
             }
         }
     }
-            
-    return result
-}
-
-debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariable) {
-    result = push_variable(ctx, group_name, DebugVariableGroup{})
-    ctx.group = result
     
     return result
 }
 
-debug_add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) -> ^DebugVariable {
-    return push_variable(ctx, variable_name, value)
+debug_add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) -> (result: ^DebugVariableReference) {
+    var := debug_add_variable_unreferenced(ctx.debug, value, variable_name)
+    ref := debug_add_variable_reference_to_group(ctx.debug, ctx.group, var)
+    
+    return ref
 }
 
 debug_end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext) {

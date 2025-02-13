@@ -186,8 +186,6 @@ Platform: PlatformAPI
 
 @export
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
-    timed_function()
-    
     Platform = memory.Platform_api
     
     when INTERNAL {

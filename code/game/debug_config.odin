@@ -5,7 +5,7 @@ DEBUG_Profiling :b32: true
 DEBUG_ShowFramerate :b32: true
 // Rendering
 DEBUG_UseDebugCamera :b32: false
-DEBUG_DebugCameraDistance :f32: 5
+DEBUG_DebugCameraDistance :f32: 3.699996
 DEBUG_RenderSingleThreaded :b32: false
 DEBUG_TestWeirdScreenSizes :b32: false
 // Bounds
