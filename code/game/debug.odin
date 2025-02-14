@@ -460,7 +460,7 @@ debug_end_and_overlay :: proc(input: Input) {
     debug := get_debug_state()
     if debug == nil do return
     
-    debug.hot_interaction = {}
+    debug.next_hot_interaction = {}
     
     overlay_debug_info(debug, input)
     
@@ -686,103 +686,161 @@ debug_end_interact :: proc(debug: ^DebugState, input: Input) {
     debug.interaction = {}
 }
 
+Layout :: struct {
+    debug:        ^DebugState,
+    mouse_p:      v2,
+    p:            v2,
+    depth:        f32,
+    line_advance: f32,
+    spacing_y:    f32,
+}
+
+LayoutElement :: struct {
+    layout:  ^Layout,
+    
+    size:        ^v2,
+    flags:       LayoutElementFlags,
+    interaction: DebugInteraction,
+    
+    bounds: Rectangle2,
+}
+
+LayoutElementFlags :: bit_set[LayoutElementFlag]
+LayoutElementFlag :: enum {
+    Resizable, 
+    HasInteraction,
+}
+
+begin_ui_element_rectangle :: proc(layout: ^Layout, size: ^v2) -> (result: LayoutElement) {
+    result.layout  = layout
+    result.size    = size
+    
+    return result
+}
+
+make_ui_element_resizable :: proc(element: ^LayoutElement) {
+    element.flags += {.Resizable}
+}
+
+set_ui_element_default_interaction :: proc(element: ^LayoutElement, interaction: DebugInteraction) {
+    element.flags += {.HasInteraction}
+    element.interaction = interaction
+}
+
+end_ui_element :: proc(using element: ^LayoutElement, use_spacing: b32) {
+    SizeHandlePixels :: 4
+    frame: v2
+    if .Resizable in element.flags {
+        frame = SizeHandlePixels
+    }
+    total_size := element.size^ + frame * 2
+    
+    total_min    := layout.p + {layout.depth * 2 * layout.line_advance, -total_size.y}
+    total_max    := total_min + total_size
+    interior_min := total_min + frame
+    interior_max := interior_min + element.size^
+    
+    total_bounds := rectangle_min_diameter(total_min, total_size)
+    element.bounds = rectangle_min_diameter(interior_min, element.size^)
+
+    was_resized: b32
+    if .Resizable in element.flags {
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             Black)
+        
+        resize_box := rectangle_min_diameter(v2{element.bounds.max.x, total_min.y}, frame)
+        push_rectangle(layout.debug.render_group, resize_box, White)
+        
+        resize_interaction := DebugInteraction {
+            kind   = .Resize,
+            target = element.size,
+        }
+        if rectangle_contains(resize_box, layout.mouse_p) {
+            was_resized = true
+            layout.debug.next_hot_interaction = resize_interaction
+        }
+    }
+    
+    if !was_resized && .HasInteraction in element.flags && rectangle_contains(element.bounds, layout.mouse_p) {
+        layout.debug.next_hot_interaction = element.interaction
+    }
+    
+    spacing := use_spacing ? layout.spacing_y : 0
+    layout.p.y = total_bounds.min.y - spacing
+}
+
+
 debug_main_menu :: proc(debug: ^DebugState, input: Input) {
     if debug.font_info == nil do return
     
     for hierarchy := debug.hierarchy_sentinel.next; hierarchy != &debug.hierarchy_sentinel; hierarchy = hierarchy.next {
         mouse_p := input.mouse.p
         
-        p := hierarchy.ui_p
-        line_advance := get_line_advance(debug.font_info) * debug.font_scale
-        depth: f32
-        
-        spacing_y :: 4
+        layout := Layout {
+            debug        = debug,
+            mouse_p      = mouse_p,
+            
+            p            = hierarchy.ui_p,
+            depth        = 0,
+            line_advance = get_line_advance(debug.font_info) * debug.font_scale,
+            spacing_y    = 4,
+        }
         
         root := hierarchy.root_group.var.value.(DebugVariableGroup)
         for ref := root.first_child; ref != nil;  {
             var := ref.var
             
-            item_interaction := DebugInteraction{
+            autodetect_interaction := DebugInteraction{
                 kind   = .AutoDetect,
                 target = var,
             }
 
-            is_hot := debug_interaction_is_hot(debug, item_interaction)
+            is_hot := debug_interaction_is_hot(debug, autodetect_interaction)
             
             text: string
             color := is_hot ? Blue : White
             
             depth_delta: f32
-            defer depth += depth_delta
+            defer layout.depth += depth_delta
             
             next: ^DebugVariableReference
-            defer ref = next
+            defer if next != hierarchy.root_group {
+                ref = next
+            }
             
             draw_p: v2
-            bounds: Rectangle2
             
             switch value in var.value {
               case DebugVariableThreadList:
-                min_corner := p + {depth * 2 * line_advance, -value.size.y}
-                max_corner := v2{min_corner.x + value.size.x, p.y}
-                size_p := v2{max_corner.x, min_corner.y}
-                bounds = rectangle_min_max(min_corner, max_corner)
-                debug_draw_profile(debug, input, bounds)
-                
-                // NOTE(viktor): if we take a ref to the value in the switch, llvm crashes in the next case, where value is still a union-type
                 dvtl := &var.value.(DebugVariableThreadList)
-                resize_interaction := DebugInteraction {
-                    kind   = .Resize,
-                    target = &dvtl.size,
-                }
-                resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
                 
-                push_rectangle(debug.render_group, resize_handle, debug_interaction_is_hot(debug, resize_interaction) ? Blue : White)
-            
-                if rectangle_contains(resize_handle, mouse_p) {
-                    debug.next_hot_interaction = resize_interaction
-                } else if rectangle_contains(bounds, mouse_p) {
-                    debug.next_hot_interaction = item_interaction
-                }
+                element := begin_ui_element_rectangle(&layout, &dvtl.size)
+                make_ui_element_resizable(&element)
+                set_ui_element_default_interaction(&element, autodetect_interaction)
+                end_ui_element(&element, true)
+                
+                debug_draw_profile(debug, input, element.bounds)
                 
               case DebugBitmapDisplay:
-                min_corner := p + {depth * 2 * line_advance, -value.size.y}
-                max_corner := v2{min_corner.x + value.size.x, p.y}
-                size_p := v2{max_corner.x, min_corner.y}
-                bounds = rectangle_min_max(min_corner, max_corner)
+                dbd := &var.value.(DebugBitmapDisplay)
                 
-                bitmap := get_bitmap(debug.render_group.assets, value.id, debug.render_group.generation_id)
-                bitmap_height := value.size.y
-                bitmap_offset := V3(bounds.min, 0)
-
-                dvtl := &var.value.(DebugBitmapDisplay)
-                if bitmap != nil {
-                    dim := get_used_bitmap_dim(debug.render_group, bitmap^, bitmap_height, bitmap_offset, use_alignment = false)
-                    dvtl.size = dim.size
-                    bitmap_height = dim.size.y
+                if bitmap := get_bitmap(debug.render_group.assets, value.id, debug.render_group.generation_id); bitmap != nil {
+                    dim := get_used_bitmap_dim(debug.render_group, bitmap^, value.size.y, 0, use_alignment = false)
+                    dbd.size = dim.size
                 }
+
+                element := begin_ui_element_rectangle(&layout, &dbd.size)
+                make_ui_element_resizable(&element)
+                set_ui_element_default_interaction(&element, {kind = .Move, target = var })
+                end_ui_element(&element, true)
                 
-                push_rectangle(debug.render_group, bounds, DarkBlue )
+                bitmap_height := value.size.y
+                bitmap_offset := V3(element.bounds.min, 0)
+                push_rectangle(debug.render_group, element.bounds, DarkBlue )
                 push_bitmap(debug.render_group, value.id, bitmap_height, bitmap_offset, use_alignment = false)
                 
-                resize_interaction := DebugInteraction {
-                    kind   = .Resize,
-                    target = &dvtl.size,
-                }
-
-                resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
-                push_rectangle(debug.render_group, resize_handle, debug_interaction_is_hot(debug, resize_interaction) ? Blue : White)
-                
-                if rectangle_contains(resize_handle, mouse_p) {
-                    debug.next_hot_interaction = resize_interaction
-                } else if rectangle_contains(bounds, mouse_p) {
-                    tear_interaction := DebugInteraction {
-                        kind = .Move,
-                        target = var,
-                    }
-                    debug.next_hot_interaction = tear_interaction
-                }
-                     
               case DebugVariableGroup, b32, u32, i32, f32, v2, v3, v4:
                 if group, ok := value.(DebugVariableGroup); ok {
                     text = fmt.tprintf("%s %v", group.expanded ? "-" : "+",  var.name)
@@ -793,20 +851,17 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                 } else {
                     text = fmt.tprintf("%s %v", var.name, value)
                 }
-                            
-                left := p.x + depth*line_advance*2
-                top  := p.y
-                bounds = debug_measure_text(text)
-                bounds = rectangle_add_offset(bounds, v2{left, top - rectangle_get_diameter(bounds).y })
-
-                debug_push_text(text, {left, top} - {0, debug.ascent * debug.font_scale}, color)
                 
-                if rectangle_contains(bounds, mouse_p) {
-                    debug.next_hot_interaction = item_interaction
-                }
+                text_bounds := debug_measure_text(text)
+                
+                size := v2{ rectangle_get_diameter(text_bounds).x, layout.line_advance }
+                
+                element := begin_ui_element_rectangle(&layout, &size)
+                set_ui_element_default_interaction(&element, autodetect_interaction)
+                end_ui_element(&element, false)
+                
+                debug_push_text(text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
             }
-            
-            p.y = rectangle_get_min(bounds).y - spacing_y
             
             if next == nil {
                 next = ref
@@ -822,7 +877,7 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
             }
         }
         
-        debug.top_edge = p.y
+        debug.top_edge = layout.p.y
         
         move_interaction := DebugInteraction{
             kind   = .Move,
