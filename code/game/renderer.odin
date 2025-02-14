@@ -200,7 +200,7 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}) {
+push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32, offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true) {
     assert(group.inside_render)
     
     bitmap := get_bitmap(group.assets, id, group.generation_id)
@@ -211,7 +211,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32
     }
     
     if bitmap != nil {
-        push_bitmap_raw(group, bitmap^, height, offset, color, id)
+        push_bitmap_raw(group, bitmap^, height, offset, color, id, use_alignment)
     } else {
         assert(!group.renders_in_background)
         load_bitmap(group.assets, id, false)
@@ -226,9 +226,9 @@ UsedBitmapDim :: struct {
     basis: ProjectedBasis,
 }
 
-get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}) -> (result: UsedBitmapDim) {
+get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, use_alignment: b32 = true) -> (result: UsedBitmapDim) {
     result.size  = v2{bitmap.width_over_height, 1} * height
-    result.align = bitmap.align_percentage * result.size
+    result.align = use_alignment ? bitmap.align_percentage * result.size : 0
     result.p     = offset - V3(result.align, 0)
 
     result.basis = project_with_transform(group.transform, result.p)
@@ -236,11 +236,11 @@ get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, of
     return result
 }
 
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0) {
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
     assert(group.inside_render)
     assert(bitmap.width_over_height != 0)
     
-    used_dim := get_used_bitmap_dim(group, bitmap, height, offset)
+    used_dim := get_used_bitmap_dim(group, bitmap, height, offset, use_alignment)
 
     if used_dim.basis.valid {
         element := push_render_element(group, RenderGroupEntryBitmap)

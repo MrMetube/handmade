@@ -17,7 +17,7 @@ GlobalDebugMemory: ^GameMemory
 DebugState :: struct {
     inititalized: b32,
     paused:       b32,
-    debug_arena:   Arena,
+    debug_arena:  Arena,
     
     // NOTE(viktor): Collation
     collation_arena:  Arena,
@@ -34,22 +34,14 @@ DebugState :: struct {
     frames:      []DebugFrame,
     
     threads: []DebugThread,
-    
+
+    root_group:           ^DebugVariableReference,
+    hierarchy_sentinel:   DebugVariableHierarchy,
     
     last_mouse_p:         v2,
     interaction:          DebugInteraction,
-    interacting_with:     ^DebugVariable,
-    
     hot_interaction:      DebugInteraction,
     next_hot_interaction: DebugInteraction,
-    
-    hot:                  ^DebugVariable,
-    next_hot:             ^DebugVariable,
-    
-    root_group:           ^DebugVariableReference,
-    hierarchy_sentinel:   DebugVariableHierarchy,
-    dragging_hierarchy:   ^DebugVariableHierarchy,
-    next_hot_hierarchy:   ^DebugVariableHierarchy,
     
     compiling:    b32,
     compiler:     DebugExecutingProcess,
@@ -102,19 +94,6 @@ DebugOpenBlock :: struct {
     opening_event: ^DebugEvent,
     parent, 
     next_free:     ^DebugOpenBlock,
-}
-
-DebugInteraction :: enum {
-    None, 
-    
-    NOP,
-    
-    Toggle, 
-    Drag,
-    Tear,
-    MoveHierarchy,
-    
-    ResizeProfile,
 }
 
 ////////////////////////////////////////////////
@@ -177,6 +156,29 @@ DebugRecordLocation :: struct {
 
 ////////////////////////////////////////////////
 
+DebugInteraction :: struct {
+    kind: DebugInteractionKind,
+    target: union {
+        ^DebugVariable, 
+        ^DebugVariableHierarchy,
+        ^v2,
+        // TODO(viktor): add hot region from profile view
+    }
+}
+
+DebugInteractionKind :: enum {
+    None, 
+    
+    NOP,
+    AutoDetect,
+    
+    Toggle,
+    DragValue,
+    
+    Move,
+    Resize,
+}
+
 DebugVariableReference :: struct {
     var:    ^DebugVariable,
     parent: ^DebugVariableReference,
@@ -194,10 +196,16 @@ DebugVariableValue :: union {
     
     DebugVariableThreadList,
     DebugVariableGroup,
+    DebugBitmapDisplay,
+}
+
+DebugBitmapDisplay :: struct {
+    id:   BitmapId,
+    size: v2,
 }
 
 DebugVariableThreadList :: struct {
-    dimension: v2,
+    size: v2,
 }
 
 DebugVariableGroup :: struct {
@@ -207,7 +215,7 @@ DebugVariableGroup :: struct {
     last_child:  ^DebugVariableReference,
 }
 
-DebugVariableHierarchy :: LinkedListEntry(DebugVariableHierarchyData)
+DebugVariableHierarchy :: #type LinkedListEntry(DebugVariableHierarchyData)
 DebugVariableHierarchyData :: struct {
     ui_p:       v2,
     root_group: ^DebugVariableReference,
@@ -269,12 +277,16 @@ debug_reset :: proc(memory: ^GameMemory, assets: ^Assets, work_queue: ^PlatformW
         
         init_debug_variables(&ctx)
 
+        debug_begin_variable_group(&ctx, "Assets")
+            debug_add_variable(&ctx, DebugBitmapDisplay{ size = {800, 100}, id = first_bitmap_from(assets, .Monster) }, "")
+        debug_end_variable_group(&ctx)
+        
         debug_begin_variable_group(&ctx, "Profile")
             debug_begin_variable_group(&ctx, "By Thread")
-                debug_add_variable(&ctx, DebugVariableThreadList{ dimension = {800, 100}}, "")
+                debug_add_variable(&ctx, DebugVariableThreadList{ size = {800, 100}}, "")
             debug_end_variable_group(&ctx)
             debug_begin_variable_group(&ctx, "By Function")
-                debug_add_variable(&ctx, DebugVariableThreadList{ dimension = {800, 200}}, "")
+                debug_add_variable(&ctx, DebugVariableThreadList{ size = {800, 200}}, "")
             debug_end_variable_group(&ctx)
         debug_end_variable_group(&ctx)
         
@@ -448,8 +460,7 @@ debug_end_and_overlay :: proc(input: Input) {
     debug := get_debug_state()
     if debug == nil do return
     
-    debug.next_hot = nil
-    debug.hot_interaction = .None
+    debug.hot_interaction = {}
     
     overlay_debug_info(debug, input)
     
@@ -481,11 +492,11 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 }
 
 debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) {
-    push_rectangle(debug.render_group, rect, {0.08, 0.08, 0.2, 1} )
+    push_rectangle(debug.render_group, rect, DarkBlue )
     
     target_fps :: 72
 
-    bar_padding :: 2
+    bar_padding :: 1
     lane_height :f32
     lane_count  := cast(f32) debug.frame_bar_lane_count +1 
     frame_count := cast(f32) len(debug.frames)
@@ -537,7 +548,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
         if hot_region != nil {
             debug.scopes_to_record[hot_region.lane_index] = hot_region.record
             // TODO(viktor): @Cleanup clicking regions and variables at the same time should be handled better
-            debug.interaction = .NOP
+            debug.hot_interaction.kind = .NOP
         } else {
             for &scope in debug.scopes_to_record do scope = nil
         }
@@ -546,27 +557,42 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
 }
 
 debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
-    if debug.hot_interaction != .None {
+    if debug.hot_interaction.kind != .None {
+        if debug.hot_interaction.kind == .AutoDetect {
+            target := debug.hot_interaction.target.(^DebugVariable)
+            switch var in target.value {
+              case u32, i32, v2, v3, v4, DebugBitmapDisplay:
+                debug.hot_interaction.kind = .NOP
+              case b32, DebugVariableGroup, DebugVariableThreadList:
+                debug.hot_interaction.kind = .Toggle
+              case f32:
+                debug.hot_interaction.kind = .DragValue
+            }
+            
+            if alt_ui {
+                debug.hot_interaction.kind = .Move
+            }
+        }
+        
+        #partial switch debug.hot_interaction.kind {
+          case .Move:
+            switch target in debug.hot_interaction.target {
+              case ^v2:
+                // NOTE(viktor): nothing
+              case ^DebugVariable:
+                root_group := debug_add_root_group(debug, "NewUserGroup")
+                debug_add_variable_reference_to_group(debug, root_group, debug.hot_interaction.target.(^DebugVariable))
+                hierarchy := add_hierarchy(debug, root_group, {0, 0})
+                debug.hot_interaction.target = &hierarchy.ui_p
+              case ^DebugVariableHierarchy:
+                unreachable()
+            }
+            
+        }
+        
         debug.interaction = debug.hot_interaction
     } else {
-        if debug.hot != nil || debug.dragging_hierarchy != nil {
-            if alt_ui {
-                debug.interaction = .Tear
-            } else {
-                #partial switch var in debug.hot.value {
-                  case b32, DebugVariableGroup:
-                    debug.interaction = .Toggle
-                  case f32:
-                    debug.interaction = .Drag
-                }
-            }
-        } else {
-            debug.interaction = .NOP
-        }
-    }
-    
-    if debug.interaction != .None {
-        debug.interacting_with = debug.hot
+        debug.interaction.kind = .NOP
     }
 }
 
@@ -574,33 +600,34 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
     mouse_dp := input.mouse.p - debug.last_mouse_p
     defer debug.last_mouse_p = input.mouse.p
     
-    if debug.interaction != .None {
-        var := debug.interacting_with
+    
+    
+    alt_ui := input.mouse.right.ended_down
+    if debug.interaction.kind != .None {
         // NOTE(viktor): Mouse move interaction
-        #partial switch debug.interaction {
-          case .Drag:
-            #partial switch &value in var.value {
-              case f32:
-                value += 0.1 * mouse_dp.y
-            }
-          case .ResizeProfile:
-            value := &var.value.(DebugVariableThreadList)
-            value.dimension += mouse_dp * {1,-1}
-            value.dimension.x = max(value.dimension.x, 10)
-            value.dimension.y = max(value.dimension.y, 10)
-          case .MoveHierarchy:
-            debug.dragging_hierarchy.ui_p = input.mouse.p
-          case .Tear: 
-            if debug.dragging_hierarchy == nil {
-                root_group := debug_add_root_group(debug, "NewUserGroup")
-                debug_add_variable_reference_to_group(debug, root_group, var)
-                debug.dragging_hierarchy = add_hierarchy(debug, root_group, {0, 0})
-            }
-            debug.dragging_hierarchy.ui_p = input.mouse.p
+        switch debug.interaction.kind {
+          case .None: 
+            unreachable()
+            
+          case .NOP, .AutoDetect, .Toggle:
+            // NOTE(viktor): nothing
+            
+          case .DragValue:
+            value := &debug.interaction.target.(^DebugVariable).value.(f32)
+            value^ += 0.1 * mouse_dp.y
+            
+          case .Resize:
+            value := debug.interaction.target.(^v2)
+            value^ += mouse_dp * {1,-1}
+            value.x = max(value.x, 10)
+            value.y = max(value.y, 10)
+          
+          case .Move:
+            value := debug.interaction.target.(^v2)
+            value^ += mouse_dp
         }
         
         // NOTE(viktor): Click interaction
-        alt_ui := input.mouse.right.ended_down
         for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_end_interact(debug, input)
             debug_begin_interact(debug, input, alt_ui)
@@ -610,11 +637,8 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
             debug_end_interact(debug, input)
         }
     } else {
-        debug.hot = debug.next_hot
-        debug.dragging_hierarchy = debug.next_hot_hierarchy
         debug.hot_interaction = debug.next_hot_interaction
         
-        alt_ui := input.mouse.right.ended_down
         for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_begin_interact(debug, input, alt_ui)
             debug_end_interact(debug, input)
@@ -627,40 +651,39 @@ debug_interact :: proc(debug: ^DebugState, input: Input) {
 }
 
 debug_end_interact :: proc(debug: ^DebugState, input: Input) {
-    defer {
-        debug.interaction = .None
-        debug.interacting_with = nil
+    reload: b32
+    switch debug.interaction.kind {
+      case .None: 
+        unreachable()
+      
+      case .NOP, .Move, .Resize, .AutoDetect: 
+        // NOTE(viktor): nothing
+      
+      case .DragValue: 
+        reload = true
+      
+      case .Toggle:
+        target := debug.interaction.target.(^DebugVariable)
+        
+        switch &value in target.value {
+          case f32, u32, i32, v2, v3, v4, DebugBitmapDisplay:
+            unreachable()
+            
+          case DebugVariableGroup:
+            value.expanded = !value.expanded
+            
+          case DebugVariableThreadList:
+            debug.paused = !debug.paused
+            
+          case b32:
+            value = !value
+            reload = true
+        }
     }
     
-    if debug.interaction != .NOP {
-        reload: b32
-        
-        switch debug.interaction {
-          case .None, .NOP: unreachable()
-          case .MoveHierarchy, .ResizeProfile: 
-            // NOTE(viktor): nothing
-          case .Drag: 
-            reload = true
-          case .Toggle:
-            if debug.interacting_with != nil {
-                switch &value in debug.interacting_with.value {
-                  case f32, u32, i32, v2, v3, v4: unreachable()
-                  case DebugVariableGroup:
-                    value.expanded = !value.expanded
-                  case DebugVariableThreadList:
-                    debug.paused = !debug.paused
-                  case b32:
-                    assert(debug.interacting_with != nil)
-                    value = !value
-                    reload = true
-                }
-            }
-          case .Tear:
-            debug.dragging_hierarchy = nil
-        }
-        
-        if reload do write_handmade_config()
-    }
+    if reload do write_handmade_config()
+    
+    debug.interaction = {}
 }
 
 debug_main_menu :: proc(debug: ^DebugState, input: Input) {
@@ -679,8 +702,14 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
         for ref := root.first_child; ref != nil;  {
             var := ref.var
             
+            item_interaction := DebugInteraction{
+                kind   = .AutoDetect,
+                target = var,
+            }
+
+            is_hot := debug_interaction_is_hot(debug, item_interaction)
+            
             text: string
-            is_hot := var == debug.hot
             color := is_hot ? Blue : White
             
             depth_delta: f32
@@ -694,25 +723,66 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
             
             switch value in var.value {
               case DebugVariableThreadList:
-                min_corner := p + {depth * 2 * line_advance, -value.dimension.y}
-                max_corner := v2{min_corner.x + value.dimension.x, p.y}
+                min_corner := p + {depth * 2 * line_advance, -value.size.y}
+                max_corner := v2{min_corner.x + value.size.x, p.y}
                 size_p := v2{max_corner.x, min_corner.y}
                 bounds = rectangle_min_max(min_corner, max_corner)
                 debug_draw_profile(debug, input, bounds)
                 
+                // NOTE(viktor): if we take a ref to the value in the switch, llvm crashes in the next case, where value is still a union-type
+                dvtl := &var.value.(DebugVariableThreadList)
+                resize_interaction := DebugInteraction {
+                    kind   = .Resize,
+                    target = &dvtl.size,
+                }
                 resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
-
-                handle_color := debug.hot_interaction == .ResizeProfile && is_hot ? Blue : White
-                push_rectangle(debug.render_group, resize_handle, handle_color)
+                
+                push_rectangle(debug.render_group, resize_handle, debug_interaction_is_hot(debug, resize_interaction) ? Blue : White)
             
                 if rectangle_contains(resize_handle, mouse_p) {
-                    debug.next_hot_interaction = .ResizeProfile
-                    debug.next_hot = var
+                    debug.next_hot_interaction = resize_interaction
                 } else if rectangle_contains(bounds, mouse_p) {
-                    debug.next_hot_interaction = .Toggle
-                    debug.next_hot = var
+                    debug.next_hot_interaction = item_interaction
                 }
-                            
+                
+              case DebugBitmapDisplay:
+                min_corner := p + {depth * 2 * line_advance, -value.size.y}
+                max_corner := v2{min_corner.x + value.size.x, p.y}
+                size_p := v2{max_corner.x, min_corner.y}
+                bounds = rectangle_min_max(min_corner, max_corner)
+                
+                bitmap := get_bitmap(debug.render_group.assets, value.id, debug.render_group.generation_id)
+                bitmap_height := value.size.y
+                bitmap_offset := V3(bounds.min, 0)
+
+                dvtl := &var.value.(DebugBitmapDisplay)
+                if bitmap != nil {
+                    dim := get_used_bitmap_dim(debug.render_group, bitmap^, bitmap_height, bitmap_offset, use_alignment = false)
+                    dvtl.size = dim.size
+                    bitmap_height = dim.size.y
+                }
+                
+                push_rectangle(debug.render_group, bounds, DarkBlue )
+                push_bitmap(debug.render_group, value.id, bitmap_height, bitmap_offset, use_alignment = false)
+                
+                resize_interaction := DebugInteraction {
+                    kind   = .Resize,
+                    target = &dvtl.size,
+                }
+
+                resize_handle := rectangle_center_diameter(size_p, v2{8, 8})
+                push_rectangle(debug.render_group, resize_handle, debug_interaction_is_hot(debug, resize_interaction) ? Blue : White)
+                
+                if rectangle_contains(resize_handle, mouse_p) {
+                    debug.next_hot_interaction = resize_interaction
+                } else if rectangle_contains(bounds, mouse_p) {
+                    tear_interaction := DebugInteraction {
+                        kind = .Move,
+                        target = var,
+                    }
+                    debug.next_hot_interaction = tear_interaction
+                }
+                     
               case DebugVariableGroup, b32, u32, i32, f32, v2, v3, v4:
                 if group, ok := value.(DebugVariableGroup); ok {
                     text = fmt.tprintf("%s %v", group.expanded ? "-" : "+",  var.name)
@@ -732,8 +802,7 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                 debug_push_text(text, {left, top} - {0, debug.ascent * debug.font_scale}, color)
                 
                 if rectangle_contains(bounds, mouse_p) {
-                    debug.next_hot_interaction = .None
-                    debug.next_hot = var
+                    debug.next_hot_interaction = item_interaction
                 }
             }
             
@@ -755,15 +824,16 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
         
         debug.top_edge = p.y
         
+        move_interaction := DebugInteraction{
+            kind   = .Move,
+            target = &hierarchy.ui_p,
+        }
+        
         move_handle := rectangle_min_diameter(hierarchy.ui_p, v2{8, 8})
-    
-        is_hot := false
-        handle_color := debug.hot_interaction == .ResizeProfile && is_hot ? Blue : White
-        push_rectangle(debug.render_group, move_handle, handle_color)
+        push_rectangle(debug.render_group, move_handle, debug_interaction_is_hot(debug, move_interaction) ? Blue : White)
     
         if rectangle_contains(move_handle, mouse_p) {
-            debug.next_hot_interaction = .MoveHierarchy
-            debug.next_hot_hierarchy = hierarchy
+            debug.next_hot_interaction = move_interaction
         }
     }
     
@@ -800,7 +870,7 @@ write_handmade_config :: proc() {
         should_write := true
         t: typeid
         switch value in ref.var.value {
-          case DebugVariableThreadList: // NOTE(viktor): transient data
+          case DebugVariableThreadList, DebugBitmapDisplay: // NOTE(viktor): transient data
             next = ref.next
             should_write = false
           case DebugVariableGroup:
@@ -849,6 +919,11 @@ write_handmade_config :: proc() {
     HandmadeConfigFilename :: "../code/game/debug_config.odin"
     Platform.debug.write_entire_file(HandmadeConfigFilename, contents[:cursor])
     debug_state.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game`)
+}
+            
+debug_interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
+    result = debug.hot_interaction == interaction
+    return result
 }
 
 add_hierarchy :: proc(debug: ^DebugState, root: ^DebugVariableReference, p: v2) -> (result: ^DebugVariableHierarchy) {
