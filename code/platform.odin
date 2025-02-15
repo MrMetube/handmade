@@ -855,22 +855,15 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 }
 
 display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32, fix_windows_colors: b32 = true){    
-    WindowsColor :: struct{
-        b, g, r, pad: u8,
-    }
-
     if !GlobalPause {
         // TODO(viktor): can we avoid this without forcing the game to have to handle the windows color component order?
-        if fix_windows_colors {
+        #no_bounds_check if fix_windows_colors {
             for y in 0..<buffer.height {
-                for x in 0..<buffer.width {
-                    useful_color := &buffer.memory[y * buffer.pitch + x]
-                    windows_color:= WindowsColor{
-                        r = useful_color.r,
-                        g = useful_color.g,
-                        b = useful_color.b,
-                    }
-                    useful_color^ = transmute(Color) windows_color
+                row := buffer.memory[y * buffer.pitch:][:buffer.width]
+                for &useful_color in row {
+                    // NOTE(viktor): Windows expects the color to be ordered like this:
+                    // struct{ b, g, r, pad: u8 }
+                    useful_color.r, useful_color.b = useful_color.b, useful_color.r
                 }
             }
         }
@@ -891,10 +884,10 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
     } else {
         offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
 
-        win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y, win.BLACKNESS )
+        win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y,         win.BLACKNESS )
         win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
         
-        win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height, win.BLACKNESS )
+        win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height,             win.BLACKNESS )
         win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_height, win.BLACKNESS )
         
         // TODO: aspect ratio correction

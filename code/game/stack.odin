@@ -1,34 +1,38 @@
 package game
 
-Stack :: struct($T: typeid, $Size: u32) {
+import "base:intrinsics"
+
+Stack :: struct($Array: typeid) where intrinsics.type_is_array(Array) {
     depth: u32,
-    data:  [Size]T,
+    data:  Array,
 }
 
-StackIterator :: struct($T: typeid, $Size: u32) {
-    index: u32,
-    stack: ^Stack(T,Size),
-}
-
-stack_push :: #force_inline proc(using stack: ^Stack($T, $S), element: T) -> (result: ^T) {
+stack_push :: #force_inline proc(using stack: ^Stack($A/[$N]$T), element: T) -> (result: ^T) {
     result  = &data[depth]
     result^ = element
     depth += 1
     return result
 }
 
-stack_peek :: #force_inline proc(using stack: ^Stack($T, $S)) -> (result: ^T) {
-    result = &data[depth-1]
+stack_peek :: #force_inline proc(using stack: ^Stack($A/[$N]$T)) -> (result: ^T) {
+    if depth > 0 {
+        result = &data[depth-1]
+    }
     return result
 }
 
-stack_pop :: #force_inline proc(using stack: ^Stack($T, $S)) -> (result: ^T) {
+stack_pop :: #force_inline proc(using stack: ^Stack($A/[$N]$T)) -> (result: ^T) {
     depth -= 1
     result = &data[depth]
     return result
 }
 
 /* Iterator example
+    StackIterator :: struct($T: typeid, $Size: u32) {
+        index: u32,
+        stack: ^Stack(T,Size),
+    }
+
     iter := stack_make_iterator(&stack)
     for it, it_index in stack_iterator(&iter) {
         

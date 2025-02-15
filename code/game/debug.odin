@@ -185,6 +185,7 @@ DebugRecordLocation :: struct {
 ////////////////////////////////////////////////
 
 DebugInteraction :: struct {
+    id:   DebugId,
     kind: DebugInteractionKind,
     target: union {
         ^DebugVariable, 
@@ -211,25 +212,28 @@ DebugInteractionKind :: enum {
 
 DebugView :: #type SingleLinkedList(DebugViewData)
 DebugViewData :: struct {
-    tree: DebugTree,
-    var:  ^DebugVariable,
-    
+    id:   DebugId,
     kind: union {
         DebugViewVariable,
         DebugViewBlock,
-        DebugViewCollapsable,
+        DebugViewCollapsible,
     }
 }
 
 DebugViewVariable :: struct {}
 
-DebugViewCollapsable :: struct {
+DebugViewCollapsible :: struct {
     expanded_always:   b32,
     expanded_alt_view: b32,
 }
 
 DebugViewBlock :: struct {
     size: v2,
+}
+
+// TODO(viktor): Maybe there is a better way!
+DebugId :: struct {
+    value: [2]rawpointer,
 }
 
 ////////////////////////////////////////////////
@@ -251,21 +255,21 @@ DebugVariableValue :: union {
     
     DebugVariableProfile,
     DebugBitmapDisplay,
-    DebugVariableList,
+    DebugVariableLink,
 }
 
 // TODO(viktor): @CompilerBug this should just be:
 // #type LinkedList(DebugVariable)
 // But the compiler will go into an infinite loop.
 // C:\Odin\odin.exe version dev-2025-02:584fdc0d4
-DebugVariableList :: #type LinkedList(DebugVariableListData)
-DebugVariableListData :: struct {
+DebugVariableLink :: #type LinkedList(DebugVariableLinkData)
+DebugVariableLinkData :: struct {
     var: ^DebugVariable,
 }
 // :LinkedListIteration
 DebugVariableInterator :: struct {
-    link:     ^DebugVariableList,
-    sentinel: ^DebugVariableList,
+    link:     ^DebugVariableLink,
+    sentinel: ^DebugVariableLink,
 }
 
 DebugBitmapDisplay :: struct {
@@ -278,8 +282,7 @@ DebugVariableProfile :: struct {
 DebugVariableDefinitionContext :: struct {
     debug: ^DebugState,
     
-    depth: u32,
-    group_stack: [64]^DebugVariable,
+    stack: Stack([64]^DebugVariable),
 }
 
 ////////////////////////////////////////////////
@@ -327,7 +330,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             
             ctx := DebugVariableDefinitionContext { debug = debug }
 
-            debug_begin_variable_group(&ctx, "Debugging")
+            debug.root_group = debug_begin_variable_group(&ctx, "Debugging")
                 init_debug_variables(&ctx)
 
                 debug_begin_variable_group(&ctx, "Assets")
@@ -338,13 +341,9 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                     debug_begin_variable_group(&ctx, "By Thread")
                         debug_add_variable(&ctx, DebugVariableProfile{}, "")
                     debug_end_variable_group(&ctx)
-                    debug_begin_variable_group(&ctx, "By Function")
-                        debug_add_variable(&ctx, DebugVariableProfile{}, "")
-                    debug_end_variable_group(&ctx)
                 debug_end_variable_group(&ctx)
-                debug.root_group = ctx.group_stack[1]
             debug_end_variable_group(&ctx)
-            assert(ctx.depth == 0)
+            assert(ctx.stack.depth == 0)
                 
             list_init_sentinel(&debug.tree_sentinel)
             
@@ -627,7 +626,7 @@ debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
             switch var in target.value {
               case u32, i32, v2, v3, v4, DebugBitmapDisplay:
                 debug.hot_interaction.kind = .NOP
-              case b32, DebugVariableList, DebugVariableProfile:
+              case b32, DebugVariableLink, DebugVariableProfile:
                 debug.hot_interaction.kind = .Toggle
               case f32:
                 debug.hot_interaction.kind = .DragValue
@@ -644,11 +643,10 @@ debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
               case ^v2:
                 // NOTE(viktor): nothing
               case ^DebugVariable:
-                unimplemented()
-                // root_group := debug_add_root_group(debug, "NewUserGroup")
-                // debug_add_variable_reference_to_group(debug, root_group, debug.hot_interaction.target.(^DebugVariable))
-                // tree := add_tree(debug, root_group, {0, 0})
-                // debug.hot_interaction.target = &tree.p
+                root_group := debug_add_variable_group(debug, "NewUserGroup")
+                debug_add_variable_to_group(debug, root_group, debug.hot_interaction.target.(^DebugVariable))
+                tree := add_tree(debug, root_group, {0, 0})
+                debug.hot_interaction.target = &tree.p
               case ^DebugTree:
                 unreachable()
             }
@@ -730,19 +728,28 @@ debug_end_interact :: proc(debug: ^DebugState, input: Input) {
       case .Toggle:
         target := debug.interaction.target.(^DebugVariable)
         
-        switch &value in target.value {
+        switch value in target.value {
           case f32, u32, i32, v2, v3, v4, DebugBitmapDisplay:
             unreachable()
             
-          case DebugVariableList:
-            view := get_debug_view_for_variable(debug, value.var).kind.(DebugViewCollapsable)
-            view.expanded_always = !view.expanded_always
+          case DebugVariableLink:
+            view := get_debug_view_for_variable(debug, debug.interaction.id)
+            collapsible, ok := &view.kind.(DebugViewCollapsible)
+            if !ok {
+                view.kind = DebugViewCollapsible{}
+                collapsible = &view.kind.(DebugViewCollapsible)
+            }
+            
+            collapsible.expanded_always = !collapsible.expanded_always
             
           case DebugVariableProfile:
             debug.paused = !debug.paused
             
           case b32:
-            value = !value
+            // TODO(viktor): @CompilerBug 
+            // Taking ref to value in the switch will cause an infinite loop in the compiler.
+            v := &target.value.(b32)
+            v^ = !v^
             reload = true
         }
     }
@@ -812,13 +819,44 @@ end_ui_element :: proc(using element: ^LayoutElement, use_spacing: b32) {
     layout.p.y = total_bounds.min.y - spacing
 }
 
-get_debug_view_for_variable :: proc(debug: ^DebugState, var: ^DebugVariable) -> (result: DebugView) {
+link_interaction :: #force_inline proc(kind: DebugInteractionKind, tree: ^DebugTree, link: ^DebugVariableLink) -> (result: DebugInteraction) {
+    result.id = debug_id_from_link(tree, link)
+    result.target = link.var
+    result.kind = kind
+    
+    return result
+}
+
+debug_id_from_link :: #force_inline proc(tree: ^DebugTree, link: ^DebugVariableLink) -> (result: DebugId) {
+    result.value[0] = tree
+    result.value[1] = link
+    return result
+}
+
+get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
+    // TODO(viktor): BETTER HASH FUNCTION
+    hash_index := ((cast(uintpointer) id.value[0] >> 2) + (cast(uintpointer) id.value[1] >> 2)) % len(debug.view_hash)
+    slot := &debug.view_hash[hash_index]
+    // :LinkedListIteration
+    for search := slot^ ; search != nil; search = search.next {
+        if search.id == id {
+            result = search
+            break
+        }
+    }
+    
+    if result == nil {
+        result = push(&debug.debug_arena, DebugView)
+        result.id = id
+        list_push(slot, result)
+    }
+    
     return 
 }
 
 debug_main_menu :: proc(debug: ^DebugState, input: Input) {
     if debug.font_info == nil do return
-    stack: Stack(DebugVariableInterator, 64)
+    stack: Stack([64]DebugVariableInterator)
     
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
         mouse_p := input.mouse.p
@@ -834,8 +872,8 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
         }
         
         stack_push(&stack, DebugVariableInterator{
-            link     = tree.root.value.(DebugVariableList).next,
-            sentinel = &tree.root.value.(DebugVariableList),
+            link     = tree.root.value.(DebugVariableLink).next,
+            sentinel = &tree.root.value.(DebugVariableLink),
         })
         
         for stack.depth > 0 {
@@ -843,14 +881,13 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
             iter := stack_peek(&stack)
             if iter.link == iter.sentinel {
                 stack.depth -= 1
+                layout.depth -= 1
             } else {
-                var := iter.link.var
-                defer iter.link = iter.link.next
+                link := iter.link
+                var  := link.var
+                iter.link = link.next
                 
-                autodetect_interaction := DebugInteraction{
-                    kind   = .AutoDetect,
-                    target = var,
-                }
+                autodetect_interaction := link_interaction(.AutoDetect, tree, link)
 
                 is_hot := debug_interaction_is_hot(debug, autodetect_interaction)
                 
@@ -860,12 +897,16 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                 depth_delta: f32
                 defer layout.depth += depth_delta
                 
-                // TODO(viktor): View Cache
-                view: DebugView = get_debug_view_for_variable(debug, var)
+                view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
                 
                 switch value in var.value {
                 case DebugVariableProfile:
-                    block := &view.kind.(DebugViewBlock)
+                    block, ok := &view.kind.(DebugViewBlock)
+                    if !ok {
+                        view.kind = DebugViewBlock{}
+                        block = &view.kind.(DebugViewBlock)
+                    }
+                    
                     element := begin_ui_element_rectangle(&layout, &block.size)
                     make_ui_element_resizable(&element)
                     set_ui_element_default_interaction(&element, autodetect_interaction)
@@ -874,7 +915,12 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                     debug_draw_profile(debug, input, element.bounds)
                     
                 case DebugBitmapDisplay:
-                    block := &view.kind.(DebugViewBlock)
+                    block, ok := &view.kind.(DebugViewBlock)
+                    if !ok {
+                        view.kind = DebugViewBlock{}
+                        block = &view.kind.(DebugViewBlock)
+                    }
+                    
                     if bitmap := get_bitmap(debug.render_group.assets, value.id, debug.render_group.generation_id); bitmap != nil {
                         dim := get_used_bitmap_dim(debug.render_group, bitmap^, block.size.y, 0, use_alignment = false)
                         block.size = dim.size
@@ -882,7 +928,7 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
 
                     element := begin_ui_element_rectangle(&layout, &block.size)
                     make_ui_element_resizable(&element)
-                    set_ui_element_default_interaction(&element, {kind = .Move, target = var })
+                    set_ui_element_default_interaction(&element, link_interaction(.Move, tree, link))
                     end_ui_element(&element, true)
                     
                     bitmap_height := block.size.y
@@ -890,14 +936,22 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                     push_rectangle(debug.render_group, element.bounds, DarkBlue )
                     push_bitmap(debug.render_group, value.id, bitmap_height, bitmap_offset, use_alignment = false)
                     
-                case DebugVariableList, b32, u32, i32, f32, v2, v3, v4:
-                    if list, ok := value.(DebugVariableList); ok {
-                        view := view.kind.(DebugViewCollapsable)
-                        text = fmt.tprintf("%s %v", view.expanded_always ? "-" : "+",  var.name)
-                        iter = stack_push(&stack, DebugVariableInterator{
-                            link     = list.next,
-                            sentinel = &list,
-                        })
+                case DebugVariableLink, b32, u32, i32, f32, v2, v3, v4:
+                    if list, ok := &var.value.(DebugVariableLink); ok {
+                        collapsible, okc := &view.kind.(DebugViewCollapsible)
+                        if !okc {
+                            view.kind = DebugViewCollapsible{}
+                            collapsible = &view.kind.(DebugViewCollapsible)
+                        }
+                        
+                        text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+",  var.name)
+                        if collapsible.expanded_always {
+                            stack_push(&stack, DebugVariableInterator{
+                                link     = list.next,
+                                sentinel = list,
+                            })
+                            depth_delta = 1
+                        }
                     } else {
                         text = fmt.tprintf("%s %v", var.name, value)
                     }
@@ -953,10 +1007,10 @@ write_handmade_config :: proc(debug: ^DebugState) {
     cursor: u32
     cursor += write(contents[cursor:], "package game\n\n")
     
-    stack: Stack(DebugVariableInterator, 64)
+    stack: Stack([64]DebugVariableInterator)
     stack_push(&stack, DebugVariableInterator{
-        link     = debug.root_group.value.(DebugVariableList).next,
-        sentinel = &debug.root_group.value.(DebugVariableList),
+        link     = debug.root_group.value.(DebugVariableLink).next,
+        sentinel = &debug.root_group.value.(DebugVariableLink),
     })
     
     for stack.depth > 0 {
@@ -965,7 +1019,7 @@ write_handmade_config :: proc(debug: ^DebugState) {
             stack.depth -= 1
         } else {
             var := iter.link.var
-            defer iter.link = iter.link.next
+            iter.link = iter.link.next
             
             should_write := true
             t: typeid
@@ -973,7 +1027,9 @@ write_handmade_config :: proc(debug: ^DebugState) {
             case DebugVariableProfile, DebugBitmapDisplay: 
                 // NOTE(viktor): transient data
                 should_write = false
-            case DebugVariableList:
+            case DebugVariableLink:
+                for &it in contents[cursor:][:stack.depth * 4] do it = ' '
+                cursor += stack.depth * 4
                 cursor += write(contents[cursor:], fmt.tprintfln("// %s", var.name))
                 should_write = false
                 iter = stack_push(&stack, DebugVariableInterator{
@@ -995,6 +1051,7 @@ write_handmade_config :: proc(debug: ^DebugState) {
             }
             
             if should_write {
+                for &it in contents[cursor:][:stack.depth * 4] do it = ' '
                 cursor += stack.depth * 4
                 cursor += write(contents[cursor:], fmt.tprintfln("%s :%w: %w", var.name, t, var.value))
                 seen_names[seen_names_cursor] = var.name
@@ -1064,45 +1121,54 @@ init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
     debug_add_variable(ctx, DEBUG_HeroJumping)
 }
 
-debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) {
-    var := debug_add_variable_unreferenced(ctx, DebugVariableList{}, group_name)
-    list_init_sentinel(&var.value.(DebugVariableList))
- 
-    ctx.group_stack[ctx.depth] = var
-    ctx.depth += 1
-}
-
-debug_add_variable_to_group :: proc(ctx: ^DebugVariableDefinitionContext, group: ^DebugVariable, element: ^DebugVariable) {
-    entry := push(&ctx.debug.debug_arena, DebugVariableList)
-    entry.var = element
-    
-    list  := &group.value.(DebugVariableList)
-    list_insert(list, entry)
-}
-
-debug_add_variable_unreferenced :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name: string) -> (result: ^DebugVariable) {
-    result = push(&ctx.debug.debug_arena, DebugVariable)
-    result^ = {
-        name  = push_string(&ctx.debug.debug_arena, variable_name),
-        value = value,
+debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariable) {
+    result = debug_add_variable_group(ctx.debug, group_name)
+    if parent := stack_peek(&ctx.stack); parent != nil {
+        debug_add_variable_to_group(ctx.debug, parent^, result)
     }
+    
+    stack_push(&ctx.stack, result)
     return result
 }
 
-debug_add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) -> (result: ^DebugVariable) {
-    result = debug_add_variable_unreferenced(ctx, value, variable_name)
+debug_add_variable_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugVariable) {
+    result = debug_add_variable_without_context(debug, DebugVariableLink{}, name)
+    list_init_sentinel(&result.value.(DebugVariableLink))
     
-    parent := ctx.group_stack[ctx.depth]
-    if parent != nil {
-        debug_add_variable_to_group(ctx, parent, result)
+    return result
+}
+
+debug_add_variable_to_group :: proc(debug: ^DebugState, group: ^DebugVariable, element: ^DebugVariable) {
+    entry := push(&debug.debug_arena, DebugVariableLink)
+    entry.var = element
+    
+    list  := &group.value.(DebugVariableLink)
+    list_insert(list, entry)
+}
+
+debug_add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) -> (result: ^DebugVariable) {
+    result = debug_add_variable_without_context(ctx.debug, value, variable_name)
+
+    if parent := stack_peek(&ctx.stack); parent != nil {
+        debug_add_variable_to_group(ctx.debug, parent^, result)
+    }
+    
+    return result
+}
+
+debug_add_variable_without_context :: proc(debug: ^DebugState, value: DebugVariableValue, variable_name: string) -> (result: ^DebugVariable) {
+    result = push(&debug.debug_arena, DebugVariable)
+    result^ = {
+        name  = push_string(&debug.debug_arena, variable_name),
+        value = value,
     }
     
     return result
 }
 
 debug_end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext) {
-    assert(ctx.depth > 0)
-    ctx.depth -= 1
+    assert(ctx.stack.depth > 0)
+    ctx.stack.depth -= 1
 }
 
 ////////////////////////////////////////////////
