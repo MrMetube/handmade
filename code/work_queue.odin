@@ -1,8 +1,6 @@
 package main
 
 import "base:runtime"
-import "core:fmt"
-import "core:os"
 import "core:thread"
 import "base:intrinsics"
 import win "core:sys/windows"

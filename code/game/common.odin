@@ -3,7 +3,6 @@ package game
 import "base:intrinsics"
 import "base:runtime"
 import "core:simd/x86"
-import "core:hash"
 
 INTERNAL :: #config(INTERNAL, false)
 
@@ -105,7 +104,7 @@ GameMemory :: struct {
 
 TimedBlock :: struct {
     record_index: u32, 
-    hit_count:    i64
+    hit_count:    i64,
 }
 
 DebugCode :: struct {

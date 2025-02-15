@@ -7,7 +7,7 @@ game: GameApi = stubbed
 
 @(private="file")
 stubbed := GameApi {
-    debug_frame_end   = proc(memory: ^GameMemory) {},
+    debug_frame_end   = proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {},
     frame_marker      = proc(seconds_elapsed: f32, loc := #caller_location) {},
     begin_timed_block = proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock)  { return result },
     end_timed_block   = proc(block: TimedBlock) {},
@@ -93,7 +93,7 @@ game_lib: win.HMODULE
 
 @(private="file") UpdateAndRender    :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: Input)
 @(private="file") OutputSoundSamples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
-@(private="file") DebugFrameEnd      :: #type proc(memory: ^GameMemory)
+@(private="file") DebugFrameEnd      :: #type proc(memory: ^GameMemory, offscreen_buffer: Bitmap, input: Input)
 
 @(private="file") BeginTimedBlock    :: #type proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock) 
 @(private="file") EndTimedBlock      :: #type proc(block: TimedBlock)

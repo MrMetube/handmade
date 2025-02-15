@@ -134,27 +134,6 @@ abs_vec_3 :: #force_inline proc(a: [3]$E) -> [3]E where intrinsics.type_is_numer
     return {abs(a.x), abs(a.y), abs(a.z)}
 }
 
-
-@(require_results)
-rotate_left :: #force_inline proc(value: u32, amount: i32) -> u32 {
-    // TODO: can odin insert rotate intrinsics
-    masked := amount & 31
-    return value << u32(masked) | value >> u32(32 - masked)
-}
-
-@(require_results)
-rotate_right :: #force_inline proc(value: u32, amount: i32) -> u32 {
-    // TODO: can odin insert rotate intrinsics
-    masked := amount & 31
-    return value >> u32(-masked) | value << u32(32 + masked)
-}
-
-pointer_step :: proc(t: ^$T, #any_int step: i64) ->(result: ^T) {
-    ts := cast([^]T) t
-    result = &ts[step]
-    return result
-}
-
 modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where intrinsics.type_is_numeric(N) {
     value^ += addend
     if value^ >= one_past_maximum {

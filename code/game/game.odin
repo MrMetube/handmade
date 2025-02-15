@@ -184,6 +184,16 @@ ControlledHero :: struct {
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
+debug_get_game_assets_and_work_queue :: proc(memory: ^GameMemory) -> (assets: ^Assets, work_queue: ^PlatformWorkQueue) {
+    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
+    if tran_state.is_initialized {
+        assets = tran_state.assets
+        work_queue = tran_state.high_priority_queue
+    }
+    
+    return assets, work_queue
+}
+
 @export
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     Platform = memory.Platform_api
@@ -413,8 +423,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         make_sphere_normal_map(tran_state.test_normal, 0)
         make_sphere_diffuse_map(tran_state.test_diffuse)
     }
-    
-    debug_reset(memory, tran_state.assets, tran_state.high_priority_queue, buffer)
     
     ////////////////////////////////////////////////
     // Input
@@ -971,8 +979,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     check_arena(&state.world_arena)
     check_arena(&tran_state.arena)
-    
-    debug_end_and_overlay(input)
 }
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a

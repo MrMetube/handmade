@@ -32,8 +32,8 @@ LowPriorityWorkQueueThreadCount  :: 2
 
 
 // Resolution :: [2]i32 {2560, 1440}
-Resolution :: [2]i32 {1920, 1080}
-// Resolution :: [2]i32 {1280, 720}
+// Resolution :: [2]i32 {1920, 1080}
+Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
 MonitorRefreshHz: u32 : 72
@@ -271,7 +271,7 @@ main :: proc() {
     }
     
     { // NOTE(viktor): initialize game_memory
-        base_address := cast(rawpointer) cast(uintpointer) (1 * Terabyte) when INTERNAL else 0
+        base_address := cast(rawpointer) cast(uintpointer) (1 * Terabyte when INTERNAL else 0)
 
         total_size := cast(uint) (PermanentStorageSize + TransientStorageSize + DebugStorageSize)
 
@@ -327,15 +327,13 @@ main :: proc() {
     last_counter := get_wall_clock()
     flip_counter := get_wall_clock()
 
-
     ////////////////////////////////////////////////
     //  Game Loop
     // 
-    frame_marker_clock: i64
     for GlobalRunning {
         ////////////////////////////////////////////////
         //  Hot Reload
-        // executable_refresh := game.begin_timed_block("executable refresh")
+        executable_refresh := game.begin_timed_block("executable refresh")
         
         game_memory.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
@@ -353,7 +351,7 @@ main :: proc() {
         }
         
         
-        // game.end_timed_block(executable_refresh)
+        game.end_timed_block(executable_refresh)
         ////////////////////////////////////////////////   
         //  Input
         input_processed := game.begin_timed_block("input processed")
@@ -365,7 +363,6 @@ main :: proc() {
                 mouse: win.POINT
                 win.GetCursorPos(&mouse)
                 win.ScreenToClient(window, &mouse)
-                mouse_p := transmute([2]i32) mouse
                 new_input.mouse.p = v2{ 
                     (-0.5 * cast(f32) GLOBAL_back_buffer.width  + 0.5) + cast(f32) mouse.x,
                     ( 0.5 * cast(f32) GLOBAL_back_buffer.height + 0.5) - cast(f32) mouse.y,
@@ -490,7 +487,7 @@ main :: proc() {
                 width  = GLOBAL_back_buffer.width,
                 height = GLOBAL_back_buffer.height,
             }
-
+            
             if state.input_record_index != 0 {
                 record_input(&state, &new_input)
             }
@@ -501,8 +498,6 @@ main :: proc() {
             if game_lib_is_valid {
                 game.update_and_render(&game_memory, offscreen_buffer, new_input)
             }
-        
-            swap(&old_input, &new_input)
         }
         
         game.end_timed_block(game_updated)
@@ -590,9 +585,25 @@ main :: proc() {
         
         game.end_timed_block(audio_update)
         ////////////////////////////////////////////////
+        debug_colation := game.begin_timed_block("debug colation")
+        
+        {
+            offscreen_buffer := Bitmap{
+                memory = GLOBAL_back_buffer.memory,
+                width  = GLOBAL_back_buffer.width,
+                height = GLOBAL_back_buffer.height,
+            }
+            
+            game.debug_frame_end(&game_memory, offscreen_buffer, new_input)
+            
+            swap(&old_input, &new_input)
+        }
+        
+        game.end_timed_block(debug_colation)
+        ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         
-        when false {
+        {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
 
             if seconds_elapsed_for_frame < target_seconds_per_frame {
@@ -625,12 +636,8 @@ main :: proc() {
             flip_counter = get_wall_clock()
         }
 
+        game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
-        debug_colation := game.begin_timed_block("debug colation")
-        
-        game.debug_frame_end(&game_memory)
-        
-        game.end_timed_block(debug_colation)
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))

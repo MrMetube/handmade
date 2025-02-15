@@ -1,7 +1,6 @@
 package game
 
 import "core:simd"
-import "core:simd/x86"
 
 /* NOTE(viktor):
     1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
@@ -850,11 +849,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 intb := cast(u32x8) blended_b
                 inta := cast(u32x8) blended_a
                 
-                intrl := simd.shl_masked(intr, 0)
-                intgl := simd.shl_masked(intg, 8)
-                intbl := simd.shl_masked(intb, 16)
-                intal := simd.shl_masked(inta, 24)
-                mixed := intr | intgl | intbl | intal
+                mixed := intr | simd.shl_masked(intg, 8) | simd.shl_masked(intb, 16) | simd.shl_masked(inta, 24)
 
                 simd.masked_store(&pixel[0], mixed, write_mask)
             }
