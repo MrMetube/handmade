@@ -29,16 +29,12 @@ Entity :: struct {
 }
 
 EntityCollisionVolumeGroup :: struct {
-    total_volume: EntityCollisionVolume,
+    total_volume: Rectangle3,
     // TODO(viktor): volumes is always expected to be non-empty if the entity
     // has any volume... in the future, this could be compressed if necessary
     // that the length can be 0 if the total_volume should be used as the only
     // collision volume for the entity.
-    volumes: []EntityCollisionVolume,
-}
-
-EntityCollisionVolume :: struct {
-    dim, offset: v3,
+    volumes: []Rectangle3,
 }
 
 EntityReference :: struct #raw_union {
@@ -145,9 +141,9 @@ end_sim :: proc(region: ^SimRegion, state: ^State) {
     }
 }
 
-entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volume: EntityCollisionVolume) -> (result: b32) {
-    grown := rectangle_add_radius(bounds, 0.5 * volume.dim)
-    result = rectangle_contains(grown, p + volume.offset)
+entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
+    grown := rectangle_add_radius(bounds, 0.5 * rectangle_get_diameter(volume))
+    result = rectangle_contains(grown, p + rectangle_get_center(volume))
     return result
 }
 
@@ -321,11 +317,11 @@ move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3,
                         
                         for volume in entity.collision.volumes {
                             for test_volume in test_entity.collision.volumes {
-                                minkowski_diameter := volume.dim + test_volume.dim
+                                minkowski_diameter := rectangle_get_diameter(volume) + rectangle_get_diameter(test_volume)
                                 min_corner := -0.5 * minkowski_diameter
                                 max_corner :=  0.5 * minkowski_diameter
                                 
-                                rel := (entity.p + volume.offset) - (test_entity.p + test_volume.offset)
+                                rel := (entity.p + rectangle_get_center(volume)) - (test_entity.p + rectangle_get_center(test_volume))
                                 
                                 // TODO(viktor): do we want an close inclusion on the max_corner?
                                 if rel.z >= min_corner.z && rel.z < max_corner.z {
@@ -484,8 +480,8 @@ move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3,
 entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
     outer: for a_volume in a.collision.volumes {
         for b_volume in b.collision.volumes {
-            a_rect := rectangle_center_diameter(a.p + a_volume.offset, a_volume.dim + epsilon)
-            b_rect := rectangle_center_diameter(b.p + b_volume.offset, b_volume.dim)
+            a_rect := rectangle_center_diameter(a.p + rectangle_get_center(a_volume), rectangle_get_diameter(a_volume) + epsilon)
+            b_rect := rectangle_center_diameter(b.p + rectangle_get_center(b_volume), rectangle_get_diameter(b_volume))
             
             if rectangle_intersects(a_rect, b_rect) {
                 result = true

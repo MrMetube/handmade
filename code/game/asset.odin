@@ -663,7 +663,6 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
             }
         }
     }
-    complete_previous_writes_before_future_writes()
     
     if !Platform_no_file_errors(work.handle) {
         zero(work.destination, work.amount)
@@ -682,6 +681,9 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 
 AssetKind :: enum {Font, Bitmap, Sound}
 load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
+    immediate := immediate 
+    immediate ||= DEBUG_LoadAssetsSingleThreaded
+    
     if is_valid_asset(id) {
         asset := &assets.assets[id]
         if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
@@ -706,12 +708,12 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
                     kind = kind,
                 }
                 
-                if !immediate {
+                if immediate {
+                    load_asset_work_immediatly(&work)
+                } else {
                     task_work := push(&task.arena, LoadAssetWork)
                     task_work^ = work
                     Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
-                } else {
-                    load_asset_work_immediatly(&work)
                 }
             } else {
                 _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)

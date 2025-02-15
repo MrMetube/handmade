@@ -150,6 +150,8 @@ perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meter
     
     group.transform.distance_above_target = distance_above_target
     group.transform.focal_length          = focal_length
+    group.transform.offset                = 0
+    group.transform.scale                 = 1
 }
 
 orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels: f32) {
@@ -163,6 +165,8 @@ orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, mete
     
     group.transform.distance_above_target = 10
     group.transform.focal_length          = 10
+    group.transform.offset                = 0
+    group.transform.scale                 = 1
 }
 
 all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
@@ -256,13 +260,17 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, heigh
     }
 }
 
-push_rectangle :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, color := v4{1,1,1,1}) {
+push_rectangle :: proc { push_rectangle2, push_rectangle3 }
+push_rectangle2 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, color := v4{1,1,1,1}) {
+    push_rectangle(group, Rect3(rec, 0, 0), color)
+}
+push_rectangle3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, color := v4{1,1,1,1}) {
     assert(group.inside_render)
     
     center := rectangle_get_center(rec)
     size   := rectangle_get_diameter(rec)
     p := center + 0.5*size
-    basis := project_with_transform(group.transform, V3(p, 0))
+    basis := project_with_transform(group.transform, p)
     
     if basis.valid {
         element := push_render_element(group, RenderGroupEntryRectangle)
@@ -270,24 +278,30 @@ push_rectangle :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, color
 
         if element != nil {
             element.color = color * alpha
-            element.rect  = rectangle_center_diameter(basis.position - 0.5 * basis.scale * size, basis.scale * size)
+            element.rect  = rectangle_center_diameter(basis.position - 0.5 * basis.scale * size.xy, basis.scale * size.xy)
         }
     }
 }
-
-push_rectangle_outline :: #force_inline proc(group: ^RenderGroup, offset:v2, size: v2, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
+push_rectangle_outline2 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, color := v4{1,1,1,1}, thickness: f32 = 0.1) {
+    push_rectangle_outline(group, Rect3(rec, 0, 0), color, thickness)
+}
+push_rectangle_outline3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
     assert(group.inside_render)
     
     // TODO(viktor): there are rounding issues with draw_rectangle
-    // @Cleanup offset and size params to rect itself?
+    // @Cleanup offset and size
+    
+    offset := rectangle_get_center(rec)
+    size   := rectangle_get_diameter(rec)
     
     // Top and Bottom
-    push_rectangle(group, rectangle_center_diameter(offset.xy - {0, size.y*0.5}, v2{size.x+thickness, thickness}), color)
-    push_rectangle(group, rectangle_center_diameter(offset.xy + {0, size.y*0.5}, v2{size.x+thickness, thickness}), color)
+    push_rectangle(group, rectangle_center_diameter(offset - {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), color)
+    push_rectangle(group, rectangle_center_diameter(offset + {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), color)
 
     // Left and Right
-    push_rectangle(group, rectangle_center_diameter(offset.xy - {size.x*0.5, 0}, v2{thickness, size.y-thickness}), color)
-    push_rectangle(group, rectangle_center_diameter(offset.xy + {size.x*0.5, 0}, v2{thickness, size.y-thickness}), color)
+    push_rectangle(group, rectangle_center_diameter(offset - {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), color)
+    push_rectangle(group, rectangle_center_diameter(offset + {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), color)
 }
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
@@ -315,7 +329,7 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
             hit_point := entity.hit_points[index]
             color := hit_point.filled_amount == 0 ? Gray : Red
             // @Cleanup rect
-            push_rectangle(group, rectangle_center_diameter(v2{health_x, -offset_y}, health_size), color)
+            push_rectangle(group, rectangle_center_diameter(v3{health_x, -offset_y, 0}, V3(health_size, 0)), color)
             health_x += spacing_between
         }
     }
@@ -374,13 +388,30 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
 
     return result
 }
+/* 
+complete_unproject :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v3) {
+    result.z = distance_from_camera
+    
+    if transform.mode == .Perspective {
+        a := (projected - transform.screen_center) / transform.meters_to_pixels_for_monitor 
+        result.xy = (a * (distance_from_camera - p.z)) / transform.focal_length
+    } else{
+        position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
+    }
+    
+    result -= transform.offset
 
+    return result
+}
+ */
 unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
     result = projected * (distance_from_camera / transform.focal_length)
 
     return result
 }
 
+// TODO(viktor): Can we define the work and the do_work together, whilst
+// ensuring no loss of data/types... through the dll boundary?
 TileRenderWork :: struct {
     group:  ^RenderGroup, 
     target: Bitmap,
@@ -674,8 +705,8 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
             fill_rect.max.x = align8(fill_rect.max.x)
         }
         
-        normal_x_axis := x_axis * 1 / length_squared(x_axis)
-        normal_y_axis := y_axis * 1 / length_squared(y_axis)
+        normal_x_axis := safe_ratio_0(x_axis, length_squared(x_axis))
+        normal_y_axis := safe_ratio_0(y_axis, length_squared(y_axis))
         
         texture_width_x8  := cast(f32x8) (texture.width  - 2)
         texture_height_x8 := cast(f32x8) (texture.height - 2)

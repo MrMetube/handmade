@@ -193,9 +193,10 @@ atomic_add         :: intrinsics.atomic_add
 read_cycle_counter :: intrinsics.read_cycle_counter
 atomic_exchange    :: intrinsics.atomic_exchange
 
-@(enable_target_feature="sse")
+@(enable_target_feature="sse2,sse")
 complete_previous_writes_before_future_writes :: proc "contextless" () {
     x86._mm_sfence()
+    x86._mm_lfence()
 }
 @(enable_target_feature="sse2")
 complete_previous_reads_before_future_reads :: proc "contextless" () {

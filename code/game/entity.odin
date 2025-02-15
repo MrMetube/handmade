@@ -126,7 +126,7 @@ add_stairs :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, ent
 
     entity.sim.flags += {.Collides}
     entity.sim.walkable_height = state.typical_floor_height
-    entity.sim.walkable_dim    = entity.sim.collision.total_volume.dim.xy
+    entity.sim.walkable_dim    = rectangle_get_diameter(entity.sim.collision.total_volume).xy
 
     return index, entity
 }

@@ -24,7 +24,7 @@ import "core:hash" // TODO(viktor): I do not need this
 // tree graph to visualize the size of the allocated types and such in each arena?
 // Maybe a table view of largest entries or most entries of a type.
 
-DebugTimingDisabled :: !INTERNAL || !DEBUG_Profiling
+DebugTimingDisabled :: !INTERNAL
 
 GlobalDebugTable:  DebugTable
 GlobalDebugMemory: ^GameMemory
@@ -387,7 +387,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
-    
+
     if memory.reloaded_executable {
         restart_collation(debug, GlobalDebugTable.events_state.array_index)
     }
@@ -556,7 +556,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 }
 
 debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) {
-    push_rectangle(debug.render_group, rect, DarkBlue )
+    push_rectangle(debug.render_group, Rect3(rect, 0, 0), DarkBlue )
     
     target_fps :: 72
 
@@ -924,17 +924,17 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                     if bitmap := get_bitmap(debug.render_group.assets, value.id, debug.render_group.generation_id); bitmap != nil {
                         dim := get_used_bitmap_dim(debug.render_group, bitmap^, block.size.y, 0, use_alignment = false)
                         block.size = dim.size
+                        
+                        element := begin_ui_element_rectangle(&layout, &block.size)
+                        make_ui_element_resizable(&element)
+                        set_ui_element_default_interaction(&element, link_interaction(.Move, tree, link))
+                        end_ui_element(&element, true)
+                        
+                        bitmap_height := block.size.y
+                        bitmap_offset := V3(element.bounds.min, 0)
+                        push_rectangle(debug.render_group, element.bounds, DarkBlue )
+                        push_bitmap(debug.render_group, value.id, bitmap_height, bitmap_offset, use_alignment = false)
                     }
-
-                    element := begin_ui_element_rectangle(&layout, &block.size)
-                    make_ui_element_resizable(&element)
-                    set_ui_element_default_interaction(&element, link_interaction(.Move, tree, link))
-                    end_ui_element(&element, true)
-                    
-                    bitmap_height := block.size.y
-                    bitmap_offset := V3(element.bounds.min, 0)
-                    push_rectangle(debug.render_group, element.bounds, DarkBlue )
-                    push_bitmap(debug.render_group, value.id, bitmap_height, bitmap_offset, use_alignment = false)
                     
                 case DebugVariableLink, b32, u32, i32, f32, v2, v3, v4:
                     if list, ok := &var.value.(DebugVariableLink); ok {
@@ -1084,7 +1084,6 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugVariable, p: v2) -> (result: ^D
 
 init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
     debug_begin_variable_group(ctx, "Profiling")
-        debug_add_variable(ctx, DEBUG_Profiling)
         debug_add_variable(ctx, DEBUG_ShowFramerate)
     debug_end_variable_group(ctx)
 
@@ -1095,7 +1094,7 @@ init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
         debug_add_variable(ctx, DEBUG_RenderSingleThreaded)
         debug_add_variable(ctx, DEBUG_TestWeirdScreenSizes)
         
-        debug_begin_variable_group(ctx, "Bounds")
+        debug_begin_variable_group(ctx, "Space")
             debug_add_variable(ctx, DEBUG_ShowSpaceBounds)
             debug_add_variable(ctx, DEBUG_ShowGroundChunkBounds)
         debug_end_variable_group(ctx)
@@ -1116,9 +1115,14 @@ init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
         debug_add_variable(ctx, DEBUG_SoundPanningWithMouse)
         debug_add_variable(ctx, DEBUG_SoundPitchingWithMouse)
     debug_end_variable_group(ctx)
-
-    debug_add_variable(ctx, DEBUG_FamiliarFollowsHero)
-    debug_add_variable(ctx, DEBUG_HeroJumping)
+    
+    debug_begin_variable_group(ctx, "Entities")
+        debug_add_variable(ctx, DEBUG_ShowEntityBounds)
+        debug_add_variable(ctx, DEBUG_FamiliarFollowsHero)
+        debug_add_variable(ctx, DEBUG_HeroJumping)
+    debug_end_variable_group(ctx)
+    
+    debug_add_variable(ctx, DEBUG_LoadAssetsSingleThreaded)
 }
 
 debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariable) {

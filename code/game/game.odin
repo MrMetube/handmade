@@ -537,11 +537,16 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
     begin_render(render_group)
+
+    orthographic(render_group, buffer_size, 1)
+    
+    clear(render_group, Red)
+    
+    push_rectangle(render_group, rectangle_center_diameter(input.mouse.p, 6), Blue)
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
-    clear(render_group, Red)
     
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
@@ -552,7 +557,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 bitmap.align_percentage = 0
                 
                 ground_chunk_size := world.chunk_dim_meters.x
-                push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
+                // push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
                 
                 when DEBUG_ShowGroundChunkBounds {
                     push_rectangle_outline(render_group, offset.xy, ground_chunk_size, Yellow)
@@ -614,9 +619,11 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     sim_origin := state.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
-    push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Yellow,0.1)
-    push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.bounds).xy,           Blue,  0.2)
-    push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, Green, 0.2)
+    when DEBUG_UseDebugCamera {
+        push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Yellow,0.1)
+        push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.bounds).xy,           Blue,  0.2)
+        push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, Green, 0.2)
+    }
     
     camera_p := world_difference(world, state.camera_p, sim_origin)
         
@@ -624,7 +631,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
 
-            // TODO(viktor): Probably indicates we want to separate update adn rednder for entities sometime soon?
+            // TODO(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
             camera_relative_ground := get_entity_ground_point(&entity) - camera_p
             fade_top_end      :=  0.75 * state.typical_floor_height
             fade_top_start    :=  0.5  * state.typical_floor_height
@@ -890,9 +897,30 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             case .Space: 
                 when DEBUG_ShowSpaceBounds {
                     for volume in entity.collision.volumes {
-                        push_rectangle_outline(render_group, volume.dim.xy, volume.offset.xy, Blue)
+                        push_rectangle_outline(render_group, volume.offset.xy, volume.size.xy, Blue)
                     }
                 }
+            }
+        }
+        
+        when DEBUG_ShowEntityBounds {
+            pixels_to_meters := 1.0 / render_group.transform.meters_to_pixels_for_monitor
+            meters_mouse_p := input.mouse.p * pixels_to_meters
+            for volume in entity.collision.volumes {
+                color := Yellow
+                
+                volume_offset := rectangle_get_center(volume)
+                local_z := volume_offset.z + entity.p.z
+                local_mouse_p := unproject_with_transform(render_group.transform, meters_mouse_p, local_z)// - (entity.p.xy + volume_offset.xy)
+                before := render_group.transform
+                render_group.transform.offset = V3(local_mouse_p, render_group.transform.distance_above_target - local_z)
+                
+                push_rectangle_outline(render_group, rectangle_center_diameter(v3{}, 0.1), Yellow, 0.001)
+                if rectangle_contains(rectangle_xy(volume), input.mouse.p) {
+                    color = Orange
+                }
+                render_group.transform = before
+                push_rectangle_outline(render_group, volume, color, 0.03)
             }
         }
     }
@@ -1187,15 +1215,12 @@ make_null_collision :: proc(state: ^State) -> (result: ^EntityCollisionVolumeGro
     return result
 }
 
-make_simple_grounded_collision :: proc(state: ^State, dim: v3) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_grounded_collision :: proc(state: ^State, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&state.world_arena, EntityCollisionVolumeGroup)
-    result.volumes = push(&state.world_arena, EntityCollisionVolume, 1)
+    result.volumes = push(&state.world_arena, Rectangle3, 1)
     
-    result.total_volume = {
-        dim = dim, 
-        offset = {0, 0, 0.5*dim.z},
-    }
+    result.total_volume = rectangle_center_diameter(v3{0, 0, 0.5*size.z}, size)
     result.volumes[0] = result.total_volume
 
     return result

@@ -218,6 +218,8 @@ V3 :: proc { V3_x_yz, V3_xy_z }
 @(require_results) V3_x_yz :: #force_inline proc(x: f32, yz: v2) -> v3 { return { x, yz.x, yz.y }}
 @(require_results) V3_xy_z :: #force_inline proc(xy: v2, z: f32) -> v3 { return { xy.x, xy.y, z }}
 
+@(require_results) Rect3 :: #force_inline proc(xy: $R/Rectangle([2]$E), z_min, z_max: E) -> Rectangle([3]E) { return { V3(xy.min, z_min), V3(xy.max, z_max)} }
+
 V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
 @(require_results) V4_x_yzw  :: #force_inline proc(x: f32, yzw: v3) -> (result: v4) {
     result.x = x
