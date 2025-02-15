@@ -10,6 +10,8 @@ import "core:log"
 import "core:strings"
 import "base:runtime"
 
+// TODO(viktor): Maybe switch to radlink?
+
 flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true "
@@ -50,7 +52,6 @@ main :: proc() {
         }
     }
     if card(targetsToBuild) == 0 do targetsToBuild = ~targetsToBuild
-    
     // TODO(viktor): clean up the initial build turd (ie. .\handmade.exe)
     // TODO(viktor): confirm in which directory we are running, handle subdirectories
     go_rebuild_yourself(exe_path)

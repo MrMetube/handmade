@@ -1,16 +1,18 @@
 package game
 
-LinkedListEntry :: struct($T: typeid) {
+// :LinkedListIteration
+// TODO(viktor): make an iterator for this
+LinkedList :: struct($T: typeid) {
     using data: T,
-    prev, next: ^LinkedListEntry(T),
+    prev, next: ^LinkedList(T),
 }
 
-list_init_sentinel :: #force_inline proc(sentinel: ^LinkedListEntry($T)) {
+list_init_sentinel :: #force_inline proc(sentinel: ^LinkedList($T)) {
     sentinel.next = sentinel
     sentinel.prev = sentinel
 }
 
-list_insert :: #force_inline proc(previous, element: ^LinkedListEntry($T)) {
+list_insert :: #force_inline proc(previous, element: ^LinkedList($T)) {
     element.prev = previous
     element.next = previous.next
     
@@ -18,7 +20,7 @@ list_insert :: #force_inline proc(previous, element: ^LinkedListEntry($T)) {
     element.prev.next = element
 }
 
-list_remove :: #force_inline proc(element: ^LinkedListEntry($T)) {
+list_remove :: #force_inline proc(element: ^LinkedList($T)) {
     element.prev.next = element.next
     element.next.prev = element.prev
     
@@ -28,9 +30,9 @@ list_remove :: #force_inline proc(element: ^LinkedListEntry($T)) {
 
 ///////////////////////////////////////////////
 
-SingleLinkedListEntry :: struct($T: typeid) {
+SingleLinkedList :: struct($T: typeid) {
     using data: T,
-    next:       ^SingleLinkedListEntry(T),
+    next:       ^SingleLinkedList(T),
 }
 
 // :ListEntryRemovalInLoop
@@ -38,17 +40,17 @@ SingleLinkedListEntry :: struct($T: typeid) {
 // whilst iterating. See the tag for manual implementations of it and as targets for refactoring
 // if the day ever comes.
 
-list_push_sentinel :: #force_inline proc(sentinel: ^SingleLinkedListEntry($T), element: ^SingleLinkedListEntry(T)) {
+list_push_sentinel :: #force_inline proc(sentinel: ^SingleLinkedList($T), element: ^SingleLinkedList(T)) {
     element^      = sentinel^
     sentinel.next = element
 }
 
-list_push :: #force_inline proc(head: ^^SingleLinkedListEntry($T), element: ^SingleLinkedListEntry(T)) {
+list_push :: #force_inline proc(head: ^^SingleLinkedList($T), element: ^SingleLinkedList(T)) {
     element.next = head^
     head^        = element
 }
 
-list_pop :: #force_inline proc(head: ^^SingleLinkedListEntry($T)) -> (result: ^SingleLinkedListEntry(T), ok: b32) #optional_ok {
+list_pop :: #force_inline proc(head: ^^SingleLinkedList($T)) -> (result: ^SingleLinkedList(T), ok: b32) #optional_ok {
     if head^ != nil {
         result = head^
         head^  = result.next

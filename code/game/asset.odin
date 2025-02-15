@@ -48,7 +48,7 @@ Asset :: struct {
     state:  AssetState,
 }
 
-AssetMemoryHeader :: #type LinkedListEntry(AssetMemoryHeaderData)
+AssetMemoryHeader :: #type LinkedList(AssetMemoryHeaderData)
 AssetMemoryHeaderData :: struct {
     asset_index: u32,
     
@@ -72,7 +72,7 @@ AssetMemoryBlockFlags :: bit_set[enum u64 {
     Used,
 }]
 
-AssetMemoryBlock :: #type LinkedListEntry(AssetMemoryBlockData)
+AssetMemoryBlock :: #type LinkedList(AssetMemoryBlockData)
 AssetMemoryBlockData :: struct {
     size:  u64,
     flags: AssetMemoryBlockFlags,

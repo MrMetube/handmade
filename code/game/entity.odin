@@ -37,7 +37,7 @@ StoredEntity :: struct {
     p: WorldPosition,
 }
 
-PairwiseCollsionRule :: #type SingleLinkedListEntry(PairwiseCollsionRuleData)
+PairwiseCollsionRule :: #type SingleLinkedList(PairwiseCollsionRuleData)
 PairwiseCollsionRuleData :: struct {
     can_collide: b32,
     index_a, index_b: StorageIndex,

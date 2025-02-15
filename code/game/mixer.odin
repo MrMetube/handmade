@@ -17,7 +17,7 @@ Sound :: struct {
     channels: [2][]i16, // 1 or 2 channels of [sample_count]samples
 }
 
-PlayingSound :: #type SingleLinkedListEntry(PlayingSoundData)
+PlayingSound :: #type SingleLinkedList(PlayingSoundData)
 PlayingSoundData :: struct {
     id:   SoundId,
     

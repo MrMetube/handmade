@@ -9,7 +9,7 @@ World :: struct {
     first_free: ^WorldEntityBlock,
 }
 
-Chunk :: #type SingleLinkedListEntry(ChunkData)
+Chunk :: #type SingleLinkedList(ChunkData)
 ChunkData :: struct {
     chunk: [3]i32,
 
@@ -17,7 +17,7 @@ ChunkData :: struct {
 }
 
 // TODO(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
-WorldEntityBlock :: #type SingleLinkedListEntry(WorldEntityBlockData)
+WorldEntityBlock :: #type SingleLinkedList(WorldEntityBlockData)
 WorldEntityBlockData :: struct {
     entity_count: StorageIndex,
     indices: [16]StorageIndex,
