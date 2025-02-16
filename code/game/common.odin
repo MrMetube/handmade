@@ -210,10 +210,6 @@ align16    :: #force_inline proc "contextless" (value: $T) -> T { return (value 
 align32    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 31) &~ 31 }
 align_pow2 :: #force_inline proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
 
-swap :: #force_inline proc "contextless" (a, b: ^$T) {
-    b^, a^ = a^, b^
-}
-
 safe_truncate :: proc{
     safe_truncate_u64,
     safe_truncate_i64,

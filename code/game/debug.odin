@@ -30,7 +30,7 @@ GlobalDebugTable:  DebugTable
 GlobalDebugMemory: ^GameMemory
 
 DebugMaxThreadCount     :: 256   when !DebugTimingDisabled else 0
-DebugMaxHistoryLength   :: 6     when !DebugTimingDisabled else 0
+DebugMaxHistoryLength   :: 16    when !DebugTimingDisabled else 0
 DebugMaxRegionsPerFrame :: 14000 when !DebugTimingDisabled else 0
 
 when DebugTimingDisabled {
@@ -313,6 +313,7 @@ LayoutElementFlag :: enum {
 }
 
 ////////////////////////////////////////////////
+Foo :: struct {s: string}
 
 @export
 debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
@@ -331,9 +332,47 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             ctx := DebugVariableDefinitionContext { debug = debug }
 
             debug.root_group = debug_begin_variable_group(&ctx, "Debugging")
-                init_debug_variables(&ctx)
-
+                debug_begin_variable_group(&ctx, "Profiling")
+                    debug_add_variable(&ctx, DEBUG_ShowFramerate)
+                debug_end_variable_group(&ctx)
+            
+                debug_begin_variable_group(&ctx, "Rendering")
+                    debug_add_variable(&ctx, DEBUG_UseDebugCamera)
+                    debug_add_variable(&ctx, DEBUG_DebugCameraDistance)
+                
+                    debug_add_variable(&ctx, DEBUG_RenderSingleThreaded)
+                    debug_add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
+                    
+                    debug_begin_variable_group(&ctx, "Space")
+                        debug_add_variable(&ctx, DEBUG_ShowSpaceBounds)
+                        debug_add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
+                    debug_end_variable_group(&ctx)
+                    
+                    debug_begin_variable_group(&ctx, "ParticleSystem")
+                        debug_add_variable(&ctx, DEBUG_ParticleSystemTest)
+                        debug_add_variable(&ctx, DEBUG_ParticleGrid)
+                    debug_end_variable_group(&ctx)
+                    
+                    debug_begin_variable_group(&ctx, "CoordinateSystem")
+                        debug_add_variable(&ctx, DEBUG_CoordinateSystemTest)
+                        debug_add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
+                        debug_add_variable(&ctx, DEBUG_ShowLightingSampling)
+                    debug_end_variable_group(&ctx)
+                debug_end_variable_group(&ctx)
+            
+                debug_begin_variable_group(&ctx, "Audio")
+                    debug_add_variable(&ctx, DEBUG_SoundPanningWithMouse)
+                    debug_add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
+                debug_end_variable_group(&ctx)
+                
+                debug_begin_variable_group(&ctx, "Entities")
+                    debug_add_variable(&ctx, DEBUG_ShowEntityBounds)
+                    debug_add_variable(&ctx, DEBUG_FamiliarFollowsHero)
+                    debug_add_variable(&ctx, DEBUG_HeroJumping)
+                debug_end_variable_group(&ctx)
+                
                 debug_begin_variable_group(&ctx, "Assets")
+                debug_add_variable(&ctx, DEBUG_LoadAssetsSingleThreaded)
                     debug_add_variable(&ctx, DebugBitmapDisplay{id = first_bitmap_from(assets, .Monster) }, "")
                 debug_end_variable_group(&ctx)
                 
@@ -532,10 +571,12 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
 
 ////////////////////////////////////////////////
 
+debug_hot_element :: proc(v: any) {}
+
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     if debug.render_group == nil do return
 
-    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 1)
+    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 0.8)
 
     if debug.compiling {
         state := Platform.debug.get_process_state(debug.compiler)
@@ -547,15 +588,16 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
         }
     }
 
-    debug_main_menu(debug, input)
-    debug_interact(debug, input)
+    mouse_p := unproject_with_transform(debug.render_group.transform, input.mouse.p).xy
+    debug_main_menu(debug, input, mouse_p)
+    debug_interact(debug, input, mouse_p)
     
     if DEBUG_ShowFramerate {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames[0].seconds_elapsed*1000))
     }
 }
 
-debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) {
+debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect: Rectangle2) {
     push_rectangle(debug.render_group, Rect3(rect, 0, 0), DarkBlue )
     
     target_fps :: 72
@@ -597,12 +639,12 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, rect: Rectangle2) 
             color := color_wheel[color_index]
                         
             push_rectangle(debug.render_group, stack_rect, color)
-            if rectangle_contains(stack_rect, input.mouse.p) {
+            if rectangle_contains(stack_rect, mouse_p) {
                 hot_region = &region
                 
                 record := region.record
                 text := fmt.tprintf("%s - %d cycles [%s:% 4d]", record.loc.name, region.cycle_count, record.loc.file_path, record.loc.line)
-                debug_push_text(debug, text, input.mouse.p)
+                debug_push_text(debug, text, mouse_p)
             }
         }
     }
@@ -659,9 +701,9 @@ debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
     }
 }
 
-debug_interact :: proc(debug: ^DebugState, input: Input) {
-    mouse_dp := input.mouse.p - debug.last_mouse_p
-    defer debug.last_mouse_p = input.mouse.p
+debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+    mouse_dp := mouse_p - debug.last_mouse_p
+    defer debug.last_mouse_p = mouse_p
     
     
     
@@ -778,7 +820,7 @@ set_ui_element_default_interaction :: proc(element: ^LayoutElement, interaction:
 }
 
 end_ui_element :: proc(using element: ^LayoutElement, use_spacing: b32) {
-    SizeHandlePixels :: 4
+    SizeHandlePixels :: 8
     frame: v2
     if .Resizable in element.flags {
         frame = SizeHandlePixels
@@ -854,13 +896,12 @@ get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result:
     return 
 }
 
-debug_main_menu :: proc(debug: ^DebugState, input: Input) {
+debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     if debug.font_info == nil do return
     stack: Stack([64]DebugVariableInterator)
     
+    // :LinkedListIteration
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
-        mouse_p := input.mouse.p
-        
         layout := Layout {
             debug        = debug,
             mouse_p      = mouse_p,
@@ -877,7 +918,6 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
         })
         
         for stack.depth > 0 {
-            // :LinkedListIteration
             iter := stack_peek(&stack)
             if iter.link == iter.sentinel {
                 stack.depth -= 1
@@ -912,7 +952,7 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input) {
                     set_ui_element_default_interaction(&element, autodetect_interaction)
                     end_ui_element(&element, true)
                     
-                    debug_draw_profile(debug, input, element.bounds)
+                    debug_draw_profile(debug, input, mouse_p, element.bounds)
                     
                 case DebugBitmapDisplay:
                     block, ok := &view.kind.(DebugViewBlock)
@@ -1080,49 +1120,6 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugVariable, p: v2) -> (result: ^D
     list_insert(&debug.tree_sentinel, result)
     
     return result
-}
-
-init_debug_variables :: proc (ctx: ^DebugVariableDefinitionContext) {
-    debug_begin_variable_group(ctx, "Profiling")
-        debug_add_variable(ctx, DEBUG_ShowFramerate)
-    debug_end_variable_group(ctx)
-
-    debug_begin_variable_group(ctx, "Rendering")
-        debug_add_variable(ctx, DEBUG_UseDebugCamera)
-        debug_add_variable(ctx, DEBUG_DebugCameraDistance)
-    
-        debug_add_variable(ctx, DEBUG_RenderSingleThreaded)
-        debug_add_variable(ctx, DEBUG_TestWeirdScreenSizes)
-        
-        debug_begin_variable_group(ctx, "Space")
-            debug_add_variable(ctx, DEBUG_ShowSpaceBounds)
-            debug_add_variable(ctx, DEBUG_ShowGroundChunkBounds)
-        debug_end_variable_group(ctx)
-        
-        debug_begin_variable_group(ctx, "ParticleSystem")
-            debug_add_variable(ctx, DEBUG_ParticleSystemTest)
-            debug_add_variable(ctx, DEBUG_ParticleGrid)
-        debug_end_variable_group(ctx)
-        
-        debug_begin_variable_group(ctx, "CoordinateSystem")
-            debug_add_variable(ctx, DEBUG_CoordinateSystemTest)
-            debug_add_variable(ctx, DEBUG_ShowLightingBounceDirection)
-            debug_add_variable(ctx, DEBUG_ShowLightingSampling)
-        debug_end_variable_group(ctx)
-    debug_end_variable_group(ctx)
-
-    debug_begin_variable_group(ctx, "Audio")
-        debug_add_variable(ctx, DEBUG_SoundPanningWithMouse)
-        debug_add_variable(ctx, DEBUG_SoundPitchingWithMouse)
-    debug_end_variable_group(ctx)
-    
-    debug_begin_variable_group(ctx, "Entities")
-        debug_add_variable(ctx, DEBUG_ShowEntityBounds)
-        debug_add_variable(ctx, DEBUG_FamiliarFollowsHero)
-        debug_add_variable(ctx, DEBUG_HeroJumping)
-    debug_end_variable_group(ctx)
-    
-    debug_add_variable(ctx, DEBUG_LoadAssetsSingleThreaded)
 }
 
 debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariable) {

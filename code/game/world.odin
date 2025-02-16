@@ -108,9 +108,8 @@ change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^Wo
                 // NOTE(viktor): We're out of room, get a new block!
                 new_block := list_pop(&world.first_free) or_else push(arena, WorldEntityBlock)
                 
-                list_push_sentinel(block, new_block)
-                
-                block.entity_count = 0
+                list_push_after_head(block, new_block)
+                block^ = {}
             }
             assert(block.entity_count < len(block.indices))
 

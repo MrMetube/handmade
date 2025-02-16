@@ -187,7 +187,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
     timed_function()
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
-    if a > b do swap(&a, &b)
+    if a > b do a, b = b, a
     // TODO(viktor): BETTER HASH FUNCTION!!!
     found: ^PairwiseCollsionRule
     hash_bucket := a & (len(state.collision_rule_hash) - 1)

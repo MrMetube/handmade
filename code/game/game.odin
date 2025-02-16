@@ -1,8 +1,9 @@
 package game
 
 /* TODO(viktor):
-    - Dead Lock on Load when a lot of assets are loaded at once
-    - font rendering robustness
+    - Is this still relevant? Dead Lock on Load when a lot of assets are loaded at once
+    - Font Rendering Robustness
+        - Kerning
     
     - :PointerArithmetic
         - change the types to a less c-mindset
@@ -18,7 +19,9 @@ package game
         - Fix clicking Bug at the end of samples
     
     - Rendering
+        - Check why the view frustum is not working quite right(too small) since <b7a4b31>
         - Get rid of "even" scan line notion?
+        - Real projections with solid concept of project/unproject
         - Straighten out all coordinate systems!
             - Screen
             - World
@@ -538,14 +541,14 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
     begin_render(render_group)
 
-    orthographic(render_group, buffer_size, 1)
-    
-    clear(render_group, Red)
-    
-    push_rectangle(render_group, rectangle_center_diameter(input.mouse.p, 6), Blue)
+    // orthographic(render_group, buffer_size, 1)
+    // clear(render_group, Red)
+    // push_rectangle(render_group, rectangle_center_diameter(input.mouse.p, 6), Blue)
     
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
+    
+    clear(render_group, Red)
     
     
     for &ground_buffer in tran_state.ground_buffers {
@@ -557,7 +560,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 bitmap.align_percentage = 0
                 
                 ground_chunk_size := world.chunk_dim_meters.x
-                // push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
+                push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
                 
                 when DEBUG_ShowGroundChunkBounds {
                     push_rectangle_outline(render_group, offset.xy, ground_chunk_size, Yellow)
@@ -627,7 +630,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     camera_p := world_difference(world, state.camera_p, sim_origin)
         
-    for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
+    for &entity, entity_index in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
 
@@ -904,23 +907,15 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         }
         
         when DEBUG_ShowEntityBounds {
-            pixels_to_meters := 1.0 / render_group.transform.meters_to_pixels_for_monitor
-            meters_mouse_p := input.mouse.p * pixels_to_meters
             for volume in entity.collision.volumes {
-                color := Yellow
-                
                 volume_offset := rectangle_get_center(volume)
-                local_z := volume_offset.z + entity.p.z
-                local_mouse_p := unproject_with_transform(render_group.transform, meters_mouse_p, local_z)// - (entity.p.xy + volume_offset.xy)
-                before := render_group.transform
-                render_group.transform.offset = V3(local_mouse_p, render_group.transform.distance_above_target - local_z)
+                local_mouse_p := unproject_with_transform(render_group.transform, input.mouse.p)
                 
-                push_rectangle_outline(render_group, rectangle_center_diameter(v3{}, 0.1), Yellow, 0.001)
-                if rectangle_contains(rectangle_xy(volume), input.mouse.p) {
-                    color = Orange
+                if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
+                    color := Yellow
+                    push_rectangle_outline(render_group, volume, color, 0.05)
+                    debug_hot_element(entity)
                 }
-                render_group.transform = before
-                push_rectangle_outline(render_group, volume, color, 0.03)
             }
         }
     }

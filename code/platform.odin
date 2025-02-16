@@ -48,15 +48,15 @@ DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
 GlobalRunning: b32
 
-GLOBAL_back_buffer:  OffscreenBuffer
-GLOBAL_sound_buffer: ^IDirectSoundBuffer
+GlobalBackBuffer:  OffscreenBuffer
+GlobalSoundBuffer: ^IDirectSoundBuffer
 
 GlobalPerformanceCounterFrequency: f64
 
 GlobalPause := false
 
-GLOBAL_debug_show_cursor: b32
-GLOBAL_window_position := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
+GlobalDebugShowCursor: b32
+GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
 ////////////////////////////////////////////////
 //  Types
@@ -151,10 +151,10 @@ main :: proc() {
             // hIcon =,
         }
         when INTERNAL {
-            GLOBAL_debug_show_cursor = true
+            GlobalDebugShowCursor = true
         }
         
-        resize_DIB_section(&GLOBAL_back_buffer, Resolution.x, Resolution.y)
+        resize_DIB_section(&GlobalBackBuffer, Resolution.x, Resolution.y)
 
         if win.RegisterClassW(&window_class) == 0 {
             return // @Logging 
@@ -172,8 +172,8 @@ main :: proc() {
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
-            GLOBAL_back_buffer.width  + 16, // add for the window frame
-            GLOBAL_back_buffer.height + 39,
+            GlobalBackBuffer.width  + 16, // add for the window frame
+            GlobalBackBuffer.height + 39,
             nil,
             nil,
             window_class.hInstance,
@@ -225,7 +225,7 @@ main :: proc() {
 
     clear_sound_buffer(&sound_output)
 
-    GLOBAL_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
+    GlobalSoundBuffer->Play(0, 0, DSBPLAY_LOOPING)
 
     sound_is_valid: b32
 
@@ -235,7 +235,7 @@ main :: proc() {
     init_xInput()
 
     input: [2]Input
-    old_input, new_input := input[0], input[1]
+    old_input, new_input := &input[0], &input[1]
 
 
     ////////////////////////////////////////////////
@@ -363,11 +363,11 @@ main :: proc() {
                 mouse: win.POINT
                 win.GetCursorPos(&mouse)
                 win.ScreenToClient(window, &mouse)
+
                 new_input.mouse.p = v2{ 
-                    (-0.5 * cast(f32) GLOBAL_back_buffer.width  + 0.5) + cast(f32) mouse.x,
-                    ( 0.5 * cast(f32) GLOBAL_back_buffer.height + 0.5) - cast(f32) mouse.y,
+                    cast(f32) mouse.x,
+                    cast(f32) ((GlobalBackBuffer.height-1) - mouse.y),
                 }
-                
                 for &button, index in new_input.mouse.buttons {
                     button.ended_down = old_input.mouse.buttons[index].ended_down
                     button.half_transition_count = 0
@@ -483,20 +483,20 @@ main :: proc() {
         
         if !GlobalPause {
             offscreen_buffer := Bitmap{
-                memory = GLOBAL_back_buffer.memory,
-                width  = GLOBAL_back_buffer.width,
-                height = GLOBAL_back_buffer.height,
+                memory = GlobalBackBuffer.memory,
+                width  = GlobalBackBuffer.width,
+                height = GlobalBackBuffer.height,
             }
             
             if state.input_record_index != 0 {
-                record_input(&state, &new_input)
+                record_input(&state, new_input)
             }
             if state.input_replay_index != 0 {
-                replay_input(&state, &new_input)
+                replay_input(&state, new_input)
             }
 
             if game_lib_is_valid {
-                game.update_and_render(&game_memory, offscreen_buffer, new_input)
+                game.update_and_render(&game_memory, offscreen_buffer, new_input^)
             }
         }
         
@@ -510,7 +510,7 @@ main :: proc() {
             play_cursor, write_cursor: win.DWORD
             audio_counter := get_wall_clock()
             from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
-            if result := GLOBAL_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
+            if result := GlobalSoundBuffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
                 /*
                     Here is how sound output computation works.
 
@@ -589,14 +589,14 @@ main :: proc() {
         
         {
             offscreen_buffer := Bitmap{
-                memory = GLOBAL_back_buffer.memory,
-                width  = GLOBAL_back_buffer.width,
-                height = GLOBAL_back_buffer.height,
+                memory = GlobalBackBuffer.memory,
+                width  = GlobalBackBuffer.width,
+                height = GlobalBackBuffer.height,
             }
             
-            game.debug_frame_end(&game_memory, offscreen_buffer, new_input)
+            game.debug_frame_end(&game_memory, offscreen_buffer, new_input^)
             
-            swap(&old_input, &new_input)
+            old_input, new_input = new_input, old_input
         }
         
         game.end_timed_block(debug_colation)
@@ -630,7 +630,7 @@ main :: proc() {
         {
             window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
-            display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height)
+            display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height)
             win.ReleaseDC(window, device_context)
             
             flip_counter = get_wall_clock()
@@ -743,7 +743,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
     region1, region2 : rawpointer
     region1_size, region2_size: win.DWORD
 
-    if result := GLOBAL_sound_buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+    if result := GlobalSoundBuffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // TODO: assert that region1/2_size is valid
         // TODO: Collapse these two loops
         
@@ -773,7 +773,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
             sound_output.running_sample_index += 1
         }
 
-        GLOBAL_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+        GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
         return // TODO: Logging
     }
@@ -783,7 +783,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
     region1, region2 : rawpointer
     region1_size, region2_size: win.DWORD
 
-    if result := GLOBAL_sound_buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+    if result := GlobalSoundBuffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // TODO: assert that region1/2_size is valid
         // TODO: Collapse these two loops
         // TODO: Copy pasta of fill_sound_buffer
@@ -800,7 +800,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
         }
         sound_output.running_sample_index += region2_size
 
-        GLOBAL_sound_buffer->Unlock(region1, region1_size, region2, region2_size)
+        GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
         return // TODO: Logging
     }
@@ -911,7 +911,7 @@ toggle_fullscreen :: proc(window: win.HWND) {
     style := cast(u32) win.GetWindowLongW(window, win.GWL_STYLE)
     if style & win.WS_OVERLAPPEDWINDOW != 0 {
         info := win.MONITORINFO{cbSize = size_of(win.MONITORINFO)}
-        if win.GetWindowPlacement(window, &GLOBAL_window_position) && 
+        if win.GetWindowPlacement(window, &GlobalWindowPosition) && 
             win.GetMonitorInfoW(win.MonitorFromWindow(window, .MONITOR_DEFAULTTOPRIMARY), &info) {
             win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style &~ win.WS_OVERLAPPEDWINDOW))
             win.SetWindowPos(window, win.HWND_TOP, 
@@ -923,7 +923,7 @@ toggle_fullscreen :: proc(window: win.HWND) {
         }
     } else {
         win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style | win.WS_OVERLAPPEDWINDOW))
-        win.SetWindowPlacement(window, &GLOBAL_window_position)
+        win.SetWindowPlacement(window, &GlobalWindowPosition)
         win.SetWindowPos(window, nil, 0, 0, 0, 0, 
             win.SWP_NOMOVE | win.SWP_NOSIZE | win.SWP_NOZORDER | 
             win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED)
@@ -957,11 +957,11 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         device_context := win.BeginPaint(window, &paint)
 
         window_width, window_height := get_window_dimension(window)
-        display_buffer_in_window(&GLOBAL_back_buffer, device_context, window_width, window_height, false)
+        display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height, false)
 
         win.EndPaint(window, &paint)
     case win.WM_SETCURSOR: 
-        if GLOBAL_debug_show_cursor {
+        if GlobalDebugShowCursor {
             // NOTE(viktor): Don't do anything
         } else {
             win.SetCursor(nil)

@@ -343,7 +343,7 @@ get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (re
 }
 
 get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
-    camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters, distance_from_camera)
+    camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters).xy
     result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
 
     return result
@@ -360,12 +360,12 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
     near_clip_plane :: 0.2
     distance_above_target := transform.distance_above_target
     
-    if transform.mode == .Perspective {
-        base_z: f32//base_p.z
+    switch transform.mode {
+      case .None: unreachable()
+      case .Perspective:
+        base_z: f32
         
-        // Debug camera
         when DEBUG_UseDebugCamera {
-            // TODO(viktor): how do we want to control the debug camera?
             distance_above_target *= DEBUG_DebugCameraDistance
         }
         
@@ -380,7 +380,7 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
             result.valid    = true
         }
         
-    } else{
+      case .Orthographic:
         result.position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
         result.scale = transform.meters_to_pixels_for_monitor
         result.valid = true
@@ -388,24 +388,19 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
 
     return result
 }
-/* 
-complete_unproject :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v3) {
-    result.z = distance_from_camera
+
+unproject_with_transform :: #force_inline proc(transform: Transform, pixels_xy: v2) -> (result: v3) {
+    result.xy = (pixels_xy - transform.screen_center) / transform.meters_to_pixels_for_monitor 
+    result.z  = transform.offset.z
     
-    if transform.mode == .Perspective {
-        a := (projected - transform.screen_center) / transform.meters_to_pixels_for_monitor 
-        result.xy = (a * (distance_from_camera - p.z)) / transform.focal_length
-    } else{
-        position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
+    switch transform.mode {
+      case .None: unreachable()
+      case .Perspective:
+        result.xy *= (transform.distance_above_target - result.z) / transform.focal_length
+      case .Orthographic:
     }
     
     result -= transform.offset
-
-    return result
-}
- */
-unproject_with_transform :: #force_inline proc(transform: Transform, projected: v2, distance_from_camera: f32) -> (result: v2) {
-    result = projected * (distance_from_camera / transform.focal_length)
 
     return result
 }

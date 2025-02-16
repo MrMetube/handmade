@@ -496,7 +496,7 @@ entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
 can_collide :: proc(state:^State, a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
-        if a.storage_index > b.storage_index do swap(&a, &b)
+        if a.storage_index > b.storage_index do a, b = b, a
         
         if .Collides in a.flags && .Collides in b.flags {
             if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
@@ -546,7 +546,7 @@ speculative_collide :: proc(mover, region: ^Entity, test_p: v3) -> (result: b32 
 
 handle_collision :: proc(state: ^State, a, b: ^Entity) -> (stops_on_collision: b32) {
     a, b := a, b
-    if a.type > b.type do swap(&a, &b)
+    if a.type > b.type do a, b = b, a
     
     if b.type == .Arrow {
         add_collision_rule(state, a.storage_index, b.storage_index, false)
