@@ -2,6 +2,17 @@ package game
 
 import "core:simd/x86"
 
+
+@common 
+Sample :: [2]i16
+
+@common 
+GameSoundBuffer :: struct {
+    // NOTE(viktor): samples length must be padded to a multiple of 4 samples
+    samples:            []Sample,
+    samples_per_second: u32,
+}
+
 Mixer :: struct {
     permanent_arena:          ^Arena,
     first_playing_sound:      ^PlayingSound,

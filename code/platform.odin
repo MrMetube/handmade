@@ -71,11 +71,9 @@ SoundOutput :: struct {
     safety_bytes:         u32,
 }
 
-Color :: [4]u8
-
 OffscreenBuffer :: struct {
     info:                 win.BITMAPINFO,
-    memory:               []Color,
+    memory:               []ByteColor,
     width, height, pitch: i32,
 }
 
@@ -848,7 +846,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     bytes_per_pixel :: 4
     buffer.pitch = align16(buffer.width)
     bitmap_memory_size := buffer.pitch * buffer.height * bytes_per_pixel
-    buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+    buffer_ptr := cast([^]ByteColor) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]
 
     // TODO: probably clear this to black

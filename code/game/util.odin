@@ -1,7 +1,8 @@
 package game 
 
-import "base:intrinsics"
-import "base:runtime"
+@common import "base:intrinsics"
+@common import "base:runtime"
+@common import "core:simd/x86"
 
 was_pressed :: #force_inline proc(button: InputButton) -> (result:b32) {
     result = button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
@@ -45,24 +46,65 @@ i32x8 :: #simd[8]i32
 f32x4 :: #simd[4]f32
 i32x4 :: #simd[4]i32
 
-@(disabled=ODIN_DISABLE_ASSERT)
-assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {
-    if !condition {
-        // TODO(viktor): We are not a console application
-        runtime.print_caller_location(loc)
-        runtime.print_string(" Assertion failed")
-        if len(message) > 0 {
-            runtime.print_string(": ")
-            runtime.print_string(message)
-        }
-        runtime.print_byte('\n')
-        
-        when ODIN_DEBUG {
-            runtime.debug_trap()
-        } else {
-            runtime.trap()
-        }
-    }
+@common rawpointer  :: rawptr
+@common uintpointer :: uintptr
+
+////////////////////////////////////////////////
+// Atomics
+
+// TODO(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
+@common atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
+    ok_: bool
+    was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
+    ok = cast(b32) ok_
+    return was, ok
+}
+
+@common volatile_load      :: intrinsics.volatile_load
+@common volatile_store     :: intrinsics.volatile_store
+@common atomic_add         :: intrinsics.atomic_add
+@common read_cycle_counter :: intrinsics.read_cycle_counter
+@common atomic_exchange    :: intrinsics.atomic_exchange
+
+@(common, enable_target_feature="sse2,sse")
+complete_previous_writes_before_future_writes :: proc "contextless" () {
+    x86._mm_sfence()
+    x86._mm_lfence()
+}
+@(common, enable_target_feature="sse2")
+complete_previous_reads_before_future_reads :: proc "contextless" () {
+    x86._mm_lfence()
+}
+
+////////////////////////////////////////////////
+
+
+@common Kilobyte :: runtime.Kilobyte
+@common Megabyte :: runtime.Megabyte
+@common Gigabyte :: runtime.Gigabyte
+@common Terabyte :: runtime.Terabyte
+
+@common align2     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  1) &~  1 }
+@common align4     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  3) &~  3 }
+@common align8     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  7) &~  7 }
+@common align16    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 15) &~ 15 }
+@common align32    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 31) &~ 31 }
+@common align_pow2 :: #force_inline proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
+
+
+@common safe_truncate :: proc{
+    safe_truncate_u64,
+    safe_truncate_i64,
+}
+
+@common safe_truncate_u64 :: #force_inline proc(value: u64) -> u32 {
+    assert(value <= 0xFFFFFFFF)
+    return cast(u32) value
+}
+
+@common safe_truncate_i64 :: #force_inline proc(value: i64) -> i32 {
+    assert(value <= 0x7FFFFFFF)
+    return cast(i32) value
 }
 
 vec_cast :: proc { cast_vec_2, cast_vec_3, cast_vec_4, cast_vec_v }
@@ -106,5 +148,27 @@ modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where 
     value^ += addend
     if value^ >= one_past_maximum {
         value^ = 0
+    }
+}
+
+
+
+@(disabled=ODIN_DISABLE_ASSERT)
+assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {
+    if !condition {
+        // TODO(viktor): We are not a console application
+        runtime.print_caller_location(loc)
+        runtime.print_string(" Assertion failed")
+        if len(message) > 0 {
+            runtime.print_string(": ")
+            runtime.print_string(message)
+        }
+        runtime.print_byte('\n')
+        
+        when ODIN_DEBUG {
+            runtime.debug_trap()
+        } else {
+            runtime.trap()
+        }
     }
 }

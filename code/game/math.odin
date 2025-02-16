@@ -9,11 +9,15 @@ import "core:simd"
 // ---------------------- Types
 // ---------------------- ---------------------- ----------------------
 
+
+@common v2 :: [2]f32
+@common v3 :: [3]f32
+@common v4 :: [4]f32
+
 Rectangle   :: struct($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
 Rectangle2i :: Rectangle([2]i32)
-
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Constants

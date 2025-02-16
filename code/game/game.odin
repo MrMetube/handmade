@@ -1,5 +1,8 @@
 package game
 
+@common 
+INTERNAL :: #config(INTERNAL, false)
+
 /* TODO(viktor):
     - Is this still relevant? Dead Lock on Load when a lot of assets are loaded at once
     - Font Rendering Robustness
@@ -81,6 +84,72 @@ package game
         - continuous save for crash recovery?
 
 */
+
+@common 
+InputButton :: struct {
+    half_transition_count: u32,
+    ended_down:            b32,
+}
+
+@common 
+InputController :: struct {
+    // TODO: allow outputing vibration
+    is_connected: b32,
+    is_analog:    b32,
+
+    stick_average: [2]f32,
+
+    using _buttons_array_and_enum : struct #raw_union {
+        buttons: [18]InputButton,
+        using _buttons_enum : struct {
+            stick_up , stick_down , stick_left , stick_right ,
+            button_up, button_down, button_left, button_right,
+            dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
+
+            start, back,
+            shoulder_left, shoulder_right,
+            thumb_left   , thumb_right:    InputButton,
+        },
+    },
+}
+#assert(size_of(InputController{}._buttons_array_and_enum.buttons) == size_of(InputController{}._buttons_array_and_enum._buttons_enum))
+
+@common 
+Input :: struct {
+    delta_time: f32,
+
+    mouse: struct {
+        using _buttons_array_and_enum : struct #raw_union {
+            buttons: [5]InputButton,
+            using _buttons_enum : struct {
+                left, 
+                right, 
+                middle,
+                extra1, 
+                extra2: InputButton,
+            },
+        },
+        p:     v2,
+        wheel: f32,
+    },
+
+    controllers: [5]InputController,
+}
+#assert(size_of(Input{}.mouse._buttons_array_and_enum.buttons) == size_of(Input{}.mouse._buttons_array_and_enum._buttons_enum))
+
+@common 
+GameMemory :: struct {
+    reloaded_executable: b32,
+    // NOTE: REQUIRED to be cleared to zero at startup
+    permanent_storage: []u8,
+    transient_storage: []u8,
+    debug_storage:     []u8,
+
+    high_priority_queue: ^PlatformWorkQueue,
+    low_priority_queue:  ^PlatformWorkQueue,
+    
+    Platform_api: PlatformAPI,
+}
 
 State :: struct {
     is_initialized: b32,

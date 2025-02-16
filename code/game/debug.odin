@@ -182,6 +182,12 @@ DebugRecordLocation :: struct {
 	name:      string,
 }
 
+@common 
+TimedBlock :: struct {
+    record_index: u32, 
+    hit_count:    i64,
+}
+
 ////////////////////////////////////////////////
 
 DebugInteraction :: struct {
@@ -313,7 +319,36 @@ LayoutElementFlag :: enum {
 }
 
 ////////////////////////////////////////////////
-Foo :: struct {s: string}
+
+
+@common 
+DebugCode :: struct {
+    read_entire_file:       DebugReadEntireFile,
+    write_entire_file:      DebugWriteEntireFile,
+    free_file_memory:       DebugFreeFileMemory,
+    execute_system_command: DebugExecuteSystemCommand,
+    get_process_state:      DebugGetProcessState,
+}
+
+@common 
+DebugProcessState :: struct {
+    started_successfully: b32,
+    is_running:           b32,
+    return_code:          i32,
+}
+
+@common
+DebugExecutingProcess :: struct {
+    os_handle: uintpointer,
+}
+
+@common DebugReadEntireFile       :: #type proc(filename: string) -> (result: []u8)
+@common DebugWriteEntireFile      :: #type proc(filename: string, memory: []u8) -> b32
+@common DebugFreeFileMemory       :: #type proc(memory: []u8)
+@common DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
+@common DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
+
+////////////////////////////////////////////////
 
 @export
 debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
