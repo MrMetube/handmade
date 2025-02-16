@@ -31,7 +31,7 @@ GlobalDebugTable:  DebugTable
 GlobalDebugMemory: ^GameMemory
 
 DebugMaxThreadCount     :: 256   when !DebugTimingDisabled else 0
-DebugMaxHistoryLength   :: 16    when !DebugTimingDisabled else 0
+DebugMaxHistoryLength   :: 32    when !DebugTimingDisabled else 0
 DebugMaxRegionsPerFrame :: 14000 when !DebugTimingDisabled else 0
 
 when DebugTimingDisabled {
@@ -85,7 +85,7 @@ DebugState :: struct {
     buffer:     Bitmap,
     
     font_scale:   f32,
-    top_edge:         f32,
+    top_edge:     f32,
     ascent:       f32,
     left_edge:    f32,
     right_edge:   f32,
@@ -94,6 +94,7 @@ DebugState :: struct {
     font:         ^Font,
     font_info:    ^FontInfo,
 
+    //
     dump_depth: u32,
 }
 
@@ -103,6 +104,8 @@ DebugFrame :: struct {
     seconds_elapsed: f32,
     region_count:    u32,
     regions:         []DebugRegion,
+    
+    root:      ^DebugVariable,
 }
 
 DebugRegion :: struct {
@@ -124,6 +127,8 @@ DebugOpenBlock :: struct {
     frame_index:   u32,
     source:        ^DebugRecord,
     opening_event: ^DebugEvent,
+    
+    group:         ^DebugVariable,
     parent, 
     next_free:     ^DebugOpenBlock,
 }
@@ -154,14 +159,7 @@ DebugEvent :: struct {
             seconds_elapsed: f32,
         },
         id: DebugId,
-        u32: u32,
-        i32: i32,
-        f32: f32,
-        v2: v2,
-        v3: v3,
-        v4: v4,
-        Rectangle2: Rectangle2,
-        Rectangle3: Rectangle3,
+        any: any,
     },
     
 }
@@ -177,6 +175,7 @@ DebugEventType :: enum u8 {
     BeginCodeBlock, 
     EndCodeBlock,
     BeginDataBlock, 
+    DataValue, 
     EndDataBlock,
     FrameMarker,
 }
@@ -665,52 +664,109 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                 
                 debug.collation_frame = &debug.frames[debug.frame_count]
                 debug.collation_frame^ = {
-                    begin_clock     = event.clock,
-                    end_clock       = -1,
-                    regions         = push(&debug.collation_arena, DebugRegion, DebugMaxRegionsPerFrame),
+                    begin_clock = event.clock,
+                    end_clock   = -1,
+                    regions     = push(&debug.collation_arena, DebugRegion, DebugMaxRegionsPerFrame),
+                    root        = collate_create_group(debug, "Frame Root", nil)
                 }
+                _ = 123
             } else if debug.collation_frame != nil {
                 debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.thread_index)
                 
                 source := &GlobalDebugTable.records[event.thread_index][event.record_index]
                 thread := &debug.threads[event.thread_index]
-                frame_index := debug.frame_count-1
+                frame_index := debug.frame_count == 0 ? DebugMaxHistoryLength-1 : debug.frame_count-1
+                frame := &debug.frames[frame_index]
                 
-                free_open_block :: proc(thread: ^DebugThread, block: ^DebugOpenBlock) {
-                    block.next_free = thread.first_free_block
-                    thread.first_free_block = block
-                }
-                
-                alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread) -> (result: ^DebugOpenBlock) {
+                alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, source: ^DebugRecord, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
                     result = thread.first_free_block
                     if result != nil {
                         thread.first_free_block = result.next_free
                     } else {
                         result = push(&debug.collation_arena, DebugOpenBlock)
                     }
+                    result ^= {
+                        frame_index   = frame_index,
+                        opening_event = opening_event,
+                        source        = source,
+                    }
+                    
+                    
+                    result.parent = parent^
+                    parent^ = result
+                    
+                    return result
+                }
+                
+                free_open_block :: proc(thread: ^DebugThread, first_open: ^^DebugOpenBlock) {
+                    free_block := first_open^
+                    free_block.next_free = thread.first_free_block
+                    thread.first_free_block = free_block
+                    
+                    first_open^ = free_block.parent
+                }
+                
+                events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
+                    result = b != nil && b.thread_index == a.thread_index
                     return result
                 }
                 
                 switch event.type {
                   case .FrameMarker: unreachable()
-                  case .BeginDataBlock:
-                    block := alloc_open_block(debug, thread)
-                  case .EndDataBlock:
-                    
                   case .BeginCodeBlock:
-                    block := alloc_open_block(debug, thread)
-                    block^ = {
-                        frame_index   = frame_index,
-                        opening_event = &event,
-                        parent        = thread.first_open_code_block,
-                        source        = source,
+                    alloc_open_block(debug, thread, frame_index, &event, source, &thread.first_open_code_block)
+                  case .BeginDataBlock:
+
+                    block := alloc_open_block(debug, thread, frame_index, &event, source, &thread.first_open_data_block)
+                    parent := block.parent != nil ? block.parent.group : frame.root
+                    if parent != nil {
+                        collate_create_group(debug, source.loc.name, parent)
                     }
-                    thread.first_open_code_block = block
+                    
+                  case .DataValue:
+                    group := thread.first_open_data_block.group
+                    name  := source.loc.name
+                    
+                    if group != nil {
+                        switch value in event.as.any {
+                          case b32: 
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case i32: 
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case u32: 
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case f32: 
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case v2: 
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case v3: 
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case v4:
+                            collate_create_grouped_variable(debug, value, name, group)
+                          case: 
+                            unimplemented()
+                        }
+                    }
+                    
+                  case .EndDataBlock:
+                    matching_block := thread.first_open_data_block
+                    if matching_block != nil {
+                        opening_event := matching_block.opening_event
+                        if events_match(&event, opening_event) {
+                            defer free_open_block(thread, &thread.first_open_data_block)
+                            
+                            
+                            
+                        }
+                    }
+                    
                   case .EndCodeBlock:
                     matching_block := thread.first_open_code_block
                     if matching_block != nil {
                         opening_event := matching_block.opening_event
-                        if opening_event != nil && opening_event.thread_index == event.thread_index && opening_event.record_index == event.record_index {
+                        if events_match(&event, opening_event) {
+                            defer free_open_block(thread, &thread.first_open_code_block)
+                            
                             if matching_block.frame_index == frame_index {
                                 record_from :: #force_inline proc(block: ^DebugOpenBlock) -> (result: ^DebugRecord) {
                                     result = block != nil ? block.source : nil
@@ -740,10 +796,6 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                             } else {
                                 // TODO(viktor): Record all frames in between and begin/end spans
                             }
-                            
-                            free_open_block(thread, matching_block)
-                        
-                            thread.first_open_code_block = matching_block.parent
                         } else {
                             // TODO(viktor): Record span that goes to the beginning of the frame
                         }
@@ -869,8 +921,8 @@ debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
               case ^v2:
                 // NOTE(viktor): nothing
               case ^DebugVariable:
-                root_group := debug_add_variable_group(debug, "NewUserGroup")
-                debug_add_variable_to_group(debug, root_group, debug.hot_interaction.target.(^DebugVariable))
+                root_group := debug_add_variable_group(&debug.debug_arena, "NewUserGroup")
+                debug_add_variable_to_group(&debug.debug_arena, root_group, debug.hot_interaction.target.(^DebugVariable))
                 tree := add_tree(debug, root_group, {0, 0})
                 debug.hot_interaction.target = &tree.p
               case ^DebugTree:
@@ -1096,9 +1148,14 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             spacing_y    = 4,
         }
         
+        root := tree.root
+        root = debug.frames[0].root != nil ? debug.frames[0].root : root
+        if debug.frame_count > 0 {
+        }
+        
         stack_push(&stack, DebugVariableInterator{
-            link     = tree.root.value.(DebugVariableLink).next,
-            sentinel = &tree.root.value.(DebugVariableLink),
+            link     = root.value.(DebugVariableLink).next,
+            sentinel = &root.value.(DebugVariableLink),
         })
         
         for stack.depth > 0 {
@@ -1169,7 +1226,7 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         }
                         
                         text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+",  var.name)
-                        if collapsible.expanded_always {
+                        /* if collapsible.expanded_always */ {
                             stack_push(&stack, DebugVariableInterator{
                                 link     = list.next,
                                 sentinel = list,
@@ -1294,8 +1351,25 @@ debug_interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteracti
     return result
 }
 
+
+collate_create_group :: proc(debug: ^DebugState, name: string, parent: ^DebugVariable) -> (result: ^DebugVariable) {
+    result = debug_add_variable_group(&debug.collation_arena, name)
+    if parent != nil {
+        debug_add_variable_to_group(&debug.collation_arena, parent, result)
+    }
+    
+    return result
+}
+
+collate_create_grouped_variable :: proc(debug: ^DebugState, value: DebugVariableValue, name: string, group: ^DebugVariable) {
+    var := debug_add_variable_without_context(&debug.collation_arena, value, name)
+    debug_add_variable_to_group(&debug.collation_arena, group, var)
+}
+
+////////////////////////////////////////////////
+
 add_tree :: proc(debug: ^DebugState, root: ^DebugVariable, p: v2) -> (result: ^DebugTree) {
-    result = push(&debug.debug_arena, DebugTree)
+    result = push(&debug.collation_arena, DebugTree)
     result^ = {
         root = root,
         p = p,
@@ -1307,24 +1381,24 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugVariable, p: v2) -> (result: ^D
 }
 
 debug_begin_variable_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugVariable) {
-    result = debug_add_variable_group(ctx.debug, group_name)
+    result = debug_add_variable_group(&ctx.debug.debug_arena, group_name)
     if parent := stack_peek(&ctx.stack); parent != nil {
-        debug_add_variable_to_group(ctx.debug, parent^, result)
+        debug_add_variable_to_group(&ctx.debug.debug_arena, parent^, result)
     }
     
     stack_push(&ctx.stack, result)
     return result
 }
 
-debug_add_variable_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugVariable) {
-    result = debug_add_variable_without_context(debug, DebugVariableLink{}, name)
+debug_add_variable_group :: proc(arena: ^Arena, name: string) -> (result: ^DebugVariable) {
+    result = debug_add_variable_without_context(arena, DebugVariableLink{}, name)
     list_init_sentinel(&result.value.(DebugVariableLink))
     
     return result
 }
 
-debug_add_variable_to_group :: proc(debug: ^DebugState, group: ^DebugVariable, element: ^DebugVariable) {
-    entry := push(&debug.debug_arena, DebugVariableLink)
+debug_add_variable_to_group :: proc(arena: ^Arena, group: ^DebugVariable, element: ^DebugVariable) {
+    entry := push(arena, DebugVariableLink)
     entry.var = element
     
     list  := &group.value.(DebugVariableLink)
@@ -1332,19 +1406,19 @@ debug_add_variable_to_group :: proc(debug: ^DebugState, group: ^DebugVariable, e
 }
 
 debug_add_variable :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugVariableValue, variable_name := #caller_expression(value)) -> (result: ^DebugVariable) {
-    result = debug_add_variable_without_context(ctx.debug, value, variable_name)
+    result = debug_add_variable_without_context(&ctx.debug.debug_arena, value, variable_name)
 
     if parent := stack_peek(&ctx.stack); parent != nil {
-        debug_add_variable_to_group(ctx.debug, parent^, result)
+        debug_add_variable_to_group(&ctx.debug.debug_arena, parent^, result)
     }
     
     return result
 }
 
-debug_add_variable_without_context :: proc(debug: ^DebugState, value: DebugVariableValue, variable_name: string) -> (result: ^DebugVariable) {
-    result = push(&debug.debug_arena, DebugVariable)
+debug_add_variable_without_context :: proc(arena: ^Arena, value: DebugVariableValue, variable_name: string) -> (result: ^DebugVariable) {
+    result = push(arena, DebugVariable)
     result^ = {
-        name  = push_string(&debug.debug_arena, variable_name),
+        name  = push_string(arena, variable_name),
         value = value,
     }
     
@@ -1503,8 +1577,18 @@ begin_data_block :: #force_inline proc(value: ^$T, loc := #caller_location, name
     event.as.id[0] = value
 }
 
-record_debug_event_value :: #force_inline proc(value: $T) {
+record_debug_event_value :: #force_inline proc(value: any, loc := #caller_location, name := #caller_expression(value)) {
+    if DebugTimingDisabled do return
     
+    key := DebugRecordLocation{
+        name      = name,
+        file_path = loc.file_path,
+        line      = loc.line,
+    }
+    index := record_index_from_loc(key)
+    
+    event := record_debug_event_common(.DataValue, index)
+    event.as.any = value
 }
 
 end_data_block :: #force_inline proc(loc := #caller_location) {

@@ -692,9 +692,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
     when DEBUG_UseDebugCamera {
-        push_rectangle_outline(render_group, 0, rectangle_get_diameter(screen_bounds),                         Yellow,0.1)
-        push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.bounds).xy,           Blue,  0.2)
-        push_rectangle_outline(render_group, 0, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy, Green, 0.2)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(screen_bounds)),                         Yellow,0.1)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(camera_sim_region.bounds).xy),           Blue,  0.2)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy), Green, 0.2)
     }
     
     camera_p := world_difference(world, state.camera_p, sim_origin)
@@ -986,7 +986,10 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                     
                     stored_entity := &state.stored_entities[entity.storage_index]
                     begin_data_block(stored_entity)
+                        record_debug_event_value(entity.updatable)
+                        record_debug_event_value(entity.p)
                         record_debug_event_value(entity.dp)
+                        record_debug_event_value(entity.distance_limit)
                     end_data_block()
                 }
             }

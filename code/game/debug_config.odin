@@ -24,7 +24,7 @@ package game
             DEBUG_ShowSpaceBounds :b32: false
         DEBUG_TestWeirdScreenSizes :b32: false
         DEBUG_RenderSingleThreaded :b32: false
-        DEBUG_DebugCameraDistance :f32: 14.3999949
-        DEBUG_UseDebugCamera :b32: false
+        DEBUG_DebugCameraDistance :f32: 4.3999949
+        DEBUG_UseDebugCamera :b32: !true
     // Profiling
         DEBUG_ShowFramerate :b32: true
