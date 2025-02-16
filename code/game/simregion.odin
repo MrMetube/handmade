@@ -38,12 +38,12 @@ EntityCollisionVolumeGroup :: struct {
 }
 
 EntityReference :: struct #raw_union {
-    ptr: ^Entity,
+    ptr:   ^Entity,
     index: StorageIndex,
 }
 
 SimEntityHash :: struct {
-    ptr: ^Entity,
+    ptr:   ^Entity,
     index: StorageIndex,
 }
 

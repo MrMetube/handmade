@@ -504,7 +504,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     when DEBUG_SoundPanningWithMouse {
         // NOTE(viktor): test sound panning with the mouse 
-        music_volume := input.mouse_position
+        music_volume := input.mouse.p - vec_cast(f32, buffer.width, buffer.height) * 0.5
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
                 play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))

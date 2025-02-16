@@ -8,7 +8,7 @@ Arena :: struct {
 
 TemporaryMemory :: struct {
     arena: ^Arena,
-    used: u64,
+    used:  u64,
 }
 
 init_arena :: #force_inline proc(arena: ^Arena, storage: []u8) {

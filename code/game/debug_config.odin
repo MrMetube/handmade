@@ -3,7 +3,7 @@ package game
     // Profile
         // By Thread
     // Assets
-    DEBUG_LoadAssetsSingleThreaded :b32: false
+        DEBUG_LoadAssetsSingleThreaded :b32: false
     // Entities
         DEBUG_HeroJumping :b32: false
         DEBUG_FamiliarFollowsHero :b32: false

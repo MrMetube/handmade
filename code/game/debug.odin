@@ -1,5 +1,6 @@
 package game
 
+import "core:reflect"
 import "core:fmt"
 import "core:hash" // TODO(viktor): I do not need this
 
@@ -92,6 +93,8 @@ DebugState :: struct {
     font_id:      FontId,
     font:         ^Font,
     font_info:    ^FontInfo,
+
+    dump_depth: u32,
 }
 
 DebugFrame :: struct {
@@ -356,106 +359,249 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     assert(len(memory.debug_storage) >= size_of(DebugState))
     debug := cast(^DebugState) raw_data(memory.debug_storage)
     
-    assets, work_queue := debug_get_game_assets_and_work_queue(memory)
-    { // Debug reset
-        if !debug.inititalized {
-            debug.inititalized = true
     
-            // :PointerArithmetic
-            init_arena(&debug.debug_arena, memory.debug_storage[size_of(DebugState):])
-            
-            ctx := DebugVariableDefinitionContext { debug = debug }
+    assets, work_queue := debug_get_game_assets_and_work_queue(memory)
+    if !debug.inititalized {
+        debug.inititalized = true
 
-            debug.root_group = debug_begin_variable_group(&ctx, "Debugging")
-                debug_begin_variable_group(&ctx, "Profiling")
-                    debug_add_variable(&ctx, DEBUG_ShowFramerate)
-                debug_end_variable_group(&ctx)
+        // :PointerArithmetic
+        init_arena(&debug.debug_arena, memory.debug_storage[size_of(DebugState):])
+        
+        ctx := DebugVariableDefinitionContext { debug = debug }
+
+        debug.root_group = debug_begin_variable_group(&ctx, "Debugging")
+            debug_begin_variable_group(&ctx, "Profiling")
+                debug_add_variable(&ctx, DEBUG_ShowFramerate)
+            debug_end_variable_group(&ctx)
+        
+            debug_begin_variable_group(&ctx, "Rendering")
+                debug_add_variable(&ctx, DEBUG_UseDebugCamera)
+                debug_add_variable(&ctx, DEBUG_DebugCameraDistance)
             
-                debug_begin_variable_group(&ctx, "Rendering")
-                    debug_add_variable(&ctx, DEBUG_UseDebugCamera)
-                    debug_add_variable(&ctx, DEBUG_DebugCameraDistance)
+                debug_add_variable(&ctx, DEBUG_RenderSingleThreaded)
+                debug_add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
                 
-                    debug_add_variable(&ctx, DEBUG_RenderSingleThreaded)
-                    debug_add_variable(&ctx, DEBUG_TestWeirdScreenSizes)
-                    
-                    debug_begin_variable_group(&ctx, "Space")
-                        debug_add_variable(&ctx, DEBUG_ShowSpaceBounds)
-                        debug_add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
-                    debug_end_variable_group(&ctx)
-                    
-                    debug_begin_variable_group(&ctx, "ParticleSystem")
-                        debug_add_variable(&ctx, DEBUG_ParticleSystemTest)
-                        debug_add_variable(&ctx, DEBUG_ParticleGrid)
-                    debug_end_variable_group(&ctx)
-                    
-                    debug_begin_variable_group(&ctx, "CoordinateSystem")
-                        debug_add_variable(&ctx, DEBUG_CoordinateSystemTest)
-                        debug_add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
-                        debug_add_variable(&ctx, DEBUG_ShowLightingSampling)
-                    debug_end_variable_group(&ctx)
-                debug_end_variable_group(&ctx)
-            
-                debug_begin_variable_group(&ctx, "Audio")
-                    debug_add_variable(&ctx, DEBUG_SoundPanningWithMouse)
-                    debug_add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
+                debug_begin_variable_group(&ctx, "Space")
+                    debug_add_variable(&ctx, DEBUG_ShowSpaceBounds)
+                    debug_add_variable(&ctx, DEBUG_ShowGroundChunkBounds)
                 debug_end_variable_group(&ctx)
                 
-                debug_begin_variable_group(&ctx, "Entities")
-                    debug_add_variable(&ctx, DEBUG_ShowEntityBounds)
-                    debug_add_variable(&ctx, DEBUG_FamiliarFollowsHero)
-                    debug_add_variable(&ctx, DEBUG_HeroJumping)
+                debug_begin_variable_group(&ctx, "ParticleSystem")
+                    debug_add_variable(&ctx, DEBUG_ParticleSystemTest)
+                    debug_add_variable(&ctx, DEBUG_ParticleGrid)
                 debug_end_variable_group(&ctx)
                 
-                debug_begin_variable_group(&ctx, "Assets")
-                debug_add_variable(&ctx, DEBUG_LoadAssetsSingleThreaded)
-                    debug_add_variable(&ctx, DebugBitmapDisplay{id = first_bitmap_from(assets, .Monster) }, "")
-                debug_end_variable_group(&ctx)
-                
-                debug_begin_variable_group(&ctx, "Profile")
-                    debug_begin_variable_group(&ctx, "By Thread")
-                        debug_add_variable(&ctx, DebugVariableProfile{}, "")
-                    debug_end_variable_group(&ctx)
+                debug_begin_variable_group(&ctx, "CoordinateSystem")
+                    debug_add_variable(&ctx, DEBUG_CoordinateSystemTest)
+                    debug_add_variable(&ctx, DEBUG_ShowLightingBounceDirection)
+                    debug_add_variable(&ctx, DEBUG_ShowLightingSampling)
                 debug_end_variable_group(&ctx)
             debug_end_variable_group(&ctx)
-            assert(ctx.stack.depth == 0)
+        
+            debug_begin_variable_group(&ctx, "Audio")
+                debug_add_variable(&ctx, DEBUG_SoundPanningWithMouse)
+                debug_add_variable(&ctx, DEBUG_SoundPitchingWithMouse)
+            debug_end_variable_group(&ctx)
+            
+            debug_begin_variable_group(&ctx, "Entities")
+                debug_add_variable(&ctx, DEBUG_ShowEntityBounds)
+                debug_add_variable(&ctx, DEBUG_FamiliarFollowsHero)
+                debug_add_variable(&ctx, DEBUG_HeroJumping)
+            debug_end_variable_group(&ctx)
+            
+            debug_begin_variable_group(&ctx, "Assets")
+            debug_add_variable(&ctx, DEBUG_LoadAssetsSingleThreaded)
+                debug_add_variable(&ctx, DebugBitmapDisplay{id = first_bitmap_from(assets, .Monster) }, "")
+            debug_end_variable_group(&ctx)
+            
+            debug_begin_variable_group(&ctx, "Profile")
+                debug_begin_variable_group(&ctx, "By Thread")
+                    debug_add_variable(&ctx, DebugVariableProfile{}, "")
+                debug_end_variable_group(&ctx)
+            debug_end_variable_group(&ctx)
+        debug_end_variable_group(&ctx)
+        assert(ctx.stack.depth == 0)
+            
+        list_init_sentinel(&debug.tree_sentinel)
+        
+        sub_arena(&debug.collation_arena, &debug.debug_arena, 64 * Megabyte)
+        
+        debug.scopes_to_record = push(&debug.collation_arena, ^DebugRecord, DebugMaxThreadCount)
+        
+        debug.font_scale = 0.6
+
+        debug.work_queue = work_queue
+        debug.buffer     = buffer
+        
+        
+        debug.left_edge  = -0.5 * cast(f32) buffer.width
+        debug.right_edge =  0.5 * cast(f32) buffer.width
+        debug.top_edge   =  0.5 * cast(f32) buffer.height
+        
+        add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
+        
+        debug.collation_memory = begin_temporary_memory(&debug.collation_arena)
+        restart_collation(debug, GlobalDebugTable.events_state.array_index)
+    }
+    
+    if debug.render_group == nil {
+        debug.render_group = make_render_group(&debug.debug_arena, assets, 32 * Megabyte, false)
+        assert(debug.render_group != nil)
+    }
+    if debug.render_group.inside_render do return 
+
+    if debug.font == nil {
+        debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
+        debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
+        load_font(debug.render_group.assets, debug.font_id, false)
+        debug.font_info = get_font_info(assets, debug.font_id)
+        debug.ascent = get_baseline(debug.font_info)
+    }
+        
+    begin_render(debug.render_group)
+        
+    e:=Entity {
+        p = 1,
+        dp = 2,
+        distance_limit = 3,
+        hit_point_max = 4,
+        type = .Arrow,
+        flags = {.Collides, .Simulated},
+        updatable = true,
+        walkable_dim = {5,6},
+    }
+    
+    // debug_dump_var(debug, &e, Entity)
+    // debug_dump_var(debug, &e)
+    
+    debug.dump_depth = 0
+    debug_dump_var(debug, debug^)
+    debug_dump_var :: proc(debug: ^DebugState, a: any) {
+        prefix : string
+        for i in 0..<debug.dump_depth {
+            prefix = fmt.tprint(prefix, "    ", sep="")
+        }
+        
+        data, type := a.data, a.id
+        info := type_info_of(type)
+        
+        if reflect.is_struct(info) || reflect.is_raw_union(info) {
+            for field in reflect.struct_fields_zipped(type) {
+                field := field
+                field_buffer:= fmt.tprint(prefix, field.name, " =", sep="")
+                base_len := len(field_buffer)
+                manually: b32
                 
-            list_init_sentinel(&debug.tree_sentinel)
+                member_pointer :rawpointer= &(cast([^]u8) data)[field.offset]
+                switch reflect.type_info_base(field.type) {
+                  case type_info_of(string):
+                    value := cast(^string) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(u8):
+                    value := cast(^u8) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(u16):
+                    value := cast(^u16) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(u32):
+                    value := cast(^u32) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(u64):
+                    value := cast(^u32) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(i32):
+                    value := cast(^i32) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(i64):
+                    value := cast(^i64) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(f32):
+                    value := cast(^f32) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(b32):
+                    value := cast(^b32) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(v2):
+                    value := cast(^v2) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(v3):
+                    value := cast(^v3) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case type_info_of(v4):
+                    value := cast(^v4) member_pointer
+                    field_buffer = fmt.tprint(field_buffer, value^)
+                  case:
+                    if reflect.is_enum(field.type) {
+                        names := reflect.enum_field_names(field.type.id)
+                        value := (cast(^u64) member_pointer)^
+                        if value < auto_cast len(names) {
+                            field_buffer = fmt.tprint(field_buffer, names[value])
+                        }
+                    } else if reflect.is_bit_set(field.type) {
+                        // TODO(viktor):  
+                    } else if reflect.is_pointer(field.type) {
+                        field_buffer = fmt.tprint(field_buffer, member_pointer)
+                        bogus := cast(^^u8) member_pointer
+                        
+                        if bogus^ != nil {
+                            // @Copypasta from below
+                            debug.dump_depth += 1
+                            defer debug.dump_depth -= 1
+                            
+                            
+                            debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
+                            raw_any :: struct{data:rawpointer, type:typeid}
+                            debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
+                            manually = true
+                        }
+                    } else {
+                        debug.dump_depth += 1
+                        defer debug.dump_depth -= 1
+                        
+                        if struct_named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
+                            debug_push_text_line(debug, fmt.tprint(prefix, field.name, " :", struct_named.name, sep=""))
+                        } else {
+                            debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
+                        }
+                        
+                        raw_any :: struct{data:rawpointer, type:typeid}
+                        debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
+                        manually = true
+                    }
+                }
+                
+                if len(field_buffer) != base_len {
+                    debug_push_text_line(debug, field_buffer)
+                } else if !manually {
+                    if named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
+                        debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, " = ", named.name, sep=""))
+                    } else {
+                        debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, sep=""))
+                    }
+                }
+            }
+        } else if reflect.is_array(info) || reflect.is_slice(info) {
+            debug.dump_depth += 1
+            defer debug.dump_depth -= 1
             
-            sub_arena(&debug.collation_arena, &debug.debug_arena, 64 * Megabyte)
-            
-            debug.scopes_to_record = push(&debug.collation_arena, ^DebugRecord, DebugMaxThreadCount)
-            
-            debug.font_scale = 0.6
-
-            debug.work_queue = work_queue
-            debug.buffer     = buffer
-            
-            
-            debug.left_edge  = -0.5 * cast(f32) buffer.width
-            debug.right_edge =  0.5 * cast(f32) buffer.width
-            debug.top_edge   =  0.5 * cast(f32) buffer.height
-            
-            add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
-            
-            debug.collation_memory = begin_temporary_memory(&debug.collation_arena)
-            restart_collation(debug, GlobalDebugTable.events_state.array_index)
+            too_many: b32
+            it: int
+            for e in reflect.iterate_array(a, &it) {
+                debug_dump_var(debug, e)
+                if it > 3 {
+                    too_many = true
+                    break
+                }
+            }
+            if too_many {
+                debug_push_text_line(debug, fmt.tprint(prefix, "...", sep=""))
+            }
+        } else {
+            // TODO(viktor): bitfield
+            if named, ok := info.variant.(reflect.Type_Info_Named); ok {
+                debug_push_text_line(debug, fmt.tprint(prefix,"TODO: ", named.name, sep=""))
+            }
         }
-
-        if debug.render_group == nil {
-            debug.render_group = make_render_group(&debug.debug_arena, assets, 32 * Megabyte, false)
-            assert(debug.render_group != nil)
-        }
-        if debug.render_group.inside_render do return 
-
-        if debug.font == nil {
-            debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
-            debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
-            load_font(debug.render_group.assets, debug.font_id, false)
-            debug.font_info = get_font_info(assets, debug.font_id)
-            debug.ascent = get_baseline(debug.font_info)
-        }
-            
-        begin_render(debug.render_group)
     }
     
     modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
@@ -611,14 +757,14 @@ debug_hot_element :: proc(v: any) {}
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     if debug.render_group == nil do return
 
-    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 0.8)
+    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 0.75)
 
     if debug.compiling {
         state := Platform.debug.get_process_state(debug.compiler)
         if state.is_running {
             debug_push_text_line(debug, "Recompiling...")
         } else {
-            assert(state.return_code == 0)
+            fmt.println("ERROR: failed to recompile")
             debug.compiling = false
         }
     }
