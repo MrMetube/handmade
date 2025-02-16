@@ -983,7 +983,11 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
                     color := Yellow
                     push_rectangle_outline(render_group, volume, color, 0.05)
-                    debug_hot_element(entity)
+                    
+                    stored_entity := &state.stored_entities[entity.storage_index]
+                    begin_data_block(stored_entity)
+                        record_debug_event_value(entity.dp)
+                    end_data_block()
                 }
             }
         }

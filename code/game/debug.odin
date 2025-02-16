@@ -113,10 +113,11 @@ DebugRegion :: struct {
 }
 
 DebugThread :: struct {
-    thread_index:     u32, // Also used as a lane_index
+    thread_index:     u32,
     
-    first_free_block: ^DebugOpenBlock,
-    first_open_block: ^DebugOpenBlock,
+    first_free_block:      ^DebugOpenBlock,
+    first_open_code_block: ^DebugOpenBlock,
+    first_open_data_block: ^DebugOpenBlock,
 }
 
 DebugOpenBlock :: struct {
@@ -143,17 +144,25 @@ DebugTable :: struct {
 
 DebugEvent :: struct {
     clock: i64,
+    thread_index: u16,
+    core_index:   u16,
+    record_index: u32,
+    type: DebugEventType,
+                        
     as: struct #raw_union {
-        block: struct {
-            thread_index: u16,
-            core_index:   u16,                    
-        },
         frame_marker: struct {
             seconds_elapsed: f32,
         },
+        id: DebugId,
+        u32: u32,
+        i32: i32,
+        f32: f32,
+        v2: v2,
+        v3: v3,
+        v4: v4,
+        Rectangle2: Rectangle2,
+        Rectangle3: Rectangle3,
     },
-    record_index: u32,
-    type: DebugEventType,
     
 }
 
@@ -165,8 +174,10 @@ DebugEventsState :: bit_field u64 {
 }
 
 DebugEventType :: enum u8 {
-    BeginBlock, 
-    EndBlock,
+    BeginCodeBlock, 
+    EndCodeBlock,
+    BeginDataBlock, 
+    EndDataBlock,
     FrameMarker,
 }
 
@@ -240,10 +251,7 @@ DebugViewBlock :: struct {
     size: v2,
 }
 
-// TODO(viktor): Maybe there is a better way!
-DebugId :: struct {
-    value: [2]rawpointer,
-}
+DebugId :: [2]rawpointer
 
 ////////////////////////////////////////////////
 
@@ -459,151 +467,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     }
         
     begin_render(debug.render_group)
-        
-    e:=Entity {
-        p = 1,
-        dp = 2,
-        distance_limit = 3,
-        hit_point_max = 4,
-        type = .Arrow,
-        flags = {.Collides, .Simulated},
-        updatable = true,
-        walkable_dim = {5,6},
-    }
-    
-    // debug_dump_var(debug, &e, Entity)
-    // debug_dump_var(debug, &e)
-    
-    debug.dump_depth = 0
-    debug_dump_var(debug, debug^)
-    debug_dump_var :: proc(debug: ^DebugState, a: any) {
-        prefix : string
-        for i in 0..<debug.dump_depth {
-            prefix = fmt.tprint(prefix, "    ", sep="")
-        }
-        
-        data, type := a.data, a.id
-        info := type_info_of(type)
-        
-        if reflect.is_struct(info) || reflect.is_raw_union(info) {
-            for field in reflect.struct_fields_zipped(type) {
-                field := field
-                field_buffer:= fmt.tprint(prefix, field.name, " =", sep="")
-                base_len := len(field_buffer)
-                manually: b32
-                
-                member_pointer :rawpointer= &(cast([^]u8) data)[field.offset]
-                switch reflect.type_info_base(field.type) {
-                  case type_info_of(string):
-                    value := cast(^string) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(u8):
-                    value := cast(^u8) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(u16):
-                    value := cast(^u16) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(u32):
-                    value := cast(^u32) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(u64):
-                    value := cast(^u32) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(i32):
-                    value := cast(^i32) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(i64):
-                    value := cast(^i64) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(f32):
-                    value := cast(^f32) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(b32):
-                    value := cast(^b32) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(v2):
-                    value := cast(^v2) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(v3):
-                    value := cast(^v3) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case type_info_of(v4):
-                    value := cast(^v4) member_pointer
-                    field_buffer = fmt.tprint(field_buffer, value^)
-                  case:
-                    if reflect.is_enum(field.type) {
-                        names := reflect.enum_field_names(field.type.id)
-                        value := (cast(^u64) member_pointer)^
-                        if value < auto_cast len(names) {
-                            field_buffer = fmt.tprint(field_buffer, names[value])
-                        }
-                    } else if reflect.is_bit_set(field.type) {
-                        // TODO(viktor):  
-                    } else if reflect.is_pointer(field.type) {
-                        field_buffer = fmt.tprint(field_buffer, member_pointer)
-                        bogus := cast(^^u8) member_pointer
-                        
-                        if bogus^ != nil {
-                            // @Copypasta from below
-                            debug.dump_depth += 1
-                            defer debug.dump_depth -= 1
-                            
-                            
-                            debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
-                            raw_any :: struct{data:rawpointer, type:typeid}
-                            debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
-                            manually = true
-                        }
-                    } else {
-                        debug.dump_depth += 1
-                        defer debug.dump_depth -= 1
-                        
-                        if struct_named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
-                            debug_push_text_line(debug, fmt.tprint(prefix, field.name, " :", struct_named.name, sep=""))
-                        } else {
-                            debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
-                        }
-                        
-                        raw_any :: struct{data:rawpointer, type:typeid}
-                        debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
-                        manually = true
-                    }
-                }
-                
-                if len(field_buffer) != base_len {
-                    debug_push_text_line(debug, field_buffer)
-                } else if !manually {
-                    if named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
-                        debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, " = ", named.name, sep=""))
-                    } else {
-                        debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, sep=""))
-                    }
-                }
-            }
-        } else if reflect.is_array(info) || reflect.is_slice(info) {
-            debug.dump_depth += 1
-            defer debug.dump_depth -= 1
-            
-            too_many: b32
-            it: int
-            for e in reflect.iterate_array(a, &it) {
-                debug_dump_var(debug, e)
-                if it > 3 {
-                    too_many = true
-                    break
-                }
-            }
-            if too_many {
-                debug_push_text_line(debug, fmt.tprint(prefix, "...", sep=""))
-            }
-        } else {
-            // TODO(viktor): bitfield
-            if named, ok := info.variant.(reflect.Type_Info_Named); ok {
-                debug_push_text_line(debug, fmt.tprint(prefix,"TODO: ", named.name, sep=""))
-            }
-        }
-    }
-    
+
     modular_add(&GlobalDebugTable.current_events_index, 1, len(GlobalDebugTable.events))
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index })
     GlobalDebugTable.event_count[events_state.array_index] = events_state.events_index
@@ -628,6 +492,134 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     end_render(debug.render_group)
 }
 
+debug_dump_var :: proc(debug: ^DebugState, a: any) {
+    prefix : string
+    for i in 0..<debug.dump_depth {
+        prefix = fmt.tprint(prefix, "    ", sep="")
+    }
+    
+    data, type := a.data, a.id
+    info := type_info_of(type)
+    
+    if reflect.is_struct(info) || reflect.is_raw_union(info) {
+        for field in reflect.struct_fields_zipped(type) {
+            field := field
+            field_buffer := fmt.tprint(prefix, field.name, " =", sep="")
+            base_len := len(field_buffer)
+            manually: b32
+            
+            member_pointer :rawpointer= &(cast([^]u8) data)[field.offset]
+            switch reflect.type_info_base(field.type) {
+              case type_info_of(string):
+                value := cast(^string) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(u8):
+                value := cast(^u8) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(u16):
+                value := cast(^u16) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(u32):
+                value := cast(^u32) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(u64):
+                value := cast(^u32) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(i32):
+                value := cast(^i32) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(i64):
+                value := cast(^i64) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(f32):
+                value := cast(^f32) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(b32):
+                value := cast(^b32) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(v2):
+                value := cast(^v2) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(v3):
+                value := cast(^v3) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case type_info_of(v4):
+                value := cast(^v4) member_pointer
+                field_buffer = fmt.tprint(field_buffer, value^)
+              case:
+                if reflect.is_enum(field.type) {
+                    names := reflect.enum_field_names(field.type.id)
+                    value := (cast(^u64) member_pointer)^
+                    if value < auto_cast len(names) {
+                        field_buffer = fmt.tprint(field_buffer, names[value])
+                    }
+                } else if reflect.is_bit_set(field.type) {
+                    // TODO(viktor):  
+                } else if reflect.is_pointer(field.type) {
+                    field_buffer = fmt.tprint(field_buffer, member_pointer)
+                    bogus := cast(^^u8) member_pointer
+                    
+                    if bogus^ != nil {
+                        // @Copypasta from below
+                        debug.dump_depth += 1
+                        defer debug.dump_depth -= 1
+                        
+                        
+                        debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
+                        raw_any :: struct{data:rawpointer, type:typeid}
+                        debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
+                        manually = true
+                    }
+                } else {
+                    debug.dump_depth += 1
+                    defer debug.dump_depth -= 1
+                    
+                    if struct_named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
+                        debug_push_text_line(debug, fmt.tprint(prefix, field.name, " :", struct_named.name, sep=""))
+                    } else {
+                        debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
+                    }
+                    
+                    raw_any :: struct{data:rawpointer, type:typeid}
+                    debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
+                    manually = true
+                }
+            }
+            
+            if len(field_buffer) != base_len {
+                debug_push_text_line(debug, field_buffer)
+            } else if !manually {
+                if named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
+                    debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, " = ", named.name, sep=""))
+                } else {
+                    debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, sep=""))
+                }
+            }
+        }
+    } else if reflect.is_array(info) || reflect.is_slice(info) {
+        debug.dump_depth += 1
+        defer debug.dump_depth -= 1
+        
+        too_many: b32
+        it: int
+        for e in reflect.iterate_array(a, &it) {
+            debug_dump_var(debug, e)
+            if it > 3 {
+                too_many = true
+                break
+            }
+        }
+        if too_many {
+            debug_push_text_line(debug, fmt.tprint(prefix, "...", sep=""))
+        }
+    } else {
+        // TODO(viktor): bitfield
+        if named, ok := info.variant.(reflect.Type_Info_Named); ok {
+            debug_push_text_line(debug, fmt.tprint(prefix,"TODO: ", named.name, sep=""))
+        }
+    }
+}
+
 ////////////////////////////////////////////////
 
 restart_collation :: proc(debug: ^DebugState, invalid_index: u32) {
@@ -650,7 +642,7 @@ refresh_collation :: proc(debug: ^DebugState) {
 
 collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
     // @Hack why should this need to be reset? Think dont guess
-    for &thread in debug.threads do thread.first_open_block = nil
+    for &thread in debug.threads do thread.first_open_code_block = nil
     
     modular_add(&debug.collation_index, 0, DebugMaxHistoryLength)
     for {
@@ -678,40 +670,54 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                     regions         = push(&debug.collation_arena, DebugRegion, DebugMaxRegionsPerFrame),
                 }
             } else if debug.collation_frame != nil {
-                debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.as.block.thread_index)
+                debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.thread_index)
                 
-                source := &GlobalDebugTable.records[event.as.block.thread_index][event.record_index]
-                thread := &debug.threads[event.as.block.thread_index]
+                source := &GlobalDebugTable.records[event.thread_index][event.record_index]
+                thread := &debug.threads[event.thread_index]
                 frame_index := debug.frame_count-1
                 
-                switch event.type {
-                case .FrameMarker: unreachable()
-                case .BeginBlock:
-                    block := thread.first_free_block
-                    if block != nil {
-                        thread.first_free_block = block.next_free
+                free_open_block :: proc(thread: ^DebugThread, block: ^DebugOpenBlock) {
+                    block.next_free = thread.first_free_block
+                    thread.first_free_block = block
+                }
+                
+                alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread) -> (result: ^DebugOpenBlock) {
+                    result = thread.first_free_block
+                    if result != nil {
+                        thread.first_free_block = result.next_free
                     } else {
-                        block = push(&debug.collation_arena, DebugOpenBlock)
+                        result = push(&debug.collation_arena, DebugOpenBlock)
                     }
+                    return result
+                }
+                
+                switch event.type {
+                  case .FrameMarker: unreachable()
+                  case .BeginDataBlock:
+                    block := alloc_open_block(debug, thread)
+                  case .EndDataBlock:
+                    
+                  case .BeginCodeBlock:
+                    block := alloc_open_block(debug, thread)
                     block^ = {
                         frame_index   = frame_index,
                         opening_event = &event,
-                        parent        = thread.first_open_block,
+                        parent        = thread.first_open_code_block,
                         source        = source,
                     }
-                    thread.first_open_block = block
-                case .EndBlock:
-                    matching_block := thread.first_open_block
+                    thread.first_open_code_block = block
+                  case .EndCodeBlock:
+                    matching_block := thread.first_open_code_block
                     if matching_block != nil {
                         opening_event := matching_block.opening_event
-                        if opening_event != nil && opening_event.as.block.thread_index == event.as.block.thread_index && opening_event.record_index == event.record_index {
+                        if opening_event != nil && opening_event.thread_index == event.thread_index && opening_event.record_index == event.record_index {
                             if matching_block.frame_index == frame_index {
                                 record_from :: #force_inline proc(block: ^DebugOpenBlock) -> (result: ^DebugRecord) {
                                     result = block != nil ? block.source : nil
                                     return result
                                 }
                                 
-                                if record_from(matching_block.parent) == debug.scopes_to_record[event.as.block.thread_index] {
+                                if record_from(matching_block.parent) == debug.scopes_to_record[event.thread_index] {
                                     t_min := cast(f32) (opening_event.clock - debug.collation_frame.begin_clock)
                                     t_max := cast(f32) (event.clock - debug.collation_frame.begin_clock)
                                     
@@ -723,7 +729,7 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                                         region^ = {
                                             record      = source,
                                             cycle_count = event.clock - opening_event.clock,
-                                            lane_index = cast(u32) event.as.block.thread_index,
+                                            lane_index = cast(u32) event.thread_index,
                                             t_min = t_min,
                                             t_max = t_max,
                                         }
@@ -735,10 +741,9 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                                 // TODO(viktor): Record all frames in between and begin/end spans
                             }
                             
-                            matching_block.next_free = thread.first_free_block
-                            thread.first_free_block = matching_block
-                            
-                            thread.first_open_block = matching_block.parent
+                            free_open_block(thread, matching_block)
+                        
+                            thread.first_open_code_block = matching_block.parent
                         } else {
                             // TODO(viktor): Record span that goes to the beginning of the frame
                         }
@@ -751,8 +756,6 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
 }
 
 ////////////////////////////////////////////////
-
-debug_hot_element :: proc(v: any) {}
 
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     if debug.render_group == nil do return
@@ -1051,14 +1054,14 @@ link_interaction :: #force_inline proc(kind: DebugInteractionKind, tree: ^DebugT
 }
 
 debug_id_from_link :: #force_inline proc(tree: ^DebugTree, link: ^DebugVariableLink) -> (result: DebugId) {
-    result.value[0] = tree
-    result.value[1] = link
+    result[0] = tree
+    result[1] = link
     return result
 }
 
 get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
     // TODO(viktor): BETTER HASH FUNCTION
-    hash_index := ((cast(uintpointer) id.value[0] >> 2) + (cast(uintpointer) id.value[1] >> 2)) % len(debug.view_hash)
+    hash_index := ((cast(uintpointer) id[0] >> 2) + (cast(uintpointer) id[1] >> 2)) % len(debug.view_hash)
     slot := &debug.view_hash[hash_index]
     // :LinkedListIteration
     for search := slot^ ; search != nil; search = search.next {
@@ -1425,22 +1428,15 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
 begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
     when DebugTimingDisabled do return result
     
-    records := &GlobalDebugTable.records[context.user_index]
-
     key := DebugRecordLocation{
         name      = name,
         file_path = loc.file_path,
         line      = loc.line,
     }
-    ok: b32
-    // TODO(viktor): Check the overhead of this
-    result.record_index, ok = get(records, key)
-    if !ok {
-        result.record_index = put(records, key)
-    }
+    result.record_index = record_index_from_loc(key)
     result.hit_count = hit_count
     
-    record_debug_event_block(.BeginBlock, result.record_index)
+    record_debug_event_block(.BeginCodeBlock, result.record_index)
     
     return result
 }
@@ -1450,7 +1446,15 @@ end_timed_block:: #force_inline proc(block: TimedBlock) {
     if DebugTimingDisabled do return
     // TODO(viktor): check manual blocks are closed once and exactly once
     // TODO(viktor): record the hit count here
-    record_debug_event_block(.EndBlock, block.record_index)
+    record_debug_event_block(.EndCodeBlock, block.record_index)
+}
+
+record_index_from_loc :: #force_inline proc(key: DebugRecordLocation) -> (result: u32) {
+    records := &GlobalDebugTable.records[context.user_index]
+    // TODO(viktor): Check the overhead of this
+    result = get(records, key) or_else put(records, key)
+    
+    return result
 }
 
 @(deferred_out=end_timed_block)
@@ -1485,6 +1489,35 @@ frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location
     frame_marker.hash  = NilHashValue
 }
 
+begin_data_block :: #force_inline proc(value: ^$T, loc := #caller_location, name := #caller_expression(value)) {
+    if DebugTimingDisabled do return
+    
+    key := DebugRecordLocation{
+        name      = name,
+        file_path = loc.file_path,
+        line      = loc.line,
+    }
+    index := record_index_from_loc(key)
+    
+    event := record_debug_event_common(.BeginDataBlock, index)
+    event.as.id[0] = value
+}
+
+record_debug_event_value :: #force_inline proc(value: $T) {
+    
+}
+
+end_data_block :: #force_inline proc(loc := #caller_location) {
+    if DebugTimingDisabled do return
+    
+    key := DebugRecordLocation{
+        file_path = loc.file_path,
+        line      = loc.line,
+    }
+    index := record_index_from_loc(key)
+    _ = record_debug_event_common(.EndDataBlock, index)
+}
+
 record_debug_event_frame_marker :: #force_inline proc (seconds_elapsed: f32) {
     if DebugTimingDisabled do return
     
@@ -1497,11 +1530,7 @@ record_debug_event_frame_marker :: #force_inline proc (seconds_elapsed: f32) {
 record_debug_event_block :: #force_inline proc (type: DebugEventType, record_index: u32) {
     if DebugTimingDisabled do return
     
-    event := record_debug_event_common(type, record_index)
-    event.as.block = {
-        thread_index = cast(u16) context.user_index,
-        core_index   = 0,
-    }
+    _ = record_debug_event_common(type, record_index)
 }
 
 @require_results
@@ -1514,6 +1543,9 @@ record_debug_event_common :: #force_inline proc (type: DebugEventType, record_in
         type         = type,
         clock        = read_cycle_counter(),
         record_index = record_index,
+        
+        thread_index = cast(u16) context.user_index,
+        core_index   = 0,
     }
     
     return event
