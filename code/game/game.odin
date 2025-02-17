@@ -699,7 +699,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     camera_p := world_difference(world, state.camera_p, sim_origin)
         
-    for &entity, entity_index in camera_sim_region.entities[:camera_sim_region.entity_count] {
+    for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
 
@@ -977,7 +977,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         
         when DEBUG_ShowEntityBounds {
             for volume in entity.collision.volumes {
-                volume_offset := rectangle_get_center(volume)
                 local_mouse_p := unproject_with_transform(render_group.transform, input.mouse.p)
                 
                 if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
@@ -989,6 +988,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                         record_debug_event_value(entity.updatable)
                         record_debug_event_value(entity.p)
                         record_debug_event_value(entity.dp)
+                        record_debug_event_value(first_bitmap_from(tran_state.assets, .Body))
                         record_debug_event_value(entity.distance_limit)
                     end_data_block()
                 }

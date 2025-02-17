@@ -137,7 +137,7 @@ vec_cast :: proc { cast_vec_2, cast_vec_3, cast_vec_4, cast_vec_v }
     }
     return result
 }
-@(require_results) abs_vec_2 :: #force_inline proc(a: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) abs_vec :: #force_inline proc(a: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = abs(a[i])
     }
