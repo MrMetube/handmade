@@ -975,24 +975,33 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             }
         }
         
-        when DEBUG_ShowEntityBounds {
-            for volume in entity.collision.volumes {
-                local_mouse_p := unproject_with_transform(render_group.transform, input.mouse.p)
+        when DebugEnabled {
+            if entity.type != .Space {
+                debug_id := debug_pointer_id(&state.stored_entities[entity.storage_index])
                 
-                if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
-                    color := Yellow
-                    push_rectangle_outline(render_group, volume, color, 0.05)
+                for volume in entity.collision.volumes {
+                    local_mouse_p := unproject_with_transform(render_group.transform, input.mouse.p)
                     
-                    stored_entity := &state.stored_entities[entity.storage_index]
-                    begin_data_block(stored_entity)
-                        record_debug_event_value(entity.updatable)
-                        record_debug_event_value(entity.p)
-                        record_debug_event_value(entity.dp)
-                        record_debug_event_value(first_bitmap_from(tran_state.assets, .Body))
-                        record_debug_event_value(entity.distance_limit)
-                    end_data_block()
+                    if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
+                        debug_hit(debug_id, local_mouse_p.z)
+                    }
+                    
+                    highlighted, color := debug_highlighted(debug_id)
+                    if highlighted {
+                        push_rectangle_outline(render_group, volume, color, 0.05)
+                    }
+                }
+                
+                if debug_begin_data_block(debug_id, "Simulation Entity") {
+                    debug_record_value(entity.updatable)
+                    debug_record_value(entity.p)
+                    debug_record_value(entity.dp)
+                    debug_record_value(first_bitmap_from(tran_state.assets, .Body))
+                //     debug_record_value(entity.distance_limit)
+                    debug_end_data_block()
                 }
             }
+            
         }
     }
     render_group.transform.offset = 0

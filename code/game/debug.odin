@@ -24,16 +24,16 @@ import "core:fmt"
 // tree graph to visualize the size of the allocated types and such in each arena?
 // Maybe a table view of largest entries or most entries of a type.
 
-DebugTimingDisabled :: !INTERNAL
+DebugEnabled :: INTERNAL
 
 GlobalDebugTable:  DebugTable
 GlobalDebugMemory: ^GameMemory
+DebugMaxEventsLength    :: 600_000 when DebugEnabled else 0
+DebugMaxThreadCount     :: 256     when DebugEnabled else 0
+DebugMaxHistoryLength   :: 32      when DebugEnabled else 0
+DebugMaxRegionsPerFrame :: 1000    when DebugEnabled else 0
 
-DebugMaxThreadCount     :: 256   when !DebugTimingDisabled else 0
-DebugMaxHistoryLength   :: 32    when !DebugTimingDisabled else 0
-DebugMaxRegionsPerFrame :: 14000 when !DebugTimingDisabled else 0
-
-when DebugTimingDisabled {
+when !DebugEnabled {
     #assert(len(GlobalDebugTable.event_count) == 0)
     #assert(len(GlobalDebugTable.events)      == 0)
     #assert(len(GlobalDebugTable.records)     == 0)
@@ -65,6 +65,9 @@ DebugState :: struct {
     root_group:    ^DebugEventGroup,
     view_hash:     [4096]^DebugView,
     tree_sentinel: DebugTree,
+    
+    selected_count: u32,
+    selected_ids:   [64]DebugId,
     
     last_mouse_p:         v2,
     interaction:          DebugInteraction,
@@ -140,7 +143,7 @@ DebugTable :: struct {
     current_events_index: u32,
     events_state:   DebugEventsState,
     event_count:    [DebugMaxHistoryLength]u32,
-    events:         [DebugMaxHistoryLength][8*65536]DebugEvent,
+    events:         [DebugMaxHistoryLength][DebugMaxEventsLength]DebugEvent,
 }
 
 DebugEventsState :: bit_field u64 {
@@ -282,6 +285,8 @@ DebugInteractionKind :: enum {
     
     Move,
     Resize,
+    
+    Select,
 }
 
 ////////////////////////////////////////////////
@@ -402,7 +407,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             debug_end_variable_group(&ctx)
             
             debug_begin_event_group(&ctx, "Entities")
-                debug_add_event(&ctx, DEBUG_ShowEntityBounds)
+                debug_add_event(&ctx, DebugEnabled)
                 debug_add_event(&ctx, DEBUG_FamiliarFollowsHero)
                 debug_add_event(&ctx, DEBUG_HeroJumping)
             debug_end_variable_group(&ctx)
@@ -473,12 +478,17 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         collate_debug_records(debug, events_state.array_index)
     }
 
-    debug.next_hot_interaction = {}
-    
     overlay_debug_info(debug, input)
     
     tiled_render_group_to_output(debug.work_queue, debug.render_group, debug.buffer)
     end_render(debug.render_group)
+    
+    debug.next_hot_interaction = {}
+}
+
+debug_get_state :: proc() -> (result: ^DebugState) {
+    result = cast(^DebugState) raw_data(GlobalDebugMemory.debug_storage)
+    return result
 }
 
 debug_dump_var :: proc(debug: ^DebugState, a: any) {
@@ -688,14 +698,14 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                 
                 free_open_block :: proc(thread: ^DebugThread, first_open: ^^DebugOpenBlock) {
                     free_block := first_open^
-                    free_block.next_free = thread.first_free_block
+                    free_block.next_free    = thread.first_free_block
                     thread.first_free_block = free_block
                     
                     first_open^ = free_block.parent
                 }
                 
                 events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
-                    result = b != nil && b.thread_index == a.thread_index
+                    result = b != nil && b.loc.name == a.loc.name
                     return result
                 }
                 
@@ -726,11 +736,8 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                     
                   case EndDataBlock:
                     matching_block := thread.first_open_data_block
-                    if matching_block != nil {
-                        opening_event := matching_block.opening_event
-                        if events_match(&event, opening_event) {
-                            free_open_block(thread, &thread.first_open_data_block)
-                        }
+                        if matching_block != nil {
+                        free_open_block(thread, &thread.first_open_data_block)
                     }
                     
                   case EndCodeBlock:
@@ -869,7 +876,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
     }
 }
 
-debug_begin_interact :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
+debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
     if debug.hot_interaction.kind != .None {
         if debug.hot_interaction.kind == .AutoDetect {
             target := debug.hot_interaction.target.(^DebugEvent)
@@ -921,75 +928,85 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     mouse_dp := mouse_p - debug.last_mouse_p
     defer debug.last_mouse_p = mouse_p
     
-    
-    
     alt_ui := input.mouse.right.ended_down
-    if debug.interaction.kind != .None {
+    interaction := &debug.interaction
+    if interaction.kind != .None {
         // NOTE(viktor): Mouse move interaction
-        switch debug.interaction.kind {
+        switch interaction.kind {
           case .None: 
             unreachable()
             
           case .NOP, .AutoDetect, .Toggle:
             // NOTE(viktor): nothing
             
+          case .Select:
+            shift_ended_down: b32
+            if !shift_ended_down {
+                clear_selection(debug)
+            }
+            select(debug, interaction.id)
+            
           case .DragValue:
-            event := debug.interaction.target.(^DebugEvent)
+            event := interaction.target.(^DebugEvent)
             value := &event.value.(f32)
             value^ += 0.1 * mouse_dp.y
             
           case .Resize:
-            value := debug.interaction.target.(^v2)
+            value := interaction.target.(^v2)
             value^ += mouse_dp * {1,-1}
             value.x = max(value.x, 10)
             value.y = max(value.y, 10)
           
           case .Move:
-            value := debug.interaction.target.(^v2)
+            value := interaction.target.(^v2)
             value^ += mouse_dp
+            
         }
         
         // NOTE(viktor): Click interaction
         for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
-            debug_end_interact(debug, input)
-            debug_begin_interact(debug, input, alt_ui)
+            debug_end_click_interaction(debug, input)
+            debug_begin_click_interaction(debug, input, alt_ui)
         }
         
         if !input.mouse.left.ended_down {
-            debug_end_interact(debug, input)
+            debug_end_click_interaction(debug, input)
         }
     } else {
         debug.hot_interaction = debug.next_hot_interaction
         
         for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
-            debug_begin_interact(debug, input, alt_ui)
-            debug_end_interact(debug, input)
+            debug_begin_click_interaction(debug, input, alt_ui)
+            debug_end_click_interaction(debug, input)
         }
         
         if input.mouse.left.ended_down {
-            debug_begin_interact(debug, input, alt_ui)
+            debug_begin_click_interaction(debug, input, alt_ui)
         }
     }
 }
 
-debug_end_interact :: proc(debug: ^DebugState, input: Input) {
+debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
     reload: b32
-    switch debug.interaction.kind {
+    interaction := &debug.interaction
+    defer interaction^ = {}
+    
+    switch interaction.kind {
       case .None: 
         unreachable()
       
-      case .NOP, .Move, .Resize, .AutoDetect: 
+      case .NOP, .Move, .Resize, .AutoDetect, .Select: 
         // NOTE(viktor): nothing
       
       case .DragValue: 
         reload = true
-      
+        
       case .Toggle:
-        target := debug.interaction.target.(^DebugEvent)
+        target := interaction.target.(^DebugEvent)
         
         #partial switch value in target.value {
           case DebugEventLink:
-            view := get_debug_view_for_variable(debug, debug.interaction.id)
+            view := get_debug_view_for_variable(debug, interaction.id)
             collapsible, ok := &view.kind.(DebugViewCollapsible)
             if !ok {
                 view.kind = DebugViewCollapsible{}
@@ -1009,8 +1026,6 @@ debug_end_interact :: proc(debug: ^DebugState, input: Input) {
     }
     
     if reload do write_handmade_config(debug)
-    
-    debug.interaction = {}
 }
 
 ///////////////////////////////////////////////

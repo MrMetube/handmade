@@ -7,7 +7,6 @@ package game
     // Entities
         DEBUG_HeroJumping :b32: false
         DEBUG_FamiliarFollowsHero :b32: false
-        DEBUG_ShowEntityBounds :b32: true
     // Audio
         DEBUG_SoundPitchingWithMouse :b32: false
         DEBUG_SoundPanningWithMouse :b32: false

@@ -741,7 +741,6 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-        timed_block("pixel", hit_count = rectangle_clamped_area(fill_rect) / 2)
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
             // NOTE(viktor): iterative calculations will lead to arithmetic errors,
             // so we calculate always based of the index.
