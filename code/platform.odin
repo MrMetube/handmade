@@ -356,6 +356,17 @@ main :: proc() {
         
         {
             new_input.delta_time = target_seconds_per_frame
+                
+            is_down :: #force_inline proc(vk: win.INT) -> b32 {
+                is_down_mask :: min(i16) // 1 << 15
+                return cast(b32) (win.GetKeyState(vk)  & is_down_mask)
+            }
+        
+            {
+                new_input.shift_down   = is_down(win.VK_LSHIFT)
+                new_input.control_down = is_down(win.VK_CONTROL)
+                new_input.alt_down     = is_down(win.VK_MENU)
+            }
             
             { // Mouse Input 
                 mouse: win.POINT
@@ -372,13 +383,12 @@ main :: proc() {
                 }
                 // TODO: support mouse wheel
                 new_input.mouse.wheel = 0
-                is_down_mask := min(i16) // 1 << 15
                 // TODO: Do we need to update the input button on every event?
-                process_win_keyboard_message(&new_input.mouse.left,   cast(b32) (win.GetKeyState(win.VK_LBUTTON)  & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse.right,  cast(b32) (win.GetKeyState(win.VK_RBUTTON)  & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse.middle, cast(b32) (win.GetKeyState(win.VK_MBUTTON)  & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse.extra1, cast(b32) (win.GetKeyState(win.VK_XBUTTON1) & is_down_mask))
-                process_win_keyboard_message(&new_input.mouse.extra2, cast(b32) (win.GetKeyState(win.VK_XBUTTON2) & is_down_mask))
+                process_win_keyboard_message(&new_input.mouse.left,   is_down(win.VK_LBUTTON))
+                process_win_keyboard_message(&new_input.mouse.right,  is_down(win.VK_RBUTTON))
+                process_win_keyboard_message(&new_input.mouse.middle, is_down(win.VK_MBUTTON))
+                process_win_keyboard_message(&new_input.mouse.extra1, is_down(win.VK_XBUTTON1))
+                process_win_keyboard_message(&new_input.mouse.extra2, is_down(win.VK_XBUTTON2))
             }
 
             { // Keyboard Input

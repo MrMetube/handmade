@@ -1,5 +1,7 @@
 package game
 
+import "base:intrinsics"
+
 import "core:reflect"
 import "core:fmt"
 
@@ -28,7 +30,7 @@ DebugEnabled :: INTERNAL
 
 GlobalDebugTable:  DebugTable
 GlobalDebugMemory: ^GameMemory
-DebugMaxEventsLength    :: 600_000 when DebugEnabled else 0
+DebugMaxEventsLength    :: 500_000 when DebugEnabled else 0
 DebugMaxThreadCount     :: 256     when DebugEnabled else 0
 DebugMaxHistoryLength   :: 32      when DebugEnabled else 0
 DebugMaxRegionsPerFrame :: 1000    when DebugEnabled else 0
@@ -36,7 +38,6 @@ DebugMaxRegionsPerFrame :: 1000    when DebugEnabled else 0
 when !DebugEnabled {
     #assert(len(GlobalDebugTable.event_count) == 0)
     #assert(len(GlobalDebugTable.events)      == 0)
-    #assert(len(GlobalDebugTable.records)     == 0)
 }
 
 ////////////////////////////////////////////////
@@ -255,12 +256,6 @@ DebugEventInterator :: struct {
     sentinel: ^DebugEventLink,
 }
 
-DebugVariableDefinitionContext :: struct {
-    debug: ^DebugState,
-    
-    stack: Stack([64]^DebugEventGroup),
-}
-
 ////////////////////////////////////////////////
 
 DebugInteraction :: struct {
@@ -354,6 +349,27 @@ DebugExecutingProcess :: struct {
 @common DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
 @common DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
 
+debug_value :: #force_inline proc($T: typeid, $name: string) -> (result: T) where !intrinsics.type_is_pointer(T) {
+     // TODO(viktor): allow different default value
+     /* Can this be simplified or does it actually need to be an event?
+        when !DebugEnabled {
+            return {}
+        } else {
+            @static value: T
+            return value
+        }
+     */
+    
+    when !DebugEnabled do return {}
+    else {
+        @static debug_event: DebugEvent
+        if debug_event.value == nil {
+            debug_event = DebugEvent { value = T{} }
+        }
+        return debug_event.value.(T)
+    }
+}
+
 ////////////////////////////////////////////////
 
 @export
@@ -370,62 +386,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         // :PointerArithmetic
         init_arena(&debug.debug_arena, memory.debug_storage[size_of(DebugState):])
         
-        ctx := DebugVariableDefinitionContext { debug = debug }
-        debug.root_group = debug_begin_event_group(&ctx, "Debugging")
-        when false {
-            debug_begin_event_group(&ctx, "Profiling")
-                debug_add_event(&ctx, DEBUG_ShowFramerate)
-            debug_end_variable_group(&ctx)
-        
-            debug_begin_event_group(&ctx, "Rendering")
-                debug_add_event(&ctx, DEBUG_UseDebugCamera)
-                debug_add_event(&ctx, DEBUG_DebugCameraDistance)
-            
-                debug_add_event(&ctx, DEBUG_RenderSingleThreaded)
-                debug_add_event(&ctx, DEBUG_TestWeirdScreenSizes)
-                
-                debug_begin_event_group(&ctx, "Space")
-                    debug_add_event(&ctx, DEBUG_ShowSpaceBounds)
-                    debug_add_event(&ctx, DEBUG_ShowGroundChunkBounds)
-                debug_end_variable_group(&ctx)
-                
-                debug_begin_event_group(&ctx, "ParticleSystem")
-                    debug_add_event(&ctx, DEBUG_ParticleSystemTest)
-                    debug_add_event(&ctx, DEBUG_ParticleGrid)
-                debug_end_variable_group(&ctx)
-                
-                debug_begin_event_group(&ctx, "CoordinateSystem")
-                    debug_add_event(&ctx, DEBUG_CoordinateSystemTest)
-                    debug_add_event(&ctx, DEBUG_ShowLightingBounceDirection)
-                    debug_add_event(&ctx, DEBUG_ShowLightingSampling)
-                debug_end_variable_group(&ctx)
-            debug_end_variable_group(&ctx)
-        
-            debug_begin_event_group(&ctx, "Audio")
-                debug_add_event(&ctx, DEBUG_SoundPanningWithMouse)
-                debug_add_event(&ctx, DEBUG_SoundPitchingWithMouse)
-            debug_end_variable_group(&ctx)
-            
-            debug_begin_event_group(&ctx, "Entities")
-                debug_add_event(&ctx, DebugEnabled)
-                debug_add_event(&ctx, DEBUG_FamiliarFollowsHero)
-                debug_add_event(&ctx, DEBUG_HeroJumping)
-            debug_end_variable_group(&ctx)
-            
-            debug_begin_event_group(&ctx, "Assets")
-            debug_add_event(&ctx, DEBUG_LoadAssetsSingleThreaded)
-                debug_add_event(&ctx, DebugBitmapDisplay{id = first_bitmap_from(assets, .Monster) }, "")
-            debug_end_variable_group(&ctx)
-            
-            debug_begin_event_group(&ctx, "Profile")
-                debug_begin_event_group(&ctx, "By Thread")
-                    debug_add_event(&ctx, DebugVariableProfile{}, "")
-                debug_end_variable_group(&ctx)
-            debug_end_variable_group(&ctx)
-        }
-        debug_end_variable_group(&ctx)
-        assert(ctx.stack.depth == 0)
-            
+        debug.root_group = &debug_add_variable_group(&debug.debug_arena, "Root").value.(DebugEventGroup)
         list_init_sentinel(&debug.tree_sentinel)
         
         sub_arena(&debug.collation_arena, &debug.debug_arena, 64 * Megabyte)
@@ -674,7 +635,7 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                 debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.thread_index)
                 
                 thread := &debug.threads[event.thread_index]
-                frame_index := debug.frame_count == 0 ? DebugMaxHistoryLength-1 : debug.frame_count-1
+                frame_index := cast(u32) (debug.frame_count == 0 ? DebugMaxHistoryLength-1 : cast(i32) debug.frame_count-1)
                 frame := &debug.frames[frame_index]
                 
                 alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
@@ -807,7 +768,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     debug_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
-    if DEBUG_ShowFramerate {
+    if debug_value(b32, "ShowFramerate") {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames[0].seconds_elapsed*1000))
     }
 }
@@ -928,7 +889,8 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     mouse_dp := mouse_p - debug.last_mouse_p
     defer debug.last_mouse_p = mouse_p
     
-    alt_ui := input.mouse.right.ended_down
+    alt_ui := input.alt_down
+    
     interaction := &debug.interaction
     if interaction.kind != .None {
         // NOTE(viktor): Mouse move interaction
@@ -940,8 +902,7 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             // NOTE(viktor): nothing
             
           case .Select:
-            shift_ended_down: b32
-            if !shift_ended_down {
+            if !input.shift_down {
                 clear_selection(debug)
             }
             select(debug, interaction.id)
@@ -987,7 +948,6 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
 }
 
 debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
-    reload: b32
     interaction := &debug.interaction
     defer interaction^ = {}
     
@@ -995,12 +955,9 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
       case .None: 
         unreachable()
       
-      case .NOP, .Move, .Resize, .AutoDetect, .Select: 
+      case .NOP, .Move, .Resize, .AutoDetect, .Select, .DragValue:
         // NOTE(viktor): nothing
       
-      case .DragValue: 
-        reload = true
-        
       case .Toggle:
         target := interaction.target.(^DebugEvent)
         
@@ -1021,11 +978,9 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
             // Taking ref to value in the switch will cause an infinite loop in the compiler.
             v := &target.value.(b32)
             v^ = !v^
-            reload = true
+        
         }
     }
-    
-    if reload do write_handmade_config(debug)
 }
 
 ///////////////////////////////////////////////
@@ -1265,89 +1220,6 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     }
 }
 
-write_handmade_config :: proc(debug: ^DebugState) {
-    when false {
-        if debug.compiling do return
-        debug.compiling = true
-        
-        write :: proc(buffer: []u8, line: string) -> (result: u32) {
-            for r, i in line {
-                assert(r < 256, "no unicode in config")
-                buffer[i] = cast(u8) r
-            }
-            
-            result = auto_cast len(line)
-            return result
-        }
-        
-        // TODO(viktor): is this still needed?
-        seen_names: [1024]string
-        seen_names_cursor: u32
-        contents: [4096*4]u8
-        cursor: u32
-        cursor += write(contents[cursor:], "package game\n\n")
-        
-        stack: Stack([64]DebugEventInterator)
-        stack_push(&stack, DebugEventInterator{
-            link     = debug.root_group.value.(DebugEventLink).next,
-            sentinel = &debug.root_group.value.(DebugEventLink),
-        })
-        
-        for stack.depth > 0 {
-            iter := stack_peek(&stack)
-            if iter.link == iter.sentinel {
-                stack.depth -= 1
-            } else {
-                event := iter.link.event
-                iter.link = iter.link.next
-                
-                should_write := true
-                t: typeid
-                switch &value in event.value {
-                  case DebugVariableProfile, DebugBitmapDisplay: 
-                    // NOTE(viktor): transient data
-                    should_write = false
-                  case DebugEventLink:
-                    for &it in contents[cursor:][:stack.depth * 4] do it = ' '
-                    cursor += stack.depth * 4
-                    cursor += write(contents[cursor:], fmt.tprintfln("// %s", event.name))
-                    should_write = false
-                    iter = stack_push(&stack, DebugEventInterator{
-                        link     = value.next,
-                        sentinel = &value,
-                    })
-                  case b32: t = b32
-                  case f32: t = f32
-                  case i32: t = i32
-                  case u32: t = u32
-                  case v2:  t = v2
-                  case v3:  t = v3
-                  case v4:  t = v4
-                  case Rectangle2: t = Rectangle2
-                  case Rectangle3: t = Rectangle3
-                }
-                
-                for name in seen_names[:seen_names_cursor] {
-                    if !should_write do break
-                    if name == event.name do should_write = false
-                }
-                
-                if should_write {
-                    for &it in contents[cursor:][:stack.depth * 4] do it = ' '
-                    cursor += stack.depth * 4
-                    cursor += write(contents[cursor:], fmt.tprintfln("%s :%w: %w", event.name, t, event.value))
-                    seen_names[seen_names_cursor] = event.name
-                    seen_names_cursor += 1
-                }
-            }
-        }
-        
-        HandmadeConfigFilename :: "../code/game/debug_config.odin"
-        Platform.debug.write_entire_file(HandmadeConfigFilename, contents[:cursor])
-        debug.compiler = Platform.debug.execute_system_command(`D:\handmade\`, `D:\handmade\build\build.exe`, `-Game`)
-    }
-}
-            
 debug_interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
     result = debug.hot_interaction == interaction
     return result
@@ -1377,19 +1249,11 @@ debug_add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (re
     return result
 }
 
-debug_begin_event_group :: proc(ctx: ^DebugVariableDefinitionContext, group_name: string) -> (result: ^DebugEventGroup) {
-    event := debug_add_variable_group(&ctx.debug.debug_arena, group_name)
-    result = &event.value.(DebugEventGroup)
-    if parent := stack_peek(&ctx.stack); parent != nil {
-        debug_add_variable_to_group(&ctx.debug.debug_arena, parent^, event)
-    }
-    
-    stack_push(&ctx.stack, result)
-    return result
-}
-
 debug_add_variable_group :: proc(arena: ^Arena, name: string) -> (result: ^DebugEvent) {
-    result = debug_add_event_without_context(arena, DebugEventGroup{}, name)
+    result = push(arena, DebugEvent)
+    
+    result.value = DebugEventGroup{}
+    result.loc.name =  push_string(arena, name)
     
     group := &result.value.(DebugEventGroup)
     group.sentinel.next = &group.sentinel
@@ -1414,30 +1278,6 @@ debug_add_variable_to_group :: proc(arena: ^Arena, group: ^DebugEventGroup, elem
     }
     
     return result
-}
-
-debug_add_event :: proc(ctx: ^DebugVariableDefinitionContext, value: DebugValue, variable_name := #caller_expression(value)) -> (result: ^DebugEvent) {
-    result = debug_add_event_without_context(&ctx.debug.debug_arena, value, variable_name)
-
-    if parent := stack_peek(&ctx.stack); parent != nil {
-        debug_add_variable_to_group(&ctx.debug.debug_arena, parent^, result)
-    }
-    
-    return result
-}
-
-debug_add_event_without_context :: proc(arena: ^Arena, value: DebugValue, variable_name: string) -> (result: ^DebugEvent) {
-    result = push(arena, DebugEvent)
-    
-    result.value = value
-    result.loc.name =  push_string(arena, variable_name)
-    
-    return result
-}
-
-debug_end_variable_group :: proc(ctx: ^DebugVariableDefinitionContext) {
-    assert(ctx.stack.depth > 0)
-    ctx.stack.depth -= 1
 }
 
 ////////////////////////////////////////////////
@@ -1504,36 +1344,4 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
     }
     
     return result
-}
-
-////////////////////////////////////////////////
-
-DebugStatistic :: struct {
-    min, max, avg, count: f64,
-}
-
-debug_statistic_begin :: #force_inline proc() -> (result: DebugStatistic) {
-    result = {
-        min = max(f64),
-        max = min(f64),
-    }
-    return result
-}
-
-debug_statistic_accumulate :: #force_inline proc(stat: ^DebugStatistic, value: $N) {
-    value := cast(f64) value
-    stat.min    = min(stat.min, value)
-    stat.max    = max(stat.max, value)
-    stat.avg   += value
-    stat.count += 1
-}
-
-debug_statistic_end :: #force_inline proc(stat: ^DebugStatistic) {
-    if stat.count == 0 {
-        stat.min = 0
-        stat.max = 0
-        stat.avg = 0
-    } else {
-        stat.avg /= stat.count
-    }
 }

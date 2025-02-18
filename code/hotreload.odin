@@ -1,6 +1,8 @@
 package main
 
 import "base:runtime"
+import "core:os"
+import "core:fmt"
 import win "core:sys/windows"
 
 game: GameApi = stubbed
@@ -25,10 +27,11 @@ GameApi :: struct {
 
 load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
     if game_lib == nil {
-        assert(game == stubbed, "Game.dll has already been initialized")
+        assert(game == stubbed, "game.dll has already been initialized")
     } else {
         if !win.FreeLibrary(game_lib) {
             // @Logging 
+            fmt.println("Failed to load game.dll")
         }
     }
     
@@ -48,6 +51,8 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil
         } else {
             // @Logging 
+            fmt.println("Failed to initialize game api")
+            fmt.println(os.error_string(os.get_last_error()))
         }
     }
 

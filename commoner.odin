@@ -1,3 +1,4 @@
+#+private
 package build
 
 import "core:fmt"

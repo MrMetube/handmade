@@ -111,6 +111,7 @@ InputController :: struct {
             thumb_left   , thumb_right:    InputButton,
         },
     },
+    
 }
 #assert(size_of(InputController{}._buttons_array_and_enum.buttons) == size_of(InputController{}._buttons_array_and_enum._buttons_enum))
 
@@ -118,6 +119,9 @@ InputController :: struct {
 Input :: struct {
     delta_time: f32,
 
+    controllers: [5]InputController,
+        
+    // NOTE(viktor): this is for debugging only
     mouse: struct {
         using _buttons_array_and_enum : struct #raw_union {
             buttons: [5]InputButton,
@@ -132,8 +136,10 @@ Input :: struct {
         p:     v2,
         wheel: f32,
     },
-
-    controllers: [5]InputController,
+    
+    shift_down, 
+    alt_down, 
+    control_down: b32,
 }
 #assert(size_of(Input{}.mouse._buttons_array_and_enum.buttons) == size_of(Input{}.mouse._buttons_array_and_enum._buttons_enum))
 
@@ -502,7 +508,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
     world := state.world
     
-    when DEBUG_SoundPanningWithMouse {
+    if debug_value(b32, "Audio/SoundPanningWithMouse") {
         // NOTE(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, buffer.width, buffer.height) * 0.5
         if state.music == nil {
@@ -514,7 +520,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         change_volume(&state.mixer, state.music, 0.01, music_volume)
     }
     
-    when DEBUG_SoundPitchingWithMouse {
+    if debug_value(b32, "Audio/SoundPitchingWithMouse") {
         // NOTE(viktor): test sound panning with the mouse 
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
@@ -524,9 +530,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         }
         
         delta: f32
-        if was_pressed(input.mouse_middle) {
-            if input.mouse_position.x > 10  do delta = 0.1
-            if input.mouse_position.x < -10 do delta = -0.1
+        if was_pressed(input.mouse.middle) {
+            if input.mouse.p.x > 10  do delta = 0.1
+            if input.mouse.p.x < -10 do delta = -0.1
             change_pitch(&state.mixer, state.music, state.music.d_sample + delta)
         }
     }
@@ -563,7 +569,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 }
             }
             
-            when DEBUG_HeroJumping {
+            if debug_value(b32, "Entity/HeroJumping") {
                 if controller.start.ended_down {
                     con_hero.dz = 2
                 }
@@ -593,7 +599,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     // Update and Render
     // 
     
-    when DEBUG_TestWeirdScreenSizes {
+    if debug_value(b32, "Rendering/TestWeirdScreenSizes") {
         // NOTE(viktor): enable this to test weird screen sizes
         buffer := buffer
         buffer.width  = 1279
@@ -631,8 +637,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 ground_chunk_size := world.chunk_dim_meters.x
                 push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
                 
-                when DEBUG_ShowGroundChunkBounds {
-                    push_rectangle_outline(render_group, offset.xy, ground_chunk_size, Yellow)
+                if debug_value(b32, "Rendering/Bounds/ShowGroundChunkBounds") {
+                    push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), Yellow)
                 }
             }
         }
@@ -691,7 +697,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     sim_origin := state.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
-    when DEBUG_UseDebugCamera {
+    if debug_value(b32, "Rendering/Bounds/ShowRenderAndSimulationBounds") {
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(screen_bounds)),                         Yellow,0.1)
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(camera_sim_region.bounds).xy),           Blue,  0.2)
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy), Green, 0.2)
@@ -785,7 +791,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                     }
                 }
                 
-                when DEBUG_FamiliarFollowsHero {
+                if debug_value(b32, "Entity/FamiliarFollowsHero") {
                     if closest_hero != nil && closest_hero_dsq > 1 {
                         mpss: f32 = 0.5
                         ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
@@ -832,7 +838,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 push_bitmap(render_group, sword_id, 1.6)
                 push_hitpoints(render_group, &entity, 1)
                 
-                when DEBUG_ParticleSystemTest { 
+                if debug_value(b32, "Particles/FountainTest") { 
                     ////////////////////////////////////////////////
                     // NOTE(viktor): Particle system test
                     font_id := first_font_from(tran_state.assets, .Font)
@@ -881,7 +887,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                             cell.velocity_times_density += density * particle.dp
                         }
                         
-                        when DEBUG_ParticleGrid {
+                        if debug_value(b32, "Particles/ShowGrid") {
                             for row, y in state.cells {
                                 for cell, x in row {
                                     alpha := clamp_01(0.1 * cell.density)
@@ -967,9 +973,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue)
             
             case .Space: 
-                when DEBUG_ShowSpaceBounds {
+                if debug_value(b32, "Rendering/ShowSpaceBounds") {
                     for volume in entity.collision.volumes {
-                        push_rectangle_outline(render_group, volume.offset.xy, volume.size.xy, Blue)
+                        push_rectangle_outline(render_group, volume, Blue)
                     }
                 }
             }
@@ -1006,7 +1012,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     }
     render_group.transform.offset = 0
     
-    when DEBUG_CoordinateSystemTest { 
+    if debug_value(b32, "Rendering/Environtment/Test") { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}

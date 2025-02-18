@@ -2,6 +2,7 @@ package game
 
 @common import "base:intrinsics"
 @common import "base:runtime"
+@common import "core:fmt"
 @common import "core:simd/x86"
 
 was_pressed :: #force_inline proc(button: InputButton) -> (result:b32) {
@@ -107,18 +108,18 @@ complete_previous_reads_before_future_reads :: proc "contextless" () {
     return cast(i32) value
 }
 
-vec_cast :: proc { cast_vec_2, cast_vec_3, cast_vec_4, cast_vec_v }
+vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
 
-@(require_results) cast_vec_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
+@(require_results) vcast_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
     return {cast(T) x, cast(T) y}
 }
-@(require_results) cast_vec_3 :: #force_inline proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
+@(require_results) vcast_3 :: #force_inline proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z}
 }
-@(require_results) cast_vec_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
+@(require_results) vcast_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
-@(require_results) cast_vec_v :: #force_inline proc($T: typeid, v:[$N]$E) -> (result: [N]T) where T != E {
+@(require_results) vcast_vec :: #force_inline proc($T: typeid, v:[$N]$E) -> (result: [N]T) where T != E {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = cast(T) v[i]
     }
@@ -153,17 +154,14 @@ modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where 
 
 
 
-@(disabled=ODIN_DISABLE_ASSERT)
+@(common, disabled=ODIN_DISABLE_ASSERT)
 assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {
     if !condition {
         // TODO(viktor): We are not a console application
-        runtime.print_caller_location(loc)
-        runtime.print_string(" Assertion failed")
+        fmt.print(loc, "Assertion failed")
         if len(message) > 0 {
-            runtime.print_string(": ")
-            runtime.print_string(message)
+            fmt.println(":", message)
         }
-        runtime.print_byte('\n')
         
         when ODIN_DEBUG {
             runtime.debug_trap()

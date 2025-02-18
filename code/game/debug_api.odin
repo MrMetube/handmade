@@ -42,7 +42,8 @@ is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
 }
 
 debug_highlighted :: proc(id: DebugId) -> (highlighted: b32, color: v4) {
-    when !DebugEnabled do return highlighted
+    when !DebugEnabled do return highlighted, color
+    
     debug := debug_get_state()
 
     if debug.hot_interaction.id == id {
