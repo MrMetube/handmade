@@ -571,7 +571,7 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
     return result
 }
 
-insert_block :: proc(previous: ^AssetMemoryBlock, memory: [^]u8, size: u64) -> (result: ^AssetMemoryBlock) {
+insert_block :: proc(previous: ^AssetMemoryBlock, memory: rawpointer, size: u64) -> (result: ^AssetMemoryBlock) {
     assert(size > size_of(AssetMemoryBlock))
     result = cast(^AssetMemoryBlock) memory
     result.size = size - size_of(AssetMemoryBlock)
