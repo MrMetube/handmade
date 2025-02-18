@@ -682,7 +682,7 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 AssetKind :: enum {Font, Bitmap, Sound}
 load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
     immediate := immediate 
-    immediate ||= debug_value(b32, "Assets/LoadAssetsSingleThreaded")
+    immediate ||= debug_variable(b32, "Assets/LoadAssetsSingleThreaded")
     
     if is_valid_asset(id) {
         asset := &assets.assets[id]

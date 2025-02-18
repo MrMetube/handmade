@@ -379,8 +379,8 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
       case .Perspective:
         base_z: f32
         
-        if debug_value(b32, "Rendering/Camera/UseDebugCamera") {
-            distance_above_target *= debug_value(f32, "Rendering/Camera/DebugCameraDistance")
+        if debug_variable(b32, "Rendering/Camera/UseDebugCamera") {
+            distance_above_target *= debug_variable(f32, "Rendering/Camera/DebugCameraDistance")
         }
         
         distance_to_p_z := distance_above_target - p.z
@@ -477,7 +477,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
                 it.clip_rect.max.y = target.height
             }
             
-            if debug_value(b32, "Rendering/RenderSingleThreaded") {
+            if debug_variable(b32, "Rendering/RenderSingleThreaded") {
                 do_tile_render_work(it)
             } else {
                 Platform.enqueue_work(queue, do_tile_render_work, it)
@@ -1020,7 +1020,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                     }
 
                     texel.rgb += texel.a * light_color.rgb
-                    if debug_value(b32, "Rendering/Environment/ShowLightingBounceDirection") {
+                    if debug_variable(b32, "Rendering/Environment/ShowLightingBounceDirection") {
                         // NOTE(viktor): draws the bounce direction
                         texel.rgb = 0.5 + 0.5 * bounce_direction
                         texel.rgb *= texel.a
@@ -1136,7 +1136,7 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
 
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
 
-    if debug_value(b32, "Rendering/Environment/ShowLightingSampling") {
+    if debug_variable(b32, "Rendering/Environment/ShowLightingSampling") {
         // NOTE(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[index.y * lod.width + index.x]
         texel^ = 255

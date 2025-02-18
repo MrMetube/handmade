@@ -41,7 +41,8 @@ DebugState :: struct {
     
     arena: Arena,
 
-    frame_count:       i32,
+    total_frame_count: u32,
+    frame_count:       u32,
     oldest_frame:      ^DebugFrame,
     most_recent_frame: ^DebugFrame,
     first_free_frame:  ^DebugFrame,
@@ -52,9 +53,14 @@ DebugState :: struct {
     first_free_thread: ^DebugThread,
     
     scope_to_record: string,
-
-    debug_values:  ^DebugEvent,
+    
+    element_hash: [1024]^DebugElement,
+    first_free_stored_event: ^DebugStoredEvent,
+    
+    debug_values:  ^DebugEvent, // TODO(viktor): remove
     root_group:    ^DebugEvent,
+    
+    root_tree:     DebugTree,
     view_hash:     [4096]^DebugView,
     tree_sentinel: DebugTree,
     
@@ -94,14 +100,11 @@ DebugState :: struct {
 
 DebugFrame :: #type SingleLinkedList(DebugFrameLink)
 DebugFrameLink :: struct {
+    frame_index: u32,
+    
     begin_clock,
     end_clock:       i64,
     seconds_elapsed: f32,
-    // :Expandable
-    region_count:    u32,
-    regions:         []DebugRegion,
-    
-    root: ^DebugEvent,
     
     frame_bar_lane_count: u32,
 }
@@ -123,7 +126,7 @@ DebugThreadLink :: struct {
 }
 
 DebugOpenBlock :: struct {
-    frame_index:   i32,
+    frame_index:   u32,
     opening_event: ^DebugEvent,
     group:         ^DebugEvent,
     
@@ -175,24 +178,14 @@ DebugValue :: union {
     
     FrameMarker,
     
-    BeginCodeBlock, 
-    EndCodeBlock,
-    BeginDataBlock, 
-    EndDataBlock,
+    BeginCodeBlock, EndCodeBlock,
+    BeginDataBlock, EndDataBlock,
     
-    b32,
-    i32,
-    u32,
-    f32,
-    v2,
-    v3,
-    v4,
-    Rectangle2,
-    Rectangle3,
+    b32, i32, u32, f32,
+    v2, v3, v4,
+    Rectangle2,Rectangle3,
     
-    BitmapId,
-    SoundId,
-    FontId,
+    BitmapId, SoundId, FontId,
     
     DebugVariableProfile,
     
@@ -212,6 +205,20 @@ BeginDataBlock :: struct { id: rawpointer }
 EndDataBlock   :: struct {}
 
 DebugVariableProfile :: struct {}
+
+////////////////////////////////////////////////
+
+DebugStoredEvent :: #type SingleLinkedList(DebugStoredEventLink)
+DebugStoredEventLink :: struct {
+    event:       DebugEvent,
+    frame_index: u32,
+}
+
+DebugElement :: #type SingleLinkedList(DebugElementLink)
+DebugElementLink :: struct {
+    oldest:      ^DebugStoredEvent,
+    most_recent: ^DebugStoredEvent,
+}
 
 DebugTree :: #type LinkedList(DebugTreeData)
 DebugTreeData :: struct {
@@ -248,8 +255,9 @@ DebugEventGroup :: struct {
 
 DebugEventLink :: struct {
     next, prev: ^DebugEventLink,
-    event:      ^DebugEvent,
     children:   ^DebugEventGroup,
+    
+    element: ^DebugElement
 }
 
 // :LinkedListIteration
@@ -549,16 +557,11 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
 
 new_frame :: proc(debug: ^DebugState, begin_clock: i64) -> (result: ^DebugFrame) {
     // TODO(viktor): simplify this once regions are more reasonable
-    ok: b32
-    if result, ok = list_pop(&debug.first_free_frame); ok {
-        result^ = { regions = result.regions }
-    } else {
-        result = debug_push(debug, DebugFrame)
-        result.regions = debug_push(debug, DebugRegion, DebugMaxRegionsPerFrame)
-    }
+    result = list_pop(&debug.first_free_frame) or_else debug_push(debug, DebugFrame)
     
+    result.frame_index = debug.total_frame_count
+    debug.total_frame_count += 1
     result.begin_clock = begin_clock
-    result.root        = create_event_group(debug, "Frame Root")
     
     return result
 }
@@ -601,7 +604,22 @@ debug_push_size :: proc(debug: ^DebugState, #any_int size: u64, alignment: u64) 
 }
 
 free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
-    // TODO(viktor): free(root_group)
+    for element in debug.element_hash {
+        for element := element; element != nil; element = element.next {
+            for element.oldest != nil && element.oldest.frame_index <= frame.frame_index {
+                free_event := element.oldest
+                element.oldest = free_event.next
+                
+                if element.most_recent == free_event {
+                    assert(free_event.next == nil)
+                    element.most_recent = nil
+                }
+                
+                list_push(&debug.first_free_stored_event, free_event)
+            }
+        }
+    }
+    
     list_push(&debug.first_free_frame, frame)
 }
 
@@ -654,7 +672,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
           case BeginDataBlock:
             block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block)
             block.group = create_event_group(debug, event.loc.name)
-            parent := block.parent != nil? block.parent.group : collation_frame.root
+            parent := block.parent != nil? block.parent.group : debug.root_group
             link := debug_append_event_to_group(debug, parent, &event)
             link.children = &block.group.value.(DebugEventGroup)
             link.event = &event
@@ -723,7 +741,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
     }
 }
 
-alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: i32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
+alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
     result = thread.first_free_block
     if result != nil {
         thread.first_free_block = result.next_free
@@ -776,7 +794,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     debug_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
-    if debug_value(b32, "ShowFramerate") && debug.most_recent_frame != nil {
+    if debug_variable(b32, "ShowFramerate") && debug.most_recent_frame != nil {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.most_recent_frame.seconds_elapsed*1000))
     }
 }
@@ -815,6 +833,8 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
         
         stack_x := chart_left
         stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
+        // TODO(viktor): 
+        when false {
         for &region in frame.regions[:frame.region_count] {
             
             x_min := stack_x + scale * region.t_min
@@ -836,6 +856,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
                 text := fmt.tprintf("%s - %d cycles [%s:% 4d]", event.loc.name, region.cycle_count, event.loc.file_path, event.loc.line)
                 debug_push_text(debug, text, mouse_p)
             }
+        }
         }
     }
     
@@ -1056,11 +1077,19 @@ end_ui_element :: proc(using element: ^LayoutElement, use_spacing: b32) {
     spacing := use_spacing ? layout.spacing_y : 0
     layout.p.y = total_bounds.min.y - spacing
 }
-
+get_event_from_link :: proc(link: ^DebugEventLink) -> (result: ^DebugEvent) {
+    if link.element.most_recent != nil {
+        result = &link.element.most_recent.event
+    }
+    return result
+}
 link_interaction :: #force_inline proc(kind: DebugInteractionKind, tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugInteraction) {
-    result.id = debug_id_from_link(tree, link)
-    result.target = link.event
-    result.kind = kind
+    event := get_event_from_link(link)
+    if event != nil {
+        result.id = debug_id_from_link(tree, link)
+        result.target = event 
+        result.kind = kind
+    }
     
     return result
 }
@@ -1122,33 +1151,33 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             for stack.depth > 0 {
                 iter := stack_peek(&stack)
                 if iter.link == iter.sentinel {
-                    stack.depth -= 1
+                    stack.depth  -= 1
                     layout.depth -= 1
                 } else {
                     link := iter.link
-                    event  := link.event
                     iter.link = link.next
                     
-                    autodetect_interaction := link_interaction(.AutoDetect, tree, link)
-
-                    is_hot := debug_interaction_is_hot(debug, autodetect_interaction)
-                    
-                    text: string
-                    color := is_hot ? Blue : White
-                    
+                    event := get_event_from_link(link)
                     depth_delta: f32
                     defer layout.depth += depth_delta
                     
-                    view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
-                    // TODO(viktor): How can a link not have an event!?
                     if event != nil {
+                        autodetect_interaction := link_interaction(.AutoDetect, tree, link)
+
+                        is_hot := debug_interaction_is_hot(debug, autodetect_interaction)
+                        
+                        text: string
+                        color := is_hot ? Blue : White
+                        
+                        view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
+                        // TODO(viktor): How can a link not have an event!?
                         switch value in event.value {
-                        case SoundId, FontId, 
+                          case SoundId, FontId, 
                             BeginCodeBlock, EndCodeBlock,
                             BeginDataBlock, EndDataBlock,
                             FrameMarker, MarkEvent:
                             // NOTE(viktor): nothing
-                        case DebugVariableProfile:
+                          case DebugVariableProfile:
                             block, ok := &view.kind.(DebugViewBlock)
                             if !ok {
                                 view.kind = DebugViewBlock{}
@@ -1283,10 +1312,10 @@ debug_create_event :: proc(debug: ^DebugState, value: $T, name: string) -> (resu
     return result
 }
 
-debug_append_event_to_group :: proc(debug: ^DebugState, group: ^DebugEvent, element: ^DebugEvent) -> (result: ^DebugEventLink) {
+debug_append_event_to_group :: proc(debug: ^DebugState, group: ^DebugEvent, event: ^DebugEvent) -> (result: ^DebugEventLink) {
     result = debug_push(debug, DebugEventLink)
-    assert(element != nil)
-    result.event = element
+    assert(event != nil)
+    result.event = event
     
     if group != nil {
         value := &group.value.(DebugEventGroup)

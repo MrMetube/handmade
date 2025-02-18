@@ -3,19 +3,19 @@ package game
 import "core:fmt"
 import "core:os"
 
-debug_value :: #force_inline proc($T: typeid, $name: string, loc := #caller_location) -> (result: T) {
+debug_variable :: #force_inline proc($T: typeid, $name: string, loc := #caller_location) -> (result: T) {
     // TODO(viktor): allow different default value
    when !DebugEnabled do return {}
    else {
        @static event: DebugEvent
        if event.value == nil {
-           debug_init_value(&event, T{}, name, loc.file_path, auto_cast loc.line)
+           debug_init_variable(&event, T{}, name, loc.file_path, auto_cast loc.line)
        }
        return event.value.(T)
    }
 }
 
-debug_init_value :: #force_inline proc(event: ^DebugEvent, initial_value: $T, name, file_path: string, line: u32) {
+debug_init_variable :: #force_inline proc(event: ^DebugEvent, initial_value: $T, name, file_path: string, line: u32) {
     event.loc = { name, file_path, line}
     event.value = initial_value
     record_debug_event_common(MarkEvent{event}, event.loc)
@@ -90,6 +90,16 @@ debug_begin_data_block :: proc(id: DebugId, name: string, loc := #caller_locatio
     return result
 }
 
+debug_record_value :: #force_inline proc(value: DebugValue, loc := #caller_location, name := #caller_expression(value)) {
+    if !DebugEnabled do return
+    
+    record_debug_event_common(value, {
+        name      = name,
+        file_path = loc.file_path,
+        line      = auto_cast loc.line,
+    })
+}
+
 debug_end_data_block :: #force_inline proc(loc := #caller_location) {
     if !DebugEnabled do return
     
@@ -148,16 +158,6 @@ frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location
     debug_record_value(FrameMarker{seconds_elapsed}, loc, "Frame Marker")
 }
 
-
-debug_record_value :: #force_inline proc(value: DebugValue, loc := #caller_location, name := #caller_expression(value)) {
-    if !DebugEnabled do return
-    
-    record_debug_event_common(value, {
-        name      = name,
-        file_path = loc.file_path,
-        line      = auto_cast loc.line,
-    })
-}
 
 record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
