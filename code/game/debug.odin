@@ -5,20 +5,7 @@ import "base:intrinsics"
 import "core:reflect"
 import "core:fmt"
 
-/* IMPORTANT TODO(viktor): explicit type for Expandable
-    ie :: struct {
-        ...
-        array_count: u32,
-        array:       [N]T,
-    }
-    
-    Push entries and expand count in one operation.
-    Get the slice of the filled values.
-    
-    Maybe this is just a dynamic array if we ever get
-    a handmade Allocator.
-*/ 
-
+// TODO(viktor): :DoubleEndedQueue functions for these kinds of operations, like list
 // TODO(viktor): "Mark Loop Point" as debug action
 // TODO(viktor): pause/unpause profiling
 
@@ -43,9 +30,8 @@ DebugState :: struct {
 
     total_frame_count: u32,
     frame_count:       u32,
-    oldest_frame:      ^DebugFrame,
-    most_recent_frame: ^DebugFrame,
-    first_free_frame:  ^DebugFrame,
+    // :DoubleEndedQueue
+    frames: Deque(DebugFrame),
 
     collation_frame:  ^DebugFrame,
     
@@ -55,7 +41,6 @@ DebugState :: struct {
     scope_to_record: string,
     
     element_hash: [1024]^DebugElement,
-    first_free_stored_event: ^DebugStoredEvent,
     
     debug_values:  ^DebugEvent, // TODO(viktor): remove
     root_group:    ^DebugEvent,
@@ -96,6 +81,11 @@ DebugState :: struct {
     
     //
     dump_depth: u32,
+    
+    // NOTE(viktor): Per-frame storage management
+    per_frame_arena:         Arena,
+    first_free_frame:        ^DebugFrame,
+    first_free_stored_event: ^DebugStoredEvent,
 }
 
 DebugFrame :: #type SingleLinkedList(DebugFrameLink)
@@ -164,6 +154,7 @@ DebugEventLocation :: struct {
 
 // TODO(viktor): compact this, we have a lot of them
 DebugEvent :: struct {
+    // TODO(viktor): find a better id value
     loc: DebugEventLocation,
     
     clock:        i64,
@@ -216,8 +207,8 @@ DebugStoredEventLink :: struct {
 
 DebugElement :: #type SingleLinkedList(DebugElementLink)
 DebugElementLink :: struct {
-    oldest:      ^DebugStoredEvent,
-    most_recent: ^DebugStoredEvent,
+    guid:   DebugEventLocation,
+    events: Deque(DebugStoredEvent),
 }
 
 DebugTree :: #type LinkedList(DebugTreeData)
@@ -372,12 +363,15 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         debug.inititalized = true
 
         // :PointerArithmetic
-        init_arena(&debug.arena, memory.debug_storage[size_of(DebugState):])
+        total_memory := memory.debug_storage[size_of(DebugState):]
+        init_arena(&debug.arena, total_memory)
         
-        debug.debug_values = create_event_group(debug, "Values Root")
+        sub_arena(&debug.per_frame_arena, &debug.arena, 20 * Kilobyte)
+        // sub_arena(&debug.per_frame_arena, &debug.arena, 3 * len(total_memory) / 4)
+        // debug.debug_values = create_event_group(debug, "Values Root")
         
-        debug.root_group = create_event_group(debug, "Root")
-        debug_append_event_to_group(debug, debug.root_group, debug_create_event(debug, DebugVariableProfile{}, "Profile"))
+        // debug.root_group = create_event_group(debug, "Root")
+        // debug_append_event_to_group(debug, debug.root_group, debug_create_event(debug, DebugVariableProfile{}, "Profile"))
         
         list_init_sentinel(&debug.tree_sentinel)
         
@@ -386,18 +380,14 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         debug.work_queue = work_queue
         debug.buffer     = buffer
         
-        
-        debug.left_edge  = -0.5 * cast(f32) buffer.width
-        debug.right_edge =  0.5 * cast(f32) buffer.width
-        debug.top_edge   =  0.5 * cast(f32) buffer.height
-        
         debug_add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
         debug.render_group = make_render_group(&debug.arena, assets, 32 * Megabyte, false)
     }
     
-    assert(debug.render_group != nil)
-    assert(!debug.render_group.inside_render)
-
+    debug.left_edge  = -0.5 * cast(f32) buffer.width
+    debug.right_edge =  0.5 * cast(f32) buffer.width
+    debug.top_edge   =  0.5 * cast(f32) buffer.height
+    
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
         debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
@@ -425,6 +415,7 @@ debug_get_state :: proc() -> (result: ^DebugState) {
     return result
 }
 
+// TODO(viktor): @Cleanup
 debug_dump_var :: proc(debug: ^DebugState, a: any) {
     prefix : string
     for _ in 0..<debug.dump_depth {
@@ -556,65 +547,67 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
 ////////////////////////////////////////////////
 
 new_frame :: proc(debug: ^DebugState, begin_clock: i64) -> (result: ^DebugFrame) {
-    // TODO(viktor): simplify this once regions are more reasonable
-    result = list_pop(&debug.first_free_frame) or_else debug_push(debug, DebugFrame)
+    ok: b32
+    for result == nil {
+        result, ok = list_pop(&debug.first_free_frame)
+        if !ok {
+            if arena_has_room(&debug.per_frame_arena, DebugFrame) {
+                result = push(&debug.per_frame_arena, DebugFrame)
+            } else {
+                free_oldest_frame(debug)
+            }
+        }
+    }
     
-    result.frame_index = debug.total_frame_count
+    result ^ = {
+        frame_index = debug.total_frame_count,
+        begin_clock = begin_clock,
+    }
+    
     debug.total_frame_count += 1
-    result.begin_clock = begin_clock
     
     return result
 }
 
-// TODO(viktor): include this functionality in the arena itself
-debug_push :: proc { debug_push_string, debug_push_slice, debug_push_struct, debug_push_size }
-@require_results
-debug_push_slice :: #force_inline proc(debug: ^DebugState, $Element: typeid, #any_int count: u64, alignment: u64 = DefaultAlignment) -> (result: []Element) {
-    size := size_of(Element) * count
-    data := cast([^]Element) debug_push_size(debug, size, alignment)
-    result = data[:count]
-    return result
-}
-@require_results
-debug_push_struct :: #force_inline proc(debug: ^DebugState, $T: typeid, alignment: u64 = DefaultAlignment) -> (result: ^T) {
-    size := size_of(T)
-    result = cast(^T) debug_push_size(debug, size, alignment)
-    return result
-}
-@require_results
-debug_push_string :: proc(debug: ^DebugState, s: string) -> (result: string) {
-    buffer := debug_push_slice(debug, u8, len(s))
-    bytes  := transmute([]u8) s
-    for r, i in bytes {
-        buffer[i] = r
-    }
-    result = transmute(string) buffer
-    return result
-}
-@require_results
-debug_push_size :: proc(debug: ^DebugState, #any_int size: u64, alignment: u64) -> (result: rawpointer) {
-    for !arena_has_room(&debug.arena, size, alignment) && debug.oldest_frame != nil {
-        if debug.most_recent_frame == debug.oldest_frame {
-            list_pop(&debug.most_recent_frame)
+store_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result: ^DebugStoredEvent) {
+    element     := get_element_from_event(debug, event)
+    frame_index := debug.collation_frame.frame_index
+    
+    ok: b32
+    for result == nil {
+        result, ok = list_pop(&debug.first_free_stored_event)
+        if !ok {
+            if arena_has_room(&debug.per_frame_arena, DebugStoredEvent) {
+                result = push(&debug.per_frame_arena, DebugStoredEvent)
+            } else {
+                free_oldest_frame(debug)
+            }
         }
-        free_frame(debug, list_pop(&debug.oldest_frame))
     }
-    result = push(&debug.arena, size, alignment)
-    return result
+    
+    result^ = {
+        event       = event,
+        frame_index = frame_index,
+    }
+    
+    deque_append(&element.events, result)
+    
+    return result 
+}
+
+free_oldest_frame :: proc(debug: ^DebugState) {
+    oldest := deque_remove_from_end(&debug.frames)
+    
+    if oldest != nil {
+        free_frame(debug, oldest)
+    }
 }
 
 free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
     for element in debug.element_hash {
         for element := element; element != nil; element = element.next {
-            for element.oldest != nil && element.oldest.frame_index <= frame.frame_index {
-                free_event := element.oldest
-                element.oldest = free_event.next
-                
-                if element.most_recent == free_event {
-                    assert(free_event.next == nil)
-                    element.most_recent = nil
-                }
-                
+            for element.events.last != nil && element.events.last.frame_index <= frame.frame_index {
+                free_event := deque_remove_from_end(&element.events)
                 list_push(&debug.first_free_stored_event, free_event)
             }
         }
@@ -623,10 +616,28 @@ free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
     list_push(&debug.first_free_frame, frame)
 }
 
-collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
-    // @Hack why should this need to be reset? Think dont guess
-    // for &thread in debug.threads do thread.first_open_code_block = nil
+get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result: ^DebugElement) {
+    assert(event.loc != {})
+    // TODO(viktor): BETTER HASH FUNCTION
+    hash_value := 19 * cast(u32) (cast(uintpointer) raw_data(event.loc.file_path) >> 2) +  31 * cast(u32) (cast(uintpointer) raw_data(event.loc.name) >> 2) + 5 * event.loc.line
+    index := hash_value % len(debug.element_hash)
     
+    for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
+        if chain.guid == event.loc {
+            result = chain
+            break
+        }
+    }
+    
+    if result == nil {
+        result = push(&debug.arena, DebugElement)
+        list_push(&debug.element_hash[index], result)
+    }
+    
+    return result
+}
+
+collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
     for &event in events {
         collation_frame := debug.collation_frame
         if collation_frame == nil {
@@ -636,14 +647,16 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         thread: ^DebugThread
         for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {}
         if thread == nil {
-            thread = list_pop(&debug.first_free_thread) or_else debug_push(debug, DebugThread)
-            thread.thread_index = event.thread_index
+            thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread)
+            thread^ = {
+                thread_index = event.thread_index
+            }
+            
             list_push(&debug.thread, thread)
         }
-        assert(thread != nil)
         assert(thread.thread_index == event.thread_index)
         
-        frame_index := debug.frame_count - 1
+        frame_index := debug.collation_frame.frame_index
         
         switch value in event.value {
           case FrameMarker:
@@ -653,29 +666,26 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             if debug.paused {
                 free_frame(debug, collation_frame)
             } else {
-                if debug.most_recent_frame != nil {
-                    list_push(&debug.most_recent_frame, collation_frame)
-                } else {
-                    debug.most_recent_frame = collation_frame
-                    debug.oldest_frame      = collation_frame
-                }
+                deque_append(&debug.frames, collation_frame)
             }
             
             debug.collation_frame = new_frame(debug, event.clock)
             
           case MarkEvent:
-            debug_append_event_to_group(debug, get_group_by_hierarchical_name(debug, value.event.loc.name), value.event)
+            store_event(debug, value.event^)
+            // debug_append_event_to_group(debug, get_group_by_hierarchical_name(debug, value.event.loc.name), value.event)
             
           case BeginCodeBlock:
             alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block)
 
           case BeginDataBlock:
             block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block)
-            block.group = create_event_group(debug, event.loc.name)
-            parent := block.parent != nil? block.parent.group : debug.root_group
-            link := debug_append_event_to_group(debug, parent, &event)
-            link.children = &block.group.value.(DebugEventGroup)
-            link.event = &event
+            // block.group = create_event_group(debug, event.loc.name)
+            // parent := block.parent != nil? block.parent.group : debug.root_group
+            // link := debug_append_event_to_group(debug, parent, &event)
+            // link.children = &block.group.value.(DebugEventGroup)
+            // TODO(viktor): 
+            // link.event = &event
             
           case DebugVariableProfile,
             DebugEventLink, DebugEventGroup,
@@ -683,14 +693,15 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             b32, f32, u32, i32, 
             v2, v3, v4, 
             Rectangle2, Rectangle3:
-               
-            if thread.first_open_data_block != nil {
-               group := thread.first_open_data_block.group
+            
+            store_event(debug, event)
+            // if thread.first_open_data_block != nil {
+            //    group := thread.first_open_data_block.group
                 
-                if group != nil {
-                    debug_append_event_to_group(debug, group, &event)
-                }
-            }
+            //     if group != nil {
+            //         debug_append_event_to_group(debug, group, &event)
+            //     }
+            // }
             
           case EndDataBlock:
             matching_block := thread.first_open_data_block
@@ -715,16 +726,18 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
                             
                             threshold :: 0.001
                             if t_max - t_min > threshold {
-                                region := &debug.collation_frame.regions[debug.collation_frame.region_count]
-                                debug.collation_frame.region_count += 1
-                                
-                                region^ = {
-                                    event       = &event,
-                                    cycle_count = event.clock - opening_event.clock,
-                                    lane_index  = cast(u32) event.thread_index,
+                                when false { // TODO(viktor): 
+                                    region := &debug.collation_frame.regions[debug.collation_frame.region_count]
+                                    debug.collation_frame.region_count += 1
                                     
-                                    t_min = t_min,
-                                    t_max = t_max,
+                                    region^ = {
+                                        event       = &event,
+                                        cycle_count = event.clock - opening_event.clock,
+                                        lane_index  = cast(u32) event.thread_index,
+                                        
+                                        t_min = t_min,
+                                        t_max = t_max,
+                                    }
                                 }
                             }
                         } else {
@@ -746,7 +759,7 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
     if result != nil {
         thread.first_free_block = result.next_free
     } else {
-        result = debug_push(debug, DebugOpenBlock)
+        result = push(&debug.arena, DebugOpenBlock)
     }
     
     result ^= {
@@ -778,7 +791,7 @@ events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     if debug.render_group == nil do return
 
-    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 0.75)
+    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 1)
 
     if debug.compiling {
         state := Platform.debug.get_process_state(debug.compiler)
@@ -794,8 +807,9 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     debug_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
-    if debug_variable(b32, "ShowFramerate") && debug.most_recent_frame != nil {
-        debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.most_recent_frame.seconds_elapsed*1000))
+    if (true || debug_variable(b32, "ShowFramerate")) && debug.frames.first != nil {
+        debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames.first.seconds_elapsed*1000))
+        debug_push_text_line(debug, fmt.tprintf("Last Frame memory footprint: %m/%m", debug.per_frame_arena.used, len(debug.per_frame_arena.storage)))
     }
 }
 
@@ -808,13 +822,13 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
 
     lane_count: f32
     frame_bar_scale :: 1. / 60_000_000.
-    for frame := debug.oldest_frame; frame != nil; frame = frame.next {
+    for frame := debug.frames.last; frame != nil; frame = frame.next {
         lane_count = max(lane_count, cast(f32) frame.frame_bar_lane_count + 1)
     }
     
     hot_region: ^DebugRegion
     frame_index: u32
-    for frame := debug.oldest_frame; frame != nil; frame = frame.next {
+    for frame := debug.frames.last; frame != nil; frame = frame.next {
         defer frame_index += 1
 
         lane_height :f32
@@ -1077,12 +1091,14 @@ end_ui_element :: proc(using element: ^LayoutElement, use_spacing: b32) {
     spacing := use_spacing ? layout.spacing_y : 0
     layout.p.y = total_bounds.min.y - spacing
 }
+
 get_event_from_link :: proc(link: ^DebugEventLink) -> (result: ^DebugEvent) {
-    if link.element.most_recent != nil {
-        result = &link.element.most_recent.event
+    if link.element.events.first != nil {
+        result = &link.element.events.first.event
     }
     return result
 }
+
 link_interaction :: #force_inline proc(kind: DebugInteractionKind, tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugInteraction) {
     event := get_event_from_link(link)
     if event != nil {
@@ -1113,7 +1129,7 @@ get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result:
     }
     
     if result == nil {
-        result = debug_push(debug, DebugView)
+        result = push(&debug.arena, DebugView)
         result.id = id
         list_push(slot, result)
     }
@@ -1279,7 +1295,7 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, name: string) -> (res
 }
 
 debug_add_tree :: proc(debug: ^DebugState, root: ^DebugEvent, p: v2) -> (result: ^DebugTree) {
-    result = debug_push(debug, DebugTree)
+    result = push(&debug.arena, DebugTree)
     result^ = {
         root = root,
         p = p,
@@ -1291,10 +1307,10 @@ debug_add_tree :: proc(debug: ^DebugState, root: ^DebugEvent, p: v2) -> (result:
 }
 
 create_event_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEvent) {
-    result = debug_push(debug, DebugEvent)
+    result = push(&debug.arena, DebugEvent)
     
     result.value = DebugEventGroup{}
-    result.loc.name = debug_push(debug, name)
+    result.loc.name = push(&debug.arena, name)
     
     group := &result.value.(DebugEventGroup)
     group.sentinel.next = &group.sentinel
@@ -1304,30 +1320,32 @@ create_event_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugE
 }
 
 debug_create_event :: proc(debug: ^DebugState, value: $T, name: string) -> (result: ^DebugEvent) {
-    result = debug_push(debug, DebugEvent)
+    result = push(&debug.arena, DebugEvent)
     
     result.value = value
-    result.loc.name = debug_push(debug, name)
+    result.loc.name = push(&debug.arena, name)
     
     return result
 }
 
 debug_append_event_to_group :: proc(debug: ^DebugState, group: ^DebugEvent, event: ^DebugEvent) -> (result: ^DebugEventLink) {
-    result = debug_push(debug, DebugEventLink)
-    assert(event != nil)
-    result.event = event
-    
-    if group != nil {
-        value := &group.value.(DebugEventGroup)
-        parent  := &value.sentinel
+    when false {
+        result = push(&debug.arena, DebugEventLink)
+        assert(event != nil)
+        result.event = event
         
-        result.prev = parent
-        result.next = parent.next
+        if group != nil {
+            value := &group.value.(DebugEventGroup)
+            parent  := &value.sentinel
+            
+            result.prev = parent
+            result.next = parent.next
+            
+            result.next.prev = result
+            result.prev.next = result
+        }
         
-        result.next.prev = result
-        result.prev.next = result
     }
-    
     return result
 }
 

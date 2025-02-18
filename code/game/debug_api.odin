@@ -162,13 +162,9 @@ frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location
 record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
     
-    events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
-    length := len(GlobalDebugTable.events[events.array_index])
-    if events.events_index > auto_cast length {
-        fmt.printfln("Index %v is out of range 0..<%v", events.events_index, length)
-        os.exit(1)
-    }
-    result = &GlobalDebugTable.events[events.array_index][events.events_index]
+    state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
+    result = &GlobalDebugTable.events[state.array_index][state.events_index]
+    
     result^ = {
         loc          = loc,
         
