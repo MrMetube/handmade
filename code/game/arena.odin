@@ -16,6 +16,7 @@ init_arena :: #force_inline proc(arena: ^Arena, storage: []u8) {
 }
 
 push :: proc { push_slice, push_struct, push_size }
+@require_results
 push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int len: u64, #any_int alignment: u64 = 4, clear_to_zero: b32 = true) -> (result: []Element) {
     size := size_of(Element) * len
     data := cast([^]Element) push_size(arena, size, alignment)
@@ -28,6 +29,7 @@ push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int len: 
     return result
 }
 
+@require_results
 push_struct :: #force_inline proc(arena: ^Arena, $T: typeid, #any_int alignment: u64 = 4, clear_to_zero: b32= true) -> (result: ^T) {
     result = cast(^T) push_size(arena, size_of(T), alignment)
     
@@ -38,6 +40,7 @@ push_struct :: #force_inline proc(arena: ^Arena, $T: typeid, #any_int alignment:
     return result
 }
 
+@require_results
 push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, #any_int alignment: u64 = 4) -> (result: [^]u8) {
     alignment_offset := arena_alignment_offset(arena, alignment)
 
@@ -54,6 +57,7 @@ push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, #any_int
 
 // NOTE(viktor): This is generally not for production use, this is probably
 // only really something we need during testing, but who knows
+@require_results
 push_string :: #force_inline proc(arena: ^Arena, s: string) -> (result: string) {
     buffer := push_slice(arena, u8, len(s))
     bytes  := transmute([]u8) s
