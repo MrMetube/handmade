@@ -63,7 +63,8 @@ DebugState :: struct {
     
     scope_to_record: string,
 
-    root_group:    ^DebugEventGroup,
+    debug_values:  ^DebugEvent,
+    root_group:    ^DebugEvent,
     view_hash:     [4096]^DebugView,
     tree_sentinel: DebugTree,
     
@@ -108,7 +109,7 @@ DebugFrame :: struct {
     region_count:    u32,
     regions:         []DebugRegion,
     
-    root: ^DebugEventGroup,
+    root: ^DebugEvent,
 }
 
 DebugRegion :: struct {
@@ -130,7 +131,7 @@ DebugOpenBlock :: struct {
     frame_index:   u32,
     opening_event: ^DebugEvent,
     
-    group:         ^DebugEventGroup,
+    group:         ^DebugEvent,
     parent, 
     next_free:     ^DebugOpenBlock,
 }
@@ -173,6 +174,8 @@ DebugEvent :: struct {
 }
 
 DebugValue :: union {
+    MarkEvent,
+    
     FrameMarker,
     
     BeginCodeBlock, 
@@ -200,6 +203,8 @@ DebugValue :: union {
     DebugEventGroup,
 }
 
+MarkEvent :: struct { event: ^DebugEvent }
+
 FrameMarker :: struct {
     seconds_elapsed: f32,
 }
@@ -214,7 +219,7 @@ DebugVariableProfile :: struct {}
 DebugTree :: #type LinkedList(DebugTreeData)
 DebugTreeData :: struct {
     p:    v2,
-    root: ^DebugEventGroup,
+    root: ^DebugEvent,
 }
 
 DebugView :: #type SingleLinkedList(DebugViewData)
@@ -349,27 +354,6 @@ DebugExecutingProcess :: struct {
 @common DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
 @common DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
 
-debug_value :: #force_inline proc($T: typeid, $name: string) -> (result: T) where !intrinsics.type_is_pointer(T) {
-     // TODO(viktor): allow different default value
-     /* Can this be simplified or does it actually need to be an event?
-        when !DebugEnabled {
-            return {}
-        } else {
-            @static value: T
-            return value
-        }
-     */
-    
-    when !DebugEnabled do return {}
-    else {
-        @static debug_event: DebugEvent
-        if debug_event.value == nil {
-            debug_event = DebugEvent { value = T{} }
-        }
-        return debug_event.value.(T)
-    }
-}
-
 ////////////////////////////////////////////////
 
 @export
@@ -378,7 +362,6 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     assert(len(memory.debug_storage) >= size_of(DebugState))
     debug := cast(^DebugState) raw_data(memory.debug_storage)
     
-    
     assets, work_queue := debug_get_game_assets_and_work_queue(memory)
     if !debug.inititalized {
         debug.inititalized = true
@@ -386,7 +369,11 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         // :PointerArithmetic
         init_arena(&debug.debug_arena, memory.debug_storage[size_of(DebugState):])
         
-        debug.root_group = &debug_add_variable_group(&debug.debug_arena, "Root").value.(DebugEventGroup)
+        debug.debug_values = debug_create_event_group(&debug.debug_arena, "Values Root")
+        
+        debug.root_group = debug_create_event_group(&debug.debug_arena, "Root")
+        debug_append_event_to_group(&debug.debug_arena, debug.root_group, debug_create_event(&debug.debug_arena, DebugVariableProfile{}, "Profile"))
+        
         list_init_sentinel(&debug.tree_sentinel)
         
         sub_arena(&debug.collation_arena, &debug.debug_arena, 64 * Megabyte)
@@ -610,11 +597,18 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
         defer modular_add(&debug.collation_index, 1, DebugMaxHistoryLength)
         
         for &event in GlobalDebugTable.events[debug.collation_index][:GlobalDebugTable.event_count[debug.collation_index]] {
-            if frame_marker, ok := event.value.(FrameMarker); ok {
+            debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.thread_index)
+                
+            thread := &debug.threads[event.thread_index]
+            frame_index := cast(u32) (debug.frame_count == 0 ? DebugMaxHistoryLength-1 : cast(i32) debug.frame_count-1)
+            frame := &debug.frames[frame_index]
+            
+            switch value in event.value {
+              case FrameMarker:    
                 if debug.collation_frame != nil {
                     debug.collation_frame.end_clock = event.clock
                     modular_add(&debug.frame_count, 1, auto_cast len(debug.frames))
-                    debug.collation_frame.seconds_elapsed = frame_marker.seconds_elapsed
+                    debug.collation_frame.seconds_elapsed = value.seconds_elapsed
                     
                     clocks := cast(f32) (debug.collation_frame.end_clock - debug.collation_frame.begin_clock)
                     if clocks != 0 {
@@ -630,78 +624,41 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                     regions     = push(&debug.collation_arena, DebugRegion, DebugMaxRegionsPerFrame),
                     root        = collate_create_group(debug),
                 }
-                _ = 123
-            } else if debug.collation_frame != nil {
-                debug.frame_bar_lane_count = max(debug.frame_bar_lane_count, cast(u32) event.thread_index)
                 
-                thread := &debug.threads[event.thread_index]
-                frame_index := cast(u32) (debug.frame_count == 0 ? DebugMaxHistoryLength-1 : cast(i32) debug.frame_count-1)
-                frame := &debug.frames[frame_index]
+              case MarkEvent:
+                debug_append_event_to_group(&debug.debug_arena, debug_get_group_by_hierarchical_name(debug, value.event.loc.name), value.event)
                 
-                alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
-                    result = thread.first_free_block
-                    if result != nil {
-                        thread.first_free_block = result.next_free
-                    } else {
-                        result = push(&debug.collation_arena, DebugOpenBlock)
-                    }
-                    
-                    result ^= {
-                        frame_index   = frame_index,
-                        opening_event = opening_event,
-                    }
-                    
-                    result.parent = parent^
-                    parent^ = result
-                    
-                    return result
-                }
-                
-                free_open_block :: proc(thread: ^DebugThread, first_open: ^^DebugOpenBlock) {
-                    free_block := first_open^
-                    free_block.next_free    = thread.first_free_block
-                    thread.first_free_block = free_block
-                    
-                    first_open^ = free_block.parent
-                }
-                
-                events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
-                    result = b != nil && b.loc.name == a.loc.name
-                    return result
-                }
-                
-                switch v in event.value {
-                  case FrameMarker: unreachable()
-                  case BeginCodeBlock:
-                    alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block)
+              case BeginCodeBlock:
+                alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block)
 
-                  case BeginDataBlock:
-                    block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block)
-                    block.group = collate_create_group(debug)
-                    parent := block.parent != nil? block.parent.group : frame.root
-                    link := debug_add_variable_to_group(&debug.collation_arena, parent, &event)
-                    link.children = block.group
-                    link.event = &event
-                    
-                  case DebugVariableProfile,
-                       DebugEventLink, DebugEventGroup,
-                       BitmapId, SoundId, FontId, 
-                       b32, f32, u32, i32, 
-                       v2, v3, v4, 
-                       Rectangle2, Rectangle3:
-                    group := thread.first_open_data_block.group
-                    
-                    if group != nil {
-                        debug_add_variable_to_group(&debug.collation_arena, group, &event)
-                    }
-                    
-                  case EndDataBlock:
-                    matching_block := thread.first_open_data_block
-                        if matching_block != nil {
-                        free_open_block(thread, &thread.first_open_data_block)
-                    }
-                    
-                  case EndCodeBlock:
+              case BeginDataBlock:
+                block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block)
+                block.group = collate_create_group(debug)
+                parent := block.parent != nil? block.parent.group : frame.root
+                link := debug_append_event_to_group(&debug.collation_arena, parent, &event)
+                link.children = &block.group.value.(DebugEventGroup)
+                link.event = &event
+                
+              case DebugVariableProfile,
+                   DebugEventLink, DebugEventGroup,
+                   BitmapId, SoundId, FontId, 
+                   b32, f32, u32, i32, 
+                   v2, v3, v4, 
+                   Rectangle2, Rectangle3:
+                group := thread.first_open_data_block.group
+                
+                if group != nil {
+                    debug_append_event_to_group(&debug.collation_arena, group, &event)
+                }
+                
+              case EndDataBlock:
+                matching_block := thread.first_open_data_block
+                    if matching_block != nil {
+                    free_open_block(thread, &thread.first_open_data_block)
+                }
+                
+              case EndCodeBlock:
+                if debug.collation_frame != nil {
                     matching_block := thread.first_open_code_block
                     if matching_block != nil {
                         opening_event := matching_block.opening_event
@@ -741,10 +698,41 @@ collate_debug_records :: proc(debug: ^DebugState, invalid_events_index: u32) {
                         }
                     }
                 }
-
             }
         }
     }
+}
+
+alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
+    result = thread.first_free_block
+    if result != nil {
+        thread.first_free_block = result.next_free
+    } else {
+        result = push(&debug.collation_arena, DebugOpenBlock)
+    }
+    
+    result ^= {
+        frame_index   = frame_index,
+        opening_event = opening_event,
+    }
+    
+    result.parent = parent^
+    parent^ = result
+    
+    return result
+}
+
+free_open_block :: proc(thread: ^DebugThread, first_open: ^^DebugOpenBlock) {
+    free_block := first_open^
+    free_block.next_free    = thread.first_free_block
+    thread.first_free_block = free_block
+    
+    first_open^ = free_block.parent
+}
+
+events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
+    result = b != nil && b.loc.name == a.loc.name
+    return result
 }
 
 ////////////////////////////////////////////////
@@ -841,8 +829,9 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: 
     if debug.hot_interaction.kind != .None {
         if debug.hot_interaction.kind == .AutoDetect {
             target := debug.hot_interaction.target.(^DebugEvent)
-            switch v in target.value {
+            switch value in target.value {
               case FrameMarker, 
+                   MarkEvent,
                    BitmapId, SoundId, FontId,
                    BeginCodeBlock, EndCodeBlock,
                    BeginDataBlock, EndDataBlock,
@@ -869,9 +858,9 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: 
               case ^v2:
                 // NOTE(viktor): nothing
               case ^DebugEvent:
-                root_group := debug_add_variable_group(&debug.debug_arena, "NewUserGroup")
-                debug_add_variable_to_group(&debug.debug_arena, &root_group.value.(DebugEventGroup), debug.hot_interaction.target.(^DebugEvent))
-                tree := debug_add_tree(debug, &root_group.value.(DebugEventGroup), {0, 0})
+                root_group := debug_create_event_group(&debug.debug_arena, "NewUserGroup")
+                debug_append_event_to_group(&debug.debug_arena, root_group, debug.hot_interaction.target.(^DebugEvent))
+                tree := debug_add_tree(debug, root_group, {0, 0})
                 debug.hot_interaction.target = &tree.p
               case ^DebugTree:
                 unreachable()
@@ -910,7 +899,7 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
           case .DragValue:
             event := interaction.target.(^DebugEvent)
             value := &event.value.(f32)
-            value^ += 0.1 * mouse_dp.y
+            value^ += 0.1 * mouse_dp.x
             
           case .Resize:
             value := interaction.target.(^v2)
@@ -976,8 +965,8 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
           case b32:
             // TODO(viktor): @CompilerBug 
             // Taking ref to value in the switch will cause an infinite loop in the compiler.
-            v := &target.value.(b32)
-            v^ = !v^
+            value_ref := &target.value.(b32)
+            value_ref^ = !value_ref^
         
         }
     }
@@ -1095,12 +1084,14 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
         }
         
         root := tree.root
-        root = debug.frames[0].root != nil ? debug.frames[0].root : root
+        // root = debug.frames[0].root != nil ? debug.frames[0].root : root
+        root = debug.debug_values
         
         if root != nil {
+            group := &root.value.(DebugEventGroup)
             stack_push(&stack, DebugEventInterator{
-                link     = root.sentinel.next,
-                sentinel = &root.sentinel,
+                link     = group.sentinel.next,
+                sentinel = &group.sentinel,
             })
             
             for stack.depth > 0 {
@@ -1130,7 +1121,7 @@ debug_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         case SoundId, FontId, 
                             BeginCodeBlock, EndCodeBlock,
                             BeginDataBlock, EndDataBlock,
-                            FrameMarker:
+                            FrameMarker, MarkEvent:
                             // NOTE(viktor): nothing
                         case DebugVariableProfile:
                             block, ok := &view.kind.(DebugViewBlock)
@@ -1226,18 +1217,19 @@ debug_interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteracti
 }
 
 
-collate_create_group :: proc(debug: ^DebugState) -> (result: ^DebugEventGroup) {
-    result = push(&debug.collation_arena, DebugEventGroup)
+collate_create_group :: proc(debug: ^DebugState) -> (result: ^DebugEvent) {
+    result = debug_create_event_group(&debug.collation_arena, "")
     
-    result.sentinel.next = &result.sentinel
-    result.sentinel.prev = &result.sentinel
+    group := &result.value.(DebugEventGroup)
+    group.sentinel.next = &group.sentinel
+    group.sentinel.prev = &group.sentinel
     
     return result
 }
 
 ////////////////////////////////////////////////
 
-debug_add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (result: ^DebugTree) {
+debug_add_tree :: proc(debug: ^DebugState, root: ^DebugEvent, p: v2) -> (result: ^DebugTree) {
     result = push(&debug.collation_arena, DebugTree)
     result^ = {
         root = root,
@@ -1249,7 +1241,12 @@ debug_add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (re
     return result
 }
 
-debug_add_variable_group :: proc(arena: ^Arena, name: string) -> (result: ^DebugEvent) {
+debug_get_group_by_hierarchical_name :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEvent) {
+    result = debug.debug_values
+    return result
+}
+
+debug_create_event_group :: proc(arena: ^Arena, name: string) -> (result: ^DebugEvent) {
     result = push(arena, DebugEvent)
     
     result.value = DebugEventGroup{}
@@ -1262,13 +1259,23 @@ debug_add_variable_group :: proc(arena: ^Arena, name: string) -> (result: ^Debug
     return result
 }
 
-debug_add_variable_to_group :: proc(arena: ^Arena, group: ^DebugEventGroup, element: ^DebugEvent) -> (result: ^DebugEventLink) {
+debug_create_event :: proc(arena: ^Arena, value: $T, name: string) -> (result: ^DebugEvent) {
+    result = push(arena, DebugEvent)
+    
+    result.value = value
+    result.loc.name =  push_string(arena, name)
+    
+    return result
+}
+
+debug_append_event_to_group :: proc(arena: ^Arena, group: ^DebugEvent, element: ^DebugEvent) -> (result: ^DebugEventLink) {
     result = push(arena, DebugEventLink)
     assert(element != nil)
     result.event = element
     
     if group != nil {
-        parent  := &group.sentinel
+        value := &group.value.(DebugEventGroup)
+        parent  := &value.sentinel
         
         result.prev = parent
         result.next = parent.next

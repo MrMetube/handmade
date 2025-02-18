@@ -3,6 +3,24 @@ package game
 import "core:fmt"
 import "core:os"
 
+debug_value :: #force_inline proc($T: typeid, $name: string, loc := #caller_location) -> (result: T) {
+    // TODO(viktor): allow different default value
+   when !DebugEnabled do return {}
+   else {
+       @static event: DebugEvent
+       if event.value == nil {
+           debug_init_value(&event, T{}, name, loc.file_path, auto_cast loc.line)
+       }
+       return event.value.(T)
+   }
+}
+
+debug_init_value :: #force_inline proc(event: ^DebugEvent, initial_value: $T, name, file_path: string, line: u32) {
+    event.loc = { name, file_path, line}
+    event.value = initial_value
+    record_debug_event_common(MarkEvent{event}, event.loc)
+}
+
 debug_pointer_id :: proc(pointer: rawpointer) -> (result: DebugId) {
     when !DebugEnabled do return result
     
@@ -141,7 +159,7 @@ debug_record_value :: #force_inline proc(value: DebugValue, loc := #caller_locat
     })
 }
 
-record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) {
+record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
     
     events := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
@@ -150,8 +168,8 @@ record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEv
         fmt.printfln("Index %v is out of range 0..<%v", events.events_index, length)
         os.exit(1)
     }
-    event := &GlobalDebugTable.events[events.array_index][events.events_index]
-    event^ = {
+    result = &GlobalDebugTable.events[events.array_index][events.events_index]
+    result^ = {
         loc          = loc,
         
         clock        = read_cycle_counter(),
@@ -160,4 +178,6 @@ record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEv
         
         value        = value,
     }
+    
+    return result
 }

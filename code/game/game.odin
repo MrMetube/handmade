@@ -4,6 +4,7 @@ package game
 INTERNAL :: #config(INTERNAL, false)
 
 /* TODO(viktor):
+    - Since the correction to unproject_with_transform the sim region bounds are too small
     - Is this still relevant? Dead Lock on Load when a lot of assets are loaded at once
     - Font Rendering Robustness
         - Kerning
@@ -22,7 +23,6 @@ INTERNAL :: #config(INTERNAL, false)
         - Fix clicking Bug at the end of samples
     
     - Rendering
-        - Check why the view frustum is not working quite right(too small) since <b7a4b31>
         - Get rid of "even" scan line notion?
         - Real projections with solid concept of project/unproject
         - Straighten out all coordinate systems!
