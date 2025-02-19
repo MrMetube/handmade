@@ -288,7 +288,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     ////////////////////////////////////////////////
     // Permanent Initialization
-    // 
+
     assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
     state := cast(^State) raw_data(memory.permanent_storage)
     if !state.is_initialized {
@@ -324,7 +324,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
         ////////////////////////////////////////////////
         // "World Gen"
-        //
         
         chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
             tile_size_in_meters  :: 1.5
@@ -1000,16 +999,16 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                     }
                 }
                 
-                if debug_begin_data_block(debug_id, "Simulation Entity") {
+                if debug_begin_data_block(debug_id, "Entity/HotEntity/") {
+                    debug_record_value(cast(u32) entity.storage_index, name = "storage_index")
                     debug_record_value(entity.updatable)
                     debug_record_value(entity.p)
                     debug_record_value(entity.dp)
                     debug_record_value(first_bitmap_from(tran_state.assets, .Body))
-                //     debug_record_value(entity.distance_limit)
+                    debug_record_value(entity.distance_limit)
                     debug_end_data_block()
                 }
             }
-            
         }
     }
     render_group.transform.offset = 0

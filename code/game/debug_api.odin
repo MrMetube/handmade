@@ -39,7 +39,7 @@ debug_init_variable :: #force_inline proc(event: ^DebugEvent, initial_value: $T,
 debug_pointer_id :: proc(pointer: rawpointer) -> (result: DebugId) {
     when !DebugEnabled do return result
     
-    result[0] = pointer
+    result.value[0] = pointer
     return result
 }
 
@@ -125,7 +125,8 @@ debug_end_data_block :: #force_inline proc(loc := #caller_location) {
 
 @(export)
 begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
-    when !DebugEnabled do return result
+    when true do return // IMPORTANT TODO(viktor): FIX THIS!
+    when !DebugEnabled do return result 
     
     result = {
         loc = { 
@@ -143,27 +144,23 @@ begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #a
 
 @export
 end_timed_block:: #force_inline proc(block: TimedBlock) {
-    if !DebugEnabled do return
+    when true do return // IMPORTANT TODO(viktor): FIX THIS!
+    when !DebugEnabled do return
     // TODO(viktor): record the hit count here
     debug_record_event_common(EndCodeBlock{}, block.loc)
 }
 
 @(deferred_out=end_timed_block)
-timed_block:: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
+timed_block :: #force_inline proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) {
     return begin_timed_block(name, loc, hit_count)
 }
 
 
 
-@(deferred_out=end_timed_function)
+@(deferred_out = end_timed_block)
 timed_function :: #force_inline proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlock) { 
     return begin_timed_block(loc.procedure, loc, hit_count)
 }
-
-end_timed_function :: #force_inline proc(block: TimedBlock) {
-    end_timed_block(block)
-}
-
 
 
 @export
@@ -174,7 +171,7 @@ frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location
 }
 
 
-debug_record_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
+debug_record_event_common :: #force_inline proc(value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
     
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)

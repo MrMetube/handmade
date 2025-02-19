@@ -15,7 +15,7 @@ import "core:fmt"
 
 GlobalDebugTable:  DebugTable
 GlobalDebugMemory: ^GameMemory
-DebugMaxEventsCount     :: 1_000_000 when DebugEnabled else 0
+DebugMaxEventsCount     :: 5_000_000 when DebugEnabled else 0
 DebugMaxRegionsPerFrame :: 15000     when DebugEnabled else 0
 
 ////////////////////////////////////////////////
@@ -57,7 +57,7 @@ DebugState :: struct {
     profile_on:   b32,
     framerate_on: b32,
     
-    // NOTE(viktor): Overlay rendering
+    // Overlay rendering
     render_group: ^RenderGroup,
     
     work_queue: ^PlatformWorkQueue, 
@@ -73,10 +73,10 @@ DebugState :: struct {
     font:         ^Font,
     font_info:    ^FontInfo,
     
-    //
+    // @Cleanup
     dump_depth: u32,
     
-    // NOTE(viktor): Per-frame storage management
+    // Per-frame storage management
     per_frame_arena:         Arena,
     first_free_frame:        ^DebugFrame,
     first_free_stored_event: ^DebugStoredEvent,
@@ -102,7 +102,7 @@ DebugRegion :: struct {
 
 DebugThread :: #type SingleLinkedList(DebugThreadLink)
 DebugThreadLink :: struct {
-    thread_index:     u16,
+    thread_index: u16,
     
     first_free_block:      ^DebugOpenBlock,
     first_open_code_block: ^DebugOpenBlock,
@@ -113,6 +113,7 @@ DebugOpenBlock :: struct {
     frame_index:   u32,
     opening_event: ^DebugEvent,
     group:         ^DebugEvent,
+    element:       ^DebugElement,
     
     using next : struct #raw_union {
         parent, 
@@ -194,7 +195,7 @@ DebugStoredEventLink :: struct {
 
 DebugElement :: #type SingleLinkedList(DebugElementLink)
 DebugElementLink :: struct {
-    guid:   DebugEventLocation,
+    guid:   u32,
     events: Deque(DebugStoredEvent),
 }
 
@@ -225,7 +226,9 @@ DebugViewBlock :: struct {
     size: v2,
 }
 
-DebugId :: [2]rawpointer
+DebugId :: struct {
+    value: [2]rawpointer
+}
 
 DebugEventGroup :: struct {
     name:     string,
@@ -254,7 +257,6 @@ DebugInteraction :: struct {
         ^DebugEvent, 
         ^DebugTree,
         ^v2,
-        // TODO(viktor): add hot region from profile view
     },
 }
 
@@ -264,7 +266,7 @@ DebugInteractionKind :: enum {
     NOP,
     AutoDetect,
     
-        ToggleValue,
+    ToggleValue,
     DragValue,
     
     Move,
@@ -349,8 +351,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         
         when true {
             sub_arena(&debug.per_frame_arena, &debug.arena, 3 * len(total_memory) / 4)
-        } else {
-            // NOTE(viktor): use this to test the handling of deallocation and freeing of frames
+        } else { // NOTE(viktor): use this to test the handling of deallocation and freeing of frames
             sub_arena(&debug.per_frame_arena, &debug.arena, 20 * Kilobyte)
         }
         
@@ -369,8 +370,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
             
         debug.left_edge  = -0.5 * cast(f32) buffer.width
         debug.right_edge =  0.5 * cast(f32) buffer.width
-        debug.top_edge   =  0.5 * cast(f32) buffer.height
-        
+        debug.top_edge   =  0.5 * cast(f32) buffer.height   
     }
 
     if debug.font == nil {
@@ -383,10 +383,10 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         
     begin_render(debug.render_group)
 
-    events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 })
-
+    GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
+    events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
+    
     collate_debug_records(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
-
     overlay_debug_info(debug, input)
     
     tiled_render_group_to_output(debug.work_queue, debug.render_group, debug.buffer)
@@ -463,7 +463,7 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
                         field_buffer = fmt.tprint(field_buffer, names[value])
                     }
                 } else if reflect.is_bit_set(field.type) {
-                    // TODO(viktor):  
+                    // TODO(viktor):    
                 } else if reflect.is_pointer(field.type) {
                     field_buffer = fmt.tprint(field_buffer, member_pointer)
                     bogus := cast(^^u8) member_pointer
@@ -499,9 +499,9 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
                 debug_push_text_line(debug, field_buffer)
             } else if !manually {
                 if named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
-                    debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, " = ", named.name, sep=""))
+                    debug_push_text_line(debug, fmt.tprint("Unhandled: ", prefix, field.name, " = ", named.name, sep=""))
                 } else {
-                    debug_push_text_line(debug, fmt.tprint("TODO: ", prefix, field.name, sep=""))
+                    debug_push_text_line(debug, fmt.tprint("Unhandled: ", prefix, field.name, sep=""))
                 }
             }
         }
@@ -524,7 +524,7 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
     } else {
         // TODO(viktor): bitfield
         if named, ok := info.variant.(reflect.Type_Info_Named); ok {
-            debug_push_text_line(debug, fmt.tprint(prefix,"TODO: ", named.name, sep=""))
+            debug_push_text_line(debug, fmt.tprint(prefix,"Unhandled: ", named.name, sep=""))
         }
     }
 }
@@ -544,7 +544,7 @@ new_frame :: proc(debug: ^DebugState, begin_clock: i64) -> (result: ^DebugFrame)
         }
     }
     
-    result ^ = {
+    result^ = {
         frame_index = debug.total_frame_count,
         begin_clock = begin_clock,
     }
@@ -554,9 +554,8 @@ new_frame :: proc(debug: ^DebugState, begin_clock: i64) -> (result: ^DebugFrame)
     return result
 }
 
-store_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result: ^DebugStoredEvent) {
+store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElement) -> (result: ^DebugStoredEvent) {
     if debug.root_group == nil do return
-    element     := get_element_from_event(debug, event)
     frame_index := debug.collation_frame.frame_index
     
     ok: b32
@@ -603,13 +602,18 @@ free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
 }
 
 get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result: ^DebugElement) {
+    timed_function()
+    
     assert(event.loc != {})
     // TODO(viktor): BETTER HASH FUNCTION
     hash_value := 19 * cast(u32) (cast(uintpointer) raw_data(event.loc.file_path) >> 2) +  31 * cast(u32) (cast(uintpointer) raw_data(event.loc.name) >> 2) + 5 * event.loc.line
+    assert(hash_value != 0)
     index := hash_value % len(debug.element_hash)
     
+    count : i32
     for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
-        if chain.guid == event.loc {
+        defer count += 1
+        if chain.guid == hash_value {
             result = chain
             break
         }
@@ -617,9 +621,10 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
     
     if result == nil {
         result = push(&debug.arena, DebugElement)
+        result.guid = hash_value
         list_push(&debug.element_hash[index], result)
         
-        name := event.loc.name
+        name   := event.loc.name
         parent := get_group_by_hierarchical_name(debug, debug.root_group, &name)
         add_element_to_group(debug, parent, result)
     }
@@ -628,7 +633,9 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
 }
 
 collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
-    for &event in events {
+    timed_function()
+    
+    for &event, index in events {
         collation_frame := debug.collation_frame
         if collation_frame == nil {
             debug.collation_frame = new_frame(debug, event.clock)
@@ -638,9 +645,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {}
         if thread == nil {
             thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread)
-            thread^ = {
-                thread_index = event.thread_index
-            }
+            thread^ = { thread_index = event.thread_index }
             
             list_push(&debug.thread, thread)
         }
@@ -650,7 +655,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         
         switch value in event.value {
           case FrameMarker:
-            collation_frame.end_clock = event.clock
+            collation_frame.end_clock       = event.clock
             collation_frame.seconds_elapsed = value.seconds_elapsed
             
             if debug.paused {
@@ -662,42 +667,38 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             debug.collation_frame = new_frame(debug, event.clock)
             
           case MarkEvent:
-            store_event(debug, value.event^)
-            // debug_append_event_to_group(debug, get_group_by_hierarchical_name(debug, value.event.loc.name), value.event)
+            element := get_element_from_event(debug, event)
+            store_event(debug, value.event^, element)
          
           case BeginDataBlock:
-            // TODO(viktor): 
-            block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block)
-            // block.group = create_event_group(debug, event.loc.name)
-            // parent := block.parent != nil? block.parent.group : debug.root_group
-            // link := debug_append_event_to_group(debug, parent, &event)
-            // link.children = &block.group.value.(DebugEventGroup)
-            // link.event = &event
+            element := get_element_from_event(debug, event)
+            alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, element)
+            store_event(debug, event, element) 
             
-          case Profile,
-            DebugEventLink, DebugEventGroup,
+            
+          case Profile, DebugEventLink, DebugEventGroup,
             BitmapId, SoundId, FontId, 
             b32, f32, u32, i32, 
             v2, v3, v4, 
             Rectangle2, Rectangle3:
             
-            store_event(debug, event) 
-            // if thread.first_open_data_block != nil {
-            //    group := thread.first_open_data_block.group
-                
-            //     if group != nil {
-            //         debug_append_event_to_group(debug, group, &event)
-            //     }
-            // }
+            parent_element := get_element_from_event(debug, event)
+            if thread.first_open_data_block != nil {
+                parent_element = thread.first_open_data_block.element
+            }
+            store_event(debug, event, parent_element) 
             
           case EndDataBlock:
+            element := get_element_from_event(debug, event)
             matching_block := thread.first_open_data_block
-                if matching_block != nil {
+            if matching_block != nil {
                 free_open_block(thread, &thread.first_open_data_block)
             }
+            store_event(debug, event, element) 
                
           case BeginCodeBlock:
-            alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block)
+            element := get_element_from_event(debug, event)
+            alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
 
           case EndCodeBlock:
             matching_block := thread.first_open_code_block
@@ -744,7 +745,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
     }
 }
 
-alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock) -> (result: ^DebugOpenBlock) {
+alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
     result = thread.first_free_block
     if result != nil {
         thread.first_free_block = result.next_free
@@ -755,6 +756,7 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
     result ^= {
         frame_index   = frame_index,
         opening_event = opening_event,
+        element       = element,
     }
     
     result.parent = parent^
@@ -794,7 +796,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     }
 
     mouse_p := unproject_with_transform(debug.render_group.transform, input.mouse.p).xy
-    main_menu(debug, input, mouse_p)
+    draw_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
     if (true || debug_variable(b32, "ShowFramerate")) && debug.frames.first != nil {
@@ -803,6 +805,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     }
 }
 
+// @Cleanup
 debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect: Rectangle2) {
     push_rectangle(debug.render_group, Rect3(rect, 0, 0), DarkBlue )
     
@@ -837,7 +840,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
         
         stack_x := chart_left
         stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
-        // TODO(viktor): @Cleanup
+        // @Cleanup
         when false {
             for &region in frame.regions[:frame.region_count] {
                 
@@ -869,7 +872,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
         when false {
             if hot_region != nil {
                 debug.scope_to_record = hot_region.event.loc.name
-                // TODO(viktor): @Cleanup clicking regions and variables at the same time should be handled better
+                // @Cleanup clicking regions and variables at the same time should be handled better
                 debug.hot_interaction.kind = .NOP
             } else {
                 debug.scope_to_record = ""
@@ -909,9 +912,9 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: 
           case .Move:
             switch target in debug.hot_interaction.target {
               case ^v2:
-                // NOTE(viktor): nothing
+                // Nothing
               case ^DebugEvent:
-                // TODO(viktor): @Cleanup
+                // @Cleanup
                 root_group := create_group(debug, "NewUserGroup")
                 // add_element_to_group(debug, root_group, debug.hot_interaction.target.(^DebugEvent))
                 tree := add_tree(debug, root_group, {0, 0})
@@ -936,13 +939,13 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     
     interaction := &debug.interaction
     if interaction.kind != .None {
-        // NOTE(viktor): Mouse move interaction
+        // Mouse move interaction
         switch interaction.kind {
           case .None: 
             unreachable()
             
           case .NOP, .AutoDetect, .ToggleValue, .ToggleExpansion:
-            // NOTE(viktor): nothing
+            // nothing
             
           case .Select:
             if !input.shift_down {
@@ -967,7 +970,7 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             
         }
         
-        // NOTE(viktor): Click interaction
+        // Click interaction
         for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_end_click_interaction(debug, input)
             debug_begin_click_interaction(debug, input, alt_ui)
@@ -1018,7 +1021,7 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
           case Profile:
             debug.paused = !debug.paused
           case b32:
-            // TODO(viktor): @CompilerBug 
+            // @CompilerBug 
             // Taking ref to value in the switch will cause an infinite loop in the compiler.
             value_ref := &target.value.(b32)
             value_ref^ = !value_ref^
@@ -1087,34 +1090,21 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
     layout.p.y = total_bounds.min.y - spacing
 }
 
-get_event_from_link :: proc(link: ^DebugEventLink) -> (result: ^DebugEvent) {
-    element, ok := link.value.(^DebugElement)
-    if ok && element.events.first != nil {
-        result = &element.events.first.event
-    }
-    return result
-}
-
-link_interaction :: #force_inline proc(kind: DebugInteractionKind, tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugInteraction) {
-    event := get_event_from_link(link)
-    if event != nil {
-        result.id = debug_id_from_link(tree, link)
-        result.target = event 
-        result.kind = kind
-    }
-    
-    return result
-}
-
 debug_id_from_link :: #force_inline proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
-    result[0] = tree
-    result[1] = link
+    result.value[0] = tree
+    result.value[1] = link
+    return result
+}
+
+debug_id_from_guid :: #force_inline proc(tree: ^DebugTree, guid: ^u8) -> (result: DebugId) {
+    result.value[0] = tree
+    result.value[1] = guid
     return result
 }
 
 get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
     // TODO(viktor): BETTER HASH FUNCTION
-    hash_index := ((cast(uintpointer) id[0] >> 2) + (cast(uintpointer) id[1] >> 2)) % len(debug.view_hash)
+    hash_index := ((cast(uintpointer) id.value[0] >> 2) + (cast(uintpointer) id.value[1] >> 2)) % len(debug.view_hash)
     slot := &debug.view_hash[hash_index]
 
     for search := slot^ ; search != nil; search = search.next {
@@ -1133,10 +1123,10 @@ get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result:
     return 
 }
 
-main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
-    if debug.font_info == nil do return
-    stack: Stack([128]DebugEventInterator)
+draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+    assert(debug.font_info != nil)
     
+    stack: Stack([128]DebugEventInterator)
     // :LinkedListIteration
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
         layout := Layout {
@@ -1169,17 +1159,17 @@ main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                     
                     depth_delta: f32
                     defer layout.depth += depth_delta
-                    view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
                     
-                    switch &v in link.value {
+                    switch &value in link.value {
                       case ^DebugEventGroup:
+                        view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
                         expanded: b32
                         if collapsible, ok := view.kind.(DebugViewCollapsible); ok {
                             if collapsible.expanded_always {
                                 expanded = true
                                 stack_push(&stack, DebugEventInterator{
-                                    link     = v.sentinel.next,
-                                    sentinel = &v.sentinel,
+                                    link     = value.sentinel.next,
+                                    sentinel = &value.sentinel,
                                 })
                                 depth_delta = 1
                             }
@@ -1196,14 +1186,14 @@ main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         color := is_hot ? Blue : White
                         
                         last_slash: u32
-                        #reverse for r, index in v.name {
+                        #reverse for r, index in value.name {
                             if r == '/' {
                                 last_slash = auto_cast index
                                 break
                             }
                         }
                         
-                        text := fmt.tprint(expanded ? "-" : "+", last_slash != 0 ? v.name[last_slash+1:] : v.name)
+                        text := fmt.tprint(expanded ? "-" : "+", last_slash != 0 ? value.name[last_slash+1:] : value.name)
                         text_bounds := debug_measure_text(debug, text)
                         
                         size := v2{ rectangle_get_diameter(text_bounds).x, layout.line_advance }
@@ -1215,87 +1205,8 @@ main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
                         
                       case ^DebugElement:
-                        event := get_event_from_link(link)
-                        if event != nil {
-                            text: string
-                            
-                            autodetect_interaction := link_interaction(.AutoDetect, tree, link)
-                            is_hot := interaction_is_hot(debug, autodetect_interaction)
-                            color := is_hot ? Blue : White
-                            
-                            switch value in event.value {
-                              case SoundId, FontId, 
-                                BeginCodeBlock, EndCodeBlock,
-                                BeginDataBlock, EndDataBlock,
-                                FrameMarker, MarkEvent:
-                                // NOTE(viktor): nothing
-                              case Profile:
-                                block, ok := &view.kind.(DebugViewBlock)
-                                if !ok {
-                                    view.kind = DebugViewBlock{}
-                                    block = &view.kind.(DebugViewBlock)
-                                }
-                                
-                                element := begin_ui_element_rectangle(&layout, &block.size)
-                                make_ui_element_resizable(&element)
-                                set_ui_element_default_interaction(&element, autodetect_interaction)
-                                end_ui_element(&element, true)
-                                
-                                debug_draw_profile(debug, input, mouse_p, element.bounds)
-                                
-                            case BitmapId:
-                                block, ok := &view.kind.(DebugViewBlock)
-                                if !ok {
-                                    view.kind = DebugViewBlock{}
-                                    block = &view.kind.(DebugViewBlock)
-                                }
-                                
-                                if bitmap := get_bitmap(debug.render_group.assets, value, debug.render_group.generation_id); bitmap != nil {
-                                    dim := get_used_bitmap_dim(debug.render_group, bitmap^, block.size.y, 0, use_alignment = false)
-                                    block.size = dim.size
-                                    
-                                    element := begin_ui_element_rectangle(&layout, &block.size)
-                                    make_ui_element_resizable(&element)
-                                    set_ui_element_default_interaction(&element, link_interaction(.Move, tree, link))
-                                    end_ui_element(&element, true)
-                                    
-                                    bitmap_height := block.size.y
-                                    bitmap_offset := V3(element.bounds.min, 0)
-                                    push_rectangle(debug.render_group, element.bounds, DarkBlue )
-                                    push_bitmap(debug.render_group, value, bitmap_height, bitmap_offset, use_alignment = false)
-                                }
-                                
-                            case DebugEventLink, DebugEventGroup,
-                                b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
-                                if _, ok := &event.value.(DebugEventGroup); ok {
-                                    collapsible, okc := &view.kind.(DebugViewCollapsible)
-                                    if !okc {
-                                        view.kind = DebugViewCollapsible{}
-                                        collapsible = &view.kind.(DebugViewCollapsible)
-                                    }
-                                    text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+", event.loc.name)
-                                } else {
-                                    last_slash: u32
-                                    #reverse for r, index in event.loc.name {
-                                        if r == '/' {
-                                            last_slash = auto_cast index
-                                            break
-                                        }
-                                    }
-                                    text = fmt.tprintf("%s %v", last_slash != 0 ? event.loc.name[last_slash+1:] : event.loc.name, value)
-                                }
-                                
-                                text_bounds := debug_measure_text(debug, text)
-                                
-                                size := v2{ rectangle_get_diameter(text_bounds).x, layout.line_advance }
-                                
-                                element := begin_ui_element_rectangle(&layout, &size)
-                                set_ui_element_default_interaction(&element, autodetect_interaction)
-                                end_ui_element(&element, false)
-                                
-                                debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
-                            }
-                        }
+                        id := debug_id_from_link(tree, link)
+                        draw_element(&layout, tree, value, id, input)
                     }
                 }
             }
@@ -1317,11 +1228,141 @@ main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     }
 }
 
+draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugElement, id: DebugId, input: Input) {
+    oldest := element.events.last
+    if oldest != nil {
+        #partial switch value in oldest.event.value {
+          case Profile:
+            view := get_debug_view_for_variable(debug, id)
+            
+            block, ok := &view.kind.(DebugViewBlock)
+            if !ok {
+                view.kind = DebugViewBlock{}
+                block = &view.kind.(DebugViewBlock)
+            }
+            
+            
+            element := begin_ui_element_rectangle(layout, &block.size)
+            make_ui_element_resizable(&element)
+            // TODO(viktor): reenable pausing the profiler
+            // pause := DebugInteraction{
+            //     kind   = .ToggleValue,
+            //     id     = id,
+            //     target = event,
+            // }
+            // set_ui_element_default_interaction(&element, pause)
+            end_ui_element(&element, true)
+            
+            debug_draw_profile(debug, input, mouse_p, element.bounds)
+            
+          case BeginDataBlock:
+            least_recently_opened_block := element.events.last
+            for event := least_recently_opened_block; event != nil; event = event.next {
+                if _, ok := event.event.value.(BeginDataBlock); ok {
+                    least_recently_opened_block = event
+                }
+            }
+            
+            for event := least_recently_opened_block; event != nil; event = event.next {
+                event_id := debug_id_from_guid(tree, raw_data(event.event.loc.name))
+                draw_event(layout, event_id, event)
+            }
+          case: 
+            assert(value != nil)
+            
+            draw_event(layout, id, element.events.first)
+        }
+    }
+}
+
+draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStoredEvent) {
+    view := get_debug_view_for_variable(debug, id)
+    
+    if stored_event != nil {
+        event := &stored_event.event
+        
+        text: string
+        
+        autodetect_interaction := DebugInteraction{ 
+            kind = .AutoDetect, 
+            id = id, 
+            target = event
+        }
+        
+        is_hot := interaction_is_hot(debug, autodetect_interaction)
+        color := is_hot ? Blue : White
+        
+        switch value in event.value {
+          case Profile: 
+            unreachable()
+            
+          case SoundId, FontId, 
+            BeginCodeBlock, EndCodeBlock,
+            BeginDataBlock, EndDataBlock,
+            FrameMarker, MarkEvent:
+            // NOTE(viktor): nothing
+            
+          case BitmapId:
+            block, ok := &view.kind.(DebugViewBlock)
+            if !ok {
+                view.kind = DebugViewBlock{}
+                block = &view.kind.(DebugViewBlock)
+            }
+            
+            if bitmap := get_bitmap(debug.render_group.assets, value, debug.render_group.generation_id); bitmap != nil {
+                dim := get_used_bitmap_dim(debug.render_group, bitmap^, block.size.y, 0, use_alignment = false)
+                block.size = dim.size
+                
+                element := begin_ui_element_rectangle(layout, &block.size)
+                make_ui_element_resizable(&element)
+                move := DebugInteraction{ kind = .Move, id = id, target = event}
+                set_ui_element_default_interaction(&element, move)
+                end_ui_element(&element, true)
+                
+                bitmap_height := block.size.y
+                bitmap_offset := V3(element.bounds.min, 0)
+                push_rectangle(debug.render_group, element.bounds, DarkBlue )
+                push_bitmap(debug.render_group, value, bitmap_height, bitmap_offset, use_alignment = false)
+            }
+            
+        case DebugEventLink, DebugEventGroup,
+            b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
+            if _, ok := &event.value.(DebugEventGroup); ok {
+                collapsible, okc := &view.kind.(DebugViewCollapsible)
+                if !okc {
+                    view.kind = DebugViewCollapsible{}
+                    collapsible = &view.kind.(DebugViewCollapsible)
+                }
+                text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+", event.loc.name)
+            } else {
+                last_slash: u32
+                #reverse for r, index in event.loc.name {
+                    if r == '/' {
+                        last_slash = auto_cast index
+                        break
+                    }
+                }
+                text = fmt.tprintf("%s %v", last_slash != 0 ? event.loc.name[last_slash+1:] : event.loc.name, value)
+            }
+            
+            text_bounds := debug_measure_text(debug, text)
+            
+            size := v2{ rectangle_get_diameter(text_bounds).x, layout.line_advance }
+            
+            element := begin_ui_element_rectangle(layout, &size)
+            set_ui_element_default_interaction(&element, autodetect_interaction)
+            end_ui_element(&element, false)
+            
+            debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
+        }
+    }
+}
+
+
 interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
     result = debug.hot_interaction.id == interaction.id
     return result
 }
-
 
 ////////////////////////////////////////////////
 
@@ -1329,10 +1370,10 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGr
     assert(parent != nil)
     result = parent
     
-    first_slash: i32 = -1
+    first_slash := -1
     for r, index in name {
         if r == '/' {
-            first_slash = auto_cast index
+            first_slash = index
             break
         }
     }
@@ -1446,7 +1487,7 @@ TextRenderOperation:: enum {
 
 text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = 1) -> (result: Rectangle2) {
     result = inverted_infinity_rectangle(Rectangle2)
-    // TODO(viktor): kerning and unicode test lines
+    // TODO(viktor): @Robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
     // 贺佳樱我爱你
     // 0123456789°

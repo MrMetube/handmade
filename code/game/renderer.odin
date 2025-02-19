@@ -535,6 +535,7 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
 
+            // @Cleanup
             when true {
                 draw_rectangle_quickly(target,
                     entry.p, {entry.size.x, 0}, {0, entry.size.y},
@@ -1101,7 +1102,6 @@ sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, 
     point in z, given in meters
 */
 sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
-    timed_function()
     assert(environment_map.LOD[0].memory != nil)
 
     // NOTE(viktor): pick which LOD to sample from
