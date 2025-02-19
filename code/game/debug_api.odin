@@ -3,6 +3,21 @@ package game
 import "core:fmt"
 import "core:os"
 
+DebugEnabled :: INTERNAL
+
+@common 
+TimedBlock :: struct {
+    hit_count: i64,
+    loc:       DebugEventLocation, 
+}
+
+@common 
+DebugEventLocation :: struct {
+    name:         string,
+    file_path:    string,
+    line:         u32,
+}
+
 debug_variable :: #force_inline proc($T: typeid, $name: string, loc := #caller_location) -> (result: T) {
     // TODO(viktor): allow different default value
    when !DebugEnabled do return {}
@@ -18,7 +33,7 @@ debug_variable :: #force_inline proc($T: typeid, $name: string, loc := #caller_l
 debug_init_variable :: #force_inline proc(event: ^DebugEvent, initial_value: $T, name, file_path: string, line: u32) {
     event.loc = { name, file_path, line}
     event.value = initial_value
-    record_debug_event_common(MarkEvent{event}, event.loc)
+    debug_record_event_common(MarkEvent{event}, event.loc)
 }
 
 debug_pointer_id :: proc(pointer: rawpointer) -> (result: DebugId) {
@@ -93,7 +108,7 @@ debug_begin_data_block :: proc(id: DebugId, name: string, loc := #caller_locatio
 debug_record_value :: #force_inline proc(value: DebugValue, loc := #caller_location, name := #caller_expression(value)) {
     if !DebugEnabled do return
     
-    record_debug_event_common(value, {
+    debug_record_event_common(value, {
         name      = name,
         file_path = loc.file_path,
         line      = auto_cast loc.line,
@@ -121,7 +136,7 @@ begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #a
         hit_count = hit_count,
     }
     
-    record_debug_event_common(BeginCodeBlock{}, result.loc)
+    debug_record_event_common(BeginCodeBlock{}, result.loc)
     
     return result
 }
@@ -130,7 +145,7 @@ begin_timed_block:: #force_inline proc(name: string, loc := #caller_location, #a
 end_timed_block:: #force_inline proc(block: TimedBlock) {
     if !DebugEnabled do return
     // TODO(viktor): record the hit count here
-    record_debug_event_common(EndCodeBlock{}, block.loc)
+    debug_record_event_common(EndCodeBlock{}, block.loc)
 }
 
 @(deferred_out=end_timed_block)
@@ -159,7 +174,7 @@ frame_marker :: #force_inline proc(seconds_elapsed: f32, loc := #caller_location
 }
 
 
-record_debug_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
+debug_record_event_common :: #force_inline proc (value: DebugValue, loc: DebugEventLocation) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
     
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
