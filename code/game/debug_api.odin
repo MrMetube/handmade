@@ -3,7 +3,7 @@ package game
 import "core:fmt"
 import "core:os"
 
-DebugEnabled :: INTERNAL
+DebugEnabled :: false
 
 @common 
 TimedBlock :: struct {

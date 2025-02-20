@@ -282,7 +282,7 @@ push_rectangle3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, colo
     assert(group.inside_render)
     
     center := rectangle_get_center(rec)
-    size   := rectangle_get_diameter(rec)
+    size   := rectangle_get_dimension(rec)
     p := center + 0.5*size
     basis := project_with_transform(group.transform, p)
     
@@ -307,7 +307,7 @@ push_rectangle_outline3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangl
     // @Cleanup offset and size
     
     offset := rectangle_get_center(rec)
-    size   := rectangle_get_diameter(rec)
+    size   := rectangle_get_dimension(rec)
     
     // Top and Bottom
     push_rectangle(group, rectangle_center_diameter(offset - {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), color)
@@ -357,7 +357,7 @@ get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (re
 }
 
 get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
-    camera_half_diameter := unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters).xy
+    camera_half_diameter := -unproject_with_transform(group.transform, group.monitor_half_diameter_in_meters).xy
     result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
 
     return result
@@ -435,8 +435,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     assert(data.group != nil)
     assert(data.target.memory != nil)
 
-    render_to_output(data.group, data.target, data.clip_rect, true)
-    render_to_output(data.group, data.target, data.clip_rect, false)
+    render_to_output(data.group, data.target, data.clip_rect)
 }
 
 tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap) {
@@ -507,7 +506,7 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
     do_tile_render_work(&work)
 }
 
-render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i, even: b32) {
+render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i) {
     assert(group.inside_render)
     
     null_pixels_to_meters :: 1
@@ -523,61 +522,43 @@ render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectang
             entry := cast(^RenderGroupEntryClear) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, rectangle_min_diameter(v2{0, 0}, group.transform.screen_center*2), entry.color, clip_rect, even)
+            draw_rectangle(target, rectangle_min_diameter(v2{0, 0}, group.transform.screen_center*2), entry.color, clip_rect)
 
         case RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) data
             base_address += auto_cast size_of(entry^)
 
-            draw_rectangle(target, entry.rect, entry.color, clip_rect, even)
+            draw_rectangle(target, entry.rect, entry.color, clip_rect)
 
         case RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) data
             base_address += auto_cast size_of(entry^)
 
-            // @Cleanup
-            when true {
-                draw_rectangle_quickly(target,
-                    entry.p, {entry.size.x, 0}, {0, entry.size.y},
-                    entry.bitmap, entry.color,
-                    null_pixels_to_meters, clip_rect, even,
-                )
-            } else {
-                draw_rectangle_slowly(target,
-                    entry.p, {entry.size.x, 0}, {0, entry.size.y},
-                    entry.bitmap, {}, entry.color,
-                    {}, {}, {},
-                    null_pixels_to_meters,
-                )
-            }
+            draw_rectangle_quickly(target,
+                entry.p, {entry.size.x, 0}, {0, entry.size.y},
+                entry.bitmap, entry.color,
+                null_pixels_to_meters, clip_rect,
+            )
 
         case RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) data
             base_address += auto_cast size_of(entry^)
-            when true {
-                draw_rectangle_quickly(target,
-                    entry.origin, entry.x_axis, entry.y_axis,
-                    entry.texture, /* entry.normal, */ entry.color,
-                    /* entry.top, entry.middle, entry.bottom, */
-                    null_pixels_to_meters, clip_rect, even,
-                )
-            } else {
-                draw_rectangle_slowly(target,
-                    entry.origin, entry.x_axis, entry.y_axis,
-                    entry.texture, entry.normal, entry.color,
-                    entry.top, entry.middle, entry.bottom,
-                    null_pixels_to_meters,
-                )
-            }
+            
+            draw_rectangle_quickly(target,
+                entry.origin, entry.x_axis, entry.y_axis,
+                entry.texture, /* entry.normal, */ entry.color,
+                /* entry.top, entry.middle, entry.bottom, */
+                null_pixels_to_meters, clip_rect, 
+            )
 
             p := entry.origin
             x := p + entry.x_axis
             y := p + entry.y_axis
             size := v2{10, 10}
 
-            draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect, even)
-            draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect, even)
-            draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect, even)
+            draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect)
+            draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect)
+            draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect)
 
         case:
             panic("Unhandled Entry")
@@ -635,10 +616,10 @@ draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
     }
 }
 
- @( enable_target_feature="sse,sse2",
+@( enable_target_feature="sse,sse2",
     optimization_mode="favor_size",
 )
-draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i, even: b32) {
+draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i) {
     timed_function()
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
     if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&
@@ -671,10 +652,6 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
     }
     fill_rect = rectangle_intersection(fill_rect, clip_rect)
-
-    if even == (fill_rect.min.y & 1 == 0) {
-        fill_rect.min.y += 1
-    }
 
     if rectangle_has_area(fill_rect) {
         maskFF :: 0xffffffff
@@ -742,14 +719,14 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-        for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
+        for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
             // NOTE(viktor): iterative calculations will lead to arithmetic errors,
             // so we calculate always based of the index.
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
-            y_index := cast(f32) (y - fill_rect.min.y) / 2
-            u_row := delta_x * normal_x_axis_x + delta_y_n_x_axis_y + y_index * normal_x_axis_y * 2
-            v_row := delta_x * normal_y_axis_x + delta_y_n_y_axis_y + y_index * normal_y_axis_y * 2
+            y_index := cast(f32) (y - fill_rect.min.y)
+            u_row := delta_x * normal_x_axis_x + delta_y_n_x_axis_y + y_index * normal_x_axis_y
+            v_row := delta_x * normal_y_axis_x + delta_y_n_y_axis_y + y_index * normal_y_axis_y
 
             clip_mask = start_clip_mask
             for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
@@ -1044,28 +1021,168 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     }
 }
 
-draw_rectangle :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: Rectangle2i, even: b32){
-    // timed_function()
-    rounded_min := floor(rect.min, i32)
-    rounded_max := floor(rect.max, i32)
-
-    fill_rect := rectangle_min_max(rounded_min, rounded_max)
-    fill_rect = rectangle_intersection(fill_rect, clip_rect)
+draw_rectangle :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: Rectangle2i){
+    origin := rect.min
+    dim := rectangle_get_dimension(rect)
+    x_axis := v2{dim.x, 0}
+    y_axis := v2{0, dim.y}
     
-    if !even == (fill_rect.min.y & 1 != 0) {
-        fill_rect.min.y += 1
+    draw_rectangle_rotated(buffer, origin, x_axis, y_axis, color, clip_rect)
+}
+
+draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color: v4, clip_rect: Rectangle2i){
+    timed_function()
+    
+    fill_rect := inverted_infinity_rectangle(Rectangle2i)
+    for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
+        floorp := floor(testp, i32)
+        ceilp  := ceil(testp, i32)
+     
+        fill_rect.min.x = min(fill_rect.min.x, floorp.x)
+        fill_rect.min.y = min(fill_rect.min.y, floorp.y)
+        fill_rect.max.x = max(fill_rect.max.x, ceilp.x)
+        fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
     }
+    fill_rect = rectangle_intersection(fill_rect, clip_rect)
 
-    for y := fill_rect.min.y; y < fill_rect.max.y; y += 2 {
-        for x in fill_rect.min.x..<fill_rect.max.x {
-            dst := &buffer.memory[y * buffer.width +  x]
-            src := color * 255
+    if rectangle_has_area(fill_rect) {
+        maskFF :: 0xffffffff
+        
+        clip_mask       : u32x8 = maskFF
+        start_clip_mask : u32x8 = maskFF
+        end_clip_mask   : u32x8 = maskFF
+        
+        start_clip_masks := [?]u32x8 {
+            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+            {     0, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+            {     0,      0, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+            {     0,      0,      0, maskFF, maskFF, maskFF, maskFF, maskFF},
+            {     0,      0,      0,      0, maskFF, maskFF, maskFF, maskFF},
+            {     0,      0,      0,      0,      0, maskFF, maskFF, maskFF},
+            {     0,      0,      0,      0,      0,      0, maskFF, maskFF},
+            {     0,      0,      0,      0,      0,      0,      0, maskFF},
+        }
+        
+        end_clip_masks := [?]u32x8 {
+            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+            {maskFF,      0,      0,      0,      0,      0,      0,      0},
+            {maskFF, maskFF,      0,      0,      0,      0,      0,      0},
+            {maskFF, maskFF, maskFF,      0,      0,      0,      0,      0},
+            {maskFF, maskFF, maskFF, maskFF,      0,      0,      0,      0},
+            {maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0,      0},
+            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0},
+            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0},
+        }
+        
+        if fill_rect.min.x & 7 != 0 {
+            start_clip_mask = start_clip_masks[fill_rect.min.x & 7]
+            fill_rect.min.x = align8(fill_rect.min.x) - 8
+        }
 
-            dst.r = cast(u8) lerp(cast(f32) dst.r, src.r, clamp_01(color.a))
-            dst.g = cast(u8) lerp(cast(f32) dst.g, src.g, clamp_01(color.a))
-            dst.b = cast(u8) lerp(cast(f32) dst.b, src.b, clamp_01(color.a))
-            // TODO(viktor): compute this
-            dst.a = cast(u8) src.a
+        if fill_rect.max.x & 7 != 0 {
+            end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
+            fill_rect.max.x = align8(fill_rect.max.x)
+        }
+        
+        normal_x_axis := safe_ratio_0(x_axis, length_squared(x_axis))
+        normal_y_axis := safe_ratio_0(y_axis, length_squared(y_axis))
+        
+        inv_255         := cast(f32x8) (1.0 / 255.0)
+        max_color_value := cast(f32x8) (255 * 255)
+        
+        normal_x_axis_x := cast(f32x8) normal_x_axis.x
+        normal_x_axis_y := cast(f32x8) normal_x_axis.y
+        normal_y_axis_x := cast(f32x8) normal_y_axis.x
+        normal_y_axis_y := cast(f32x8) normal_y_axis.y
+        
+        delta_x := cast(f32x8) fill_rect.min.x - cast(f32x8) origin.x + { 0, 1, 2, 3, 4, 5, 6, 7}
+        delta_y := cast(f32x8) fill_rect.min.y - cast(f32x8) origin.y
+        
+        delta_y_n_x_axis_y := delta_y * normal_x_axis_y
+        delta_y_n_y_axis_y := delta_y * normal_y_axis_y
+        
+            
+        // NOTE(viktor): premultiply color alpha
+        color := color
+        color.rgb *= color.a
+        
+        color *= 255
+        color_r := cast(f32x8) color.r
+        color_g := cast(f32x8) color.g
+        color_b := cast(f32x8) color.b
+        color_a := cast(f32x8) color.a
+        
+        // NOTE(viktor): srgb to linear
+        color_r = square(color_r)
+        color_g = square(color_g)
+        color_b = square(color_b)
+
+        color_r = clamp(color_r, 0, max_color_value)
+        color_g = clamp(color_g, 0, max_color_value)
+        color_b = clamp(color_b, 0, max_color_value)
+        
+        inv_color_a := (1 - (inv_255 * color_a))
+
+        for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
+            // NOTE(viktor): Iterative calculations will lead to arithmetic errors,
+            // so we always calculate based of the index.
+            // u := dot(delta, n_x_axis)
+            // v := dot(delta, n_y_axis)
+            y_index := cast(f32) (y - fill_rect.min.y)
+            u_row := delta_x * normal_x_axis_x + delta_y_n_x_axis_y + y_index * normal_x_axis_y
+            v_row := delta_x * normal_y_axis_x + delta_y_n_y_axis_y + y_index * normal_y_axis_y
+
+            clip_mask = start_clip_mask
+            for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
+                x_index := cast(f32) (x - fill_rect.min.x) / 8
+                u := u_row + x_index * normal_x_axis_x * 8
+                v := v_row + x_index * normal_y_axis_x * 8
+                defer {
+                    if x + 16 < fill_rect.max.x {
+                        clip_mask = maskFF
+                    } else {
+                        clip_mask = end_clip_mask
+                    }
+                }
+                
+                // u >= 0 && u <= 1 && v >= 0 && v <= 1
+                write_mask := clip_mask & simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
+
+                pixel := buffer.memory[y * buffer.width + x:][:8]
+                // assert(cast(uintpointer) (&pixel[0]) & 31 == 0)
+                original_pixel := simd.masked_load((&pixel[0]), cast(u32x8) 0, write_mask)
+    
+                pixel_r := cast(f32x8) (0xff &          original_pixel      )
+                pixel_g := cast(f32x8) (0xff & simd.shr(original_pixel,  8) )
+                pixel_b := cast(f32x8) (0xff & simd.shr(original_pixel,  16))
+                pixel_a := cast(f32x8) (0xff & simd.shr(original_pixel,  24))
+                
+                // NOTE(viktor): srgb to linear
+                pixel_r = square(pixel_r)
+                pixel_g = square(pixel_g)
+                pixel_b = square(pixel_b)
+                // TODO(viktor): Maybe we should blend the edges to mitigate aliasing for rotated rectangles
+                
+                // NOTE(viktor): blend with target pixel
+                blended_r := inv_color_a * pixel_r + color_r
+                blended_g := inv_color_a * pixel_g + color_g
+                blended_b := inv_color_a * pixel_b + color_b
+                blended_a := inv_color_a * pixel_a + color_a
+
+                // NOTE(viktor): linear to srgb
+                blended_r = square_root(blended_r)
+                blended_g = square_root(blended_g)
+                blended_b = square_root(blended_b)
+
+                intr := cast(u32x8) blended_r
+                intg := cast(u32x8) blended_g
+                intb := cast(u32x8) blended_b
+                inta := cast(u32x8) blended_a
+                
+                mixed := intr | simd.shl_masked(intg, 8) | simd.shl_masked(intb, 16) | simd.shl_masked(inta, 24)
+
+                simd.masked_store(&pixel[0], mixed, write_mask)
+            }
         }
     }
 }

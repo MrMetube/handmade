@@ -65,7 +65,8 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
 
 
 
-// ---------------------- Internal stuff
+////////////////////////////////////////////////
+// Internal stuff
 
 
 

@@ -5,6 +5,18 @@ import "base:intrinsics"
 import "core:reflect"
 import "core:fmt"
 
+/*
+    ////////////////////////////////////////////////
+    
+    - Anywhere in the code debug events can be cheaply registered
+    - This is a thread safe operation
+    - At the end of the frame we collate all these events 
+    - To track data we collect events of interest into elements
+    - an element keep a history of values
+    
+    ////////////////////////////////////////////////
+*/
+
 // TODO(viktor): "Mark Loop Point" as debug action
 // TODO(viktor): pause/unpause profiling
 
@@ -22,7 +34,7 @@ DebugMaxRegionsPerFrame :: 15000     when DebugEnabled else 0
 
 DebugState :: struct {
     initialized: b32,
-    paused:       b32,
+    paused:      b32,
     
     arena: Arena,
 
@@ -337,7 +349,8 @@ DebugExecutingProcess :: struct {
 
 @export
 debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
-    when !INTERNAL do return
+    when !DebugEnabled do return
+    
     assert(len(memory.debug_storage) >= size_of(DebugState))
     debug := cast(^DebugState) raw_data(memory.debug_storage)
     
@@ -826,7 +839,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
 
         lane_height :f32
         if frame_count > 0 && lane_count > 0 {
-            lane_height = ((rectangle_get_diameter(rect).y / frame_count) - bar_padding) / lane_count
+            lane_height = ((rectangle_get_dimension(rect).y / frame_count) - bar_padding) / lane_count
         }
         
         bar_height       := lane_height * lane_count
@@ -834,7 +847,7 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
         
         chart_left  := rect.min.x
         chart_top   := rect.max.y - bar_plus_spacing
-        chart_width := rectangle_get_diameter(rect).x
+        chart_width := rectangle_get_dimension(rect).x
         
         scale := frame_bar_scale * chart_width
         
@@ -1196,7 +1209,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         text := fmt.tprint(expanded ? "-" : "+", last_slash != 0 ? value.name[last_slash+1:] : value.name)
                         text_bounds := debug_measure_text(debug, text)
                         
-                        size := v2{ rectangle_get_diameter(text_bounds).x, layout.line_advance }
+                        size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
                         
                         element := begin_ui_element_rectangle(&layout, &size)
                         set_ui_element_default_interaction(&element, toggle)
@@ -1347,7 +1360,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             
             text_bounds := debug_measure_text(debug, text)
             
-            size := v2{ rectangle_get_diameter(text_bounds).x, layout.line_advance }
+            size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
             
             element := begin_ui_element_rectangle(layout, &size)
             set_ui_element_default_interaction(&element, autodetect_interaction)

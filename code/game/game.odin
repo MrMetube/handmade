@@ -25,7 +25,6 @@ INTERNAL :: #config(INTERNAL, false)
         - Fix clicking Bug at the end of samples
     
     - Rendering
-        - Get rid of "even" scan line notion?
         - Real projections with solid concept of project/unproject
         - Straighten out all coordinate systems!
             - Screen
@@ -278,12 +277,12 @@ debug_get_game_assets_and_work_queue :: proc(memory: ^GameMemory) -> (assets: ^A
 update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     Platform = memory.Platform_api
     
-    when INTERNAL {
+    when DebugEnabled {
         if memory.debug_storage == nil do return
         assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
         GlobalDebugMemory = memory
     }
-        
+    
     ground_buffer_size :: 512
     
     ////////////////////////////////////////////////
@@ -598,7 +597,6 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
     ////////////////////////////////////////////////
     // Update and Render
-    // 
     
     if debug_variable(b32, "Rendering/TestWeirdScreenSizes") {
         // NOTE(viktor): enable this to test weird screen sizes
@@ -607,25 +605,43 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         buffer.height = 719
     }
     
-    // TODO(viktor): decide what out push_buffer size is
     render_memory := begin_temporary_memory(&tran_state.arena)
+    // TODO(viktor): decide what our push_buffer size is
+    render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
+    begin_render(render_group)
+
+    update_and_render_game(state, tran_state, render_group, buffer, input)
+    
+    end_render(render_group)
+    end_temporary_memory(render_memory)
+    
+    check_arena(&state.world_arena)
+    check_arena(&tran_state.arena)
+}
+
+// NOTE: at the moment this has to be a really fast function. It shall not be slower than a
+// millisecond or so.
+// TODO: reduce the pressure on the performance of this function by measuring
+// TODO: Allow sample offsets here for more robust platform options
+@export 
+output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
+    state      := cast(^State)          raw_data(memory.permanent_storage)
+    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
+    
+    output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
+}
+
+update_and_render_game :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, buffer: Bitmap, input: Input) {
+    world := state.world
     
     monitor_width_in_meters :: 0.635
     buffer_size := [2]i32{buffer.width, buffer.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
-    begin_render(render_group)
-
-    // orthographic(render_group, buffer_size, 1)
-    // clear(render_group, Red)
-    // push_rectangle(render_group, rectangle_center_diameter(input.mouse.p, 6), Blue)
-    
     focal_length, distance_above_ground : f32 = 0.6, 8
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     clear(render_group, Red)
-    
     
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
@@ -699,9 +715,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     camera_sim_region := begin_sim(&tran_state.arena, state, world, sim_origin, sim_bounds, input.delta_time)
     
     if debug_variable(b32, "Rendering/Bounds/ShowRenderAndSimulationBounds") {
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(screen_bounds)),                         Yellow,0.1)
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(camera_sim_region.bounds).xy),           Blue,  0.2)
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_diameter(camera_sim_region.updatable_bounds).xy), Green, 0.2)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(screen_bounds)),                         Yellow,0.1)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           Blue,  0.2)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), Green, 0.2)
     }
     
     camera_p := world_difference(world, state.camera_p, sim_origin)
@@ -1028,8 +1044,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                 for x: i32; x < lod.width; x += checker_dim.x {
                     color := map_color[it_index]
                     size := vec_cast(f32, checker_dim)
-                    draw_rectangle(lod, rectangle_min_diameter(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)}, true)
-                    draw_rectangle(lod, rectangle_min_diameter(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)}, false)
+                    draw_rectangle(lod, rectangle_min_diameter(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)})
                     on = !on
                 }
                 row_on = !row_on
@@ -1080,32 +1095,14 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         }
 
     }
-
-    tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer)
-    end_render(render_group)
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.       
     end_sim(camera_sim_region, state)
-    
     end_temporary_memory(sim_memory)
-    end_temporary_memory(render_memory)
     
-    check_arena(&state.world_arena)
-    check_arena(&tran_state.arena)
-}
-
-// NOTE: at the moment this has to be a really fast function. It shall not be slower than a
-// millisecond or so.
-// TODO: reduce the pressure on the performance of this function by measuring
-// TODO: Allow sample offsets here for more robust platform options
-@export 
-output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
-    state      := cast(^State)          raw_data(memory.permanent_storage)
-    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
-    
-    output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
+    tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer)
 }
 
 begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {

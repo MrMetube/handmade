@@ -360,10 +360,10 @@ linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
     return result
 }
 
-@(require_results) rectangle_get_max      :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.max }
-@(require_results) rectangle_get_min      :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.min }
-@(require_results) rectangle_get_diameter :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
-@(require_results) rectangle_get_center   :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.min + 0.5 * (rect.max - rect.min) }
+@(require_results) rectangle_get_max       :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.max }
+@(require_results) rectangle_get_min       :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.min }
+@(require_results) rectangle_get_dimension :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
+@(require_results) rectangle_get_center    :: #force_inline proc(rect: Rectangle($T)) -> (result: T) { return rect.min + 0.5 * (rect.max - rect.min) }
 
 @(require_results) rectangle_add_radius :: #force_inline proc(rect: $R/Rectangle($T), radius: T) -> (result: R) {
     result = rect

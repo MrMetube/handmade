@@ -32,8 +32,8 @@ LowPriorityWorkQueueThreadCount  :: 2
 
 
 // Resolution :: [2]i32 {2560, 1440}
-// Resolution :: [2]i32 {1920, 1080}
-Resolution :: [2]i32 {1280, 720}
+Resolution :: [2]i32 {1920, 1080}
+// Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
 MonitorRefreshHz: u32 : 72
@@ -60,7 +60,6 @@ GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMEN
 
 ////////////////////////////////////////////////
 //  Types
-//   
 
 SoundOutput :: struct {
     samples_per_second:   u32,
@@ -655,7 +654,6 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 // Exports to the game
-//
 
 allocate_memory : PlatformAllocateMemory : proc(size: u64) -> (result: rawpointer) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -668,7 +666,6 @@ deallocate_memory : PlatformDeallocateMemory : proc(memory: rawpointer) {
 
 ////////////////////////////////////////////////
 // Performance Timers
-//
 
 get_wall_clock :: #force_inline proc() -> i64 {
     result: win.LARGE_INTEGER
@@ -682,7 +679,6 @@ get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
 
 ////////////////////////////////////////////////   
 //  Record and Replay
-//   
 
 get_record_replay_filepath :: proc(state: PlatformState, index:i32) -> win.wstring {
     return build_exe_path(state, fmt.tprintf("editloop_%d.input", index))
