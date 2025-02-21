@@ -72,84 +72,82 @@ get_entity_ground_point_with_p :: #force_inline proc(entity: ^Entity, for_entity
     return result
 }
 
-get_low_entity :: #force_inline proc(state: ^State, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
-    if storage_index > 0 && storage_index <= state.stored_entity_count {
-        entity = &state.stored_entities[storage_index]
+get_low_entity :: #force_inline proc(world: ^World, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
+    if storage_index > 0 && storage_index <= world.stored_entity_count {
+        entity = &world.stored_entities[storage_index]
     }
 
     return entity
 }
 
-add_stored_entity :: proc(state: ^State, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    assert(state.world != nil)
-    
-    index = state.stored_entity_count
-    state.stored_entity_count += 1
-    assert(state.stored_entity_count < len(state.stored_entities))
-    stored = &state.stored_entities[index]
+add_stored_entity :: proc(world: ^World, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+    index = world.stored_entity_count
+    world.stored_entity_count += 1
+    assert(world.stored_entity_count < len(world.stored_entities))
+    stored = &world.stored_entities[index]
     stored.sim = { type = type }
 
-    stored.sim.collision = state.null_collision
+    stored.sim.collision = world.null_collision
     stored.p = null_position()
 
-    change_entity_location(&state.world_arena, state.world, index, stored, p)
+    change_entity_location(&world.arena, world, index, stored, p)
 
     return index, stored
 }
 
-add_grounded_entity :: proc(state: ^State, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    index, stored = add_stored_entity(state, type, p)
+add_grounded_entity :: proc(world: ^World, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
+    index, stored = add_stored_entity(world, type, p)
     stored.sim.collision = collision
 
     return index, stored
 }
 
-add_arrow :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_stored_entity(state, .Arrow, null_position())
+add_arrow :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_stored_entity(world, .Arrow, null_position())
     
-    entity.sim.collision = state.arrow_collision
+    entity.sim.collision = world.arrow_collision
     entity.sim.flags += {.Moveable}
 
     return index, entity
 }
 
-add_wall :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Wall, p, state.wall_collision)
+add_wall :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .Wall, p, world.wall_collision)
 
     entity.sim.flags += {.Collides}
 
     return index, entity
 }
 
-add_stairs :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Stairwell, p, state.stairs_collision)
+add_stairs :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .Stairwell, p, world.stairs_collision)
 
     entity.sim.flags += {.Collides}
-    entity.sim.walkable_height = state.typical_floor_height
+    entity.sim.walkable_height = world.typical_floor_height
     entity.sim.walkable_dim    = rectangle_get_dimension(entity.sim.collision.total_volume).xy
 
     return index, entity
 }
 
-add_player :: proc(state: ^State) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Hero, state.camera_p, state.player_collision)
+add_player :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .Hero, world.camera_p, world.player_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
 
-    arrow_index, _ := add_arrow(state)
+    arrow_index, _ := add_arrow(world)
     entity.sim.arrow.index = arrow_index
 
-    if state.camera_following_index == 0 {
-        state.camera_following_index = index
+    if world.camera_following_index == 0 {
+        world.camera_following_index = index
     }
 
     return index, entity
 }
 
-add_monster :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Monster, p, state.monstar_collision)
+add_monster :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .Monster, p, world.monstar_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
 
@@ -158,16 +156,16 @@ add_monster :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, en
     return index, entity
 }
 
-add_familiar :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Familiar, p, state.familiar_collision)
+add_familiar :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .Familiar, p, world.familiar_collision)
 
     entity.sim.flags += {.Moveable}
 
     return index, entity
 }
 
-add_standart_room :: proc(state: ^State, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(state, .Space, p, state.standart_room_collision)
+add_standart_room :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .Space, p, world.standart_room_collision)
 
     entity.sim.flags += { .Traversable }
 
@@ -183,15 +181,15 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     }
 }
 
-add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32) {
+add_collision_rule :: proc(world:^World, a, b: StorageIndex, should_collide: b32) {
     timed_function()
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do a, b = b, a
     // TODO(viktor): BETTER HASH FUNCTION!!!
     found: ^PairwiseCollsionRule
-    hash_bucket := a & (len(state.collision_rule_hash) - 1)
-    for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
+    hash_bucket := a & (len(world.collision_rule_hash) - 1)
+    for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
         if rule.index_a == a && rule.index_b == b {
             found = rule
             break
@@ -199,8 +197,8 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
     }
 
     if found == nil {
-        found = list_pop(&state.first_free_collision_rule) or_else push(&state.world_arena, PairwiseCollsionRule)
-        list_push(&state.collision_rule_hash[hash_bucket], found)
+        found = list_pop(&world.first_free_collision_rule) or_else push(&world.arena, PairwiseCollsionRule)
+        list_push(&world.collision_rule_hash[hash_bucket], found)
     }
 
     if found != nil {
@@ -210,7 +208,7 @@ add_collision_rule :: proc(state:^State, a, b: StorageIndex, should_collide: b32
     }
 }
 
-clear_collision_rules :: proc(state: ^State, storage_index: StorageIndex) {
+clear_collision_rules :: proc(world: ^World, storage_index: StorageIndex) {
     timed_function()
     // TODO(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
@@ -222,12 +220,12 @@ clear_collision_rules :: proc(state: ^State, storage_index: StorageIndex) {
     // of the free list, and when you're done, do a pass through all
     // the new things on the free list, and remove the reverse of
     // those pairs.
-    for hash_bucket in 0..<len(state.collision_rule_hash) {
-        for rule_pointer := &state.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
+    for hash_bucket in 0..<len(world.collision_rule_hash) {
+        for rule_pointer := &world.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
             rule := rule_pointer^
             if rule.index_a == storage_index || rule.index_b == storage_index {
                 // :ListEntryRemovalInLoop
-                list_push(&state.first_free_collision_rule, rule)
+                list_push(&world.first_free_collision_rule, rule)
                 rule_pointer^ = rule.next
             } else {
                 rule_pointer = &rule.next

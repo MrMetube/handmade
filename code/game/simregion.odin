@@ -65,7 +65,7 @@ SimRegion :: struct {
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
-begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
+begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     timed_function()
     // TODO(viktor): make storedEntities part of world
     region = push(sim_arena, SimRegion)
@@ -96,12 +96,12 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: World
                 if chunk != nil {
                     for block := &chunk.first_block; block != nil; block = block.next {
                         for storage_index in block.indices[:block.entity_count] {
-                            stored := &state.stored_entities[storage_index]
+                            stored := &world.stored_entities[storage_index]
                             if .Nonspatial not_in stored.sim.flags {
                                 sim_space_p := get_sim_space_p(region, stored)
                                 if entity_overlaps_rectangle(region.bounds, sim_space_p, stored.sim.collision.total_volume) {
                                     // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
-                                    add_entity(state, region, storage_index, stored, &sim_space_p)
+                                    add_entity(region, storage_index, stored, &sim_space_p)
                                 }
                             }
                         }
@@ -114,12 +114,12 @@ begin_sim :: proc(sim_arena: ^Arena, state: ^State, world: ^World, origin: World
     return region
 }
 
-end_sim :: proc(region: ^SimRegion, state: ^State) {
+end_sim :: proc(region: ^SimRegion) {
     timed_function()
-    // TODO(viktor): make storedEntities part of world
+
     for entity in region.entities[:region.entity_count] {
         assert(entity.storage_index != 0)
-        stored := &state.stored_entities[entity.storage_index]
+        stored := &region.world.stored_entities[entity.storage_index]
         
         assert(.Simulated in entity.flags)
         stored.sim = entity
@@ -129,14 +129,14 @@ end_sim :: proc(region: ^SimRegion, state: ^State) {
         store_entity_reference(&stored.sim.arrow)
         // TODO(viktor): Save state back to stored entity, once high entities do state decompression
         
-        new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(state.world, region.origin, entity.p)
-        change_entity_location(&state.world_arena, region.world, entity.storage_index, stored, new_p)
+        new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(region.world, region.origin, entity.p)
+        change_entity_location(&region.world.arena, region.world, entity.storage_index, stored, new_p)
         
-        if entity.storage_index == state.camera_following_index {
+        if entity.storage_index == region.world.camera_following_index {
             new_camera_p: WorldPosition
             new_camera_p.chunk  = stored.p.chunk
             new_camera_p.offset = stored.p.offset
-            state.camera_p = new_camera_p
+            region.world.camera_p = new_camera_p
         }
     }
 }
@@ -164,14 +164,14 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
     return result
 }
 
-load_entity_reference :: #force_inline proc(state: ^State, region: ^SimRegion, ref: ^EntityReference) {
+load_entity_reference :: #force_inline proc(region: ^SimRegion, ref: ^EntityReference) {
     if ref.index != 0 {
         entry := get_hash_from_index(region, ref.index)
         if entry.ptr == nil {
             entry.index = ref.index
-            entity := get_low_entity(state, ref.index)
+            entity := get_low_entity(region.world, ref.index)
             p := get_sim_space_p(region, entity)
-            entry.ptr = add_entity(state, region, ref.index, entity, &p)
+            entry.ptr = add_entity(region, ref.index, entity, &p)
         }
         ref.ptr = entry.ptr
     }
@@ -183,8 +183,8 @@ store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
     }
 }
 
-add_entity :: #force_inline proc(state: ^State, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
-    dest = add_entity_raw(state, region, storage_index, source)
+add_entity :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
+    dest = add_entity_raw(region, storage_index, source)
     
     if dest != nil {
         if sim_p != nil {
@@ -198,7 +198,7 @@ add_entity :: #force_inline proc(state: ^State, region: ^SimRegion, storage_inde
     return dest
 }
 
-add_entity_raw :: proc(state: ^State, region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity) -> (entity: ^Entity) {
+add_entity_raw :: proc(region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity) -> (entity: ^Entity) {
     assert(storage_index != 0)
     
     entry := get_hash_from_index(region, storage_index)
@@ -214,7 +214,7 @@ add_entity_raw :: proc(state: ^State, region: ^SimRegion, storage_index: Storage
             // TODO(viktor): this should really be a decompression not a copy
             entity^ = source.sim
             
-            load_entity_reference(state, region, &entity.arrow)
+            load_entity_reference(region, &entity.arrow)
             
             assert(.Simulated not_in entity.flags)
             entity.flags += { .Simulated }
@@ -251,7 +251,7 @@ default_move_spec :: #force_inline proc() -> MoveSpec {
 }
 
 
-move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
+move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
     timed_function()
     assert(.Nonspatial not_in entity.flags)
     
@@ -313,8 +313,8 @@ move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3,
                     // TODO(viktor): Robustness!
                     OverlapEpsilon :: 0.001
                     if .Traversable in test_entity.flags && entities_overlap(entity, &test_entity, OverlapEpsilon) ||
-                    can_collide(state, entity, &test_entity) {
-                        
+                    
+                    can_collide(region.world, entity, &test_entity) {
                         for volume in entity.collision.volumes {
                             for test_volume in test_entity.collision.volumes {
                                 minkowski_diameter := rectangle_get_dimension(volume) + rectangle_get_dimension(test_volume)
@@ -431,7 +431,7 @@ move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3,
             if hit != nil {
                 entity_delta = desired_p - entity.p
                 
-                stops_on_collision := handle_collision(state, entity, hit)
+                stops_on_collision := handle_collision(region.world, entity, hit)
                 if stops_on_collision {
                     entity.dp.xy    = project(entity.dp.xy, wall_normal)
                     entity_delta.xy = project(entity_delta.xy, wall_normal)
@@ -450,8 +450,8 @@ move_entity :: proc(state: ^State, region: ^SimRegion, entity: ^Entity, ddp: v3,
         // TODO(viktor): handle collision percisly by moving it into the collision loop
         // TODO(viktor): spatial partition here
         for &test_entity in region.entities[:region.entity_count] {
-            if can_overlap(state, entity, &test_entity) && entities_overlap(entity, &test_entity) {
-                handle_overlap(state, entity, &test_entity, dt, &ground)
+            if can_overlap(entity, &test_entity) && entities_overlap(entity, &test_entity) {
+                handle_overlap(entity, &test_entity, dt, &ground)
             }
         }
     }
@@ -493,7 +493,7 @@ entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
     return result
 }
 
-can_collide :: proc(state:^State, a, b: ^Entity) -> (result: b32) {
+can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
         if a.storage_index > b.storage_index do a, b = b, a
@@ -505,8 +505,8 @@ can_collide :: proc(state:^State, a, b: ^Entity) -> (result: b32) {
             }
             
             // TODO(viktor): BETTER HASH FUNCTION!!!
-            hash_bucket := a.storage_index & (len(state.collision_rule_hash) - 1)
-            for rule := state.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
+            hash_bucket := a.storage_index & (len(world.collision_rule_hash) - 1)
+            for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
                 if rule.index_a == a.storage_index && rule.index_b == b.storage_index {
                     result = rule.can_collide
                     break
@@ -527,7 +527,7 @@ get_stair_ground :: #force_inline proc(region: ^Entity, at_ground_point: v3) -> 
     return result
 }
 
-handle_overlap :: proc(state: ^State, mover, region: ^Entity, dt: f32, ground: ^f32) {
+handle_overlap :: proc(mover, region: ^Entity, dt: f32, ground: ^f32) {
     if region.type == .Stairwell {
         ground^ = get_stair_ground(region, get_entity_ground_point(mover))
     }
@@ -544,12 +544,12 @@ speculative_collide :: proc(mover, region: ^Entity, test_p: v3) -> (result: b32 
     return result
 }
 
-handle_collision :: proc(state: ^State, a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc(world: ^World, a, b: ^Entity) -> (stops_on_collision: b32) {
     a, b := a, b
     if a.type > b.type do a, b = b, a
     
     if b.type == .Arrow {
-        add_collision_rule(state, a.storage_index, b.storage_index, false)
+        add_collision_rule(world, a.storage_index, b.storage_index, false)
         stops_on_collision = false
     } else {
         stops_on_collision = true
@@ -564,7 +564,7 @@ handle_collision :: proc(state: ^State, a, b: ^Entity) -> (stops_on_collision: b
     return stops_on_collision
 }
 
-can_overlap :: proc(state:^State, mover, region: ^Entity) -> (result: b32) {
+can_overlap :: proc(mover, region: ^Entity) -> (result: b32) {
     if mover != region {
         if region.type == .Stairwell {
             result = true

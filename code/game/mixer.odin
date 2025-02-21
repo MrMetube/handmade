@@ -8,13 +8,13 @@ Sample :: [2]i16
 
 @common 
 GameSoundBuffer :: struct {
-    // NOTE(viktor): samples length must be padded to a multiple of 4 samples
+    // NOTE(viktor): Samples length must be padded to a multiple of 4 samples.
     samples:            []Sample,
     samples_per_second: u32,
 }
 
 Mixer :: struct {
-    permanent_arena:          ^Arena,
+    permanent_arena:          Arena,
     first_playing_sound:      ^PlayingSound,
     first_free_playing_sound: ^PlayingSound,
     
@@ -40,15 +40,13 @@ PlayingSoundData :: struct {
     d_current_volume: [2]f32,
 }
 
-init_mixer :: proc(mixer: ^Mixer, arena: ^Arena) {
-    mixer^ = {
-        permanent_arena = arena,
-        master_volume = 1,
-    }
+init_mixer :: proc(mixer: ^Mixer, parent_arena: ^Arena) {
+    mixer.master_volume = 0.2
+    sub_arena(&mixer.permanent_arena, parent_arena, 1 * Megabyte)
 }
 
 play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
-    playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(mixer.permanent_arena, PlayingSound)
+    playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound)
     
     // TODO(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound^ = {
