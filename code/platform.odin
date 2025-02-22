@@ -616,7 +616,9 @@ main :: proc() {
             if seconds_elapsed_for_frame < target_seconds_per_frame {
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
-                    if sleep_ms > 0 do win.Sleep(cast(u32) sleep_ms)
+                    if sleep_ms > 0 { 
+                        win.Sleep(cast(u32) sleep_ms)
+                    }
                 }
                 test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
                 if test_seconds_elapsed < target_seconds_per_frame {

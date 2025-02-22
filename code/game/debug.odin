@@ -369,7 +369,6 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         }
         
         debug.root_group = create_group(debug, "Root")
-        // add_element_to_group(debug, debug.root_group, create_event(debug, Profile{}, "Profile"))
         
         list_init_sentinel(&debug.tree_sentinel)
         
@@ -402,7 +401,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     collate_debug_records(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
     overlay_debug_info(debug, input)
     
-    tiled_render_group_to_output(debug.work_queue, debug.render_group, debug.buffer)
+    tiled_render_group_to_output(debug.work_queue, debug.render_group, debug.buffer, &debug.arena)
     end_render(debug.render_group)
     
     debug.next_hot_interaction = {}
@@ -550,7 +549,7 @@ new_frame :: proc(debug: ^DebugState, begin_clock: i64) -> (result: ^DebugFrame)
         result, ok = list_pop(&debug.first_free_frame)
         if !ok {
             if arena_has_room(&debug.per_frame_arena, DebugFrame) {
-                result = push(&debug.per_frame_arena, DebugFrame)
+                result = push(&debug.per_frame_arena, DebugFrame, no_clear())
             } else {
                 free_oldest_frame(debug)
             }
@@ -576,7 +575,7 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
         result, ok = list_pop(&debug.first_free_stored_event)
         if !ok {
             if arena_has_room(&debug.per_frame_arena, DebugStoredEvent) {
-                result = push(&debug.per_frame_arena, DebugStoredEvent)
+                result = push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
             } else {
                 free_oldest_frame(debug)
             }
@@ -657,7 +656,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         thread: ^DebugThread
         for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {}
         if thread == nil {
-            thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread)
+            thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
             thread^ = { thread_index = event.thread_index }
             
             list_push(&debug.thread, thread)
@@ -763,7 +762,7 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
     if result != nil {
         thread.first_free_block = result.next_free
     } else {
-        result = push(&debug.arena, DebugOpenBlock)
+        result = push(&debug.arena, DebugOpenBlock, no_clear())
     }
     
     result ^= {
@@ -1418,7 +1417,7 @@ get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventGro
 }
 
 add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (result: ^DebugTree) {
-    result = push(&debug.arena, DebugTree)
+    result = push(&debug.arena, DebugTree, no_clear())
     result^ = {
         root = root,
         p = p,
@@ -1431,17 +1430,8 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (result: 
 
 create_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEventGroup) {
     result = push(&debug.arena, DebugEventGroup)
-    result.name = push_string(&debug.arena, name)
+    result.name = copy_string(&debug.arena, name)
     list_init_sentinel(&result.sentinel)
-    
-    return result
-}
-
-create_event :: proc(debug: ^DebugState, value: $T, name: string) -> (result: ^DebugEvent) {
-    result = push(&debug.arena, DebugEvent)
-    
-    result.value = value
-    result.loc.name = push_string(&debug.arena, name)
     
     return result
 }

@@ -664,8 +664,7 @@ is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
 }
 
 make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGroup) {
-    result = push(&world.arena, EntityCollisionVolumeGroup)
-
+    result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result^ = {}
     
     return result
@@ -673,10 +672,12 @@ make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGro
 
 make_simple_grounded_collision :: proc(world: ^World, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
-    result = push(&world.arena, EntityCollisionVolumeGroup)
-    result.volumes = push(&world.arena, Rectangle3, 1)
+    result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
+    result^ = {
+        total_volume = rectangle_center_diameter(v3{0, 0, 0.5*size.z}, size),
+        volumes = push(&world.arena, Rectangle3, 1),
+    }
     
-    result.total_volume = rectangle_center_diameter(v3{0, 0, 0.5*size.z}, size)
     result.volumes[0] = result.total_volume
 
     return result
@@ -895,10 +896,9 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
             }
         }
     }
-    
     assert(all_assets_valid(render_group))
     
-    render_group_to_output(render_group, bitmap^)
+    render_group_to_output(render_group, bitmap^, &work.task.arena)
     
     end_render(render_group)
     
@@ -907,7 +907,7 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 
 fill_ground_chunk :: proc(tran_state: ^TransientState, world: ^World, ground_buffer: ^GroundBuffer, p: WorldPosition){
     if task := begin_task_with_memory(tran_state); task != nil {
-        work := push(&task.arena, FillGroundChunkWork)
+        work := push(&task.arena, FillGroundChunkWork, no_clear())
             
         work^ = {
             task = task,

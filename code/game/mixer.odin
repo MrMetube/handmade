@@ -46,7 +46,7 @@ init_mixer :: proc(mixer: ^Mixer, parent_arena: ^Arena) {
 }
 
 play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
-    playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound)
+    playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound, no_clear())
     
     // TODO(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound^ = {
@@ -91,8 +91,9 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
     assert((sample_count & 3) == 0)
     chunk_count := sample_count / 4
     
-    real_channel_0 := push(temporary_arena, f32x4, chunk_count, clear_to_zero = false, alignment = 16)
-    real_channel_1 := push(temporary_arena, f32x4, chunk_count, clear_to_zero = false, alignment = 16)
+    // TODO(viktor): Do we not just want to clear the channels here
+    real_channel_0 := push(temporary_arena, f32x4, chunk_count, align_no_clear(16))
+    real_channel_1 := push(temporary_arena, f32x4, chunk_count, align_no_clear(16))
     
     // NOTE(viktor): clear out the summation channels
     #no_bounds_check for i in 0..<len(real_channel_0) {

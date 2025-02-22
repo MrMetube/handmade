@@ -45,8 +45,9 @@ RenderGroup :: struct {
     renders_in_background: b32,
     generation_id:         AssetGenerationId,
     
-    push_buffer:      []u8,
-    push_buffer_size: u32,
+    push_buffer:               []u8,
+    push_buffer_size:          u32,
+    push_buffer_element_count: u32,
     
     transform:                       Transform,
     global_alpha:                    f32,
@@ -124,8 +125,9 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
         max_push_buffer_size = arena_remaining_size(arena)
     }
     
-    result.push_buffer = push(arena, u8, max_push_buffer_size)
+    result.push_buffer = push(arena, u8, max_push_buffer_size, no_clear())
     result.push_buffer_size = 0
+    result.push_buffer_element_count = 0
     
     result.global_alpha = 1
     result.transform.scale  = 1
@@ -149,6 +151,7 @@ end_render :: proc(group: ^RenderGroup) {
     
     end_generation(group.assets, group.generation_id)
     group.push_buffer_size = 0
+    group.push_buffer_element_count = 0
     group.inside_render = false
 }
 
@@ -201,6 +204,7 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
         result = cast(^T) &group.push_buffer[group.push_buffer_size + header_size]
 
         group.push_buffer_size += size
+        group.push_buffer_element_count += 1
     } else {
         unreachable()
     }
@@ -425,7 +429,13 @@ TileRenderWork :: struct {
     group:  ^RenderGroup, 
     target: Bitmap,
     
-    clip_rect: Rectangle2i, 
+     clip_rect: Rectangle2i, 
+    sort_space: []TileSortEntry,
+}
+
+TileSortEntry :: struct {
+    sort_key:           f32,
+    push_buffer_offset: u32,
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
@@ -438,11 +448,14 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     render_to_output(data.group, data.target, data.clip_rect)
 }
 
-tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap) {
+tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
     timed_function()
     assert(group.inside_render)
     assert(group.transform != {})
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
+    
+    temp := begin_temporary_memory(temp_arena)
+    defer end_temporary_memory(temp)
     
     /* TODO(viktor):
         - Make sure the tiles are all cache-aligned
@@ -453,7 +466,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
     */
     
     tile_count :: [2]i32{4, 4}
-    work: [tile_count.x * tile_count.y]TileRenderWork
+    works: [tile_count.x * tile_count.y]TileRenderWork
     
     tile_size  := [2]i32{target.width, target.height} / tile_count
     tile_size.x = ((tile_size.x + (3)) / 4) * 4
@@ -461,38 +474,46 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
     work_index: i32
     for y in 0..<tile_count.y {
         for x in 0..<tile_count.x {
-            it := &work[work_index]
+            work := &works[work_index]
+            defer work_index += 1
             
-            it.group = group
-            it.target = target
+            work^ = {
+                group  = group,
+                target = target,
+                clip_rect = {
+                    min = tile_size * {x, y},
+                },
+                
+                sort_space = push(temp_arena, TileSortEntry, group.push_buffer_element_count),
+            }
             
-            it.clip_rect.min = tile_size * {x, y}
-            it.clip_rect.max = it.clip_rect.min + tile_size
+            work.clip_rect.max = work.clip_rect.min + tile_size
             
             if x == tile_count.x-1 {
-                it.clip_rect.max.x = target.width
+                work.clip_rect.max.x = target.width
             }
             if y == tile_count.y-1 {
-                it.clip_rect.max.y = target.height
+                work.clip_rect.max.y = target.height
             }
             
             if debug_variable(b32, "Rendering/RenderSingleThreaded") {
-                do_tile_render_work(it)
+                do_tile_render_work(work)
             } else {
-                Platform.enqueue_work(queue, do_tile_render_work, it)
+                Platform.enqueue_work(queue, do_tile_render_work, work)
             }
-            
-            work_index += 1
         }
     }
 
     Platform.complete_all_work(queue)
 }
 
-render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
+render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
     timed_function()
     assert(group.inside_render)
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
+    
+    temp := begin_temporary_memory(temp_arena)
+    defer end_temporary_memory(temp)
     
     work := TileRenderWork{
         group = group,
@@ -501,6 +522,7 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap) {
             min = 0,
             max = {target.width, target.height},
         },
+        sort_space = push(temp_arena, TileSortEntry, group.push_buffer_element_count)
     }
     
     do_tile_render_work(&work)

@@ -101,15 +101,14 @@ Font :: struct {
 ////////////////////////////////////////////////
 
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
-    assets = push(arena, Assets, clear_to_zero = true)
+    assets = push(arena, Assets)
     
     list_init_sentinel(&assets.memory_sentinel)
     
     insert_block(&assets.memory_sentinel, push(arena, memory_size), memory_size)
+    list_init_sentinel(&assets.loaded_asset_sentinel)
     
     assets.tran_state = tran_state
-    
-    list_init_sentinel(&assets.loaded_asset_sentinel)
     
     for &range in assets.tag_ranges {
         range = 1_000_000_000
@@ -711,7 +710,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
                 if immediate {
                     load_asset_work_immediatly(&work)
                 } else {
-                    task_work := push(&task.arena, LoadAssetWork)
+                    task_work := push(&task.arena, LoadAssetWork, no_clear())
                     task_work^ = work
                     Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
                 }

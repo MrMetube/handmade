@@ -290,7 +290,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         state.mixer.master_volume = 0.1
         
         // TODO(viktor): pick a real number here!
-        tran_state.ground_buffers = push(&state.world.arena, GroundBuffer, 256)
+        tran_state.ground_buffers = push(&state.world.arena, GroundBuffer, 256, no_clear())
         for &ground_buffer in tran_state.ground_buffers {
             ground_buffer.p = null_position()
             ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
@@ -479,7 +479,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     update_and_render_world(&state.world, tran_state, render_group, buffer, input)
     
     if all_assets_valid(render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
-        tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer)
+        tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
     }
     end_render(render_group)
     
@@ -607,7 +607,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
-        memory = push(arena, ByteColor, (dim.x * dim.y), clear_to_zero = clear_to_zero, alignment = 32),
+        memory = push(arena, ByteColor, (dim.x * dim.y), align_clear(32, clear_to_zero)),
         width  = dim.x,
         height = dim.y,
         width_over_height = safe_ratio_1(cast(f32) dim.x,  cast(f32) dim.y),
