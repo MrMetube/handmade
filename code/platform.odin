@@ -36,7 +36,7 @@ Resolution :: [2]i32 {1920, 1080}
 // Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 72
+MonitorRefreshHz: u32 : 30
 
 
 PermanentStorageSize :: 256 * Megabyte
@@ -612,7 +612,6 @@ main :: proc() {
         
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
-
             if seconds_elapsed_for_frame < target_seconds_per_frame {
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
@@ -629,6 +628,7 @@ main :: proc() {
                 }
             } else {
                 // @Logging Missed frame, maybe because window was moved
+                fmt.println("Missed frame")
             }
         }
         

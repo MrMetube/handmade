@@ -57,8 +57,8 @@ push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, params :
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
     size := size_init + alignment_offset
-    assert(arena.used + size < cast(u64)len(arena.storage))
-    // IMPORTANT TODO(viktor): This is not thread safe!
+    assert(arena.used + size < cast(u64) len(arena.storage))
+    
     result = &arena.storage[arena.used + alignment_offset]
     arena.used += size
     

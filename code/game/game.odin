@@ -282,7 +282,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         
         for &task in tran_state.tasks {
             task.in_use = false
-            sub_arena(&task.arena, &tran_state.arena, 2 * Megabyte)
+            sub_arena(&task.arena, &tran_state.arena, 16 * Megabyte)
         }
 
         tran_state.assets = make_assets(&tran_state.arena, 64 * Megabyte, tran_state)

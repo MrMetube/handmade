@@ -395,7 +395,7 @@ best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, we
 
     if type.first_asset_index != type.one_past_last_index {
         
-        best_diff := max(f32)
+        best_diff := PositiveInfinity
         for asset, asset_index in assets.assets[type.first_asset_index:type.one_past_last_index] {
     
             total_weight_diff: f32

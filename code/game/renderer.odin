@@ -45,8 +45,11 @@ RenderGroup :: struct {
     renders_in_background: b32,
     generation_id:         AssetGenerationId,
     
+    // NOTE(viktor): Expandable Array of disjoint elements, i.e. packed.
     push_buffer:               []u8,
     push_buffer_size:          u32,
+    
+    sort_entry_at:             u32,
     push_buffer_element_count: u32,
     
     transform:                       Transform,
@@ -57,16 +60,16 @@ RenderGroup :: struct {
 }
 
 Transform :: struct {
-    meters_to_pixels_for_monitor: f32,
+    mode: TransformMode,
+    
     screen_center:                v2,
+    meters_to_pixels_for_monitor: f32,
     
     focal_length:          f32, // meters the player is sitting from their monitor
     distance_above_target: f32,
     
     scale:  f32,
     offset: v3,
-    
-    mode: TransformMode,
 }
 
 TransformMode :: enum {
@@ -98,8 +101,8 @@ RenderGroupEntryBitmap :: struct {
 }
 
 RenderGroupEntryRectangle :: struct {
-    color:  v4,
-    rect: Rectangle2,
+    color: v4,
+    rect:  Rectangle2,
 }
 
 RenderGroupEntryCoordinateSystem :: struct {
@@ -112,9 +115,38 @@ RenderGroupEntryCoordinateSystem :: struct {
     top, middle, bottom:    EnvironmentMap,
 }
 
+// TODO(viktor): Can we define the work and the do_work together, whilst
+// ensuring no loss of data/types... through the dll boundary?
+TileRenderWork :: struct {
+    group:  ^RenderGroup, 
+    target: Bitmap,
+    
+    clip_rect:  Rectangle2i, 
+    sort_space: []TileSortEntry,
+}
+
+TileSortEntry :: struct {
+    sort_key:           f32,
+    push_buffer_offset: u32,
+}
+
+UsedBitmapDim :: struct {
+    size:  v2,
+    align: v2,
+    p:     v3,
+    basis: ProjectedBasis,
+}
+
+ProjectedBasis :: struct {
+    p:        v2,
+    scale:    f32,
+    valid:    b32,
+    sort_key: f32,
+}
+
 make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: u64, renders_in_background: b32) -> (result: ^RenderGroup) {
     result = push(arena, RenderGroup)
-    
+    // nocheckin @Cleanup
     result.assets = assets
     result.renders_in_background = renders_in_background
     result.generation_id = 0
@@ -124,7 +156,7 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
     if max_push_buffer_size == 0 {
         max_push_buffer_size = arena_remaining_size(arena)
     }
-    
+        
     result.push_buffer = push(arena, u8, max_push_buffer_size, no_clear())
     result.push_buffer_size = 0
     result.push_buffer_element_count = 0
@@ -132,6 +164,8 @@ make_render_group :: proc(arena: ^Arena, assets: ^Assets, max_push_buffer_size: 
     result.global_alpha = 1
     result.transform.scale  = 1
     result.transform.offset = 0
+    
+    result.sort_entry_at = cast(u32) max_push_buffer_size
 
     return result
 }
@@ -155,35 +189,43 @@ end_render :: proc(group: ^RenderGroup) {
     group.inside_render = false
 }
 
-perspective :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
-    group.transform.mode = .Perspective
-    
-    group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
-    group.transform.meters_to_pixels_for_monitor = meters_to_pixels
+perspective :: #force_inline proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
     // TODO(viktor): need to adjust this based on buffer size
     pixels_to_meters := 1.0 / meters_to_pixels
-    group.monitor_half_diameter_in_meters = 0.5 * vec_cast(f32, pixel_size) * pixels_to_meters
+    pixel_size := vec_cast(f32, pixel_count)
+    group.monitor_half_diameter_in_meters = 0.5 * pixel_size * pixels_to_meters
     
-    
-    group.transform.distance_above_target = distance_above_target
-    group.transform.focal_length          = focal_length
-    group.transform.offset                = 0
-    group.transform.scale                 = 1
+    group.transform = {
+        mode = .Perspective,
+        
+        screen_center = 0.5 * pixel_size,
+        meters_to_pixels_for_monitor = meters_to_pixels,
+        
+        focal_length          = focal_length,
+        distance_above_target = distance_above_target,
+        
+        scale                 = 1,
+        offset                = 0,
+    }
 }
 
-orthographic :: #force_inline proc(group: ^RenderGroup, pixel_size: [2]i32, meters_to_pixels: f32) {
-    group.transform.mode = .Orthographic
-    
-    group.transform.screen_center = 0.5 * vec_cast(f32, pixel_size)
-    group.transform.meters_to_pixels_for_monitor = meters_to_pixels
+orthographic :: #force_inline proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels: f32) {
     // TODO(viktor): need to adjust this based on buffer size
+    pixel_size := vec_cast(f32, pixel_count)
     group.monitor_half_diameter_in_meters = 0.5 * meters_to_pixels
     
-    
-    group.transform.distance_above_target = 10
-    group.transform.focal_length          = 10
-    group.transform.offset                = 0
-    group.transform.scale                 = 1
+    group.transform = {
+        mode = .Orthographic,
+        
+        screen_center = 0.5 * pixel_size,
+        meters_to_pixels_for_monitor = meters_to_pixels,
+        
+        focal_length          = 10,
+        distance_above_target = 10,
+        
+        scale                 = 1,
+        offset                = 0,
+    }
 }
 
 all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
@@ -191,18 +233,28 @@ all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
     return result
 }
 
-push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
     assert(group.inside_render)
     assert(group.transform.mode != .None)
     
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
     size := cast(u32) size_of(T) + header_size
-    if group.push_buffer_size + size < auto_cast len(group.push_buffer) {
-        header := cast(^RenderGroupEntryHeader) &group.push_buffer[group.push_buffer_size]
+    
+    // :PointerArithmetic
+    if group.push_buffer_size + size < group.sort_entry_at - size_of(TileSortEntry) {
+        offset := group.push_buffer_size
+        header := cast(^RenderGroupEntryHeader) &group.push_buffer[offset]
         header.type = typeid_of(T)
 
-        result = cast(^T) &group.push_buffer[group.push_buffer_size + header_size]
+        result = cast(^T) &group.push_buffer[offset + header_size]
 
+        group.sort_entry_at -= size_of(TileSortEntry)
+        entry := cast(^TileSortEntry) &group.push_buffer[group.sort_entry_at]
+        entry^ = {
+            sort_key           = sort_key,
+            push_buffer_offset = offset
+        }
+        
         group.push_buffer_size += size
         group.push_buffer_element_count += 1
     } else {
@@ -213,9 +265,7 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid) -> (r
 }
 
 clear :: proc(group: ^RenderGroup, color: v4) {
-    assert(group.inside_render)
-    
-    entry := push_render_element(group, RenderGroupEntryClear)
+    entry := push_render_element(group, RenderGroupEntryClear, NegativeInfinity)
     if entry != nil {
         entry.color = color
     }
@@ -240,13 +290,6 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, height: f32
     }
 }
 
-UsedBitmapDim :: struct {
-    size:  v2,
-    align: v2,
-    p:     v3,
-    basis: ProjectedBasis,
-}
-
 get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, use_alignment: b32 = true) -> (result: UsedBitmapDim) {
     result.size  = v2{bitmap.width_over_height, 1} * height
     result.align = use_alignment ? bitmap.align_percentage * result.size : 0
@@ -258,21 +301,20 @@ get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, of
 }
 
 push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
-    assert(group.inside_render)
     assert(bitmap.width_over_height != 0)
     
     used_dim := get_used_bitmap_dim(group, bitmap, height, offset, use_alignment)
-
     if used_dim.basis.valid {
-        element := push_render_element(group, RenderGroupEntryBitmap)
-        alpha := v4{1,1,1, group.global_alpha}
-
+        element := push_render_element(group, RenderGroupEntryBitmap, used_dim.basis.sort_key)
+        
         if element != nil {
+            alpha := v4{1,1,1, group.global_alpha}
+            
             element.bitmap = bitmap
             element.id     = asset_id
             
             element.color  = color * alpha
-            element.p      = used_dim.basis.position
+            element.p      = used_dim.basis.p
             element.size   = used_dim.basis.scale * used_dim.size
         }
     }
@@ -283,30 +325,27 @@ push_rectangle2 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, colo
     push_rectangle(group, Rect3(rec, 0, 0), color)
 }
 push_rectangle3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, color := v4{1,1,1,1}) {
-    assert(group.inside_render)
-    
     center := rectangle_get_center(rec)
     size   := rectangle_get_dimension(rec)
     p := center + 0.5*size
     basis := project_with_transform(group.transform, p)
     
     if basis.valid {
-        element := push_render_element(group, RenderGroupEntryRectangle)
-        alpha := v4{1,1,1, group.global_alpha}
-
+        element := push_render_element(group, RenderGroupEntryRectangle, basis.sort_key)
+        
         if element != nil {
+            alpha := v4{1,1,1, group.global_alpha}
             element.color = color * alpha
-            element.rect  = rectangle_center_diameter(basis.position - 0.5 * basis.scale * size.xy, basis.scale * size.xy)
+            element.rect  = rectangle_center_diameter(basis.p - 0.5 * basis.scale * size.xy, basis.scale * size.xy)
         }
     }
 }
+
 push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
 push_rectangle_outline2 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, color := v4{1,1,1,1}, thickness: f32 = 0.1) {
     push_rectangle_outline(group, Rect3(rec, 0, 0), color, thickness)
 }
 push_rectangle_outline3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
-    assert(group.inside_render)
-    
     // TODO(viktor): there are rounding issues with draw_rectangle
     // @Cleanup offset and size
     
@@ -324,9 +363,8 @@ push_rectangle_outline3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangl
 
 coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
     basis := project_with_transform(group.transform, 0)
-    
     if basis.valid {
-        result = push_render_element(group, RenderGroupEntryCoordinateSystem)
+        result = push_render_element(group, RenderGroupEntryCoordinateSystem, basis.sort_key)
         if result != nil {
             result.color = color
         }
@@ -336,8 +374,6 @@ coordinate_system :: #force_inline proc(group: ^RenderGroup, color:= v4{1,1,1,1}
 }
 
 push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
-    assert(group.inside_render)
-    
     if entity.hit_point_max > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
@@ -351,7 +387,6 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32) {
             health_x += spacing_between
         }
     }
-
 }
 
 get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
@@ -365,12 +400,6 @@ get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, dist
     result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
 
     return result
-}
-
-ProjectedBasis :: struct {
-    position: v2, 
-    scale: f32, 
-    valid: b32,
 }
 
 project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -> (result: ProjectedBasis) {
@@ -394,16 +423,18 @@ project_with_transform :: #force_inline proc(transform: Transform, base_p: v3) -
             projected := transform.focal_length * raw / distance_to_p_z
 
             result.scale    =                           projected.z  * transform.meters_to_pixels_for_monitor
-            result.position = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, result.scale * base_z}
+            result.p = transform.screen_center + projected.xy * transform.meters_to_pixels_for_monitor + v2{0, result.scale * base_z}
             result.valid    = true
         }
         
       case .Orthographic:
-        result.position = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
+        result.p = transform.screen_center + transform.meters_to_pixels_for_monitor * p.xy
         result.scale = transform.meters_to_pixels_for_monitor
         result.valid = true
     }
 
+    result.sort_key = 4096 * p.z - p.y
+    
     return result
 }
 
@@ -423,43 +454,19 @@ unproject_with_transform :: #force_inline proc(transform: Transform, pixels_xy: 
     return result
 }
 
-// TODO(viktor): Can we define the work and the do_work together, whilst
-// ensuring no loss of data/types... through the dll boundary?
-TileRenderWork :: struct {
-    group:  ^RenderGroup, 
-    target: Bitmap,
-    
-     clip_rect: Rectangle2i, 
-    sort_space: []TileSortEntry,
-}
-
-TileSortEntry :: struct {
-    sort_key:           f32,
-    push_buffer_offset: u32,
-}
-
-do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
-    timed_function()
-    data := cast(^TileRenderWork) data
-
-    assert(data.group != nil)
-    assert(data.target.memory != nil)
-
-    render_to_output(data.group, data.target, data.clip_rect)
-}
-
 tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
     timed_function()
     assert(group.inside_render)
     assert(group.transform != {})
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
+
+    sort_render_elements(group)
     
     temp := begin_temporary_memory(temp_arena)
     defer end_temporary_memory(temp)
     
     /* TODO(viktor):
         - Make sure the tiles are all cache-aligned
-        - Can we get hyperthreads synced so they do interleaved lines?
         - How big should the tiles be for performance?
         - Actually ballpark the memory bandwidth for our DrawRectangleQuickly
         - Re-test some of our instruction choices
@@ -512,6 +519,8 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: 
     assert(group.inside_render)
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
     
+    sort_render_elements(group)
+    
     temp := begin_temporary_memory(temp_arena)
     defer end_temporary_memory(temp)
     
@@ -528,119 +537,85 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: 
     do_tile_render_work(&work)
 }
 
-render_to_output :: proc(group: ^RenderGroup, target: Bitmap, clip_rect: Rectangle2i) {
+sort_render_elements :: proc(group: ^RenderGroup) {
+    // TODO(viktor): This is not the best way to sort.
+    // :PointerArithmetic
+    count := group.push_buffer_element_count
+    sort_entries := (cast([^]TileSortEntry) &group.push_buffer[group.sort_entry_at])[:count]
+
+    for outer in 0 ..< count {
+        for inner in 0 ..< count-1 {
+            a := &sort_entries[inner]
+            b := &sort_entries[inner+1]
+            if a.sort_key > b.sort_key {
+                a^, b^ = b^, a^
+            }
+        }
+    }
+}
+
+do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+    timed_function()
+    using work := cast(^TileRenderWork) data
+
+    assert(group != nil)
+    assert(target.memory != nil)
     assert(group.inside_render)
     
+    // :PointerArithmetic
+    sort_entries := (cast([^]TileSortEntry) &group.push_buffer[group.sort_entry_at])[:group.push_buffer_element_count]
+        
     null_pixels_to_meters :: 1
-
-    for base_address: u32 = 0; base_address < group.push_buffer_size; {
-        header := cast(^RenderGroupEntryHeader) &group.push_buffer[base_address]
-        base_address += size_of(RenderGroupEntryHeader)
+    
+    for sort_entry in sort_entries {
+        header := cast(^RenderGroupEntryHeader) &group.push_buffer[sort_entry.push_buffer_offset]
         //:PointerArithmetic
-        data := &group.push_buffer[base_address]
-
+        entry_data := &group.push_buffer[sort_entry.push_buffer_offset + size_of(RenderGroupEntryHeader)]
+        
         switch header.type {
-        case RenderGroupEntryClear:
-            entry := cast(^RenderGroupEntryClear) data
-            base_address += auto_cast size_of(entry^)
-
+          case RenderGroupEntryClear:
+            entry := cast(^RenderGroupEntryClear) entry_data
             draw_rectangle(target, rectangle_min_diameter(v2{0, 0}, group.transform.screen_center*2), entry.color, clip_rect)
-
-        case RenderGroupEntryRectangle:
-            entry := cast(^RenderGroupEntryRectangle) data
-            base_address += auto_cast size_of(entry^)
-
+            
+          case RenderGroupEntryRectangle:
+            entry := cast(^RenderGroupEntryRectangle) entry_data
             draw_rectangle(target, entry.rect, entry.color, clip_rect)
-
-        case RenderGroupEntryBitmap:
-            entry := cast(^RenderGroupEntryBitmap) data
-            base_address += auto_cast size_of(entry^)
-
+            
+          case RenderGroupEntryBitmap:
+            entry := cast(^RenderGroupEntryBitmap) entry_data
             draw_rectangle_quickly(target,
                 entry.p, {entry.size.x, 0}, {0, entry.size.y},
                 entry.bitmap, entry.color,
                 null_pixels_to_meters, clip_rect,
             )
-
-        case RenderGroupEntryCoordinateSystem:
-            entry := cast(^RenderGroupEntryCoordinateSystem) data
-            base_address += auto_cast size_of(entry^)
             
+          case RenderGroupEntryCoordinateSystem:
+            entry := cast(^RenderGroupEntryCoordinateSystem) entry_data
             draw_rectangle_quickly(target,
                 entry.origin, entry.x_axis, entry.y_axis,
                 entry.texture, /* entry.normal, */ entry.color,
                 /* entry.top, entry.middle, entry.bottom, */
                 null_pixels_to_meters, clip_rect, 
             )
-
+            
             p := entry.origin
             x := p + entry.x_axis
             y := p + entry.y_axis
             size := v2{10, 10}
-
+            
             draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect)
             draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect)
             draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect)
-
-        case:
+            
+          case:
             panic("Unhandled Entry")
         }
     }
 }
 
-draw_bitmap :: proc(buffer: Bitmap, bitmap: Bitmap, center: v2, color: v4) {
-    timed_function()
-    rounded_center := round(center, i32)
+////////////////////////////////////////////////
 
-    left   := rounded_center.x - bitmap.width  / 2
-    top	   := rounded_center.y - bitmap.height / 2
-    right  := left + bitmap.width
-    bottom := top  + bitmap.height
-
-    src_left, src_top: i32
-    if left < 0 {
-        src_left = -left
-        left = 0
-    }
-    if top < 0 {
-        src_top = -top
-        top = 0
-    }
-    bottom = min(bottom, buffer.height)
-    right  = min(right,  buffer.width)
-
-    src_row :=  bitmap.width *  src_top +  src_left
-    dst_row :=  left +  top *  buffer.width
-    for _ in top..< bottom  {
-        src_index := src_row
-        dst_index := dst_row
-        defer dst_row +=  buffer.width
-        defer src_row +=  bitmap.width
-
-        for _ in left..< right  {
-            src := bitmap.memory[src_index]
-            dst := &buffer.memory[dst_index]
-            defer src_index += 1
-            defer dst_index += 1
-
-            texel := vec_cast(f32, src)
-            texel = srgb_255_to_linear_1(texel)
-            texel *= color.a
-
-            pixel := vec_cast(f32, dst^)
-            pixel = srgb_255_to_linear_1(pixel)
-
-            result := (1 - texel.a) * pixel + texel
-            result = linear_1_to_srgb_255(result)
-
-            dst^ = vec_cast(u8, result + 0.5)
-        }
-    }
-}
-
-@( enable_target_feature="sse,sse2",
-    optimization_mode="favor_size",
-)
+@(enable_target_feature="sse,sse2", optimization_mode="favor_size")
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i) {
     timed_function()
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
@@ -648,8 +623,8 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         (auto_cast len(texture.memory) == texture.height * texture.width) &&
         (texture.width_over_height >  0)) {
         return
-    } 
-
+    }
+    
     // NOTE(viktor): premultiply color
     color := color
     color.rgb *= color.a

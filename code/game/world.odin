@@ -302,11 +302,12 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     clear(render_group, Red)
     
+    render_group.transform.offset = {0, 0, -0.1}
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
             offset := world_difference(world, ground_buffer.p, world.camera_p)
             
-            if abs(offset.z) == 0 {
+            if offset.z >= -1 && offset.z <= 1 {
                 bitmap := ground_buffer.bitmap
                 bitmap.align_percentage = 0
                 
@@ -319,6 +320,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
         }
     }
+    render_group.transform.offset = {0, 0, 0}
     
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
@@ -353,7 +355,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                                 }
                             }
                         } else {
-                            furthest_distance = max(f32)
+                            furthest_distance = PositiveInfinity
                             furthest = &ground_buffer
                         }
                     }
@@ -535,6 +537,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
             case .Stairwell: 
                 push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue)
+                render_group.transform.offset.z += world.typical_floor_height
+                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue * {1,1,1,0.5})
             
             case .Space: 
                 if debug_variable(b32, "Rendering/ShowSpaceBounds") {
@@ -648,7 +652,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     // a frame of lag in camera updating compared to the hero.       
     end_sim(camera_sim_region)
     end_temporary_memory(sim_memory)
-        
+    
     check_arena(&world.arena)
 }
 
@@ -861,36 +865,35 @@ FillGroundChunkWork :: struct {
 
 do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     timed_function()
-    work := cast(^FillGroundChunkWork) data
-
+    using work := cast(^FillGroundChunkWork) data
     
-    bitmap := &work.ground_buffer.bitmap
+    bitmap := &ground_buffer.bitmap
     bitmap.align_percentage = 0.5
     bitmap.width_over_height = 1
     
-    buffer_size := work.world.chunk_dim_meters.xy
+    buffer_size := world.chunk_dim_meters.xy
     assert(buffer_size.x == buffer_size.y)
     half_dim := buffer_size * 0.5
-
-    render_group := make_render_group(&work.task.arena, work.tran_state.assets, 0, true)
+    
+    render_group := make_render_group(&task.arena, tran_state.assets, 8 * Megabyte, true)
     begin_render(render_group)
     
     orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
-
+    
     clear(render_group, Red)
-        
-    chunk_z := work.p.chunk.z
+    
+    chunk_z := p.chunk.z
     for offset_y in i32(-1) ..= 1 {
         for offset_x in i32(-1) ..= 1 {
-            chunk_x := work.p.chunk.x + offset_x
-            chunk_y := work.p.chunk.y + offset_y
+            chunk_x := p.chunk.x + offset_x
+            chunk_y := p.chunk.y + offset_y
             
             center := vec_cast(f32, offset_x, offset_y) * buffer_size
             // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
             series := seed_random_series(cast(u32) (463 * chunk_x + 311 * chunk_y + 185 * chunk_z) + 99)
             
             for _ in 0..<120 {
-                stamp := random_bitmap_from(work.tran_state.assets, .Grass, &series)
+                stamp := random_bitmap_from(tran_state.assets, .Grass, &series)
                 p := center + random_bilateral_2(&series, f32) * half_dim 
                 push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
             }
@@ -898,11 +901,11 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     }
     assert(all_assets_valid(render_group))
     
-    render_group_to_output(render_group, bitmap^, &work.task.arena)
+    render_group_to_output(render_group, bitmap^, &task.arena)
     
     end_render(render_group)
     
-    end_task_with_memory(work.task)
+    end_task_with_memory(task)
 }
 
 fill_ground_chunk :: proc(tran_state: ^TransientState, world: ^World, ground_buffer: ^GroundBuffer, p: WorldPosition){
