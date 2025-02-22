@@ -302,26 +302,39 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     clear(render_group, Red)
     
-    render_group.transform.offset = {0, 0, -0.1}
     for &ground_buffer in tran_state.ground_buffers {
         if is_valid(ground_buffer.p) {
             offset := world_difference(world, ground_buffer.p, world.camera_p)
+            transform := default_flat_transform()
             
-            if offset.z >= -1 && offset.z <= 1 {
-                bitmap := ground_buffer.bitmap
-                bitmap.align_percentage = 0
-                
-                ground_chunk_size := world.chunk_dim_meters.x
-                push_bitmap_raw(render_group, bitmap, ground_chunk_size, offset)
-                
-                if debug_variable(b32, "Rendering/Bounds/ShowGroundChunkBounds") {
-                    push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), Yellow)
-                }
+            transform.offset = offset
+            
+            // @Cleanup @CopyPasta from entity loop
+            camera_relative_ground := offset
+            fade_top_end      :=  0.75 * world.typical_floor_height
+            fade_top_start    :=  0.5  * world.typical_floor_height
+            fade_bottom_start := -1    * world.typical_floor_height
+            fade_bottom_end   := -1.5  * world.typical_floor_height 
+            
+            render_group.global_alpha = 1
+            if camera_relative_ground.z > fade_top_start {
+                render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
+            } else if camera_relative_ground.z < fade_bottom_start {
+                render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
+            }
+            
+            
+            bitmap := ground_buffer.bitmap
+            bitmap.align_percentage = 0
+            
+            ground_chunk_size := world.chunk_dim_meters.x
+            push_bitmap_raw(render_group, bitmap, transform, ground_chunk_size)
+            
+            if debug_variable(b32, "Rendering/Bounds/ShowGroundChunkBounds") {
+                push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)
             }
         }
     }
-    render_group.transform.offset = {0, 0, 0}
-    
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := Rectangle3{
@@ -340,7 +353,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     
                     furthest_distance: f32 = -1
                     furthest: ^GroundBuffer
-                    // TODO(viktor): @Speed this is super inefficient. Fix it!
+                    // @Speed this is super inefficient. Fix it!
                     for &ground_buffer in tran_state.ground_buffers {
                         buffer_delta := world_difference(world, ground_buffer.p, world.camera_p)
                         if are_in_same_chunk(world, ground_buffer.p, chunk_center) {
@@ -375,10 +388,12 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_origin := world.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, input.delta_time)
     
+    
     if debug_variable(b32, "Rendering/Bounds/ShowRenderAndSimulationBounds") {
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(screen_bounds)),                         Yellow,0.1)
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           Blue,  0.2)
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), Green, 0.2)
+        transform := default_flat_transform()
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Yellow,0.1)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
+        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
     }
     
     camera_p := world_difference(world, world.camera_p, sim_origin)
@@ -413,10 +428,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             ////////////////////////////////////////////////
             // Pre-physics entity work
-            // 
+
             switch entity.type {
-            case .Nil: // NOTE(viktor): nothing
-            case .Hero:
+              case .Nil, .Monster, .Wall, .Stairwell, .Space:
+              case .Hero:
                 for &con_hero in world.controlled_heroes {
                     if con_hero.storage_index == entity.storage_index {
                         if con_hero.dz != 0 {
@@ -444,7 +459,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     }
                 }
 
-            case .Arrow:
+              case .Arrow:
                 move_spec.normalize_accelaration = false
                 move_spec.drag = 0
                 move_spec.speed = 0
@@ -454,7 +469,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     make_entity_nonspatial(&entity)
                 }
                 
-            case .Familiar: 
+              case .Familiar: 
                 closest_hero: ^Entity
                 closest_hero_dsq := square(f32(10))
 
@@ -479,41 +494,47 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 move_spec.normalize_accelaration = true
                 move_spec.drag = 8
                 move_spec.speed = 50
-                
-            // NOTE(viktor): nothing
-            case .Monster, .Wall, .Stairwell, .Space:
             }
 
             if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
                 move_entity(camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
 
-            render_group.transform.offset = get_entity_ground_point(&entity)
-
             ////////////////////////////////////////////////
             // Post-physics entity work
+
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
             facing_weights := #partial AssetVector{.FacingDirection = 1 }
+            head_id   := best_match_bitmap_from(tran_state.assets, .Head,  facing_match, facing_weights)
             
-            head_id  := best_match_bitmap_from(tran_state.assets, .Head, facing_match, facing_weights)
+            shadow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Shadow)
+            
+            transform := default_upright_transform()
+            shadow_transform := default_flat_transform()
+            
+            transform.offset = get_entity_ground_point(&entity)
+            shadow_transform.offset = get_entity_ground_point(&entity)
+            
             switch entity.type {
-            case .Nil: // NOTE(viktor): nothing
-            case .Hero:
-                cape_id  := best_match_bitmap_from(tran_state.assets, .Cape, facing_match, facing_weights)
+              case .Nil: // NOTE(viktor): nothing
+              case .Hero:
+                cape_id  := best_match_bitmap_from(tran_state.assets, .Cape,  facing_match, facing_weights)
                 sword_id := best_match_bitmap_from(tran_state.assets, .Sword, facing_match, facing_weights)
-                body_id  := best_match_bitmap_from(tran_state.assets, .Body, facing_match, facing_weights)
-                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, cape_id,  1.6)
-                push_bitmap(render_group, body_id,  1.6)
-                push_bitmap(render_group, head_id,  1.6)
-                push_bitmap(render_group, sword_id, 1.6)
-                push_hitpoints(render_group, &entity, 1)
+                body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
+                push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
+                
+                hero_height :f32= 1.6
+                push_bitmap(render_group, cape_id,  transform, hero_height)
+                push_bitmap(render_group, body_id,  transform, hero_height)
+                push_bitmap(render_group, head_id,  transform, hero_height)
+                push_bitmap(render_group, sword_id, transform, hero_height)
+                push_hitpoints(render_group, &entity, 1, transform)
 
-            case .Arrow:
-                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Arrow), 0.1)
+              case .Arrow:
+                push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Arrow), transform, 0.1)
 
-            case .Familiar: 
+              case .Familiar: 
                 entity.t_bob += dt
                 if entity.t_bob > Tau {
                     entity.t_bob -= Tau
@@ -522,63 +543,68 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
 
-                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
-                push_bitmap(render_group, head_id, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
+                push_bitmap(render_group, shadow_id, shadow_transform, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
+                push_bitmap(render_group, head_id, transform, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
 
-            case .Monster:
+              case .Monster:
                 monster_id := best_match_bitmap_from(tran_state.assets, .Monster, facing_match, facing_weights)
 
-                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Shadow), 0.75, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, monster_id, 1.5)
-                push_hitpoints(render_group, &entity, 1.6)
+                push_bitmap(render_group, shadow_id, shadow_transform, 0.75, color = {1, 1, 1, shadow_alpha})
+                push_bitmap(render_group, monster_id, transform, 1.5)
+                push_hitpoints(render_group, &entity, 1.6, transform)
             
-            case .Wall:
-                push_bitmap(render_group, first_bitmap_from(tran_state.assets, AssetTypeId.Rock), 1.5)
+              case .Wall:
+                // @Speed maybe just dont do this
+                rock_series := seed_random_series(entity.storage_index)
+                rock_id := random_bitmap_from(tran_state.assets, AssetTypeId.Rock, &rock_series)
+                
+                push_bitmap(render_group, rock_id, transform, 1.5)
     
-            case .Stairwell: 
-                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue)
-                render_group.transform.offset.z += world.typical_floor_height
-                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), Blue * {1,1,1,0.5})
+              case .Stairwell: 
+                transform.upright = false
+                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), transform, Blue)
+                transform.offset.z += world.typical_floor_height
+                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
             
-            case .Space: 
+              case .Space: 
                 if debug_variable(b32, "Rendering/ShowSpaceBounds") {
+                    transform.upright = false
                     for volume in entity.collision.volumes {
-                        push_rectangle_outline(render_group, volume, Blue)
+                        push_rectangle_outline(render_group, volume, transform, Blue)
                     }
                 }
             }
-        }
         
-        when DebugEnabled {
-            if entity.type != .Space {
-                debug_id := debug_pointer_id(&state.stored_entities[entity.storage_index])
-                
-                for volume in entity.collision.volumes {
-                    local_mouse_p := unproject_with_transform(render_group.transform, input.mouse.p)
+            when DebugEnabled {
+                if entity.type != .Space {
+                    debug_id := debug_pointer_id(&world.stored_entities[entity.storage_index])
                     
-                    if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
-                        debug_hit(debug_id, local_mouse_p.z)
+                    for volume in entity.collision.volumes {
+                        local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
+                        
+                        if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
+                            debug_hit(debug_id, local_mouse_p.z)
+                        }
+                        
+                        highlighted, color := debug_highlighted(debug_id)
+                        if highlighted {
+                            push_rectangle_outline(render_group, volume, transform, color, 0.05)
+                        }
                     }
                     
-                    highlighted, color := debug_highlighted(debug_id)
-                    if highlighted {
-                        push_rectangle_outline(render_group, volume, color, 0.05)
+                    if debug_begin_data_block(debug_id, "Entity/HotEntity/") {
+                        debug_record_value(cast(u32) entity.storage_index, name = "storage_index")
+                        debug_record_value(entity.updatable)
+                        debug_record_value(entity.p)
+                        debug_record_value(entity.dp)
+                        debug_record_value(first_bitmap_from(tran_state.assets, .Body))
+                        debug_record_value(entity.distance_limit)
+                        debug_end_data_block()
                     }
-                }
-                
-                if debug_begin_data_block(debug_id, "Entity/HotEntity/") {
-                    debug_record_value(cast(u32) entity.storage_index, name = "storage_index")
-                    debug_record_value(entity.updatable)
-                    debug_record_value(entity.p)
-                    debug_record_value(entity.dp)
-                    debug_record_value(first_bitmap_from(tran_state.assets, .Body))
-                    debug_record_value(entity.distance_limit)
-                    debug_end_data_block()
                 }
             }
         }
     }
-    render_group.transform.offset = 0
     
     if debug_variable(b32, "Rendering/Environtment/Test") { 
         ////////////////////////////////////////////////
@@ -617,8 +643,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         scale :: 100
         x_axis := scale * v2{cos(angle), sin(angle)}
         y_axis := perpendicular(x_axis)
-        
-        if entry := coordinate_system(render_group); entry != nil {
+        transform := default_flat_transform()
+        if entry := coordinate_system(render_group, transform); entry != nil {
             entry.origin = origin - x_axis*0.5 - y_axis*0.5 + disp
             entry.x_axis = x_axis
             entry.y_axis = y_axis
@@ -635,7 +661,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         for it, it_index in tran_state.envs {
             size := vec_cast(f32, it.LOD[0].width, it.LOD[0].height) / 2
             
-            if entry := coordinate_system(render_group); entry != nil {
+            if entry := coordinate_system(render_group, transform); entry != nil {
                 entry.x_axis = {size.x, 0}
                 entry.y_axis = {0, size.y}
                 entry.origin = 20 + (entry.x_axis + {20, 0}) * auto_cast it_index
@@ -881,6 +907,8 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
     
     clear(render_group, Red)
+
+    transform := default_flat_transform()
     
     chunk_z := p.chunk.z
     for offset_y in i32(-1) ..= 1 {
@@ -895,7 +923,7 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
             for _ in 0..<120 {
                 stamp := random_bitmap_from(tran_state.assets, .Grass, &series)
                 p := center + random_bilateral_2(&series, f32) * half_dim 
-                push_bitmap(render_group, stamp, 5, offset = V3(p, 0))
+                push_bitmap(render_group, stamp, transform, 5, offset = V3(p, 0))
             }
         }
     }

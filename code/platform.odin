@@ -32,8 +32,8 @@ LowPriorityWorkQueueThreadCount  :: 2
 
 
 // Resolution :: [2]i32 {2560, 1440}
-Resolution :: [2]i32 {1920, 1080}
-// Resolution :: [2]i32 {1280, 720}
+// Resolution :: [2]i32 {1920, 1080}
+Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
 MonitorRefreshHz: u32 : 30

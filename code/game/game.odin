@@ -367,9 +367,9 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     
     render_memory := begin_temporary_memory(&tran_state.arena)
     // TODO(viktor): decide what our push_buffer size is
+    // TODO(viktor): maybe keep this around and don't remake it every frame?
     render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
     begin_render(render_group)
-
     
     if debug_variable(b32, "Particles/FountainTest") { 
         ////////////////////////////////////////////////
@@ -426,7 +426,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                         alpha := clamp_01(0.1 * cell.density)
                         color := v4{1,1,1, alpha}
                         position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
-                        push_rectangle(render_group, rectangle_center_diameter(position.xy, grid_scale), color)
+                        push_rectangle(render_group, rectangle_center_diameter(position.xy, grid_scale), default_flat_transform(), color)
                     }
                 }
             }
@@ -471,7 +471,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                     particle.dp.x *= coefficient_of_friction
                 }
                 // NOTE(viktor): render the particle
-                push_bitmap(render_group, particle.bitmap_id, 0.4, particle.p, color)
+                push_bitmap(render_group, particle.bitmap_id, default_flat_transform(), 0.4, particle.p, color)
             }
         }             
     }

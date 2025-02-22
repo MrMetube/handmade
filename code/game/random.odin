@@ -8,7 +8,7 @@ RandomSeries :: struct {
     index: u32,
 }
 
-seed_random_series :: proc(seed: u32) -> (result: RandomSeries) {
+seed_random_series :: proc(#any_int seed: u32) -> (result: RandomSeries) {
     result = { index = seed % len(random_number_table) }
     return result
 }

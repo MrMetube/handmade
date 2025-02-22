@@ -369,6 +369,7 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         }
         
         debug.root_group = create_group(debug, "Root")
+        // debug_record_event_common(Profile{}, {name="Profile"})
         
         list_init_sentinel(&debug.tree_sentinel)
         
@@ -807,7 +808,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
         }
     }
 
-    mouse_p := unproject_with_transform(debug.render_group.transform, input.mouse.p).xy
+    mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
     draw_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
@@ -819,7 +820,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
 // @Cleanup
 debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect: Rectangle2) {
-    push_rectangle(debug.render_group, Rect3(rect, 0, 0), DarkBlue )
+    push_rectangle(debug.render_group, Rect3(rect, 0, 0), default_flat_transform(), DarkBlue )
     
     target_fps :: 72
     frame_count := cast(f32) debug.frame_count
@@ -1076,13 +1077,13 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
 
     was_resized: b32
     if .Resizable in element.flags {
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             Black)
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), Black)
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), Black)
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
+        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black)
         
         resize_box := rectangle_min_diameter(v2{element.bounds.max.x, total_min.y}, frame)
-        push_rectangle(layout.debug.render_group, resize_box, White)
+        push_rectangle(layout.debug.render_group, resize_box, default_flat_transform(), White)
         
         resize_interaction := DebugInteraction {
             kind   = .Resize,
@@ -1231,7 +1232,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             }
             
             move_handle := rectangle_min_diameter(tree.p, v2{8, 8})
-            push_rectangle(debug.render_group, move_handle, interaction_is_hot(debug, move_interaction) ? Blue : White)
+            push_rectangle(debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White)
         
             if rectangle_contains(move_handle, mouse_p) {
                 debug.next_hot_interaction = move_interaction
@@ -1322,7 +1323,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             }
             
             if bitmap := get_bitmap(debug.render_group.assets, value, debug.render_group.generation_id); bitmap != nil {
-                dim := get_used_bitmap_dim(debug.render_group, bitmap^, block.size.y, 0, use_alignment = false)
+                dim := get_used_bitmap_dim(debug.render_group, bitmap^, default_flat_transform(), block.size.y, 0, use_alignment = false)
                 block.size = dim.size
                 
                 element := begin_ui_element_rectangle(layout, &block.size)
@@ -1333,8 +1334,8 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                 
                 bitmap_height := block.size.y
                 bitmap_offset := V3(element.bounds.min, 0)
-                push_rectangle(debug.render_group, element.bounds, DarkBlue )
-                push_bitmap(debug.render_group, value, bitmap_height, bitmap_offset, use_alignment = false)
+                push_rectangle(debug.render_group, element.bounds, default_flat_transform(), DarkBlue )
+                push_bitmap(debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false)
             }
             
         case DebugEventLink, DebugEventGroup,
@@ -1509,12 +1510,12 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
         switch operation {
             case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, height, V3(p, 0), color)
+                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0), color)
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)
             if bitmap != nil {
-                dim := get_used_bitmap_dim(group, bitmap^, height, V3(p, 0))
+                dim := get_used_bitmap_dim(group, bitmap^, default_flat_transform(), height, V3(p, 0))
                 glyph_rect := rectangle_min_diameter(dim.p.xy, dim.size)
                 result = rectangle_union(result, glyph_rect)
             }
