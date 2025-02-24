@@ -152,6 +152,7 @@ modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where 
     }
 }
 
+swap :: #force_inline proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 
 
 @(common, disabled=ODIN_DISABLE_ASSERT)

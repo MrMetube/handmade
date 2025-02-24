@@ -557,6 +557,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 // @Speed maybe just dont do this
                 rock_series := seed_random_series(entity.storage_index)
                 rock_id := random_bitmap_from(tran_state.assets, AssetTypeId.Rock, &rock_series)
+                // rock_id := first_bitmap_from(tran_state.assets, AssetTypeId.Rock)
                 
                 push_bitmap(render_group, rock_id, transform, 1.5)
     
@@ -929,8 +930,12 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     }
     assert(all_assets_valid(render_group))
     
-    render_group_to_output(render_group, bitmap^, &task.arena)
-    
+    // nocheckin 
+    when false {
+        sort_render_elements(render_group)
+        
+        render_group_to_output(render_group, bitmap^, &task.arena)
+    }
     end_render(render_group)
     
     end_task_with_memory(task)

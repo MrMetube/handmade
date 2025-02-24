@@ -125,7 +125,6 @@ TileRenderWork :: struct {
     target: Bitmap,
     
     clip_rect:  Rectangle2i, 
-    sort_space: []TileSortEntry,
 }
 
 TileSortEntry :: struct {
@@ -455,10 +454,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
     assert(group.camera != {})
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
 
-    sort_render_elements(group)
-    
-    temp := begin_temporary_memory(temp_arena)
-    defer end_temporary_memory(temp)
+    sort_render_elements(group, temp_arena)
     
     /* TODO(viktor):
         - Make sure the tiles are all cache-aligned
@@ -485,8 +481,6 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
                 clip_rect = {
                     min = tile_size * {x, y},
                 },
-                
-                sort_space = push(temp_arena, TileSortEntry, group.push_buffer_element_count),
             }
             
             work.clip_rect.max = work.clip_rect.min + tile_size
@@ -514,11 +508,6 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: 
     assert(group.inside_render)
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
     
-    sort_render_elements(group)
-    
-    temp := begin_temporary_memory(temp_arena)
-    defer end_temporary_memory(temp)
-    
     work := TileRenderWork{
         group = group,
         target = target,
@@ -526,27 +515,34 @@ render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: 
             min = 0,
             max = {target.width, target.height},
         },
-        sort_space = push(temp_arena, TileSortEntry, group.push_buffer_element_count)
     }
     
     do_tile_render_work(&work)
 }
 
-sort_render_elements :: proc(group: ^RenderGroup) {
+sort_render_elements :: proc(group: ^RenderGroup, temp_arena: ^Arena) {
     // TODO(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := group.push_buffer_element_count
     sort_entries := (cast([^]TileSortEntry) &group.push_buffer[group.sort_entry_at])[:count]
 
-    for outer in 0 ..< count {
-        for inner in 0 ..< count-1 {
-            a := &sort_entries[inner]
-            b := &sort_entries[inner+1]
-            if a.sort_key > b.sort_key {
-                a^, b^ = b^, a^
-            }
-        }
+    sort := begin_temporary_memory(temp_arena)
+    defer end_temporary_memory(sort)
+    
+    temp_space := push(temp_arena, TileSortEntry, count, no_clear())
+    // merge_sort(sort_entries, temp_space)
+    radix_sort(sort_entries, temp_space)
+    
+    when false {
+        synthetic := push(temp_arena, TileSortEntry, 2_000_000)
+        series := seed_random_series(0)
+        for &s in synthetic do s.sort_key = random_between_f32(&series, -10000, 10000)
+        temp_space = push(temp_arena, TileSortEntry, 2_000_000)
+        radix_sort(synthetic, temp_space)
+        is_sorted(synthetic)
     }
+
+    when INTERNAL do is_sorted(sort_entries)
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
@@ -610,7 +606,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 
 ////////////////////////////////////////////////
 
-@(enable_target_feature="sse,sse2", optimization_mode="favor_size")
+@(enable_target_feature="sse,sse2")
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i) {
     timed_function()
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
@@ -648,38 +644,38 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
     if rectangle_has_area(fill_rect) {
         maskFF :: 0xffffffff
         
-        clip_mask       : u32x8 = maskFF
-        start_clip_mask : u32x8 = maskFF
-        end_clip_mask   : u32x8 = maskFF
+        clip_mask       := cast(u32x8) maskFF
         
-        start_clip_masks := [?]u32x8 {
-            {maskFF, maskFF, maskFF, maskFF,maskFF, maskFF, maskFF, maskFF},
-            {     0, maskFF, maskFF, maskFF,maskFF, maskFF, maskFF, maskFF},
-            {     0,      0, maskFF, maskFF,maskFF, maskFF, maskFF, maskFF},
-            {     0,      0,      0, maskFF,maskFF, maskFF, maskFF, maskFF},
-            {     0,      0,      0,      0,maskFF, maskFF, maskFF, maskFF},
-            {     0,      0,      0,      0,     0, maskFF, maskFF, maskFF},
-            {     0,      0,      0,      0,     0,      0, maskFF, maskFF},
-            {     0,      0,      0,      0,     0,      0,      0, maskFF},
-        }
-        
-        end_clip_masks := [?]u32x8 {
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
-            {maskFF,      0,      0,      0,      0,      0,      0,      0},
-            {maskFF, maskFF,      0,      0,      0,      0,      0,      0},
-            {maskFF, maskFF, maskFF,      0,      0,      0,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF,      0,      0,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0},
-        }
-        
+        start_clip_mask := clip_mask
         if fill_rect.min.x & 7 != 0 {
+            start_clip_masks := [?]u32x8 {
+                {maskFF, maskFF, maskFF, maskFF,maskFF, maskFF, maskFF, maskFF},
+                {     0, maskFF, maskFF, maskFF,maskFF, maskFF, maskFF, maskFF},
+                {     0,      0, maskFF, maskFF,maskFF, maskFF, maskFF, maskFF},
+                {     0,      0,      0, maskFF,maskFF, maskFF, maskFF, maskFF},
+                {     0,      0,      0,      0,maskFF, maskFF, maskFF, maskFF},
+                {     0,      0,      0,      0,     0, maskFF, maskFF, maskFF},
+                {     0,      0,      0,      0,     0,      0, maskFF, maskFF},
+                {     0,      0,      0,      0,     0,      0,      0, maskFF},
+            }
+            
             start_clip_mask = start_clip_masks[fill_rect.min.x & 7]
             fill_rect.min.x = align8(fill_rect.min.x) - 8
         }
 
+        end_clip_mask   := clip_mask
         if fill_rect.max.x & 7 != 0 {
+            end_clip_masks := [?]u32x8 {
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+                {maskFF,      0,      0,      0,      0,      0,      0,      0},
+                {maskFF, maskFF,      0,      0,      0,      0,      0,      0},
+                {maskFF, maskFF, maskFF,      0,      0,      0,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF,      0,      0,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0},
+            }
+            
             end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
             fill_rect.max.x = align8(fill_rect.max.x)
         }
@@ -1040,38 +1036,38 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
     if rectangle_has_area(fill_rect) {
         maskFF :: 0xffffffff
         
-        clip_mask       : u32x8 = maskFF
-        start_clip_mask : u32x8 = maskFF
-        end_clip_mask   : u32x8 = maskFF
+        clip_mask := cast(u32x8) maskFF
         
-        start_clip_masks := [?]u32x8 {
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
-            {     0, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
-            {     0,      0, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
-            {     0,      0,      0, maskFF, maskFF, maskFF, maskFF, maskFF},
-            {     0,      0,      0,      0, maskFF, maskFF, maskFF, maskFF},
-            {     0,      0,      0,      0,      0, maskFF, maskFF, maskFF},
-            {     0,      0,      0,      0,      0,      0, maskFF, maskFF},
-            {     0,      0,      0,      0,      0,      0,      0, maskFF},
-        }
-        
-        end_clip_masks := [?]u32x8 {
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
-            {maskFF,      0,      0,      0,      0,      0,      0,      0},
-            {maskFF, maskFF,      0,      0,      0,      0,      0,      0},
-            {maskFF, maskFF, maskFF,      0,      0,      0,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF,      0,      0,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0},
-            {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0},
-        }
-        
+        start_clip_mask := clip_mask
         if fill_rect.min.x & 7 != 0 {
+            start_clip_masks := [?]u32x8 {
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+                {     0, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+                {     0,      0, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+                {     0,      0,      0, maskFF, maskFF, maskFF, maskFF, maskFF},
+                {     0,      0,      0,      0, maskFF, maskFF, maskFF, maskFF},
+                {     0,      0,      0,      0,      0, maskFF, maskFF, maskFF},
+                {     0,      0,      0,      0,      0,      0, maskFF, maskFF},
+                {     0,      0,      0,      0,      0,      0,      0, maskFF},
+            }
+
             start_clip_mask = start_clip_masks[fill_rect.min.x & 7]
             fill_rect.min.x = align8(fill_rect.min.x) - 8
         }
-
+        
+        end_clip_mask   := clip_mask
         if fill_rect.max.x & 7 != 0 {
+            end_clip_masks := [?]u32x8 {
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF},
+                {maskFF,      0,      0,      0,      0,      0,      0,      0},
+                {maskFF, maskFF,      0,      0,      0,      0,      0,      0},
+                {maskFF, maskFF, maskFF,      0,      0,      0,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF,      0,      0,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0,      0},
+                {maskFF, maskFF, maskFF, maskFF, maskFF, maskFF, maskFF,      0},
+            }
+            
             end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
             fill_rect.max.x = align8(fill_rect.max.x)
         }
