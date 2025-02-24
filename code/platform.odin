@@ -2,22 +2,19 @@ package main
 
 import "core:fmt"
 import win "core:sys/windows"
+import gl "vendor:OpenGL"
 
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
-    - Threading (launch a thread)
-
-    - Fullscreen support
-
+    - Hardware acceleration (OpenGL or Direct3D or Vulkan or BOTH ?? )
+    - Blit speed improvements (BitBlt)
+    
     - Saved game locations
     - Getting a handle to our own executable file
-    - Asset loading path
     - Raw Input (support for multiple keyboards)
     - ClipCursor() (for multimonitor support)
     - QueryCancelAutoplay
     - WM_ACTIVATEAPP (for when we are not the active application)
-    - Blit speed improvements (BitBlt)
-    - Hardware acceleration (OpenGL or Direct3D or Vulkan or BOTH ?? )
     - GetKeyboardLayout (for French keyboards, international WASD support)
 
     Just a partial list of stuff !!
@@ -59,7 +56,7 @@ GlobalDebugShowCursor: b32
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
 ////////////////////////////////////////////////
-//  Types
+// Types
 
 SoundOutput :: struct {
     samples_per_second:   u32,
@@ -104,8 +101,8 @@ main :: proc() {
     }
     
     ////////////////////////////////////////////////
-    //   Platform Setup
-    //   
+    // Platform Setup
+    
     state: PlatformState
     {
         exe_path_buffer: [win.MAX_PATH_WIDE]u16
@@ -133,8 +130,7 @@ main :: proc() {
     init_work_queue(&low_queue,  LowPriorityWorkQueueThreadCount, 1+HighPriorityWorkQueueThreadCount)
 
     ////////////////////////////////////////////////
-    //  Windows Setup
-    //   
+    // Windows Setup
 
     window: win.HWND
     {
@@ -178,15 +174,17 @@ main :: proc() {
         )
 
         if window == nil {
-            return // TODO Logging
+            // @Logging
+            return 
         }
+        
+        init_opengl(window)
     }
 
 
 
     ////////////////////////////////////////////////
     //  Video Setup
-    //   
 
     // TODO: how do we reliably query this on windows?
     game_update_hz: f32
@@ -242,8 +240,8 @@ main :: proc() {
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
     game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
-    // TODO: make this like sixty seconds?
-    // TODO: pool with bitmap alloc
+    // TODO(viktor): make this like sixty seconds?
+    // TODO(viktor): pool with bitmap alloc
     // TODO(viktor): remove MaxPossibleOverlap
     MaxPossibleOverlap :: 8*size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -842,12 +840,12 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     in the bitmap, not the bottom left! */
     buffer.info = win.BITMAPINFO{
         bmiHeader = {
-                biSize          = size_of(buffer.info.bmiHeader),
-                biWidth         = buffer.width,
-                biHeight        = buffer.height,
-                biPlanes        = 1,
-                biBitCount      = 32,
-                biCompression   = win.BI_RGB,
+            biSize          = size_of(buffer.info.bmiHeader),
+            biWidth         = buffer.width,
+            biHeight        = buffer.height,
+            biPlanes        = 1,
+            biBitCount      = 32,
+            biCompression   = win.BI_RGB,
         },
     }
 
@@ -860,33 +858,13 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     // TODO: probably clear this to black
 }
 
-display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32, fix_windows_colors: b32 = true){    
-    if !GlobalPause {
-        // TODO(viktor): can we avoid this without forcing the game to have to handle the windows color component order?
-        #no_bounds_check if fix_windows_colors {
-            for y in 0..<buffer.height {
-                row := buffer.memory[y * buffer.pitch:][:buffer.width]
-                for &useful_color in row {
-                    // NOTE(viktor): Windows expects the color to be ordered like this:
-                    // struct{ b, g, r, pad: u8 }
-                    useful_color.r, useful_color.b = useful_color.b, useful_color.r
-                }
-            }
-        }
-    }    
+display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){    
+    when true {
+        gl.Viewport(0, 0, window_width, window_height)
+        gl.ClearColor(1, 0, 1, 1)
+        gl.Clear(gl.COLOR_BUFFER_BIT)
         
-    if window_width >= buffer.width*2 && window_height >= buffer.height*2 {
-        offset := [2]i32{window_width - buffer.width*2, window_height - buffer.height*2} / 2
-        
-        win.StretchDIBits(
-            device_context,
-            offset.x, offset.y, buffer.width*2, buffer.height*2,
-            0, 0, buffer.width, buffer.height,
-            raw_data(buffer.memory),
-            &buffer.info,
-            win.DIB_RGB_COLORS,
-            win.SRCCOPY,
-        )	
+        win.SwapBuffers(device_context)
     } else {
         offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
 
@@ -963,7 +941,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         device_context := win.BeginPaint(window, &paint)
 
         window_width, window_height := get_window_dimension(window)
-        display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height, false)
+        display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height)
 
         win.EndPaint(window, &paint)
     case win.WM_SETCURSOR: 

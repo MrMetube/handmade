@@ -36,16 +36,16 @@ INTERNAL :: #config(INTERNAL, false)
     ARCHITECTURE EXPLORATION
     - Z !
         - debug drawing of Z levels and inclusion of Z to make sure
-        that there are no bugs
+            that there are no bugs
         - Concept of ground in the collision loop so it can handle 
-        collisions coming onto and off of stairs, for example
+            collisions coming onto and off of stairs, for example
         - make sure flying things can go over walls
         - how is going "up" and "down" rendered?
 
     - Collision detection
         - Clean up predicate proliferation! Can we make a nice clean
-        set of flags/rules so that it's easy to understand how
-        things work in terms of special handling? This may involve
+            set of flags/rules so that it's easy to understand how
+            things work in terms of special handling? This may involve
             making the iteration handle everything instead of handling 
             overlap outside and so on.
         - transient collision rules
