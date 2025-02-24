@@ -859,13 +859,24 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
 }
 
 display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){    
-    when true {
+    when !true {
         gl.Viewport(0, 0, window_width, window_height)
         gl.ClearColor(1, 0, 1, 1)
         gl.Clear(gl.COLOR_BUFFER_BIT)
         
         win.SwapBuffers(device_context)
     } else {
+        #no_bounds_check if true {
+            for y in 0..<buffer.height {
+                row := buffer.memory[y * buffer.pitch:][:buffer.width]
+                for &useful_color in row {
+                    // NOTE(viktor): Windows expects the color to be ordered like this:
+                    // struct{ b, g, r, pad: u8 }
+                    useful_color.r, useful_color.b = useful_color.b, useful_color.r
+                }
+            }
+        }
+        
         offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
 
         win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y,         win.BLACKNESS )
@@ -917,7 +928,6 @@ toggle_fullscreen :: proc(window: win.HWND) {
 
 ////////////////////////////////////////////////   
 //  Windows Messages
-//   
 
 main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
     switch message {

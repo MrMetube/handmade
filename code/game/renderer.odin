@@ -643,8 +643,8 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
 
     if rectangle_has_area(fill_rect) {
         maskFF :: 0xffffffff
-        
-        clip_mask       := cast(u32x8) maskFF
+        maskFFx8 :: cast(u32x8) maskFF
+        clip_mask := maskFFx8
         
         start_clip_mask := clip_mask
         if fill_rect.min.x & 7 != 0 {
@@ -751,69 +751,66 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 fy := ty - cast(f32x8) sy
 
                 // NOTE(viktor): bilinear sample
-                fetch := sy * texture_width + sx
-                fetch_i := transmute([8]u32) fetch
+                fetch := cast(memx8) (sy * texture_width + sx)
                 
-                texel_0 := texture.memory[fetch_i[0]:]
-                texel_1 := texture.memory[fetch_i[1]:]
-                texel_2 := texture.memory[fetch_i[2]:]
-                texel_3 := texture.memory[fetch_i[3]:]
-                texel_4 := texture.memory[fetch_i[4]:]
-                texel_5 := texture.memory[fetch_i[5]:]
-                texel_6 := texture.memory[fetch_i[6]:]
-                texel_7 := texture.memory[fetch_i[7]:]
+                memx8 :: #simd [8]uintpointer
+                texture_memory := cast(memx8) raw_data(texture.memory)
+                texture_width  := cast(memx8) texture.width
                 
-                sample_a := u32x8{ transmute(u32) texel_0[0],                 transmute(u32) texel_1[0],                 transmute(u32) texel_2[0],                 transmute(u32) texel_3[0],                 transmute(u32) texel_4[0],                 transmute(u32) texel_5[0],                  transmute(u32) texel_6[0],                 transmute(u32) texel_7[0],                 }
-                sample_b := u32x8{ transmute(u32) texel_0[1],                 transmute(u32) texel_1[1],                 transmute(u32) texel_2[1],                 transmute(u32) texel_3[1],                 transmute(u32) texel_4[1],                 transmute(u32) texel_5[1],                  transmute(u32) texel_6[1],                 transmute(u32) texel_7[1],                 }
-                sample_c := u32x8{ transmute(u32) texel_0[texture.width],     transmute(u32) texel_1[texture.width],     transmute(u32) texel_2[texture.width],     transmute(u32) texel_3[texture.width],     transmute(u32) texel_4[texture.width],     transmute(u32) texel_5[texture.width],      transmute(u32) texel_6[texture.width],     transmute(u32) texel_7[texture.width],     }
-                sample_d := u32x8{ transmute(u32) texel_0[texture.width + 1], transmute(u32) texel_1[texture.width + 1], transmute(u32) texel_2[texture.width + 1], transmute(u32) texel_3[texture.width + 1], transmute(u32) texel_4[texture.width + 1], transmute(u32) texel_5[texture.width + 1],  transmute(u32) texel_6[texture.width + 1], transmute(u32) texel_7[texture.width + 1], }
-
+                texel := texture_memory + fetch * size_of(ByteColor)
+                
+                zero := cast(u32x8) 0
+                sample_a := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(ByteColor) * 0),                   zero, maskFFx8)
+                sample_b := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(ByteColor) * 1),                   zero, maskFFx8)
+                sample_c := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(ByteColor) * texture_width),       zero, maskFFx8)
+                sample_d := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(ByteColor) * (texture_width + 1)), zero, maskFFx8)
+                
                 ta_r := cast(f32x8) (0xff &          sample_a      )
                 ta_g := cast(f32x8) (0xff & simd.shr(sample_a,  8) )
                 ta_b := cast(f32x8) (0xff & simd.shr(sample_a,  16))
                 ta_a := cast(f32x8) (0xff & simd.shr(sample_a,  24))
-
+                
                 tb_r := cast(f32x8) (0xff &          sample_b      )
                 tb_g := cast(f32x8) (0xff & simd.shr(sample_b,  8) )
                 tb_b := cast(f32x8) (0xff & simd.shr(sample_b,  16))
                 tb_a := cast(f32x8) (0xff & simd.shr(sample_b,  24))
-
+                
                 tc_r := cast(f32x8) (0xff &          sample_c      )
                 tc_g := cast(f32x8) (0xff & simd.shr(sample_c,  8) )
                 tc_b := cast(f32x8) (0xff & simd.shr(sample_c,  16))
                 tc_a := cast(f32x8) (0xff & simd.shr(sample_c,  24))
-
+                
                 td_r := cast(f32x8) (0xff &          sample_d      )
                 td_g := cast(f32x8) (0xff & simd.shr(sample_d,  8) )
                 td_b := cast(f32x8) (0xff & simd.shr(sample_d,  16))
                 td_a := cast(f32x8) (0xff & simd.shr(sample_d,  24))
-
+                
                 pixel_r := cast(f32x8) (0xff &          original_pixel      )
                 pixel_g := cast(f32x8) (0xff & simd.shr(original_pixel,  8) )
                 pixel_b := cast(f32x8) (0xff & simd.shr(original_pixel,  16))
                 pixel_a := cast(f32x8) (0xff & simd.shr(original_pixel,  24))
-
+                
                 // NOTE(viktor): srgb to linear
                 ta_r = square(ta_r)
                 ta_g = square(ta_g)
                 ta_b = square(ta_b)
-
+                
                 tb_r = square(tb_r)
                 tb_g = square(tb_g)
                 tb_b = square(tb_b)
-
+                
                 tc_r = square(tc_r)
                 tc_g = square(tc_g)
                 tc_b = square(tc_b)
-
+                
                 td_r = square(td_r)
                 td_g = square(td_g)
                 td_b = square(td_b)
-
+                
                 pixel_r = square(pixel_r)
                 pixel_g = square(pixel_g)
                 pixel_b = square(pixel_b)
-
+                
                 // NOTE(viktor): bilinear blend
                 ifx := 1 - fx
                 ify := 1 - fy
