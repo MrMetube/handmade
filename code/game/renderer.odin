@@ -556,8 +556,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     // :PointerArithmetic
     sort_entries := (cast([^]TileSortEntry) &group.push_buffer[group.sort_entry_at])[:group.push_buffer_element_count]
         
-    null_pixels_to_meters :: 1
-    
     for sort_entry in sort_entries {
         header := cast(^RenderGroupEntryHeader) &group.push_buffer[sort_entry.push_buffer_offset]
         //:PointerArithmetic
@@ -577,7 +575,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
             draw_rectangle_quickly(target,
                 entry.p, {entry.size.x, 0}, {0, entry.size.y},
                 entry.bitmap, entry.color,
-                null_pixels_to_meters, clip_rect,
+                clip_rect,
             )
             
           case RenderGroupEntryCoordinateSystem:
@@ -586,7 +584,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
                 entry.origin, entry.x_axis, entry.y_axis,
                 entry.texture, /* entry.normal, */ entry.color,
                 /* entry.top, entry.middle, entry.bottom, */
-                null_pixels_to_meters, clip_rect, 
+                clip_rect, 
             )
             
             p := entry.origin
@@ -607,7 +605,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
 ////////////////////////////////////////////////
 
 @(enable_target_feature="sse,sse2")
-draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, pixels_to_meters: f32, clip_rect: Rectangle2i) {
+draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, clip_rect: Rectangle2i) {
     timed_function()
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
     if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&

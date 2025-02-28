@@ -852,25 +852,6 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     // TODO: probably clear this to black
 }
 
-
-display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {    
-    gl.Viewport(0, 0, window_width, window_height)
-    
-    gl.ClearColor(1, 0, 1, 1)
-    gl.Clear(gl.COLOR_BUFFER_BIT)
-    
-    gl.BindTexture(gl.TEXTURE_2D, BlitTextureHandle)
-    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, buffer.width, buffer.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(buffer.memory));
-    gl.Enable(gl.TEXTURE_2D)
-    
-    // Draw the triangles
-    gl.BindVertexArray(BlitVao)
-    gl.DrawArrays(gl.TRIANGLES, 0, 6)
-    gl.BindVertexArray(0)
-
-    win.SwapBuffers(device_context)
-}
-
 toggle_fullscreen :: proc(window: win.HWND) {
     // NOTE(viktor): This follows Raymond Chen's prescription for fullscreen toggling, see:
     // http://blogs.msdn.com/b/oldnewthing/archive/2010/04/12/9994016.aspx

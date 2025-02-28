@@ -14,6 +14,9 @@ import "core:simd"
 @common v3 :: [3]f32
 @common v4 :: [4]f32
 
+
+@common m4 :: matrix[4,4]f32
+
 Rectangle   :: struct($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
