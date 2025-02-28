@@ -108,18 +108,18 @@ complete_previous_reads_before_future_reads :: proc "contextless" () {
     return cast(i32) value
 }
 
-vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
+@common vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
 
-@(require_results) vcast_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
+@(common, require_results) vcast_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
     return {cast(T) x, cast(T) y}
 }
-@(require_results) vcast_3 :: #force_inline proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
+@(common, require_results) vcast_3 :: #force_inline proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z}
 }
-@(require_results) vcast_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
+@(common, require_results) vcast_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
-@(require_results) vcast_vec :: #force_inline proc($T: typeid, v:[$N]$E) -> (result: [N]T) where T != E {
+@(common, require_results) vcast_vec :: #force_inline proc($T: typeid, v:[$N]$E) -> (result: [N]T) where T != E {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = cast(T) v[i]
     }

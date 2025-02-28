@@ -353,13 +353,13 @@ main :: proc() {
         
         {
             new_input.delta_time = target_seconds_per_frame
-                
+            
             is_down :: #force_inline proc(vk: win.INT) -> b32 {
                 is_down_mask :: min(i16) // 1 << 15
                 return cast(b32) (win.GetKeyState(vk)  & is_down_mask)
             }
         
-            {
+            { // Modifiers
                 new_input.shift_down   = is_down(win.VK_LSHIFT)
                 new_input.control_down = is_down(win.VK_CONTROL)
                 new_input.alt_down     = is_down(win.VK_MENU)
@@ -370,10 +370,7 @@ main :: proc() {
                 win.GetCursorPos(&mouse)
                 win.ScreenToClient(window, &mouse)
 
-                new_input.mouse.p = v2{ 
-                    cast(f32) mouse.x,
-                    cast(f32) ((GlobalBackBuffer.height-1) - mouse.y),
-                }
+                new_input.mouse.p = vec_cast(f32, mouse.x, GlobalBackBuffer.height - 1 - mouse.y)
                 for &button, index in new_input.mouse.buttons {
                     button.ended_down = old_input.mouse.buttons[index].ended_down
                     button.half_transition_count = 0
@@ -810,14 +807,11 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
     }
 }
 
-
-
 ////////////////////////////////////////////////   
 //  Window Drawing
-//   
 
-get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
-    client_rect : win.RECT
+get_window_dimension :: #force_inline proc "system" (window: win.HWND) -> (width, height: i32) {
+    client_rect: win.RECT
     win.GetClientRect(window, &client_rect)
     width  = client_rect.right  - client_rect.left
     height = client_rect.bottom - client_rect.top
@@ -858,45 +852,23 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     // TODO: probably clear this to black
 }
 
-display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32){    
-    when !true {
-        gl.Viewport(0, 0, window_width, window_height)
-        gl.ClearColor(1, 0, 1, 1)
-        gl.Clear(gl.COLOR_BUFFER_BIT)
-        
-        win.SwapBuffers(device_context)
-    } else {
-        #no_bounds_check if true {
-            for y in 0..<buffer.height {
-                row := buffer.memory[y * buffer.pitch:][:buffer.width]
-                for &useful_color in row {
-                    // NOTE(viktor): Windows expects the color to be ordered like this:
-                    // struct{ b, g, r, pad: u8 }
-                    useful_color.r, useful_color.b = useful_color.b, useful_color.r
-                }
-            }
-        }
-        
-        offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
 
-        win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y,         win.BLACKNESS )
-        win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
-        
-        win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height,             win.BLACKNESS )
-        win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_height, win.BLACKNESS )
-        
-        // TODO: aspect ratio correction
-        // TODO: stretch to fill window once we are fine with our renderer
-        win.StretchDIBits(
-            device_context,
-            offset.x, offset.y, buffer.width, buffer.height,
-            0, 0, buffer.width, buffer.height,
-            raw_data(buffer.memory),
-            &buffer.info,
-            win.DIB_RGB_COLORS,
-            win.SRCCOPY,
-        )
-    }
+display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {    
+    gl.Viewport(0, 0, window_width, window_height)
+    
+    gl.ClearColor(1, 0, 1, 1)
+    gl.Clear(gl.COLOR_BUFFER_BIT)
+    
+    gl.BindTexture(gl.TEXTURE_2D, BlitTextureHandle)
+    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, buffer.width, buffer.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(buffer.memory));
+    gl.Enable(gl.TEXTURE_2D)
+    
+    // Draw the triangles
+    gl.BindVertexArray(BlitVao)
+    gl.DrawArrays(gl.TRIANGLES, 0, 6)
+    gl.BindVertexArray(0)
+
+    win.SwapBuffers(device_context)
 }
 
 toggle_fullscreen :: proc(window: win.HWND) {
@@ -925,7 +897,6 @@ toggle_fullscreen :: proc(window: win.HWND) {
     }
 }
 
-
 ////////////////////////////////////////////////   
 //  Windows Messages
 
@@ -950,8 +921,8 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         paint: win.PAINTSTRUCT
         device_context := win.BeginPaint(window, &paint)
 
-        window_width, window_height := get_window_dimension(window)
-        display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height)
+            window_width, window_height := get_window_dimension(window)
+            display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height)
 
         win.EndPaint(window, &paint)
     case win.WM_SETCURSOR: 
@@ -966,7 +937,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     return result
 }
 
-process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
+process_win_keyboard_message :: #force_inline proc(new_state: ^InputButton, is_down: b32) {
     if is_down != new_state.ended_down {
         new_state.ended_down = is_down
         new_state.half_transition_count += 1
@@ -989,31 +960,20 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
 
             if was_down != is_down {
                 switch vk_code {
-                case win.VK_W:
-                    process_win_keyboard_message(&keyboard_controller.stick_up      , is_down)
-                case win.VK_A:
-                    process_win_keyboard_message(&keyboard_controller.stick_left    , is_down)
-                case win.VK_S:
-                    process_win_keyboard_message(&keyboard_controller.stick_down    , is_down)
-                case win.VK_D:
-                    process_win_keyboard_message(&keyboard_controller.stick_right   , is_down)
-                case win.VK_Q:
-                    process_win_keyboard_message(&keyboard_controller.shoulder_left , is_down)
-                case win.VK_E:
-                    process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
-                case win.VK_UP:
-                    process_win_keyboard_message(&keyboard_controller.button_up     , is_down)
-                case win.VK_DOWN:
-                    process_win_keyboard_message(&keyboard_controller.button_down   , is_down)
-                case win.VK_LEFT:
-                    process_win_keyboard_message(&keyboard_controller.button_left   , is_down)
-                case win.VK_RIGHT:
-                    process_win_keyboard_message(&keyboard_controller.button_right  , is_down)
+                case win.VK_W:     process_win_keyboard_message(&keyboard_controller.stick_up,       is_down)
+                case win.VK_A:     process_win_keyboard_message(&keyboard_controller.stick_left,     is_down)
+                case win.VK_S:     process_win_keyboard_message(&keyboard_controller.stick_down,     is_down)
+                case win.VK_D:     process_win_keyboard_message(&keyboard_controller.stick_right,    is_down)
+                case win.VK_Q:     process_win_keyboard_message(&keyboard_controller.shoulder_left,  is_down)
+                case win.VK_E:     process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
+                case win.VK_UP:    process_win_keyboard_message(&keyboard_controller.button_up,      is_down)
+                case win.VK_DOWN:  process_win_keyboard_message(&keyboard_controller.button_down,    is_down)
+                case win.VK_LEFT:  process_win_keyboard_message(&keyboard_controller.button_left,    is_down)
+                case win.VK_RIGHT: process_win_keyboard_message(&keyboard_controller.button_right,   is_down)
+                case win.VK_SPACE: process_win_keyboard_message(&keyboard_controller.start,          is_down)
                 case win.VK_ESCAPE:
                     GlobalRunning = false
-                    process_win_keyboard_message(&keyboard_controller.back          , is_down)
-                case win.VK_SPACE:
-                    process_win_keyboard_message(&keyboard_controller.start         , is_down)
+                    process_win_keyboard_message(&keyboard_controller.back,           is_down)
                 case win.VK_L:
                     if is_down {
                         if state.input_replay_index != 0 {
@@ -1042,6 +1002,6 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
     }
 }
 
-build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
+build_exe_path :: #force_inline proc(state: PlatformState, filename: string) -> win.wstring {
     return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
 }
