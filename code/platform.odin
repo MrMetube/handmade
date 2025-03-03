@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import win "core:sys/windows"
+import gl "vendor:OpenGL"
 
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
@@ -53,6 +54,11 @@ GlobalPause := false
 
 GlobalDebugShowCursor: b32
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
+
+BlitVertexArrayObject: u32
+BlitVertexBufferObject, BlitTextureCoordinatesVbo: u32
+
+Uniforms: gl.Uniforms
 
 ////////////////////////////////////////////////
 // Types
@@ -136,7 +142,7 @@ main :: proc() {
         instance := cast(win.HINSTANCE) win.GetModuleHandleW(nil)
         window_class := win.WNDCLASSW{
             hInstance = instance,
-            lpszClassName = win.utf8_to_wstring("HandmadeWindowClass"),
+            lpszClassName = win.L("HandmadeWindowClass"),
             style = win.CS_HREDRAW | win.CS_VREDRAW,
             lpfnWndProc = main_window_callback,
             hCursor = win.LoadCursorW(nil, win.MAKEINTRESOURCEW(32512)),
@@ -152,19 +158,14 @@ main :: proc() {
             return // @Logging 
         }
 
-
-        // NOTE: lpWindowName is either a cstring or a wstring depending on if UNICODE is defined
-        // Odin expects that to be the case, but here it seems to be undefined so yeah.
-        _window_title := "Handmade"
-        window_title := cast([^]u16) raw_data(_window_title[:])
         window = win.CreateWindowExW(
             0, //win.WS_EX_TOPMOST | win.WS_EX_LAYERED,
             window_class.lpszClassName,
-            window_title,
+            win.L("Handmade"),
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
-            GlobalBackBuffer.width  + 16, // add for the window frame
+            GlobalBackBuffer.width  + 16, // added for the window frame
             GlobalBackBuffer.height + 39,
             nil,
             nil,
@@ -179,7 +180,6 @@ main :: proc() {
         
         init_opengl(window)
     }
-
 
 
     ////////////////////////////////////////////////
@@ -234,7 +234,7 @@ main :: proc() {
 
     ////////////////////////////////////////////////
     //  Memory Setup
-
+    
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
@@ -244,7 +244,15 @@ main :: proc() {
     // TODO(viktor): remove MaxPossibleOverlap
     MaxPossibleOverlap :: 8*size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-
+    
+    current_sort_memory_size : umm = 1 * Megabyte
+    sort_memory:= allocate_memory(current_sort_memory_size)
+    
+    // TODO(viktor): decide what our push_buffer size is
+    render_commands: RenderCommands
+    push_buffer_size : u32 = 4 * Megabyte
+    push_buffer := allocate_memory(push_buffer_size)
+    
     game_memory := GameMemory{
         high_priority_queue        = &high_queue,
         low_priority_queue         = &low_queue,
@@ -265,26 +273,26 @@ main :: proc() {
     }
     
     { // NOTE(viktor): initialize game_memory
-        base_address := cast(rawpointer) cast(uintpointer) (1 * Terabyte when INTERNAL else 0)
-
+        base_address := cast(rawpointer) cast(umm) (1 * Terabyte when INTERNAL else 0)
+        
         total_size := cast(uint) (PermanentStorageSize + TransientStorageSize + DebugStorageSize)
-
+        
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         // TODO(viktor): why limit ourselves?
         assert(total_size < 4 * Gigabyte)
         state.game_memory_block = storage_ptr[:total_size]
-
+        
         // TODO(viktor): TransientStorage needs to be broken up
         // into game transient and cache transient, and only
         // the former need be saved for state playback.
         for &buffer, index in state.replay_buffers {
             buffer.filename   = get_record_replay_filepath(state, cast(i32) index)
             buffer.filehandle = win.CreateFileW(buffer.filename, win.GENERIC_READ|win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
-        
+            
             size_high := cast(win.DWORD)(total_size >> 32)
             size_low  := cast(win.DWORD)total_size
             buffer.memory_map = win.CreateFileMappingW(buffer.filehandle, nil, win.PAGE_READWRITE, size_high, size_low, nil)
-
+            
             buffer_storage_ptr := cast([^]u8) win.MapViewOfFile(buffer.memory_map, win.FILE_MAP_ALL_ACCESS, 0, 0, total_size)
             if buffer_storage_ptr != nil {
                 buffer.memory_block = buffer_storage_ptr[:total_size]
@@ -292,7 +300,7 @@ main :: proc() {
                 // @Logging 
             }
         }
-
+        
         // :PointerArithmetic
         game_memory.permanent_storage = storage_ptr[0:][:PermanentStorageSize]
         game_memory.transient_storage = storage_ptr[PermanentStorageSize:][:TransientStorageSize]
@@ -308,22 +316,22 @@ main :: proc() {
             }
         }
     }
-
+    
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
         return // @Logging 
     }
-
-
-
+    
+    
+    
     ////////////////////////////////////////////////
     //  Timer Setup
-
+    
     last_counter := get_wall_clock()
     flip_counter := get_wall_clock()
-
+    
     ////////////////////////////////////////////////
     //  Game Loop
-    // 
+    
     for GlobalRunning {
         ////////////////////////////////////////////////
         //  Hot Reload
@@ -482,10 +490,6 @@ main :: proc() {
         //  Update and Render
         game_updated := game.begin_timed_block("game updated")
         
-        // TODO(viktor): decide what our push_buffer size is
-        render_commands: RenderCommands
-        push_buffer_size : u32 = 4 * Megabyte
-        push_buffer := win.VirtualAlloc()
         init_render_commands(&render_commands, push_buffer_size, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
         
         if !GlobalPause {
@@ -505,7 +509,7 @@ main :: proc() {
         ////////////////////////////////////////////////
         // Sound Output
         audio_update := game.begin_timed_block("audio update")
-            
+        
         if !GlobalPause {
             sound_is_valid = true
             play_cursor, write_cursor: win.DWORD
@@ -623,7 +627,14 @@ main :: proc() {
         {
             window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
-            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height)
+            
+            needed_sort_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(TileSortEntry) )
+            if needed_sort_memory_size < current_sort_memory_size {
+                deallocate_memory(sort_memory)
+                current_sort_memory_size = needed_sort_memory_size
+                sort_memory = allocate_memory(needed_sort_memory_size)
+            }
+            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_memory)
             win.ReleaseDC(window, device_context)
             
             flip_counter = get_wall_clock()
@@ -640,9 +651,271 @@ main :: proc() {
 }
 
 ////////////////////////////////////////////////
+
+GlDefaultTextureFormat := gl.RGBA8
+
+init_opengl :: proc(window: win.HWND) {
+    dc := win.GetDC(window)
+    defer win.ReleaseDC(window, dc)
+    
+    desired_pixel_format := win.PIXELFORMATDESCRIPTOR{
+        nSize      = size_of(win.PIXELFORMATDESCRIPTOR),
+        nVersion   = 1,
+        dwFlags    = win.PFD_SUPPORT_OPENGL | win.PFD_DRAW_TO_WINDOW | win.PFD_DOUBLEBUFFER,
+        iPixelType = win.PFD_TYPE_RGBA,
+        cColorBits = 32,
+        cAlphaBits = 8,
+        iLayerType = win.PFD_MAIN_PLANE,
+    }
+    
+    suggested_pixel_format_index := win.ChoosePixelFormat(dc, &desired_pixel_format)
+    suggested_pixel_format: win.PIXELFORMATDESCRIPTOR
+    
+    win.DescribePixelFormat(dc, suggested_pixel_format_index, size_of(suggested_pixel_format), &suggested_pixel_format)
+    win.SetPixelFormat(dc, suggested_pixel_format_index, &suggested_pixel_format)
+    
+    gl_context := win.wglCreateContext(dc)
+    
+    if win.wglMakeCurrent(dc, gl_context) {
+        
+        gl.load_up_to(4, 6, win.gl_set_proc_address)
+        
+        // Set up vertex data
+        gl.GenVertexArrays(1, &BlitVertexArrayObject)
+        gl.GenBuffers(1, &BlitVertexBufferObject)
+        gl.GenBuffers(1, &BlitTextureCoordinatesVbo)
+        
+        // useful utility procedures that are part of vendor:OpenGl
+        program, program_ok := gl.load_shaders_source(VertexShader, PixelShader)
+        if !program_ok {
+            // @Logging Failed to create GLSL program
+            fmt.println(gl.get_last_error_message())
+            return
+        }
+        gl.UseProgram(program)
+        
+        win.wglSwapIntervalEXT = cast(win.SwapIntervalEXTType) win.wglGetProcAddress("wglSwapIntervalEXT")
+        if win.wglSwapIntervalEXT != nil {
+            win.wglSwapIntervalEXT(1)
+        }
+        
+        // TODO(viktor): actually check for the extensions
+        if true {
+            GlDefaultTextureFormat = gl.SRGB8_ALPHA8
+        }
+        
+        if true {
+            gl.Enable(gl.FRAMEBUFFER_SRGB)
+        }
+        
+        Uniforms = gl.get_uniforms_from_program(program)
+    } else {
+        // @Logging
+        unreachable()
+    }
+}
+
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_memory: rawpointer) {
+    sort_render_elements(commands, sort_memory)
+    
+    /* 
+        if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
+            render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
+        }
+    
+    */
+    
+    RenderInHardware :: true
+    DisplayViaSoftware :: false
+    
+    if RenderInHardware {
+         gl_render_commands(commands, window_width, window_height)
+         win.SwapBuffers(device_context)
+    } else {
+        offscreen_buffer := Bitmap{
+            memory = GlobalBackBuffer.memory,
+            width  = GlobalBackBuffer.width,
+            height = GlobalBackBuffer.height,
+        }
+        software_render_commands(render_queue, commands, offscreen_buffer)
+        if DisplayViaSoftware {
+            // TODO(viktor): recover old strechdibits routine
+        } else {
+            gl_display_bitmap(window_width, window_height, offscreen_buffer, device_context)
+        }
+    }
+}
+
+gl_display_bitmap :: #force_inline proc(width, height: i32, bitmap: Bitmap, device_context: win.HDC) {
+    gl.Viewport(0, 0, width, height)
+    
+    gl_set_screenspace(width, height)
+    
+    gl.ClearColor(1, 0, 1, 1)
+    gl.Clear(gl.COLOR_BUFFER_BIT)
+    
+    gl.ActiveTexture(gl.TEXTURE0)
+    
+    gl.BindTexture(gl.TEXTURE_2D, 1)
+    
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_LOD, 0)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LOD, 0)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP)
+    
+    gl.Uniform1i(Uniforms["gameTexture"].location, 0)
+    
+    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory));
+    gl.Enable(gl.TEXTURE_2D)
+    
+    gl.BindVertexArray(BlitVertexArrayObject)
+        // Bind and set the vertex buffer
+        gl.BindBuffer(gl.ARRAY_BUFFER, BlitVertexBufferObject)
+            gl_rectangle(v2{0,0}, vec_cast(f32, width, height), 1)
+            gl.EnableVertexAttribArray(0)
+            
+        // Bind and set the vertex buffer
+        gl.BindBuffer(gl.ARRAY_BUFFER, BlitTextureCoordinatesVbo)
+            texture_coordinates := [6]v2{
+                {0,0}, {1, 0}, {1, 1},
+                {0,0}, {1, 1}, {0, 1},
+            }
+            
+            gl.BufferData(gl.ARRAY_BUFFER, size_of(texture_coordinates), &texture_coordinates[0], gl.STATIC_DRAW)
+            
+            gl.VertexAttribPointer(1, 2, gl.FLOAT, false, size_of(v2), 0)
+            gl.EnableVertexAttribArray(1)
+                
+        gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+    gl.BindVertexArray(0)
+    
+    // Draw the triangles
+    gl.BindVertexArray(BlitVertexArrayObject)
+    gl.DrawArrays(gl.TRIANGLES, 0, 6)
+    gl.BindVertexArray(0)
+    
+    win.SwapBuffers(device_context)
+}
+
+gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_height: i32) {
+    gl.Viewport(0, 0, commands.width, commands.height)
+    
+    gl.Enable(gl.TEXTURE_2D)
+    gl.Enable(gl.BLEND)
+    gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    
+    // :PointerArithmetic
+    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:commands.push_buffer_element_count]
+    
+    for sort_entry in sort_entries {
+        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.push_buffer_offset]
+        //:PointerArithmetic
+        entry_data := &commands.push_buffer[sort_entry.push_buffer_offset + size_of(RenderGroupEntryHeader)]
+        
+        switch header.type {
+          case .RenderGroupEntryClear:
+            entry := cast(^RenderGroupEntryClear) entry_data
+            
+            color := entry.color
+            gl.ClearColor(color.r, color.g, color.b, color.a)
+            gl.Clear(gl.COLOR_BUFFER_BIT)
+            
+          case .RenderGroupEntryRectangle:
+            entry := cast(^RenderGroupEntryRectangle) entry_data
+            
+            gl.Disable(gl.TEXTURE_2D)
+            gl_rectangle(entry.rect.min, entry.rect.max, entry.color)
+            gl.Enable(gl.TEXTURE_2D)
+            
+          case .RenderGroupEntryBitmap:
+            entry := cast(^RenderGroupEntryBitmap) entry_data
+            
+            min := entry.p
+            max := min + entry.size
+            
+            bitmap := &entry.bitmap
+            if bitmap.handle != 0 {
+                gl.BindTexture(gl.TEXTURE_2D, bitmap.handle)
+            } else {
+                @static texture_count: u32
+                bitmap.handle = texture_count
+                texture_count += 1
+                gl.BindTexture(gl.TEXTURE_2D, bitmap.handle)
+                
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_LOD, 0)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LOD, 0)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
+                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP)
+            }
+
+            gl.Uniform1i(Uniforms["gameTexture"].location, 0)
+            gl.TexImage2D(gl.TEXTURE_2D, 0, GlDefaultTextureFormat, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory));
+
+            gl_rectangle(min, max, entry.color)
+            
+          case .RenderGroupEntryCoordinateSystem:
+          case:
+            panic("Unhandled Entry")
+        }
+    }
+}
+
+panic :: proc(message := "", loc := #caller_location) { assert(false, message, loc) }
+
+gl_rectangle :: proc(min, max: v2, color: v4) {
+    @static vertex_array_object: u32
+    
+    vertices := [6]v2{
+        min, { max.x, min.y}, max, // Lower triangle
+        min, max, {min.x,  max.y}, // Upper triangle
+    }
+    @static init: b32
+    if !init {
+        init = true
+        gl.GenVertexArrays(1, &vertex_array_object)
+    }
+    
+    gl.BindVertexArray(vertex_array_object)
+    
+    gl.BufferData(gl.ARRAY_BUFFER, size_of(vertices), &vertices[0], gl.STATIC_DRAW)
+
+    gl.VertexAttribPointer(0, 2, gl.FLOAT, false, size_of(v2), 0)
+    gl.EnableVertexAttribArray(0)
+    
+    
+    gl.BindVertexArray(vertex_array_object)
+    gl.DrawArrays(gl.TRIANGLES, 0, 6)
+    gl.BindVertexArray(0)
+}
+
+gl_set_screenspace :: proc(width, height: i32) {
+    a := width  == 0 ? 1 : 2 / cast(f32) width
+    b := height == 0 ? 1 : 2 / cast(f32) height
+    
+    u_transform := m4{
+        a, 0, 0, -1,
+        0, b, 0, -1,
+        0, 0, 1,  0,
+        0, 0, 0,  1,
+    }
+    
+    gl.UniformMatrix4fv(Uniforms["u_transform"].location, 1, false, &u_transform[0, 0])
+}
+
+////////////////////////////////////////////////
 // Exports to the game
 
-allocate_memory : PlatformAllocateMemory : proc(size: u64) -> (result: rawpointer) {
+allocate_memory : PlatformAllocateMemory : proc(#any_int size: u64) -> (result: rawpointer) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     return result
 }
@@ -888,15 +1161,15 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             win.SetLayeredWindowAttributes(window, win.RGB(0,0,0),  64, LWA_ALPHA)
         }
     case win.WM_PAINT:
+        paint: win.PAINTSTRUCT
+        device_context := win.BeginPaint(window, &paint)
         when false {
-            paint: win.PAINTSTRUCT
-            device_context := win.BeginPaint(window, &paint)
         
             window_width, window_height := get_window_dimension(window)
             render_to_window(&GlobalBackBuffer, device_context, window_width, window_height)
             
-            win.EndPaint(window, &paint)
         }
+        win.EndPaint(window, &paint)
     case win.WM_SETCURSOR: 
         if GlobalDebugShowCursor {
             // NOTE(viktor): Don't do anything
@@ -917,7 +1190,7 @@ process_win_keyboard_message :: #force_inline proc(new_state: ^InputButton, is_d
 }
 
 process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^InputController) {
-    message : win.MSG
+    message: win.MSG
     for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
         switch message.message {
         case win.WM_QUIT:

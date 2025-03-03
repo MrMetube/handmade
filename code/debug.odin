@@ -92,9 +92,9 @@ when INTERNAL {
             nil, win.utf8_to_wstring(directory), 
             &startup_info, &process_info,
         ) {
-            result.os_handle = cast(uintpointer) process_info.hProcess
+            result.os_handle = cast(umm) process_info.hProcess
         } else {
-            result.os_handle = cast(uintpointer) win.INVALID_HANDLE_VALUE
+            result.os_handle = cast(umm) win.INVALID_HANDLE_VALUE
         }
         
         return result

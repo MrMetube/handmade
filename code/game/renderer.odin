@@ -94,8 +94,15 @@ EnvironmentMap :: struct {
 // TODO(viktor): Why always prefix rendergroup?
 // NOTE(viktor): RenderGroupEntry is a "compact discriminated union"
 @common
+RenderGroupEntryType :: enum {
+    RenderGroupEntryClear,
+    RenderGroupEntryBitmap,
+    RenderGroupEntryRectangle,
+    RenderGroupEntryCoordinateSystem,
+}
+@common
 RenderGroupEntryHeader :: struct {
-    type: typeid,
+    type: RenderGroupEntryType,
 }
 
 @common
@@ -109,7 +116,7 @@ RenderGroupEntryBitmap :: struct {
     p:      v2,
     size:   v2,
     
-    id:     BitmapId,
+    id:     u32, // BitmapId
     bitmap: Bitmap,
 }
 
@@ -212,7 +219,13 @@ push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid, sort_
     if commands.push_buffer_size + size < commands.sort_entry_at - size_of(TileSortEntry) {
         offset := commands.push_buffer_size
         header := cast(^RenderGroupEntryHeader) &commands.push_buffer[offset]
-        header.type = typeid_of(T)
+        
+        switch typeid_of(T) {
+          case RenderGroupEntryClear:            header.type = .RenderGroupEntryClear
+          case RenderGroupEntryRectangle:        header.type = .RenderGroupEntryRectangle
+          case RenderGroupEntryBitmap:           header.type = .RenderGroupEntryBitmap
+          case RenderGroupEntryCoordinateSystem: header.type = .RenderGroupEntryCoordinateSystem
+        }
 
         result = cast(^T) &commands.push_buffer[offset + header_size]
 
@@ -277,7 +290,7 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, trans
             alpha := v4{1,1,1, group.global_alpha}
             
             element.bitmap = bitmap
-            element.id     = asset_id
+            element.id     = cast(u32) asset_id
             
             element.color  = color * alpha
             element.p      = used_dim.basis.p

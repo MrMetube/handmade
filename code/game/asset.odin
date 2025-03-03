@@ -514,9 +514,9 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
                 result = cast(^AssetMemoryHeader) next_block
             }
             
-            alignment_offset := cast(uintpointer) result & cast(uintpointer) (alignment - 1)
+            alignment_offset := cast(umm) result & cast(umm) (alignment - 1)
             if alignment_offset != 0 {
-                result = cast(^AssetMemoryHeader) align_pow2(cast(uintpointer) result, cast(uintpointer) (alignment - 1))
+                result = cast(^AssetMemoryHeader) align_pow2(cast(umm) result, cast(umm) (alignment - 1))
             }
             
             if(block.size - (alignment - auto_cast alignment_offset) >= size) {

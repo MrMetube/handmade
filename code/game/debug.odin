@@ -335,7 +335,7 @@ DebugProcessState :: struct {
 
 @common
 DebugExecutingProcess :: struct {
-    os_handle: uintpointer,
+    os_handle: umm,
 }
 
 @common DebugReadEntireFile       :: #type proc(filename: string) -> (result: []u8)
@@ -354,6 +354,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     debug := cast(^DebugState) raw_data(memory.debug_storage)
     
     assets, work_queue, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
+    if assets == nil do return
+    
     if !debug.initialized {
         debug.initialized = true
 
@@ -383,6 +385,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.top_edge   =  0.5 * cast(f32) render_commands.height   
     }
     
+    init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
+    
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
         debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
@@ -391,8 +395,6 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.ascent = get_baseline(debug.font_info)
     }
 
-    init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
-    
     GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
     
@@ -613,7 +615,7 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
     
     assert(event.loc != {})
     // TODO(viktor): BETTER HASH FUNCTION
-    hash_value := 19 * cast(u32) (cast(uintpointer) raw_data(event.loc.file_path) >> 2) +  31 * cast(u32) (cast(uintpointer) raw_data(event.loc.name) >> 2) + 5 * event.loc.line
+    hash_value := 19 * cast(u32) (cast(umm) raw_data(event.loc.file_path) >> 2) +  31 * cast(u32) (cast(umm) raw_data(event.loc.name) >> 2) + 5 * event.loc.line
     assert(hash_value != 0)
     index := hash_value % len(debug.element_hash)
     
@@ -1109,7 +1111,7 @@ debug_id_from_guid :: #force_inline proc(tree: ^DebugTree, guid: ^u8) -> (result
 
 get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
     // TODO(viktor): BETTER HASH FUNCTION
-    hash_index := ((cast(uintpointer) id.value[0] >> 2) + (cast(uintpointer) id.value[1] >> 2)) % len(debug.view_hash)
+    hash_index := ((cast(umm) id.value[0] >> 2) + (cast(umm) id.value[1] >> 2)) % len(debug.view_hash)
     slot := &debug.view_hash[hash_index]
 
     for search := slot^ ; search != nil; search = search.next {

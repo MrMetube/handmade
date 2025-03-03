@@ -1,15 +1,12 @@
 package main
 
-import gl "vendor:OpenGl"
 import "core:simd"
 
-// TODO(viktor): Can we define the work and the do_work together, whilst
-// ensuring no loss of data/types... through the dll boundary?
 TileRenderWork :: struct {
-    commands:  ^RenderCommands, 
-    target: Bitmap,
+    commands: ^RenderCommands, 
+    target:   Bitmap,
     
-    clip_rect:  Rectangle2i, 
+    clip_rect: Rectangle2i, 
 }
 
 init_render_commands :: #force_inline proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: rawpointer, width, height: i32) {
@@ -22,16 +19,13 @@ init_render_commands :: #force_inline proc(commands: ^RenderCommands, max_push_b
     }
 }
 
-sort_render_elements :: proc(commands: ^RenderCommands, temp_arena: ^Arena) {
+sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: rawpointer) {
     // TODO(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := commands.push_buffer_element_count
     sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
+    temp_space   := (cast([^]TileSortEntry) temp_memory)[:count]
 
-    sort := begin_temporary_memory(temp_arena)
-    defer end_temporary_memory(sort)
-    
-    temp_space := push(temp_arena, TileSortEntry, count, no_clear())
     // merge_sort(sort_entries, temp_space)
     radix_sort(sort_entries, temp_space)
     
@@ -56,77 +50,8 @@ is_sorted :: proc(entries: []TileSortEntry) {
     }
 }
 
-gl_render_group_to_output :: proc(commands: ^RenderCommands, window_width, window_height: i32) {
-    gl.Viewport(0, 0, commands.width, commands.height)
-    
-    gl.Enable(gl.TEXTURE_2D)
-    gl.Enable(gl.BLEND)
-    gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-    
-    // :PointerArithmetic
-    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:commands.push_buffer_element_count]
-    
-    for sort_entry in sort_entries {
-        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.push_buffer_offset]
-        //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.push_buffer_offset + size_of(RenderGroupEntryHeader)]
-        
-        switch header.type {
-          case RenderGroupEntryClear:
-            entry := cast(^RenderGroupEntryClear) entry_data
-            
-            color := entry.color
-            gl.ClearColor(color.r, color.g, color.b, color.a)
-            gl.Clear(gl.COLOR_BUFFER_BIT)
-            
-          case RenderGroupEntryRectangle:
-            entry := cast(^RenderGroupEntryRectangle) entry_data
-            
-            gl.Disable(gl.TEXTURE_2D)
-            gl_rectangle(entry.rect.min, entry.rect.max, entry.color)
-            gl.Enable(gl.TEXTURE_2D)
-            
-          case RenderGroupEntryBitmap:
-            entry := cast(^RenderGroupEntryBitmap) entry_data
-            
-            min := entry.p
-            max := min + entry.size
-            
-            bitmap := &entry.bitmap
-            if bitmap.handle != 0 {
-                gl.BindTexture(gl.TEXTURE_2D, bitmap.handle)
-            } else {
-                @static texture_count: u32
-                bitmap.handle = texture_count
-                texture_count += 1
-                gl.BindTexture(gl.TEXTURE_2D, bitmap.handle)
-                
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_BASE_LEVEL, 0)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_LOD, 0)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LOD, 0)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
-                gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, gl.CLAMP)
-            }
-
-            gl.Uniform1i(Uniforms["gameTexture"].location, 0)
-            
-            gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory));
-
-            gl_rectangle(min, max, entry.color)
-            
-          case RenderGroupEntryCoordinateSystem:
-          case:
-            panic("Unhandled Entry")
-        }
-    }
-}
-
-tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {
-    assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
+software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {
+    assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
 
     /* TODO(viktor):
         - Make sure the tiles are all cache-aligned
@@ -158,7 +83,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, commands: ^Rende
             work.clip_rect.max = work.clip_rect.min + tile_size
             
             if x == tile_count.x-1 {
-                work.clip_rect.max.x = target.width
+                work.clip_rect.max.x = target.width 
             }
             if y == tile_count.y-1 {
                 work.clip_rect.max.y = target.height
@@ -377,11 +302,11 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 fy := ty - cast(f32x8) sy
 
                 // NOTE(viktor): bilinear sample
-                fetch := cast(memx8) (sy * texture_width + sx)
+                fetch := cast(ummx8) (sy * texture_width + sx)
                 
-                memx8 :: #simd [8]uintpointer
-                texture_memory := cast(memx8) raw_data(texture.memory)
-                texture_width  := cast(memx8) texture.width
+                ummx8 :: #simd [8]umm
+                texture_memory := cast(ummx8) raw_data(texture.memory)
+                texture_width  := cast(ummx8) texture.width
                 
                 texel := texture_memory + fetch * size_of(Color)
                 
@@ -1077,3 +1002,32 @@ bubble_sort :: proc(entries: []TileSortEntry) {
     }
 }
 
+//////////////////////////////////////////////////
+
+VertexShader := `#version 330 core
+
+layout(location=0) in vec3 a_position;
+layout(location=1) in vec2 a_tex_coords;
+
+out vec2 v_tex_coords;
+
+uniform mat4 u_transform;
+
+void main() {
+	gl_Position = u_transform * vec4(a_position, 1.0);
+    v_tex_coords = a_tex_coords;
+}
+`
+
+PixelShader := `#version 330 core
+
+uniform sampler2D gameTexture;
+
+in vec2 v_tex_coords;
+
+out vec4 o_color;
+
+void main() {
+	o_color = texture(gameTexture, v_tex_coords);
+}
+`
