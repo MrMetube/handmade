@@ -10,13 +10,13 @@ import "core:odin/parser"
 import "core:odin/tokenizer"
 
 ExtractContext :: struct {
-    files: map[string]string,
-    imports: [dynamic]string,
-    declarations: [dynamic]string,
+    files:        map[string]string,
+    imports:      map[string]string,
+    declarations: map[string]string,
 }
 
 Tag    :: "common"
-Input  :: `D:\handmade\code\game`
+Inputs :: [?]string{`D:\handmade\code\game`}
 Output :: `D:\handmade\code\generated.odin`
 OutputPackage :: "main"
 
@@ -24,15 +24,14 @@ extract_common_game_declarations :: proc() {
     using my_context: ExtractContext
     context.user_ptr = &my_context
     
-    fi, _ := os2.read_directory_by_path(Input, -1, context.allocator)
-    for f in fi {
-        bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
-        files[f.fullpath] = string(bytes)
+    for input in Inputs {
+        fi, _ := os2.read_directory_by_path(input, -1, context.allocator)
+        for f in fi {
+            bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
+            files[f.fullpath] = string(bytes)
+        }
     }
     context.user_ptr = &files
-    
-    pkg, ok := parser.parse_package_from_path(Input)
-    assert(ok)
     
     if os.exists(Output) {
         os.remove(Output)
@@ -50,14 +49,17 @@ package %v
 ///////////////////////////////////////////////
 
 `, OutputPackage)
-    v := ast.Visitor{
-        visit = extract_commons
-    }
-    ast.walk(&v, pkg)
-    for imp in imports do fmt.fprint(out, imp)
-    for decl in declarations do fmt.fprint(out, decl)
     
-    fmt.fprintln(out, "\n")
+    v := ast.Visitor{ visit = extract_commons }
+    
+    for input in Inputs {
+        pkg, ok := parser.parse_package_from_path(input)
+        assert(ok)
+        
+        ast.walk(&v, pkg)
+    }
+    for key, imp  in imports      do fmt.fprintln(out, imp)
+    for key, decl in declarations do fmt.fprintln(out, decl)
 }
 
 extract_commons :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
@@ -66,27 +68,35 @@ extract_commons :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor 
     if node == nil do return visitor
     #partial switch decl in node.derived {
     case ^ast.Value_Decl:
-        foo(&declarations, decl.attributes[:], decl.pos, decl.end)
+        collect(&declarations, decl.attributes[:], decl.pos, decl.end)
     case ^ast.Import_Decl:
-        foo(&imports, decl.attributes[:], decl.pos, decl.end)
+        collect(&imports, decl.attributes[:], decl.pos, decl.end)
     }
     return visitor
 }
 
-foo :: proc(collect: ^[dynamic]string, attributes: []^ast.Attribute, pos, end: tokenizer.Pos) {
+collect :: proc(collect: ^map[string]string, attributes: []^ast.Attribute, pos, end: tokenizer.Pos) {
     for attritbute in attributes {
         if len(attritbute.elems) > 0 {
             is_marked_as_common: b32
             other_attributes: [dynamic]string
-            declaration: string
+            name, name_and_body: string
             
             for expr in attritbute.elems {
                 if att_name, ok := read_pos(expr.pos, expr.end); ok {
                     if strings.equal_fold(att_name, Tag) {
                         is_marked_as_common = true
-                        decl_name, ok := read_pos(pos, end)
+                        ok: bool
+                        name_and_body, ok = read_pos(pos, end)
+                        
+                        eon : int
+                        for _, i in name_and_body {
+                            if i > 0 && name_and_body[i-1] == ':' && name_and_body[i] == ':' do break
+                            eon = i
+                        }
+                        name = name_and_body[:eon]
+                        
                         assert(ok)
-                        declaration = fmt.tprint(decl_name)
                     } else {
                         append(&other_attributes, fmt.tprint(att_name))
                     }
@@ -94,12 +104,16 @@ foo :: proc(collect: ^[dynamic]string, attributes: []^ast.Attribute, pos, end: t
             }
             
             if is_marked_as_common {
+                builder: string
+                
                 if len(other_attributes) > 0 {
-                    append(collect, "@(") 
-                    for other in other_attributes do append(collect, other, ",")
-                    append(collect, ")\n")
+                    builder = fmt.tprint(builder, "@(", sep = "")
+                    for other in other_attributes do builder = fmt.tprint(builder, other, ",", sep = "")
+                    builder = fmt.tprint(builder, ")\n", sep = "")
                 }
-                append(collect, declaration, "\n")
+                builder = fmt.tprint(builder, name_and_body, sep = "")
+                
+                collect[name] = builder
             }
         }
     }

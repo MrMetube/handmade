@@ -67,6 +67,7 @@ init_opengl :: proc(window: win.HWND) {
 }
 
 display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {    
+    when false {
     gl.Viewport(0, 0, window_width, window_height)
     
     gl.ClearColor(1, 0, 1, 1)
@@ -135,6 +136,7 @@ display_buffer_in_window :: proc "system" (buffer: ^OffscreenBuffer, device_cont
     gl.BindVertexArray(BlitVertexArrayObject)
     gl.DrawArrays(gl.TRIANGLES, 0, 6)
     gl.BindVertexArray(0)
+    }
     
     win.SwapBuffers(device_context)
 }

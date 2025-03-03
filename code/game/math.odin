@@ -9,7 +9,7 @@ import "core:simd"
 // ---------------------- Types
 // ---------------------- ---------------------- ----------------------
 
-
+// TODO(viktor): @common_file
 @common v2 :: [2]f32
 @common v3 :: [3]f32
 @common v4 :: [4]f32
@@ -17,10 +17,10 @@ import "core:simd"
 
 @common m4 :: matrix[4,4]f32
 
-Rectangle   :: struct($T: typeid) { min, max: T }
-Rectangle2  :: Rectangle(v2)
-Rectangle3  :: Rectangle(v3)
-Rectangle2i :: Rectangle([2]i32)
+@common Rectangle   :: struct($T: typeid) { min, max: T }
+@common Rectangle2  :: Rectangle(v2)
+@common Rectangle3  :: Rectangle(v3)
+@common Rectangle2i :: Rectangle([2]i32)
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Constants

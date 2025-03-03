@@ -479,7 +479,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     update_and_render_world(&state.world, tran_state, render_group, buffer, input)
     
     if all_assets_valid(render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
-        tiled_render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
+        render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
     }
     end_render(render_group)
     

@@ -21,7 +21,7 @@ flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows 
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true " // TODO(viktor): get rid of this
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
-
+commoner :: " -custom-attribute:common "
 optimizations    := false ? " -o:speed " : " -o:none "
 
 PedanticGame     :: false
@@ -71,9 +71,9 @@ main :: proc() {
 
     // TODO(viktor): parallel and serial build steps
     if .AssetBuilder in targetsToBuild {
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, pedantic)
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
     }
-
+    
     if .Game in targetsToBuild {
         out := `.\game.dll`
         {
@@ -90,13 +90,13 @@ main :: proc() {
             
             fmt.fprint(lock, "WAITING FOR PDB")
             pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -custom-attribute:common -out:`, out, pdb, flags, debug, internal, optimizations, (pedantic when PedanticGame else ""))
+            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, commoner, optimizations, (pedantic when PedanticGame else ""))
         }
     }
     
     debug_exe := "debug.exe" 
     if .Platform in targetsToBuild && !is_running(debug_exe) {
-        extract_common_game_declarations()
+       extract_common_game_declarations()
         
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PedanticPlatform else ""))
     }

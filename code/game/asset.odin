@@ -767,11 +767,15 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
         info := asset.info.bitmap
           
         bitmap := &asset.header.as.bitmap
-        bitmap.width  = cast(i32) info.dimension.x
-        bitmap.height = cast(i32) info.dimension.y
+        bitmap^ = {
+            width  = cast(i32) info.dimension.x,
+            height = cast(i32) info.dimension.y,
         
-        bitmap.align_percentage = info.align_percentage
-        bitmap.width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y
+            align_percentage = info.align_percentage,
+            width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
+            
+            handle = 0,
+        }
         
         divider_designate(&divider, &bitmap.memory)
         divider_hand_over(&divider)

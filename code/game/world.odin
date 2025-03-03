@@ -930,12 +930,8 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     }
     assert(all_assets_valid(render_group))
     
-    // nocheckin 
-    when false {
-        sort_render_elements(render_group)
-        
-        render_group_to_output(render_group, bitmap^, &task.arena)
-    }
+    // nocheckin render_group_to_output(render_group, bitmap^, &task.arena)
+    
     end_render(render_group)
     
     end_task_with_memory(task)

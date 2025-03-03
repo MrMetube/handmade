@@ -36,7 +36,9 @@ Bitmap :: struct {
     align_percentage:  [2]f32,
     width_over_height: f32,
     
-    width, height: i32, 
+    width, height: i32,
+    
+    handle: u32,
 }
 
 RenderGroup :: struct {
@@ -448,14 +450,22 @@ unproject_with_transform :: #force_inline proc(camera: Camera, transform: Transf
     return result
 }
 
+render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
+    sort_render_elements(group, temp_arena)
+    
+    if true /* group.is_hardware */ {
+        render_to_opengl(auto_cast group, target)
+    } else {
+        tiled_render_group_to_output(queue, group, target, temp_arena)
+    }
+}
+
 tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
     timed_function()
     assert(group.inside_render)
     assert(group.camera != {})
     assert(cast(uintpointer) raw_data(target.memory) & (16 - 1) == 0)
 
-    sort_render_elements(group, temp_arena)
-    
     /* TODO(viktor):
         - Make sure the tiles are all cache-aligned
         - How big should the tiles be for performance?
@@ -503,7 +513,7 @@ tiled_render_group_to_output :: proc(queue: ^PlatformWorkQueue, group: ^RenderGr
     Platform.complete_all_work(queue)
 }
 
-render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
+nocheckin_render_group_to_output :: proc(group: ^RenderGroup, target: Bitmap, temp_arena: ^Arena) {
     timed_function()
     assert(group.inside_render)
     assert(transmute(u64) raw_data(target.memory) & (16 - 1) == 0)
