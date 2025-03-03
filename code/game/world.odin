@@ -232,7 +232,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena, ground_buffer_size: f32)
     }
 }
 
-update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, buffer: Bitmap, input: Input) {
+update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
 
@@ -294,7 +294,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
     
     monitor_width_in_meters :: 0.635
-    buffer_size := [2]i32{buffer.width, buffer.height}
+    buffer_size := [2]i32{render_group.commands.width, render_group.commands.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
     focal_length, distance_above_ground : f32 = 0.6, 8
@@ -607,7 +607,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         }
     }
     
-    if debug_variable(b32, "Rendering/Environtment/Test") { 
+    when false do if debug_variable(b32, "Rendering/Environtment/Test") { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
@@ -898,42 +898,43 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
     bitmap.align_percentage = 0.5
     bitmap.width_over_height = 1
     
-    buffer_size := world.chunk_dim_meters.xy
-    assert(buffer_size.x == buffer_size.y)
-    half_dim := buffer_size * 0.5
     
-    render_group := make_render_group(&task.arena, tran_state.assets, 8 * Megabyte, true)
-    begin_render(render_group)
-    
-    orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
-    
-    clear(render_group, Red)
+    when false {
+        buffer_size := world.chunk_dim_meters.xy
+        assert(buffer_size.x == buffer_size.y)
+        half_dim := buffer_size * 0.5
+        render_group := init_render_group(&task.arena, tran_state.assets, 8 * Megabyte, true)
+        begin_render(render_group)
+        
+        orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)
+        
+        clear(render_group, Red)
 
-    transform := default_flat_transform()
-    
-    chunk_z := p.chunk.z
-    for offset_y in i32(-1) ..= 1 {
-        for offset_x in i32(-1) ..= 1 {
-            chunk_x := p.chunk.x + offset_x
-            chunk_y := p.chunk.y + offset_y
-            
-            center := vec_cast(f32, offset_x, offset_y) * buffer_size
-            // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
-            series := seed_random_series(cast(u32) (463 * chunk_x + 311 * chunk_y + 185 * chunk_z) + 99)
-            
-            for _ in 0..<120 {
-                stamp := random_bitmap_from(tran_state.assets, .Grass, &series)
-                p := center + random_bilateral_2(&series, f32) * half_dim 
-                push_bitmap(render_group, stamp, transform, 5, offset = V3(p, 0))
+        transform := default_flat_transform()
+        
+        chunk_z := p.chunk.z
+        for offset_y in i32(-1) ..= 1 {
+            for offset_x in i32(-1) ..= 1 {
+                chunk_x := p.chunk.x + offset_x
+                chunk_y := p.chunk.y + offset_y
+                
+                center := vec_cast(f32, offset_x, offset_y) * buffer_size
+                // TODO(viktor): look into wang hashing here or some other spatial seed generation "thing"
+                series := seed_random_series(cast(u32) (463 * chunk_x + 311 * chunk_y + 185 * chunk_z) + 99)
+                
+                for _ in 0..<120 {
+                    stamp := random_bitmap_from(tran_state.assets, .Grass, &series)
+                    p := center + random_bilateral_2(&series, f32) * half_dim 
+                    push_bitmap(render_group, stamp, transform, 5, offset = V3(p, 0))
+                }
             }
         }
+        assert(all_assets_valid(render_group))
+        
+        render_group_to_output(render_group, bitmap^, &task.arena)
+        
+        end_render(render_group)
     }
-    assert(all_assets_valid(render_group))
-    
-    // nocheckin render_group_to_output(render_group, bitmap^, &task.arena)
-    
-    end_render(render_group)
-    
     end_task_with_memory(task)
 }
 

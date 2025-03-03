@@ -182,7 +182,8 @@ TransientState :: struct {
     is_initialized: b32,
     arena: Arena,
     
-    assets: ^Assets,
+    assets:        ^Assets,
+    generation_id: AssetGenerationId,
     
     tasks: [4]TaskWithMemory,
 
@@ -235,18 +236,19 @@ ControlledHero :: struct {
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
-debug_get_game_assets_and_work_queue :: proc(memory: ^GameMemory) -> (assets: ^Assets, work_queue: ^PlatformWorkQueue) {
+debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, work_queue: ^PlatformWorkQueue, generation_id: AssetGenerationId) {
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if tran_state.is_initialized {
         assets = tran_state.assets
         work_queue = tran_state.high_priority_queue
+        generation_id = tran_state.generation_id
     }
     
-    return assets, work_queue
+    return assets, work_queue, generation_id
 }
 
 @export
-update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
+update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     Platform = memory.Platform_api
     
     when DebugEnabled {
@@ -328,7 +330,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
 
     if debug_variable(b32, "Audio/SoundPanningWithMouse") {
         // NOTE(viktor): test sound panning with the mouse 
-        music_volume := input.mouse.p - vec_cast(f32, buffer.width, buffer.height) * 0.5
+        music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
                 play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
@@ -358,18 +360,8 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
     ////////////////////////////////////////////////
     // Update and Render
     
-    if debug_variable(b32, "Rendering/TestWeirdScreenSizes") {
-        // NOTE(viktor): enable this to test weird screen sizes
-        buffer := buffer
-        buffer.width  = 1279
-        buffer.height = 719
-    }
-    
-    render_memory := begin_temporary_memory(&tran_state.arena)
-    // TODO(viktor): decide what our push_buffer size is
-    // TODO(viktor): maybe keep this around and don't remake it every frame?
-    render_group := make_render_group(&tran_state.arena, tran_state.assets, 4 * Megabyte, false)
-    begin_render(render_group)
+    render_group: RenderGroup
+    init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
     
     if debug_variable(b32, "Particles/FountainTest") { 
         ////////////////////////////////////////////////
@@ -426,7 +418,7 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                         alpha := clamp_01(0.1 * cell.density)
                         color := v4{1,1,1, alpha}
                         position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
-                        push_rectangle(render_group, rectangle_center_diameter(position.xy, grid_scale), default_flat_transform(), color)
+                        push_rectangle(&render_group, rectangle_center_diameter(position.xy, grid_scale), default_flat_transform(), color)
                     }
                 }
             }
@@ -471,19 +463,19 @@ update_and_render :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
                     particle.dp.x *= coefficient_of_friction
                 }
                 // NOTE(viktor): render the particle
-                push_bitmap(render_group, particle.bitmap_id, default_flat_transform(), 0.4, particle.p, color)
+                push_bitmap(&render_group, particle.bitmap_id, default_flat_transform(), 0.4, particle.p, color)
             }
         }             
     }
     
-    update_and_render_world(&state.world, tran_state, render_group, buffer, input)
+    update_and_render_world(&state.world, tran_state, &render_group, input)
     
-    if all_assets_valid(render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
-        render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
+    // TODO(viktor): We should probably pull the generation stuff, because
+    // if we don't do ground chunks its a huge waste of effort
+    if tran_state.generation_id != 0 {
+        end_generation(tran_state.assets, tran_state.generation_id)
     }
-    end_render(render_group)
-    
-    end_temporary_memory(render_memory)
+    tran_state.generation_id = begin_generation(tran_state.assets)
     
     // TODO(viktor): :CutsceneEpisodes quit requested
     
@@ -607,7 +599,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
 
 make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
-        memory = push(arena, ByteColor, (dim.x * dim.y), align_clear(32, clear_to_zero)),
+        memory = push(arena, Color, (dim.x * dim.y), align_clear(32, clear_to_zero)),
         width  = dim.x,
         height = dim.y,
         width_over_height = safe_ratio_1(cast(f32) dim.x,  cast(f32) dim.y),

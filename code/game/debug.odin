@@ -70,10 +70,9 @@ DebugState :: struct {
     framerate_on: b32,
     
     // Overlay rendering
-    render_group: ^RenderGroup,
+    render_group: RenderGroup,
     
     work_queue: ^PlatformWorkQueue, 
-    buffer:     Bitmap,
     
     font_scale:   f32,
     top_edge:     f32,
@@ -130,7 +129,7 @@ DebugOpenBlock :: struct {
     using next : struct #raw_union {
         parent, 
         next_free:     ^DebugOpenBlock,
-    }
+    },
 }
 
 ////////////////////////////////////////////////
@@ -239,7 +238,7 @@ DebugViewBlock :: struct {
 }
 
 DebugId :: struct {
-    value: [2]rawpointer
+    value: [2]rawpointer,
 }
 
 DebugEventGroup :: struct {
@@ -251,8 +250,8 @@ DebugEventLink :: #type LinkedList(DebugEventLinkData)
 DebugEventLinkData :: struct {
     value: union {
         ^DebugEventGroup,
-        ^DebugElement
-    }
+        ^DebugElement,
+    },
 }
 
 DebugEventInterator :: struct {
@@ -348,13 +347,13 @@ DebugExecutingProcess :: struct {
 ////////////////////////////////////////////////
 
 @export
-debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
+debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
     
     assert(len(memory.debug_storage) >= size_of(DebugState))
     debug := cast(^DebugState) raw_data(memory.debug_storage)
     
-    assets, work_queue := debug_get_game_assets_and_work_queue(memory)
+    assets, work_queue, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
     if !debug.initialized {
         debug.initialized = true
 
@@ -376,16 +375,14 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         debug.font_scale = 0.6
 
         debug.work_queue = work_queue
-        debug.buffer     = buffer
         
         add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
-        debug.render_group = make_render_group(&debug.arena, assets, 32 * Megabyte, false)
-            
-        debug.left_edge  = -0.5 * cast(f32) buffer.width
-        debug.right_edge =  0.5 * cast(f32) buffer.width
-        debug.top_edge   =  0.5 * cast(f32) buffer.height   
+        
+        debug.left_edge  = -0.5 * cast(f32) render_commands.width
+        debug.right_edge =  0.5 * cast(f32) render_commands.width
+        debug.top_edge   =  0.5 * cast(f32) render_commands.height   
     }
-
+    
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
         debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
@@ -393,17 +390,14 @@ debug_frame_end :: proc(memory: ^GameMemory, buffer: Bitmap, input: Input) {
         debug.font_info = get_font_info(assets, debug.font_id)
         debug.ascent = get_baseline(debug.font_info)
     }
-        
-    begin_render(debug.render_group)
 
+    init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
+    
     GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
     
     collate_debug_records(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
     overlay_debug_info(debug, input)
-    
-    tiled_render_group_to_output(debug.work_queue, debug.render_group, debug.buffer, &debug.arena)
-    end_render(debug.render_group)
     
     debug.next_hot_interaction = {}
 }
@@ -648,7 +642,7 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
 collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
     timed_function()
     
-    for &event, index in events {
+    for &event in events {
         collation_frame := debug.collation_frame
         if collation_frame == nil {
             debug.collation_frame = new_frame(debug, event.clock)
@@ -794,9 +788,9 @@ events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
 ////////////////////////////////////////////////
 
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
-    if debug.render_group == nil do return
+    if debug.render_group.assets == nil do return
 
-    orthographic(debug.render_group, {debug.buffer.width, debug.buffer.height}, 1)
+    orthographic(&debug.render_group, {debug.render_group.commands.width, debug.render_group.commands.height}, 1)
 
     if debug.compiling {
         state := Platform.debug.get_process_state(debug.compiler)
@@ -820,10 +814,9 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
 // @Cleanup
 debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect: Rectangle2) {
-    push_rectangle(debug.render_group, Rect3(rect, 0, 0), default_flat_transform(), DarkBlue )
+    push_rectangle(&debug.render_group, rect, default_flat_transform(), DarkBlue )
     
     target_fps :: 72
-    frame_count := cast(f32) debug.frame_count
     bar_padding :: 1
 
     lane_count: f32
@@ -832,29 +825,28 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
         lane_count = max(lane_count, cast(f32) frame.frame_bar_lane_count + 1)
     }
     
-    hot_region: ^DebugRegion
     frame_index: u32
     for frame := debug.frames.last; frame != nil; frame = frame.next {
         defer frame_index += 1
-
-        lane_height :f32
-        if frame_count > 0 && lane_count > 0 {
-            lane_height = ((rectangle_get_dimension(rect).y / frame_count) - bar_padding) / lane_count
-        }
         
-        bar_height       := lane_height * lane_count
-        bar_plus_spacing := bar_height + bar_padding
-        
-        chart_left  := rect.min.x
-        chart_top   := rect.max.y - bar_plus_spacing
-        chart_width := rectangle_get_dimension(rect).x
-        
-        scale := frame_bar_scale * chart_width
-        
-        stack_x := chart_left
-        stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
-        // @Cleanup
         when false {
+            lane_height :f32
+            if frame_count > 0 && lane_count > 0 {
+                lane_height = ((rectangle_get_dimension(rect).y / frame_count) - bar_padding) / lane_count
+            }
+            
+            bar_height       := lane_height * lane_count
+            bar_plus_spacing := bar_height + bar_padding
+            
+            chart_left  := rect.min.x
+            chart_top   := rect.max.y - bar_plus_spacing
+            chart_width := rectangle_get_dimension(rect).x
+            
+            scale := frame_bar_scale * chart_width
+            
+            stack_x := chart_left
+            stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
+            // @Cleanup
             for &region in frame.regions[:frame.region_count] {
                 
                 x_min := stack_x + scale * region.t_min
@@ -1077,13 +1069,13 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
 
     was_resized: b32
     if .Resizable in element.flags {
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black)
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
-        push_rectangle(layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black)
         
         resize_box := rectangle_min_diameter(v2{element.bounds.max.x, total_min.y}, frame)
-        push_rectangle(layout.debug.render_group, resize_box, default_flat_transform(), White)
+        push_rectangle(&layout.debug.render_group, resize_box, default_flat_transform(), White)
         
         resize_interaction := DebugInteraction {
             kind   = .Resize,
@@ -1232,7 +1224,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             }
             
             move_handle := rectangle_min_diameter(tree.p, v2{8, 8})
-            push_rectangle(debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White)
+            push_rectangle(&debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White)
         
             if rectangle_contains(move_handle, mouse_p) {
                 debug.next_hot_interaction = move_interaction
@@ -1299,7 +1291,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
         autodetect_interaction := DebugInteraction{ 
             kind = .AutoDetect, 
             id = id, 
-            target = event
+            target = event,
         }
         
         is_hot := interaction_is_hot(debug, autodetect_interaction)
@@ -1323,7 +1315,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             }
             
             if bitmap := get_bitmap(debug.render_group.assets, value, debug.render_group.generation_id); bitmap != nil {
-                dim := get_used_bitmap_dim(debug.render_group, bitmap^, default_flat_transform(), block.size.y, 0, use_alignment = false)
+                dim := get_used_bitmap_dim(&debug.render_group, bitmap^, default_flat_transform(), block.size.y, 0, use_alignment = false)
                 block.size = dim.size
                 
                 element := begin_ui_element_rectangle(layout, &block.size)
@@ -1334,8 +1326,8 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                 
                 bitmap_height := block.size.y
                 bitmap_offset := V3(element.bounds.min, 0)
-                push_rectangle(debug.render_group, element.bounds, default_flat_transform(), DarkBlue )
-                push_bitmap(debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false)
+                push_rectangle(&debug.render_group, element.bounds, default_flat_transform(), DarkBlue )
+                push_bitmap(&debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false)
             }
             
         case DebugEventLink, DebugEventGroup,
@@ -1463,21 +1455,19 @@ add_group_to_group :: proc(debug: ^DebugState, parent: ^DebugEventGroup, child: 
 
 debug_push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = 1) {
     if debug.font != nil {
-        text_op(.Draw, debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
+        text_op(.Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
     }
 }
 
 debug_measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
     if debug.font != nil {
-        result = text_op(.Measure, debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
+        result = text_op(.Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
     }
     
     return result
 }
 
 debug_push_text_line :: proc(debug: ^DebugState, text: string) {
-    assert(debug.render_group.inside_render)
-    
     debug_push_text(debug, text, {debug.left_edge, debug.top_edge} - {0, debug.ascent * debug.font_scale})
     if debug.font != nil {
         advance_y := get_line_advance(debug.font_info)

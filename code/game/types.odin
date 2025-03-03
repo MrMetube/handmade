@@ -2,7 +2,7 @@ package game
 
 // [First] <- [..] ... <- [..] <- [Last] 
 Deque :: struct($L: typeid) {
-    first, last: ^L
+    first, last: ^L,
 }
 
 deque_append :: proc(deque: ^Deque($L), element: ^L) {

@@ -737,7 +737,7 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
         divider_reserve(&divider, u16, info.one_past_highest_codepoint)
       case .Bitmap: // [Header][pixels]
         info := asset.data.info.bitmap
-        divider_reserve(&divider, ByteColor, info.dimension.x * info.dimension.y)
+        divider_reserve(&divider, Color, info.dimension.x * info.dimension.y)
         memory_size = divider.total
       case .Sound: // [Header][channels[samples]]
         info := asset.data.info.sound

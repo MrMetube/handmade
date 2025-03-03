@@ -2,7 +2,6 @@ package main
 
 import "core:fmt"
 import win "core:sys/windows"
-import gl "vendor:OpenGL"
 
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
@@ -69,7 +68,7 @@ SoundOutput :: struct {
 
 OffscreenBuffer :: struct {
     info:                 win.BITMAPINFO,
-    memory:               []ByteColor,
+    memory:               []Color,
     width, height, pitch: i32,
 }
 
@@ -483,13 +482,13 @@ main :: proc() {
         //  Update and Render
         game_updated := game.begin_timed_block("game updated")
         
+        // TODO(viktor): decide what our push_buffer size is
+        render_commands: RenderCommands
+        push_buffer_size : u32 = 4 * Megabyte
+        push_buffer := win.VirtualAlloc()
+        init_render_commands(&render_commands, push_buffer_size, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
+        
         if !GlobalPause {
-            offscreen_buffer := Bitmap{
-                memory = GlobalBackBuffer.memory,
-                width  = GlobalBackBuffer.width,
-                height = GlobalBackBuffer.height,
-            }
-            
             if state.input_record_index != 0 {
                 record_input(&state, new_input)
             }
@@ -498,7 +497,7 @@ main :: proc() {
             }
 
             if game_lib_is_valid {
-                game.update_and_render(&game_memory, offscreen_buffer, new_input^)
+                game.update_and_render(&game_memory, new_input^, &render_commands)
             }
         }
         
@@ -589,17 +588,7 @@ main :: proc() {
         ////////////////////////////////////////////////
         debug_colation := game.begin_timed_block("debug colation")
         
-        {
-            offscreen_buffer := Bitmap{
-                memory = GlobalBackBuffer.memory,
-                width  = GlobalBackBuffer.width,
-                height = GlobalBackBuffer.height,
-            }
-            
-            game.debug_frame_end(&game_memory, offscreen_buffer, new_input^)
-            
-            old_input, new_input = new_input, old_input
-        }
+        game.debug_frame_end(&game_memory, new_input^, &render_commands)
         
         game.end_timed_block(debug_colation)
         ////////////////////////////////////////////////
@@ -634,7 +623,7 @@ main :: proc() {
         {
             window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
-            display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height)
+            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height)
             win.ReleaseDC(window, device_context)
             
             flip_counter = get_wall_clock()
@@ -642,6 +631,7 @@ main :: proc() {
 
         game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
+        swap(&new_input, &old_input)
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))
@@ -738,7 +728,6 @@ end_replaying_input :: proc(state: ^PlatformState) {
 
 ////////////////////////////////////////////////   
 //  Sound Buffer
-//
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     region1, region2 : rawpointer
@@ -846,7 +835,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     bytes_per_pixel :: 4
     buffer.pitch = align16(buffer.width)
     bitmap_memory_size := buffer.pitch * buffer.height * bytes_per_pixel
-    buffer_ptr := cast([^]ByteColor) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
+    buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]
 
     // TODO: probably clear this to black
@@ -899,13 +888,15 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             win.SetLayeredWindowAttributes(window, win.RGB(0,0,0),  64, LWA_ALPHA)
         }
     case win.WM_PAINT:
-        paint: win.PAINTSTRUCT
-        device_context := win.BeginPaint(window, &paint)
-
+        when false {
+            paint: win.PAINTSTRUCT
+            device_context := win.BeginPaint(window, &paint)
+        
             window_width, window_height := get_window_dimension(window)
-            display_buffer_in_window(&GlobalBackBuffer, device_context, window_width, window_height)
-
-        win.EndPaint(window, &paint)
+            render_to_window(&GlobalBackBuffer, device_context, window_width, window_height)
+            
+            win.EndPaint(window, &paint)
+        }
     case win.WM_SETCURSOR: 
         if GlobalDebugShowCursor {
             // NOTE(viktor): Don't do anything

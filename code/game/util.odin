@@ -1,5 +1,7 @@
 package game 
 
+// IMPORTANT TODO(viktor): @common_file
+
 @common import "base:intrinsics"
 @common import "base:runtime"
 @common import "core:fmt"
@@ -40,12 +42,12 @@ color_wheel :: [?]v4 {
     {0.18, 0.75, 0.44, 1},
 }
 
-f32x8 :: #simd[8]f32
-u32x8 :: #simd[8]u32
-i32x8 :: #simd[8]i32
+@common f32x8 :: #simd[8]f32
+@common u32x8 :: #simd[8]u32
+@common i32x8 :: #simd[8]i32
 
-f32x4 :: #simd[4]f32
-i32x4 :: #simd[4]i32
+@common f32x4 :: #simd[4]f32
+@common i32x4 :: #simd[4]i32
 
 @common rawpointer  :: rawptr
 @common uintpointer :: uintptr
@@ -152,7 +154,7 @@ modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where 
     }
 }
 
-swap :: #force_inline proc(a, b: ^$T ) { a^, b^ = b^, a^ }
+@common swap :: #force_inline proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 
 
 @(common, disabled=ODIN_DISABLE_ASSERT)
