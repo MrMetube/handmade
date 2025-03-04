@@ -652,7 +652,45 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-GlDefaultTextureFormat := gl.RGBA8
+OpenGlInfo :: struct {
+    modern_context: b32,
+    
+    vendor, renderer, version, shading_language_version, extensions: cstring,
+    GL_EXT_texture_sRGB: b32,
+    GL_EXT_framebuffer_sRGB: b32,
+}
+
+opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
+    result.modern_context = modern_context
+    
+    result.vendor     = gl.GetString(gl.VENDOR)
+    result.renderer   = gl.GetString(gl.RENDERER)
+    result.version    = gl.GetString(gl.VERSION)
+    result.extensions = gl.GetString(gl.EXTENSIONS)
+    
+    if modern_context {
+        result.shading_language_version = gl.GetString(gl.SHADING_LANGUAGE_VERSION)
+    } else {
+        result.shading_language_version = "(none)"
+    }
+    
+    len: u32
+    extensions := cast(string) result.extensions
+    for extensions != "" {
+        len += 1
+        if extensions[len] == ' ' {
+            part      := extensions[:len]
+            extensions = extensions[len+1:]
+            len = 0
+            if      "GL_EXT_texture_sRGB"     == part do result.GL_EXT_texture_sRGB = true
+            else if "GL_EXT_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
+        }
+    }
+    
+    return result
+}
+
+GlDefaultTextureFormat :i32= gl.RGBA8
 
 init_opengl :: proc(window: win.HWND) {
     dc := win.GetDC(window)
@@ -677,15 +715,52 @@ init_opengl :: proc(window: win.HWND) {
     gl_context := win.wglCreateContext(dc)
     
     if win.wglMakeCurrent(dc, gl_context) {
+        context_is_modern: b32
+        win.wglCreateContextAttribsARB = auto_cast win.wglGetProcAddress("wglCreateContextAttribsARB")
+        if win.wglCreateContextAttribsARB != nil {
+            share_context: win.HGLRC 
+            
+            // NOTE(viktor): Windows-specific
+            WGL_CONTEXT_MAJOR_VERSION_ARB             :: 0x2091
+            WGL_CONTEXT_MINOR_VERSION_ARB             :: 0x2092
+            WGL_CONTEXT_LAYER_PLANE_ARB               :: 0x2093
+            WGL_CONTEXT_FLAGS_ARB                     :: 0x2094
+            WGL_CONTEXT_PROFILE_MASK_ARB              :: 0x9126
+            
+            WGL_CONTEXT_DEBUG_BIT_ARB                 :: 0x0001
+            WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB    :: 0x0002
+            
+            WGL_CONTEXT_CORE_PROFILE_BIT_ARB          :: 0x00000001
+            WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB :: 0x00000002
+            
+            attribs: = [?]i32{
+                WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
+                WGL_CONTEXT_MINOR_VERSION_ARB, 6,
+                
+                WGL_CONTEXT_FLAGS_ARB, (WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
+                
+                WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+                0,
+            }
+            
+            modern_context := win.wglCreateContextAttribsARB(dc, share_context, raw_data(attribs[:]))
+            if modern_context != nil {
+                if win.wglMakeCurrent(dc, modern_context) {
+                    context_is_modern = true
+                    win.wglDeleteContext(gl_context)
+                    gl_context = modern_context
+                }
+            }
+            
+        }
+        
         
         gl.load_up_to(4, 6, win.gl_set_proc_address)
         
-        // Set up vertex data
         gl.GenVertexArrays(1, &BlitVertexArrayObject)
         gl.GenBuffers(1, &BlitVertexBufferObject)
         gl.GenBuffers(1, &BlitTextureCoordinatesVbo)
         
-        // useful utility procedures that are part of vendor:OpenGl
         program, program_ok := gl.load_shaders_source(VertexShader, PixelShader)
         if !program_ok {
             // @Logging Failed to create GLSL program
@@ -694,17 +769,18 @@ init_opengl :: proc(window: win.HWND) {
         }
         gl.UseProgram(program)
         
-        win.wglSwapIntervalEXT = cast(win.SwapIntervalEXTType) win.wglGetProcAddress("wglSwapIntervalEXT")
+        win.wglSwapIntervalEXT = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
         if win.wglSwapIntervalEXT != nil {
             win.wglSwapIntervalEXT(1)
         }
         
-        // TODO(viktor): actually check for the extensions
-        if true {
+        extensions := opengl_get_extensions(context_is_modern)
+        
+        if extensions.GL_EXT_texture_sRGB{
             GlDefaultTextureFormat = gl.SRGB8_ALPHA8
         }
         
-        if true {
+        if extensions.GL_EXT_framebuffer_sRGB {
             gl.Enable(gl.FRAMEBUFFER_SRGB)
         }
         
