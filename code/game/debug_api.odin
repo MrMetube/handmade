@@ -33,7 +33,7 @@ debug_init_variable :: #force_inline proc(event: ^DebugEvent, initial_value: $T,
     debug_record_event_common(MarkEvent{event}, event.loc)
 }
 
-debug_pointer_id :: proc(pointer: rawpointer) -> (result: DebugId) {
+debug_pointer_id :: proc(pointer: pmm) -> (result: DebugId) {
     when !DebugEnabled do return result
     
     result.value[0] = pointer

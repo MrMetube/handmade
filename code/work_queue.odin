@@ -15,28 +15,32 @@ PlatformWorkQueue :: struct {
     next_entry_to_read:  u32,
     
     entries: [4096]PlatformWorkQueueEntry,
+    
+    needs_opengl: b32,
 }
 
 PlatformWorkQueueEntry :: struct {
     callback: PlatformWorkQueueCallback,
-    data:     rawpointer,
+    data:     pmm,
 }
 
 CreateThreadInfo :: struct {
     queue: ^PlatformWorkQueue,
     index: u32,
-    self:  ^CreateThreadInfo,
 }
 
-init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: u32, thread_id_offset: u32) {
-    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, cast(i32) thread_count, nil)
+@(private="file") created_thread_count: u32
 
-    for thread_index in thread_id_offset..<thread_count + thread_id_offset {
+init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: u32) {
+    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, cast(i32) thread_count, nil)
+    
+    thread_count_before := created_thread_count
+    created_thread_count += thread_count
+    for thread_index in thread_count_before..<created_thread_count {
         info := new(CreateThreadInfo)
         info^ = {
             queue = queue,
             index = thread_index,
-            self  = info,
         }
         // NOTE(viktor): When I use the windows call i can at most create 4 threads at once,
         // any more calls to create thread in this call of the init function fail silently
@@ -47,7 +51,7 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: u32, thread_id_
     }
 }
 
-enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: rawpointer) {
+enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
     assert(new_next_entry != queue.next_entry_to_read) 
@@ -98,13 +102,15 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
     return should_sleep
 }
 
-thread_proc :: proc (parameter: rawpointer) {
+thread_proc :: proc (parameter: pmm) {
     context = runtime.default_context()
     
     info := cast(^CreateThreadInfo) parameter
     queue := info.queue
     context.user_index = cast(int) info.index
-    free(info.self)
+    free(info)
+    
+    if queue.needs_opengl do create_opengl_context_for_worker_thread()
     
     for {
         if do_next_work_queue_entry(queue) { 

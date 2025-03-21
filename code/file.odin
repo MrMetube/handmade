@@ -75,7 +75,7 @@ open_next_file : PlatformOpenNextFile : proc(group: ^PlatformFileGroup) -> (resu
 
 }
 
-read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: rawpointer) {
+read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm) {
     file_handle := cast(^FileHandle) handle._platform
     if Platform_no_file_errors(handle) {
         overlap_info := win.OVERLAPPED{

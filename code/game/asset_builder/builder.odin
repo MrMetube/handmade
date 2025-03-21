@@ -677,7 +677,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
 
     RiffIterator :: struct {
         at:   [^]u8,
-        stop: rawpointer,
+        stop: pmm,
     }
     
     if len(contents) > 0 {
@@ -689,7 +689,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
         assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
         
-        parse_chunk_at :: #force_inline proc(at: rawpointer, stop: rawpointer) -> (result: RiffIterator) {
+        parse_chunk_at :: #force_inline proc(at: pmm, stop: pmm) -> (result: RiffIterator) {
             result.at    = cast([^]u8) at
             result.stop  = stop
             
@@ -716,7 +716,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             return result
         }
         
-        get_chunk_data :: #force_inline proc(it: RiffIterator) -> (result: rawpointer) {
+        get_chunk_data :: #force_inline proc(it: RiffIterator) -> (result: pmm) {
             result = &it.at[size_of(WAVE_Chunk)]
             return result
         }
@@ -738,7 +738,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         sample_data:      [^]i16
         sample_data_size: u32
         
-        for it := parse_chunk_at(behind_header, cast(rawpointer) &behind_header[header.size - 4]); is_valid_riff_iter(it); it = next_chunk(it) {
+        for it := parse_chunk_at(behind_header, cast(pmm) &behind_header[header.size - 4]); is_valid_riff_iter(it); it = next_chunk(it) {
             #partial switch get_type(it) {
             case .fmt_: 
                 fmt := cast(^WAVE_fmt) get_chunk_data(it)
@@ -818,7 +818,7 @@ premuliply_alpha :: proc(r, g, b, a: u8) -> (result: [4]u8) {
 // ---------------------- ---------------------- ----------------------
 
 
-rawpointer :: rawptr
+pmm :: rawptr
 uintpointer :: uintptr
 
 v2 :: [2]f32

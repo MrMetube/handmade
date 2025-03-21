@@ -191,7 +191,7 @@ FrameMarker :: struct {
 
 BeginCodeBlock :: struct {}
 EndCodeBlock   :: struct {}
-BeginDataBlock :: struct { id: rawpointer }
+BeginDataBlock :: struct { id: pmm }
 EndDataBlock   :: struct {}
 
 Profile :: struct {}
@@ -238,7 +238,7 @@ DebugViewBlock :: struct {
 }
 
 DebugId :: struct {
-    value: [2]rawpointer,
+    value: [2]pmm,
 }
 
 DebugEventGroup :: struct {
@@ -426,7 +426,7 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
             base_len := len(field_buffer)
             manually: b32
             
-            member_pointer :rawpointer= &(cast([^]u8) data)[field.offset]
+            member_pointer :pmm= &(cast([^]u8) data)[field.offset]
             switch reflect.type_info_base(field.type) {
               case type_info_of(string):
                 value := cast(^string) member_pointer
@@ -484,7 +484,7 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
                         
                         
                         debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
-                        raw_any :: struct{data:rawpointer, type:typeid}
+                        raw_any :: struct{data:pmm, type:typeid}
                         debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
                         manually = true
                     }
@@ -498,7 +498,7 @@ debug_dump_var :: proc(debug: ^DebugState, a: any) {
                         debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
                     }
                     
-                    raw_any :: struct{data:rawpointer, type:typeid}
+                    raw_any :: struct{data:pmm, type:typeid}
                     debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
                     manually = true
                 }

@@ -50,8 +50,8 @@ color_wheel :: [?]v4 {
 @common f32x4 :: #simd[4]f32
 @common i32x4 :: #simd[4]i32
 
-@common rawpointer :: rawptr
-@common umm        :: uintptr
+@common pmm :: rawptr
+@common umm :: uintptr
 
 ////////////////////////////////////////////////
 // Atomics

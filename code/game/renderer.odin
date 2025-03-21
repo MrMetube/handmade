@@ -36,7 +36,7 @@ Bitmap :: struct {
     
     width, height: i32,
     
-    handle: u32,
+    texture_handle: pmm,
 }
 
 @common

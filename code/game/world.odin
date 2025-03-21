@@ -890,7 +890,7 @@ FillGroundChunkWork :: struct {
     p:             WorldPosition,
 }
 
-do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: rawpointer) {
+do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: pmm) {
     timed_function()
     using work := cast(^FillGroundChunkWork) data
     

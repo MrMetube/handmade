@@ -53,7 +53,7 @@ push_struct :: #force_inline proc(arena: ^Arena, $T: typeid, params := DefaultPu
 }
 
 @require_results
-push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: rawpointer) {
+push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: pmm) {
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
     size := size_init + alignment_offset
@@ -106,7 +106,7 @@ arena_has_room_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64
 
 
 zero :: proc { zero_size, zero_slice }
-zero_size :: #force_inline proc(memory: rawpointer, size: u64) {
+zero_size :: #force_inline proc(memory: pmm, size: u64) {
     // :PointerArithmetic
     bytes := (cast([^]u8)memory)[:size]
     for &b in bytes {

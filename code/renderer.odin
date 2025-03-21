@@ -1,6 +1,7 @@
 package main
 
 import "core:simd"
+import win "core:sys/windows"
 
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
@@ -9,7 +10,7 @@ TileRenderWork :: struct {
     clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: #force_inline proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: rawpointer, width, height: i32) {
+init_render_commands :: #force_inline proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: pmm, width, height: i32) {
     commands^ = {
         width  = width, 
         height = height,
@@ -19,7 +20,7 @@ init_render_commands :: #force_inline proc(commands: ^RenderCommands, max_push_b
     }
 }
 
-sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: rawpointer) {
+sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
     // TODO(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := commands.push_buffer_element_count
@@ -47,6 +48,20 @@ is_sorted :: proc(entries: []TileSortEntry) {
         a := &entries[index]
         b := &entries[index+1]
         assert(a.sort_key <= b.sort_key)
+    }
+}
+
+create_opengl_context_for_worker_thread :: proc() {
+    if win.wglCreateContextAttribsARB == nil do return
+    
+    window_dc     := GlobalDC
+    share_context := GlobalGlContext
+    
+    modern_context := win.wglCreateContextAttribsARB(window_dc, share_context, raw_data(opengl_attribs[:]))
+    if modern_context != nil {
+        if !win.wglMakeCurrent(window_dc, modern_context) {
+            // TODO(viktor): @Fatal
+        }
     }
 }
 
@@ -100,7 +115,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
     complete_all_work(queue)
 }
 
-do_tile_render_work : PlatformWorkQueueCallback : proc(data: rawpointer) { when false {
+do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) { when false {
     using work := cast(^TileRenderWork) data
 
     assert(commands != nil)
@@ -311,10 +326,10 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 texel := texture_memory + fetch * size_of(Color)
                 
                 zero := cast(u32x8) 0
-                sample_a := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(Color) * 0),                   zero, maskFFx8)
-                sample_b := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(Color) * 1),                   zero, maskFFx8)
-                sample_c := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(Color) * texture_width),       zero, maskFFx8)
-                sample_d := simd.gather(cast(#simd [8]rawpointer) (texel + size_of(Color) * (texture_width + 1)), zero, maskFFx8)
+                sample_a := simd.gather(cast(#simd [8]pmm) (texel + size_of(Color) * 0),                   zero, maskFFx8)
+                sample_b := simd.gather(cast(#simd [8]pmm) (texel + size_of(Color) * 1),                   zero, maskFFx8)
+                sample_c := simd.gather(cast(#simd [8]pmm) (texel + size_of(Color) * texture_width),       zero, maskFFx8)
+                sample_d := simd.gather(cast(#simd [8]pmm) (texel + size_of(Color) * (texture_width + 1)), zero, maskFFx8)
                 
                 ta_r := cast(f32x8) (0xff &          sample_a      )
                 ta_g := cast(f32x8) (0xff & simd.shr(sample_a,  8) )
@@ -993,7 +1008,7 @@ bubble_sort :: proc(entries: []TileSortEntry) {
             a := &entries[inner]
             b := &entries[inner+1]
             if a.sort_key > b.sort_key {
-                a^, b^ = b^, a^
+                swap(a, b)
                 sorted = false
             }
         }
@@ -1006,28 +1021,32 @@ bubble_sort :: proc(entries: []TileSortEntry) {
 
 VertexShader := `#version 330 core
 
-layout(location=0) in vec3 a_position;
-layout(location=1) in vec2 a_tex_coords;
-
-out vec2 v_tex_coords;
+layout(location=0) in vec3 v_position;
+layout(location=1) in vec2 v_tex_coords;
 
 uniform mat4 u_transform;
+uniform vec4 u_color;
+uniform sampler2D u_texture;
+
+out vec2 p_tex_coords;
 
 void main() {
-	gl_Position = u_transform * vec4(a_position, 1.0);
-    v_tex_coords = a_tex_coords;
+	gl_Position = u_transform * vec4(v_position, 1.0);
+    p_tex_coords = v_tex_coords;
 }
 `
 
 PixelShader := `#version 330 core
 
-uniform sampler2D gameTexture;
+uniform mat4 u_transform;
+uniform vec4 u_color;
+uniform sampler2D u_texture;
 
-in vec2 v_tex_coords;
+in vec2 p_tex_coords;
 
 out vec4 o_color;
 
 void main() {
-	o_color = texture(gameTexture, v_tex_coords);
+	o_color = u_color * texture(u_texture, p_tex_coords);
 }
 `
