@@ -80,26 +80,17 @@ lerp :: proc { lerp_vf, lerp_t }
     return result
 }
 
-safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
-@(require_results) safe_ratio_n_1 :: #force_inline proc(numerator, divisor, n: f32) -> f32 {
+safe_ratio_n :: proc { safe_ratio_n_f, safe_ratio_n_v }
+@(require_results) safe_ratio_n_f :: #force_inline proc(numerator, divisor, n: f32) -> f32 {
     ratio := n
-
+    
     if divisor != 0 {
         ratio = numerator / divisor
     }
 
     return ratio
 }
-@(require_results) safe_ratio_n_2 :: #force_inline proc(numerator, divisor, n: v2) -> v2 {
-    ratio := n
-
-    if divisor != 0 {
-        ratio = numerator / divisor
-    }
-
-    return ratio
-}
-@(require_results) safe_ratio_n_3 :: #force_inline proc(numerator, divisor, n: v3) -> v3 {
+@(require_results) safe_ratio_n_v :: #force_inline proc(numerator: $V/[$N]f32, divisor, n: V) -> V {
     ratio := n
 
     if divisor != 0 {
@@ -109,15 +100,13 @@ safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
     return ratio
 }
 
-safe_ratio_0 :: proc { safe_ratio_0_1, safe_ratio_0_2, safe_ratio_0_3 }
-@(require_results) safe_ratio_0_1 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 0) }
-@(require_results) safe_ratio_0_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 0) }
-@(require_results) safe_ratio_0_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 0) }
+safe_ratio_0 :: proc { safe_ratio_0_f, safe_ratio_0_v }
+@(require_results) safe_ratio_0_f :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 0) }
+@(require_results) safe_ratio_0_v :: #force_inline proc(numerator: $V, divisor: V) -> V { return safe_ratio_n(numerator, divisor, cast(V) 0) }
 
-safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
-@(require_results) safe_ratio_1_1 :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 1) }
-@(require_results) safe_ratio_1_2 :: #force_inline proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 1) }
-@(require_results) safe_ratio_1_3 :: #force_inline proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
+safe_ratio_1 :: proc { safe_ratio_1_f, safe_ratio_1_v }
+@(require_results) safe_ratio_1_f :: #force_inline proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 1) }
+@(require_results) safe_ratio_1_v :: #force_inline proc(numerator: $V, divisor: V) -> V { return safe_ratio_n(numerator, divisor, 1) }
 
 @(require_results) clamp :: #force_inline proc(value: $T, min, max: T) -> (result:T) {
     when intrinsics.type_is_simd_vector(T) {

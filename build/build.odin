@@ -28,82 +28,66 @@ PedanticGame     :: false
 PedanticPlatform :: false
 
 src_path :: `.`
-exe_path :: `.\build\build.exe`
+exe_path :: `.\build.exe`
 
-build_dir :: `.\build`
+build_dir :: `.\build\`
 data_dir  :: `.\data`
-
-Target :: enum {
-    Game,
-    Platform,
-    AssetBuilder,
-}
-TargetFlags :: bit_set[Target]
-
-TargetNames := map[string]Target {
-    "Game"         = .Game,
-    "Platform"     = .Platform,
-    "AssetBuilder" = .AssetBuilder,
-}
 
 main :: proc() {
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
     context.logger.lowest_level = .Info
-
-    targetsToBuild := TargetFlags{}
-    for arg in os.args[1:] {
-        if v, ok := TargetNames[arg]; ok {
-            targetsToBuild += {v}
-        }
-    }
-    if card(targetsToBuild) == 0 do targetsToBuild = ~targetsToBuild
-    // TODO(viktor): clean up the initial build turd (ie. .\handmade.exe)
+    
+    
     // TODO(viktor): confirm in which directory we are running, handle subdirectories
     go_rebuild_yourself()
     
-    if !os.exists(build_dir) do os.make_directory(build_dir)
-    if !os.exists(data_dir)  do os.make_directory(data_dir) 
+    make_directory_if_not_exists(build_dir)
+    // TODO(viktor): create gitignore if necessary
+    make_directory_if_not_exists(data_dir)
     
-    {
-        err := os.set_current_directory(build_dir)
-        assert(err == nil)
-    }
-
-    // TODO(viktor): parallel and serial build steps
-    if .AssetBuilder in targetsToBuild {
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
-    }
+    err := os.set_current_directory(build_dir)
+    assert(err == nil)
     
-    if .Game in targetsToBuild {
-        out := `.\game.dll`
-        {
-            delete_all_like(`.\game*.pdb`)
-            
-            // NOTE(viktor): the platform checks for this lock file when hot-reloading
-            lock_path := `.\lock.tmp` 
-            lock, err := os.open(lock_path, mode = os.O_CREATE)
-            if err != nil do log.error(os.error_string(err))
-            defer {
-                os.close(lock)
-                os.remove(lock_path)
+    if len(os.args) == 1 {
+        build_game()
+        build_platform()
+    } else {
+        for arg in os.args[1:] {
+            switch arg {
+                case "AssetBuilder": run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
+                case "Game":         build_game()
+                case "Platform":     build_platform()
             }
-            
-            fmt.fprint(lock, "WAITING FOR PDB")
-            pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
-            run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, commoner, optimizations, (pedantic when PedanticGame else ""))
         }
     }
+}
+
+build_game :: proc() {
+    out := `.\game.dll`
+    delete_all_like(`.\game*.pdb`)
     
+    // NOTE(viktor): the platform checks for this lock file when hot-reloading
+    lock_path := `.\lock.tmp` 
+    lock, err := os.open(lock_path, mode = os.O_CREATE)
+    if err != nil do log.error(os.error_string(err))
+    defer {
+        os.close(lock)
+        os.remove(lock_path)
+    }
+    
+    fmt.fprint(lock, "WAITING FOR PDB")
+    pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
+    run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, commoner, optimizations, (pedantic when PedanticGame else ""))
+}
+
+build_platform :: proc() {
     debug_exe := "debug.exe" 
-    if .Platform in targetsToBuild && !is_running(debug_exe) {
-       extract_common_game_declarations()
+    if !is_running(debug_exe) {
+        extract_common_game_declarations()
         
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PedanticPlatform else ""))
     }
 }
-
-
-
 
 
 
@@ -129,7 +113,7 @@ go_rebuild_yourself :: proc() -> (os2.Error) {
     
     src_dir  := os2.read_directory_by_path(src_path, -1, context.allocator) or_return
     exe_time := os2.modification_time_by_path(exe_path) or_return
-
+    
     needs_to_rebuild: b32
     for file in src_dir {
         if file.type == .Regular {
@@ -139,23 +123,15 @@ go_rebuild_yourself :: proc() -> (os2.Error) {
             }
         }
     }
-       
+    
     if needs_to_rebuild {
         log.info("Rebuilding!")
-        temp_path := fmt.tprintf("%s-temp", exe_path)
-        
-        delete_all_like(temp_path) 
-        
-        run_command_or_exit(`C:\Odin\odin.exe`, "odin build ", src_path, " -out:", temp_path, debug, pedantic)
         
         old_path := fmt.tprintf("%s-old", exe_path)
-        if err := os.rename(exe_path,  old_path); err != nil do fmt.println(os.error_string(err))
-        if err := os.rename(temp_path, exe_path); err != nil do fmt.println(os.error_string(err))
+        if os.exists(old_path) do delete_all_like(old_path)
         
-        exe := os.args[0] 
-        args := os.args
-        args[0] = " "
-        run_command_or_exit(exe, ..args) 
+        if err := os.rename(exe_path, old_path); err != nil do fmt.println(os.error_string(err))
+        run_command_or_exit(`C:\Odin\odin.exe`, "odin run ", src_path, " -out:", exe_path, debug, pedantic)
         
         os.exit(0)
     }
@@ -183,9 +159,7 @@ delete_all_like :: proc(pattern: string) {
     find_data := win.WIN32_FIND_DATAW{}
 
     handle := win.FindFirstFileW(win.utf8_to_wstring(pattern), &find_data)
-    if handle == win.INVALID_HANDLE_VALUE {
-        return
-    }
+    if handle == win.INVALID_HANDLE_VALUE do return
     defer win.FindClose(handle)
     
     for {
@@ -196,7 +170,7 @@ delete_all_like :: proc(pattern: string) {
         if err := os.remove(file_path); err != nil {
             log.errorf("Failed to delete file: %s because of error: %s", file_path, os.error_string(os.get_last_error()))
         }
-
+        
         if !win.FindNextFileW(handle, &find_data){
             break
         }
@@ -248,7 +222,7 @@ run_command :: proc(program: string, args: ..string) -> (success: b32) {
     working_directory := win.utf8_to_wstring(os.get_current_directory())
     joined_args := strings.join(args, "")
     
-    log.info("Running:", program, " - ", joined_args)
+    log.info("CMD:", program, " - ", joined_args)
     
     if win.CreateProcessW(
         win.utf8_to_wstring(program), 
@@ -272,6 +246,14 @@ run_command :: proc(program: string, args: ..string) -> (success: b32) {
         success = false
     }
     return
+}
+
+make_directory_if_not_exists :: proc(path: string) -> (result: b32) {
+    if !os.exists(path) {
+        os.make_directory(path)
+        result = true
+    }
+    return result
 }
 
 random_number :: proc() ->(result: u32) {

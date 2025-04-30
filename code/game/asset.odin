@@ -55,7 +55,7 @@ AssetMemoryHeaderData :: struct {
     generation_id: AssetGenerationId,
     total_size:    u64,
     
-    kind: union {
+    value: union {
         Bitmap,
         Sound,
         Font,
@@ -256,10 +256,11 @@ get_asset :: #force_inline proc(assets: ^Assets, id: u32, generation_id: AssetGe
     return result
 }
 
+// TODO(viktor): optional ok?
 get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
-        result = &header.kind.(Bitmap)
+        result = &header.value.(Bitmap)
     }
     return result
 }
@@ -267,7 +268,7 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, generation_id: A
 get_sound :: #force_inline proc(assets: ^Assets, id: SoundId, generation_id: AssetGenerationId) -> (result: ^Sound) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
-        result = &header.kind.(Sound)
+        result = &header.value.(Sound)
     }
     return result
 }
@@ -275,7 +276,7 @@ get_sound :: #force_inline proc(assets: ^Assets, id: SoundId, generation_id: Ass
 get_font :: #force_inline proc(assets: ^Assets, id: FontId, generation_id: AssetGenerationId) -> (result: ^Font) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
-        result = &header.kind.(Font)
+        result = &header.value.(Font)
     }
     return result
 }
@@ -535,8 +536,9 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
             for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
                 asset := &assets.assets[it.asset_index]
                 if asset.state == .Loaded && generation_has_completed(assets, asset.header.generation_id) {
-                    if bitmap, ok := asset.header.kind.(Bitmap); ok {
+                    if bitmap, ok := asset.header.value.(Bitmap); ok {
                         Platform.deallocate_texture(bitmap.texture_handle)
+                        bitmap.texture_handle = 0
                     }
                     list_remove(it)
                     
@@ -651,16 +653,18 @@ LoadAssetWork :: struct {
 
 load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
     timed_function()
+    
     Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
+    
     if Platform_no_file_errors(work.handle) {
         switch work.kind {
           case .Sound: // NOTE(viktor): nothing to do
           case .Bitmap:
-            bitmap := work.asset.header.kind.(Bitmap)
+            bitmap := &work.asset.header.value.(Bitmap)
             bitmap.texture_handle = Platform.allocate_texture(bitmap.width, bitmap.height, raw_data(bitmap.memory))
             
           case .Font: 
-            font := work.asset.header.kind.(Font)
+            font := work.asset.header.value.(Font)
             info := work.asset.info.font
             for glyph_index in 1..<info.glyph_count {
                 glyph := &font.glyphs[glyph_index]
@@ -761,10 +765,10 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
       case .Font:
         info := asset.info.font
         
-        asset.header.kind = Font{
+        asset.header.value = Font{
             bitmap_id_offset = get_file(assets, asset.file_index).font_bitmap_id_offset
         }
-        font := asset.header.kind.(Font)
+        font := &asset.header.value.(Font)
         
         divider_designate(&divider, &font.glyphs)
         divider_designate(&divider, &font.advances)
@@ -776,14 +780,14 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
       case .Bitmap: 
         info := asset.info.bitmap
           
-        asset.header.kind = Bitmap{
+        asset.header.value = Bitmap{
             width  = cast(i32) info.dimension.x,
             height = cast(i32) info.dimension.y,
         
             align_percentage = info.align_percentage,
             width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
         }
-        bitmap := &asset.header.kind.(Bitmap)
+        bitmap := &asset.header.value.(Bitmap)
         
         divider_designate(&divider, &bitmap.memory)
         divider_hand_over(&divider)
@@ -791,10 +795,10 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
       case .Sound: 
         info := asset.info.sound
         
-        asset.header.kind = Sound{
+        asset.header.value = Sound{
             channel_count = cast(u8) info.channel_count
         }
-        sound := &asset.header.kind.(Sound)
+        sound := &asset.header.value.(Sound)
                                 
         for &channel in sound.channels[:info.channel_count] {
             divider_designate(&divider, &channel)

@@ -159,10 +159,10 @@ modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where 
 
 
 @(common, disabled=ODIN_DISABLE_ASSERT)
-assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location) where intrinsics.type_is_boolean(T) {
+assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(T) {
     if !condition {
         // TODO(viktor): We are not a console application
-        fmt.print(loc, "Assertion failed")
+        fmt.print(loc, prefix)
         if len(message) > 0 {
             fmt.println(":", message)
         }
@@ -174,3 +174,6 @@ assert :: #force_inline proc(condition: $T, message := #caller_expression(condit
         }
     }
 }
+
+@common panic :: proc(message := "", loc := #caller_location) { assert(false, message, loc, prefix = "Panic") }
+

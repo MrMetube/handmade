@@ -17,6 +17,7 @@ init_xInput :: proc() {
         // @Logging 
         xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))
     }
+    
     if (xInput_lib != nil) {
         XInputGetState = cast(ProcXInputGetState) win.GetProcAddress(xInput_lib, "XInputGetState")
         XInputSetState = cast(ProcXInputSetState) win.GetProcAddress(xInput_lib, "XInputSetState")

@@ -27,8 +27,8 @@ PlatformAPI :: struct {
 @common PlatformAllocateMemory   :: #type proc(size: u64) -> pmm
 @common PlatformDeallocateMemory :: #type proc(memory: pmm)
 
-@common PlatformAllocateTexture   :: #type proc(width, height: i32, data: pmm) -> pmm
-@common PlatformDeallocateTexture :: #type proc(texture: pmm)
+@common PlatformAllocateTexture   :: #type proc(width, height: i32, data: pmm) -> u32
+@common PlatformDeallocateTexture :: #type proc(texture: u32)
 
 @common PlatformFileType   :: enum { AssetFile }
 @common PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }

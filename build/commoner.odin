@@ -9,10 +9,15 @@ import "core:odin/ast"
 import "core:odin/parser"
 import "core:odin/tokenizer"
 
+Code :: struct {
+    content: string, 
+    location: tokenizer.Pos,
+}
+
 ExtractContext :: struct {
     files:        map[string]string,
-    imports:      map[string]string,
-    declarations: map[string]string,
+    imports:      map[string]Code,
+    declarations: map[string]Code,
 }
 
 Tag    :: "common"
@@ -58,14 +63,15 @@ package %v
         
         ast.walk(&v, pkg)
     }
-    for key, imp  in imports      do fmt.fprintln(out, imp)
-    for key, decl in declarations do fmt.fprintln(out, decl)
+    for key, it in imports      do fmt.fprintfln(out, "// @Copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
+    for key, it in declarations do fmt.fprintfln(out, "// @Copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
 }
 
 extract_commons :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
     using my := cast(^ExtractContext) context.user_ptr
     
     if node == nil do return visitor
+    
     #partial switch decl in node.derived {
     case ^ast.Value_Decl:
         collect(&declarations, decl.attributes[:], decl.pos, decl.end)
@@ -75,7 +81,7 @@ extract_commons :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor 
     return visitor
 }
 
-collect :: proc(collect: ^map[string]string, attributes: []^ast.Attribute, pos, end: tokenizer.Pos) {
+collect :: proc(collect: ^map[string]Code, attributes: []^ast.Attribute, pos, end: tokenizer.Pos) {
     for attritbute in attributes {
         if len(attritbute.elems) > 0 {
             is_marked_as_common: b32
@@ -113,7 +119,10 @@ collect :: proc(collect: ^map[string]string, attributes: []^ast.Attribute, pos, 
                 }
                 builder = fmt.tprint(builder, name_and_body, sep = "")
                 
-                collect[name] = builder
+                collect[name] = {
+                    content = builder,
+                    location = pos,
+                }
             }
         }
     }

@@ -328,7 +328,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             bitmap.align_percentage = 0
             
             ground_chunk_size := world.chunk_dim_meters.x
-            push_bitmap_raw(render_group, bitmap, transform, ground_chunk_size)
+            
+            // TODO(viktor): Disables for now as we dynamically change and reuse 
+            // these textures so its dificult to know when to upload to the gpu.
+            // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
             
             if debug_variable(b32, "Rendering/Bounds/ShowGroundChunkBounds") {
                 push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)

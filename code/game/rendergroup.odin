@@ -36,7 +36,7 @@ Bitmap :: struct {
     
     width, height: i32,
     
-    texture_handle: pmm,
+    texture_handle: u32,
 }
 
 @common
@@ -117,7 +117,7 @@ RenderGroupEntryBitmap :: struct {
     size:   v2,
     
     id:     u32, // BitmapId
-    bitmap: Bitmap,
+    bitmap: ^Bitmap,
 }
 
 @common
@@ -261,7 +261,8 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, transform: 
     }
     
     if bitmap != nil {
-        push_bitmap_raw(group, bitmap^, transform, height, offset, color, id, use_alignment)
+        assert(bitmap.texture_handle != 0)
+        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment)
     } else {
         assert(!group.renders_in_background)
         load_bitmap(group.assets, id, false)
@@ -279,11 +280,12 @@ get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, transform: Tran
     return result
 }
 
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
     assert(bitmap.width_over_height != 0)
     
-    used_dim := get_used_bitmap_dim(group, bitmap, transform, height, offset, use_alignment)
+    used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment)
     if used_dim.basis.valid {
+        assert(bitmap.texture_handle != 0)
         element := push_render_element(group, RenderGroupEntryBitmap, used_dim.basis.sort_key)
         
         if element != nil {

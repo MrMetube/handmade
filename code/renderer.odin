@@ -30,39 +30,7 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
     // merge_sort(sort_entries, temp_space)
     radix_sort(sort_entries, temp_space)
     
-    when false {
-        synthetic := push(temp_arena, TileSortEntry, 2_000_000)
-        series := seed_random_series(0)
-        for &s in synthetic do s.sort_key = random_between_f32(&series, -10000, 10000)
-        temp_space = push(temp_arena, TileSortEntry, 2_000_000)
-        radix_sort(synthetic, temp_space)
-        is_sorted(synthetic)
-    }
-
     when INTERNAL do is_sorted(sort_entries)
-}
-
-is_sorted :: proc(entries: []TileSortEntry) {
-    count := len(entries)
-    for index in 0 ..< count-1 {
-        a := &entries[index]
-        b := &entries[index+1]
-        assert(a.sort_key <= b.sort_key)
-    }
-}
-
-create_opengl_context_for_worker_thread :: proc() {
-    if win.wglCreateContextAttribsARB == nil do return
-    
-    window_dc     := GlobalDC
-    share_context := GlobalGlContext
-    
-    modern_context := win.wglCreateContextAttribsARB(window_dc, share_context, raw_data(opengl_attribs[:]))
-    if modern_context != nil {
-        if !win.wglMakeCurrent(window_dc, modern_context) {
-            // TODO(viktor): @Fatal
-        }
-    }
 }
 
 software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {
@@ -104,7 +72,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
                 work.clip_rect.max.y = target.height
             }
             
-            when false do if debug_variable(b32, "Rendering/RenderSingleThreaded") {
+            if false /* debug_variable(b32, "Rendering/RenderSingleThreaded") */ {
                 do_tile_render_work(work)
             } else {
                 enqueue_work(queue, do_tile_render_work, work)
@@ -115,7 +83,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
     complete_all_work(queue)
 }
 
-do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) { when false {
+do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     using work := cast(^TileRenderWork) data
 
     assert(commands != nil)
@@ -130,23 +98,24 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) { when false {
         entry_data := &commands.push_buffer[sort_entry.push_buffer_offset + size_of(RenderGroupEntryHeader)]
         
         switch header.type {
-          case RenderGroupEntryClear:
+          case .RenderGroupEntryClear:
             entry := cast(^RenderGroupEntryClear) entry_data
-            draw_rectangle(target, rectangle_min_diameter(v2{0, 0}, group.camera.screen_center*2), entry.color, clip_rect)
             
-          case RenderGroupEntryRectangle:
+            draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.color, clip_rect)
+            
+          case .RenderGroupEntryRectangle:
             entry := cast(^RenderGroupEntryRectangle) entry_data
             draw_rectangle(target, entry.rect, entry.color, clip_rect)
             
-          case RenderGroupEntryBitmap:
+          case .RenderGroupEntryBitmap:
             entry := cast(^RenderGroupEntryBitmap) entry_data
             draw_rectangle_quickly(target,
                 entry.p, {entry.size.x, 0}, {0, entry.size.y},
-                entry.bitmap, entry.color,
+                entry.bitmap^, entry.color,
                 clip_rect,
             )
             
-          case RenderGroupEntryCoordinateSystem:
+          case .RenderGroupEntryCoordinateSystem:
             entry := cast(^RenderGroupEntryCoordinateSystem) entry_data
             draw_rectangle_quickly(target,
                 entry.origin, entry.x_axis, entry.y_axis,
@@ -160,15 +129,15 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) { when false {
             y := p + entry.y_axis
             size := v2{10, 10}
             
-            draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect)
-            draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect)
-            draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect)
+            // draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect)
+            // draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect)
+            // draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect)
             
           case:
             panic("Unhandled Entry")
         }
     }
-}}
+}
 
 
 ////////////////////////////////////////////////
@@ -828,6 +797,15 @@ unscale_and_bias :: #force_inline proc(normal: v4) -> (result: v4) {
 
 ////////////////////////////////////////////////
 
+is_sorted :: proc(entries: []TileSortEntry) {
+    count := len(entries)
+    for index in 0 ..< count-1 {
+        a := &entries[index]
+        b := &entries[index+1]
+        assert(a.sort_key <= b.sort_key)
+    }
+}
+
 radix_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) #no_bounds_check {
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
@@ -1016,37 +994,3 @@ bubble_sort :: proc(entries: []TileSortEntry) {
         if sorted do break
     }
 }
-
-//////////////////////////////////////////////////
-
-VertexShader := `#version 330 core
-
-layout(location=0) in vec3 v_position;
-layout(location=1) in vec2 v_tex_coords;
-
-uniform mat4 u_transform;
-uniform vec4 u_color;
-uniform sampler2D u_texture;
-
-out vec2 p_tex_coords;
-
-void main() {
-	gl_Position = u_transform * vec4(v_position, 1.0);
-    p_tex_coords = v_tex_coords;
-}
-`
-
-PixelShader := `#version 330 core
-
-uniform mat4 u_transform;
-uniform vec4 u_color;
-uniform sampler2D u_texture;
-
-in vec2 p_tex_coords;
-
-out vec4 o_color;
-
-void main() {
-	o_color = u_color * texture(u_texture, p_tex_coords);
-}
-`
