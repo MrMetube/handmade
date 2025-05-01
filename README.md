@@ -5,6 +5,5 @@ Following the [Handmade Hero](https://guide.handmadehero.org/) Series in odin.
 
 To initialize the build tool:
 ```console
-odin run .
-.\build\build.exe
+odin run build -out:.\build\build.exe
 ```

@@ -30,11 +30,11 @@ LowPriorityWorkQueueThreadCount  :: 2
 
 
 // Resolution :: [2]i32 {2560, 1440}
-// Resolution :: [2]i32 {1920, 1080}
-Resolution :: [2]i32 {1280, 720}
+Resolution :: [2]i32 {1920, 1080}
+// Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 30
+MonitorRefreshHz: u32 : 144
 
 
 PermanentStorageSize :: 256 * Megabyte
@@ -734,8 +734,99 @@ glColor4f: proc(_,_,_,_:f32)
 glTexEnvi: proc(target: u32, pname: u32, param: u32)
 
 init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
-    win.wglChoosePixelFormatARB = auto_cast win.wglGetProcAddress("wglChoosePixelFormatARB")
+    load_wgl_extensions()
     
+    if win.wglCreateContextAttribsARB != nil {
+        set_pixel_format(dc)
+        gl_context = win.wglCreateContextAttribsARB(dc, nil, raw_data(gl_attribs[:]))
+    }
+    
+    context_is_modern :b32= true
+    if gl_context == nil {
+        context_is_modern = false
+        gl_context = win.wglCreateContext(dc)
+    }
+    
+    if gl_context != nil {
+        if win.wglMakeCurrent(dc, gl_context) {
+            
+            // OpenGLInit
+            gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
+            
+            extensions := opengl_get_extensions(context_is_modern)
+            
+            if extensions.GL_EXT_texture_sRGB{
+                GlDefaultTextureFormat = gl.SRGB8_ALPHA8
+            }
+            
+            if extensions.GL_EXT_framebuffer_sRGB {
+                gl.Enable(gl.FRAMEBUFFER_SRGB)
+            }
+            
+            gl.GenTextures(1, &GlobalBlitTextureHandle)
+            
+            if win.wglSwapIntervalEXT != nil {
+                win.wglSwapIntervalEXT(1)
+            }
+        }
+    }
+    
+    return gl_context
+}
+
+load_wgl_extensions :: proc() {
+    window_class := win.WNDCLASSW {
+        lpfnWndProc = win.DefWindowProcW,
+        hInstance = auto_cast win.GetModuleHandleW(nil),
+        lpszClassName = win.L("HandmadeWGLLoader"),
+    }
+    
+    if win.RegisterClassW(&window_class) != 0 {
+        window := win.CreateWindowExW(
+            0,
+            window_class.lpszClassName,
+            win.L("Handmade Hero"),
+            0,
+            win.CW_USEDEFAULT,
+            win.CW_USEDEFAULT,
+            win.CW_USEDEFAULT,
+            win.CW_USEDEFAULT,
+            nil,
+            nil,
+            window_class.hInstance,
+            nil,
+        )
+        defer win.DestroyWindow(window)
+        
+        dummy_dc := win.GetDC(window)
+        defer win.ReleaseDC(window, dummy_dc)
+        
+        set_pixel_format(dummy_dc)
+        
+        dummy_context := win.wglCreateContext(dummy_dc)
+        defer win.wglDeleteContext(dummy_context)
+        
+        if win.wglMakeCurrent(dummy_dc, dummy_context) {
+            defer win.wglMakeCurrent(nil, nil)
+            
+            win.wglChoosePixelFormatARB    = auto_cast win.wglGetProcAddress("wglChoosePixelFormatARB")
+            win.wglCreateContextAttribsARB = auto_cast win.wglGetProcAddress("wglCreateContextAttribsARB")
+            win.wglSwapIntervalEXT         = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
+            
+            win.gl_set_proc_address(&glBegin, "glBegin")
+            win.gl_set_proc_address(&glEnd, "glEnd")
+            win.gl_set_proc_address(&glMatrixMode,   "glMatrixMode")
+            win.gl_set_proc_address(&glLoadIdentity, "glLoadIdentity")
+            win.gl_set_proc_address(&glLoadMatrixf, "glLoadMatrixf")
+            win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
+            win.gl_set_proc_address(&glVertex2f, "glVertex2f")
+            win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
+            win.gl_set_proc_address(&glColor4f, "glColor4f")
+        }
+    }
+}
+
+set_pixel_format :: proc(dc: win.HDC) {
     suggested_pixel_format: win.PIXELFORMATDESCRIPTOR
     suggested_pixel_format_index: i32
     extended_pick: u32
@@ -749,6 +840,7 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
             win.WGL_SUPPORT_OPENGL_ARB, TRUE,
             win.WGL_DOUBLE_BUFFER_ARB, TRUE,
             win.WGL_PIXEL_TYPE_ARB, win.WGL_TYPE_RGBA_ARB,
+            win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
             0,
         }
         
@@ -772,59 +864,6 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
     win.DescribePixelFormat(dc, suggested_pixel_format_index, size_of(suggested_pixel_format), &suggested_pixel_format)
     win.SetPixelFormat(dc, suggested_pixel_format_index, &suggested_pixel_format)
     
-    gl_context = win.wglCreateContext(dc)
-    
-    if win.wglMakeCurrent(dc, gl_context) {
-        context_is_modern: b32
-        
-        win.wglCreateContextAttribsARB = auto_cast win.wglGetProcAddress("wglCreateContextAttribsARB")
-        if win.wglCreateContextAttribsARB != nil {
-            modern_context := win.wglCreateContextAttribsARB(dc, nil, raw_data(gl_attribs[:]))
-            if modern_context != nil {
-                if win.wglMakeCurrent(dc, modern_context) {
-                    context_is_modern = true
-                    // win.wglDeleteContext(gl_context)
-                    gl_context = modern_context
-                }
-            }
-        }
-        
-        gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
-        
-        if glBegin == nil {
-            win.gl_set_proc_address(&glBegin, "glBegin")
-            win.gl_set_proc_address(&glEnd, "glEnd")
-            win.gl_set_proc_address(&glMatrixMode,   "glMatrixMode")
-            win.gl_set_proc_address(&glLoadIdentity, "glLoadIdentity")
-            win.gl_set_proc_address(&glLoadMatrixf, "glLoadMatrixf")
-            win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
-            win.gl_set_proc_address(&glVertex2f, "glVertex2f")
-            win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
-            win.gl_set_proc_address(&glColor4f, "glColor4f")
-        }
-        
-        win.wglSwapIntervalEXT = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
-        if win.wglSwapIntervalEXT != nil {
-            win.wglSwapIntervalEXT(1)
-        }
-        
-        extensions := opengl_get_extensions(context_is_modern)
-        
-        if extensions.GL_EXT_texture_sRGB{
-            GlDefaultTextureFormat = gl.SRGB8_ALPHA8
-        }
-        
-        if extensions.GL_EXT_framebuffer_sRGB {
-            gl.Enable(gl.FRAMEBUFFER_SRGB)
-        }
-        
-        gl.GenTextures(1, &GlobalBlitTextureHandle)
-    } else {
-        // @Logging
-        unreachable()
-    }
-    
-    return gl_context
 }
 
 create_opengl_context_for_worker_thread :: proc() {
