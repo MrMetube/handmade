@@ -15,8 +15,6 @@ PlatformWorkQueue :: struct {
     next_entry_to_read:  u32,
     
     entries: [4096]PlatformWorkQueueEntry,
-    
-    needs_opengl: b32,
 }
 
 PlatformWorkQueueEntry :: struct {
@@ -27,27 +25,27 @@ PlatformWorkQueueEntry :: struct {
 CreateThreadInfo :: struct {
     queue: ^PlatformWorkQueue,
     index: u32,
+    gl_context: win.HGLRC,
+    window_dc: win.HDC,
 }
 
 @(private="file") created_thread_count: u32
 
-init_work_queue :: proc(queue: ^PlatformWorkQueue, thread_count: u32) {
-    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, cast(i32) thread_count, nil)
+init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
+    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast len(infos), nil)
     
-    thread_count_before := created_thread_count
-    created_thread_count += thread_count
-    for thread_index in thread_count_before..<created_thread_count {
-        info := new(CreateThreadInfo)
-        info^ = {
-            queue = queue,
-            index = thread_index,
-        }
+    for &info in infos {
+        info.queue = queue
+        info.index = created_thread_count
+        
+        created_thread_count += 1
+        
         // NOTE(viktor): When I use the windows call i can at most create 4 threads at once,
         // any more calls to create thread in this call of the init function fail silently
         // A further call for the low_priority_queue then is able to create 4 more threads.
         //     result := win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
         
-        thread.create_and_start_with_data(info, thread_proc)
+        thread.create_and_start_with_data(&info, thread_proc)
     }
 }
 
@@ -108,9 +106,10 @@ thread_proc :: proc (parameter: pmm) {
     info := cast(^CreateThreadInfo) parameter
     queue := info.queue
     context.user_index = cast(int) info.index
-    free(info)
     
-    if queue.needs_opengl do create_opengl_context_for_worker_thread()
+    if info.gl_context != nil {
+        win.wglMakeCurrent(info.window_dc, info.gl_context)
+    }
     
     for {
         if do_next_work_queue_entry(queue) { 

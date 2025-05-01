@@ -4,10 +4,7 @@ package game
 INTERNAL :: #config(INTERNAL, false)
 
 /* TODO(viktor):
-    - Simd draw_rectangle
-    
     - Since the correction to unproject_with_transform the sim region bounds are too small
-    - Is this still relevant? Dead Lock on Load when a lot of assets are loaded at once
     - Font Rendering Robustness
         - Kerning
     
@@ -31,7 +28,10 @@ INTERNAL :: #config(INTERNAL, false)
             - World
             - Texture
         - Lighting
-        - Final Optimization    
+        - Final Optimization
+        - Hardware Rendering
+            - Shaders?
+            - Render-to-Texture?
         
     ARCHITECTURE EXPLORATION
     - Z !

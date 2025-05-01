@@ -536,7 +536,7 @@ acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32
             for it := assets.loaded_asset_sentinel.prev; it != &assets.loaded_asset_sentinel; it = it.prev {
                 asset := &assets.assets[it.asset_index]
                 if asset.state == .Loaded && generation_has_completed(assets, asset.header.generation_id) {
-                    if bitmap, ok := asset.header.value.(Bitmap); ok {
+                    if bitmap, ok := &asset.header.value.(Bitmap); ok {
                         Platform.deallocate_texture(bitmap.texture_handle)
                         bitmap.texture_handle = 0
                     }

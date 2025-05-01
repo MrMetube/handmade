@@ -25,10 +25,6 @@ import gl "vendor:OpenGL"
 ////////////////////////////////////////////////
 // Config
 
-HighPriorityWorkQueueThreadCount :: 9
-LowPriorityWorkQueueThreadCount  :: 2
-
-
 // Resolution :: [2]i32 {2560, 1440}
 Resolution :: [2]i32 {1920, 1080}
 // Resolution :: [2]i32 {1280, 720}
@@ -55,9 +51,6 @@ GlobalPause := false
 
 GlobalDebugShowCursor: b32
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
-
-GlobalDC:        win.HDC
-GlobalGlContext: win.HGLRC
 
 GlobalBlitTextureHandle: u32
 BlitVertexArrayObject: u32
@@ -113,7 +106,6 @@ main :: proc() {
     // Windows Setup
     
     window: win.HWND
-    gl_context: win.HGLRC
     {
         instance := cast(win.HINSTANCE) win.GetModuleHandleW(nil)
         window_class := win.WNDCLASSW{
@@ -159,17 +151,26 @@ main :: proc() {
     ////////////////////////////////////////////////
     // Platform Setup
     
-    GlobalDC = win.GetDC(window)
-    
-    GlobalGlContext = init_opengl(GlobalDC)
-    
+    high_queue, low_queue: PlatformWorkQueue
+    high_infos: [9]CreateThreadInfo
+    low_infos:  [2]CreateThreadInfo
+    {
+        window_dc := win.GetDC(window)
+        
+        gl_context := init_opengl(window_dc)
+        
+        
+        for &info in low_infos {
+            info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &gl_attribs[0])
+            info.window_dc  = window_dc
+        }
+        
+        init_work_queue(&high_queue, high_infos[:])
+        init_work_queue(&low_queue,  low_infos[:])
+    }
+
     fmt.print("\033[2J") // Clear the terminal
-    
-    high_queue: PlatformWorkQueue
-    low_queue := PlatformWorkQueue{ needs_opengl = true }
-    init_work_queue(&high_queue, HighPriorityWorkQueueThreadCount)
-    init_work_queue(&low_queue,  0/* LowPriorityWorkQueueThreadCount */) // See :OpenGLonThreads
-    
+
     state: PlatformState
     {
         exe_path_buffer: [win.MAX_PATH_WIDE]u16
@@ -206,7 +207,7 @@ main :: proc() {
             win.ReleaseDC(window, device_context)
         }
         
-        game_update_hz = cast(f32) MonitorRefreshHz / 2
+        game_update_hz = cast(f32) MonitorRefreshHz
     }
     target_seconds_per_frame := 1 / game_update_hz
     
@@ -606,12 +607,6 @@ main :: proc() {
         
         game.end_timed_block(debug_colation)
         ////////////////////////////////////////////////
-        // IMPORTANT TODO(viktor): See :OpenGLonThreads
-        // When using opengl, the texture loading should be done asynchronously but 
-        // currently only the main thread actually manages to create an opengl context
-        // so we do the work here
-        complete_all_work(&low_queue)
-        
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
@@ -723,6 +718,8 @@ gl_attribs := [?]i32{
     0,
 }
 
+OpenGLSupportsSRGBFrameBuffer: b32
+
 glBegin: proc(_: u32)
 glEnd: proc()
 glMatrixMode: proc(_: i32)
@@ -812,6 +809,21 @@ load_wgl_extensions :: proc() {
             win.wglChoosePixelFormatARB    = auto_cast win.wglGetProcAddress("wglChoosePixelFormatARB")
             win.wglCreateContextAttribsARB = auto_cast win.wglGetProcAddress("wglCreateContextAttribsARB")
             win.wglSwapIntervalEXT         = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
+            win.wglGetExtensionsStringARB  = auto_cast win.wglGetProcAddress("wglGetExtensionsStringARB")
+            
+            if win.wglGetExtensionsStringARB != nil {
+                len: u32
+                extensions := cast(string) win.wglGetExtensionsStringARB(dummy_dc)
+                for extensions != "" {
+                    len += 1
+                    if extensions[len] == ' ' {
+                        part      := extensions[:len]
+                        extensions = extensions[len+1:]
+                        len = 0
+                        if "WGL_EXT_framebuffer_sRGB" == part do OpenGLSupportsSRGBFrameBuffer = true
+                    }
+                }
+            }
             
             win.gl_set_proc_address(&glBegin, "glBegin")
             win.gl_set_proc_address(&glEnd, "glEnd")
@@ -844,6 +856,10 @@ set_pixel_format :: proc(dc: win.HDC) {
             0,
         }
         
+        if !OpenGLSupportsSRGBFrameBuffer {
+            int_attribs[10] = 0 // @Volatile Coupled to the ordering of the attribs itself
+        }
+        
         win.wglChoosePixelFormatARB(dc, raw_data(int_attribs[:]), nil, 1, &suggested_pixel_format_index, &extended_pick)
     }
     
@@ -864,30 +880,6 @@ set_pixel_format :: proc(dc: win.HDC) {
     win.DescribePixelFormat(dc, suggested_pixel_format_index, size_of(suggested_pixel_format), &suggested_pixel_format)
     win.SetPixelFormat(dc, suggested_pixel_format_index, &suggested_pixel_format)
     
-}
-
-create_opengl_context_for_worker_thread :: proc() {
-    assert(win.wglCreateContextAttribsARB != nil)
-    assert(GlobalDC != nil)
-    assert(GlobalGlContext != nil)
-    
-    if true do return 
-    // :OpenGLonThreads
-    // The creation of a shared context fails with INVALID_OPERATION.
-    // But there is no indication of a reason.
-    // For casey it just worked
-    
-    dc            := GlobalDC
-    share_context := GlobalGlContext
-    modern_context := win.wglCreateContextAttribsARB(dc, share_context, &gl_attribs[0])
-    
-    if (modern_context == nil) || !win.wglMakeCurrent(dc, modern_context) {
-        error_code := os.get_last_error()
-        error_code = os.Platform_Error(win.HRESULT_CODE(cast(int) error_code.(os.Platform_Error)))
-        error_message := os.error_string(error_code)
-        fmt.println("Error code:", error_code, "Message:", error_message)
-        panic("Unable to create OpenGL context for worker thread")
-    }
 }
 
 render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_memory: pmm) {
