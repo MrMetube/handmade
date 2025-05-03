@@ -40,12 +40,12 @@ LinkedList :: struct($T: typeid) {
     prev, next: ^LinkedList(T),
 }
 
-list_init_sentinel :: #force_inline proc(sentinel: ^LinkedList($T)) {
+list_init_sentinel :: proc(sentinel: ^LinkedList($T)) {
     sentinel.next = sentinel
     sentinel.prev = sentinel
 }
 
-list_insert :: #force_inline proc(previous, element: ^LinkedList($T)) {
+list_insert :: proc(previous, element: ^LinkedList($T)) {
     element.prev = previous
     element.next = previous.next
     
@@ -53,7 +53,7 @@ list_insert :: #force_inline proc(previous, element: ^LinkedList($T)) {
     element.prev.next = element
 }
 
-list_remove :: #force_inline proc(element: ^LinkedList($T)) {
+list_remove :: proc(element: ^LinkedList($T)) {
     element.prev.next = element.next
     element.next.prev = element.prev
     
@@ -72,19 +72,19 @@ SingleLinkedList :: struct($T: typeid) {
 // TODO(viktor): codefy removal from the list whilst iterating over it
 // maybe a procedure is enough, please no iterator objects
 
-list_push_after_head :: #force_inline proc(head: ^SingleLinkedList($T), element: ^SingleLinkedList(T)) {
+list_push_after_head :: proc(head: ^SingleLinkedList($T), element: ^SingleLinkedList(T)) {
     element^, head^ = head^, element^
     head.next = element
 }
 
-list_push :: #force_inline proc(head: ^^SingleLinkedList($T), elements: ..^SingleLinkedList(T)) {
+list_push :: proc(head: ^^SingleLinkedList($T), elements: ..^SingleLinkedList(T)) {
     for element in elements {
         element.next = head^
         head^        = element
     }
 }
 
-list_pop :: #force_inline proc(head: ^^SingleLinkedList($T)) -> (result: ^SingleLinkedList(T), ok: b32) #optional_ok {
+list_pop :: proc(head: ^^SingleLinkedList($T)) -> (result: ^SingleLinkedList(T), ok: b32) #optional_ok {
     if head^ != nil {
         result = head^
         head^  = result.next

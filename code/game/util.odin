@@ -7,7 +7,7 @@ package game
 @common import "core:fmt"
 @common import "core:simd/x86"
 
-was_pressed :: #force_inline proc(button: InputButton) -> (result:b32) {
+was_pressed :: proc(button: InputButton) -> (result:b32) {
     result = button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
     return result
 }
@@ -57,7 +57,7 @@ color_wheel :: [?]v4 {
 // Atomics
 
 // TODO(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
-@common atomic_compare_exchange :: #force_inline proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
+@common atomic_compare_exchange :: proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
     ok_: bool
     was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
     ok = cast(b32) ok_
@@ -88,12 +88,12 @@ complete_previous_reads_before_future_reads :: proc "contextless" () {
 @common Gigabyte :: runtime.Gigabyte
 @common Terabyte :: runtime.Terabyte
 
-@common align2     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  1) &~  1 }
-@common align4     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  3) &~  3 }
-@common align8     :: #force_inline proc "contextless" (value: $T) -> T { return (value +  7) &~  7 }
-@common align16    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 15) &~ 15 }
-@common align32    :: #force_inline proc "contextless" (value: $T) -> T { return (value + 31) &~ 31 }
-@common align_pow2 :: #force_inline proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
+@common align2     :: proc "contextless" (value: $T) -> T { return (value +  1) &~  1 }
+@common align4     :: proc "contextless" (value: $T) -> T { return (value +  3) &~  3 }
+@common align8     :: proc "contextless" (value: $T) -> T { return (value +  7) &~  7 }
+@common align16    :: proc "contextless" (value: $T) -> T { return (value + 15) &~ 15 }
+@common align32    :: proc "contextless" (value: $T) -> T { return (value + 31) &~ 31 }
+@common align_pow2 :: proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
 
 
 @common safe_truncate :: proc{
@@ -101,65 +101,65 @@ complete_previous_reads_before_future_reads :: proc "contextless" () {
     safe_truncate_i64,
 }
 
-@common safe_truncate_u64 :: #force_inline proc(value: u64) -> u32 {
+@common safe_truncate_u64 :: proc(value: u64) -> u32 {
     assert(value <= 0xFFFFFFFF)
     return cast(u32) value
 }
 
-@common safe_truncate_i64 :: #force_inline proc(value: i64) -> i32 {
+@common safe_truncate_i64 :: proc(value: i64) -> i32 {
     assert(value <= 0x7FFFFFFF)
     return cast(i32) value
 }
 
 @common vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
 
-@(common, require_results) vcast_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
+@(common, require_results) vcast_2 :: proc($T: typeid, x, y: $E) -> [2]T where T != E {
     return {cast(T) x, cast(T) y}
 }
-@(common, require_results) vcast_3 :: #force_inline proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
+@(common, require_results) vcast_3 :: proc($T: typeid, x, y, z: $E) -> [3]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z}
 }
-@(common, require_results) vcast_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
+@(common, require_results) vcast_4 :: proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
-@(common, require_results) vcast_vec :: #force_inline proc($T: typeid, v:[$N]$E) -> (result: [N]T) where T != E {
+@(common, require_results) vcast_vec :: proc($T: typeid, v:[$N]$E) -> (result: [N]T) where T != E {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = cast(T) v[i]
     }
     return result
 }
 
-@(require_results) min_vec :: #force_inline proc(a,b: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) min_vec :: proc(a,b: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = min(a[i], b[i])
     }
     return result
 }
-@(require_results) max_vec :: #force_inline proc(a,b: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) max_vec :: proc(a,b: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = max(a[i], b[i])
     }
     return result
 }
-@(require_results) abs_vec :: #force_inline proc(a: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) abs_vec :: proc(a: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = abs(a[i])
     }
     return result
 }
 
-modular_add :: #force_inline proc(value:^$N, addend, one_past_maximum: N) where intrinsics.type_is_numeric(N) {
+modular_add :: proc(value:^$N, addend, one_past_maximum: N) where intrinsics.type_is_numeric(N) {
     value^ += addend
     if value^ >= one_past_maximum {
         value^ = 0
     }
 }
 
-@common swap :: #force_inline proc(a, b: ^$T ) { a^, b^ = b^, a^ }
+@common swap :: proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 
 
 @(common, disabled=ODIN_DISABLE_ASSERT)
-assert :: #force_inline proc(condition: $T, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(T) {
+assert :: proc(condition: $T, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(T) {
     if !condition {
         // TODO(viktor): We are not a console application
         fmt.print(loc, prefix)

@@ -649,9 +649,11 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         if collation_frame == nil {
             debug.collation_frame = new_frame(debug, event.clock)
         }
+        assert(debug.collation_frame != nil)
         
         thread: ^DebugThread
         for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {}
+        
         if thread == nil {
             thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
             thread^ = { thread_index = event.thread_index }
@@ -674,6 +676,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             }
             
             debug.collation_frame = new_frame(debug, event.clock)
+            assert(debug.collation_frame != nil)
             
           case MarkEvent:
             element := get_element_from_event(debug, event)
@@ -808,7 +811,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     draw_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
-    if (true || debug_variable(b32, "ShowFramerate")) && debug.frames.first != nil {
+    if (true || Global_ShowFramerate) && debug.frames.first != nil {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames.first.seconds_elapsed*1000))
         debug_push_text_line(debug, fmt.tprintf("Last Frame memory footprint: %m/%m", debug.per_frame_arena.used, len(debug.per_frame_arena.storage)))
     }
@@ -1097,13 +1100,13 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
     layout.p.y = total_bounds.min.y - spacing
 }
 
-debug_id_from_link :: #force_inline proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
+debug_id_from_link :: proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
     result.value[0] = tree
     result.value[1] = link
     return result
 }
 
-debug_id_from_guid :: #force_inline proc(tree: ^DebugTree, guid: ^u8) -> (result: DebugId) {
+debug_id_from_guid :: proc(tree: ^DebugTree, guid: ^u8) -> (result: DebugId) {
     result.value[0] = tree
     result.value[1] = guid
     return result
@@ -1502,7 +1505,8 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
         switch operation {
             case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0), color)
+                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0), color, sort_bias = 100_010)
+                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0) + {2,-2,0}, {0,0,0,1}, sort_bias = 100_000)
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)

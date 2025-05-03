@@ -3,6 +3,10 @@ package main
 import "core:simd"
 import win "core:sys/windows"
 
+Global_Rendering_RenderSingleThreaded: b32
+Global_Rendering_Environment_ShowLightingBounceDirection: b32
+Global_Rendering_Environment_ShowLightingSampling: b32
+
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
     target:   Bitmap,
@@ -10,7 +14,7 @@ TileRenderWork :: struct {
     clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: #force_inline proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: pmm, width, height: i32) {
+init_render_commands :: proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: pmm, width, height: i32) {
     commands^ = {
         width  = width, 
         height = height,
@@ -72,7 +76,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
                 work.clip_rect.max.y = target.height
             }
             
-            if false /* debug_variable(b32, "Rendering/RenderSingleThreaded") */ {
+            if Global_Rendering_RenderSingleThreaded {
                 do_tile_render_work(work)
             } else {
                 enqueue_work(queue, do_tile_render_work, work)
@@ -517,7 +521,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                     }
 
                     texel.rgb += texel.a * light_color.rgb
-                    when false do if debug_variable(b32, "Rendering/Environment/ShowLightingBounceDirection") {
+                    if Global_Rendering_Environment_ShowLightingBounceDirection {
                         // NOTE(viktor): draws the bounce direction
                         texel.rgb = 0.5 + 0.5 * bounce_direction
                         texel.rgb *= texel.a
@@ -705,14 +709,14 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
 }
 
 // TODO(viktor): should sample return a pointer instead?
-sample :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
+sample :: proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
     texel := texture.memory[ p.y * texture.width +  p.x]
     result = vec_cast(f32, texel)
 
     return result
 }
 
-sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
+sample_bilinear :: proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
     s00 = sample(texture, p + {0, 0})
     s01 = sample(texture, p + {1, 0})
     s10 = sample(texture, p + {0, 1})
@@ -735,7 +739,7 @@ sample_bilinear :: #force_inline proc(texture: Bitmap, p: [2]i32) -> (s00, s01, 
     distance_from_map_in_z says how far the map is from the sample
     point in z, given in meters
 */
-sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
+sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
     assert(environment_map.LOD[0].memory != nil)
 
     // NOTE(viktor): pick which LOD to sample from
@@ -770,7 +774,7 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
 
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
 
-    when false do if debug_variable(b32, "Rendering/Environment/ShowLightingSampling") {
+    if Global_Rendering_Environment_ShowLightingSampling {
         // NOTE(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[index.y * lod.width + index.x]
         texel^ = 255
@@ -779,14 +783,14 @@ sample_environment_map :: #force_inline proc(screen_space_uv: v2, sample_directi
     return result
 }
 
-blend_bilinear :: #force_inline proc(s00, s01, s10, s11: v4, t: v2) -> (result: v4) {
+blend_bilinear :: proc(s00, s01, s10, s11: v4, t: v2) -> (result: v4) {
     result = lerp( lerp(s00, s01, t.x), lerp(s10, s11, t.x), t.y )
 
     return result
 }
 
 @(require_results)
-unscale_and_bias :: #force_inline proc(normal: v4) -> (result: v4) {
+unscale_and_bias :: proc(normal: v4) -> (result: v4) {
     inv_255: f32 = 1.0 / 255.0
 
     result.xyz = -1 + 2 * (normal.xyz * inv_255)
@@ -839,7 +843,7 @@ radix_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) #no_bo
     }
 }
 
-sort_key_to_u32 :: #force_inline proc(sort_key: f32) -> (result: u32) {
+sort_key_to_u32 :: proc(sort_key: f32) -> (result: u32) {
     result = transmute(u32) sort_key
 
     SignBit :: 0x8000_0000

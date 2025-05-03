@@ -689,14 +689,14 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
         assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
         
-        parse_chunk_at :: #force_inline proc(at: pmm, stop: pmm) -> (result: RiffIterator) {
+        parse_chunk_at :: proc(at: pmm, stop: pmm) -> (result: RiffIterator) {
             result.at    = cast([^]u8) at
             result.stop  = stop
             
             return result
         }
         
-        is_valid_riff_iter :: #force_inline proc(it: RiffIterator) -> (result: b32) {
+        is_valid_riff_iter :: proc(it: RiffIterator) -> (result: b32) {
             at := cast(uintpointer) it.at
             stop := cast(uintpointer) it.stop
             result = at < stop 
@@ -704,7 +704,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             return result
         }
         
-        next_chunk :: #force_inline proc(it: RiffIterator) -> (result: RiffIterator) {
+        next_chunk :: proc(it: RiffIterator) -> (result: RiffIterator) {
             chunk := cast(^WAVE_Chunk)it.at
             size := chunk.size
             if size % 2 != 0 {
@@ -716,19 +716,19 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             return result
         }
         
-        get_chunk_data :: #force_inline proc(it: RiffIterator) -> (result: pmm) {
+        get_chunk_data :: proc(it: RiffIterator) -> (result: pmm) {
             result = &it.at[size_of(WAVE_Chunk)]
             return result
         }
         
-        get_chunk_size :: #force_inline proc(it: RiffIterator) -> (result: u32) {
+        get_chunk_size :: proc(it: RiffIterator) -> (result: u32) {
             chunk := cast(^WAVE_Chunk)it.at
             result = chunk.size
             
             return result
         }
         
-        get_type :: #force_inline proc(it: RiffIterator) -> (result: WAVE_Chunk_ID) {
+        get_type :: proc(it: RiffIterator) -> (result: WAVE_Chunk_ID) {
             chunk := cast(^WAVE_Chunk)it.at
             result = chunk.id
             return result
@@ -832,27 +832,27 @@ vec_cast :: proc {
 }
 
 @(require_results)
-cast_vec_2 :: #force_inline proc($T: typeid, x, y: $E) -> [2]T where T != E {
+cast_vec_2 :: proc($T: typeid, x, y: $E) -> [2]T where T != E {
     return {cast(T) x, cast(T) y}
 }
 
 @(require_results)
-cast_vec_4 :: #force_inline proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
+cast_vec_4 :: proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
 
 @(require_results)
-cast_vec_v4 :: #force_inline proc($T: typeid, v:[4]$E) -> [4]T where T != E {
+cast_vec_v4 :: proc($T: typeid, v:[4]$E) -> [4]T where T != E {
     return vec_cast(T, v.x, v.y, v.z, v.w)
 }
 
 
 @(require_results)
-srgb_255_to_linear_1 :: #force_inline proc(srgb: v4) -> (result: v4) {
+srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
     // NOTE(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
     @(require_results)
-    srgb_to_linear :: #force_inline proc(srgb: v4) -> (result: v4) {
-        @(require_results) square :: #force_inline proc(x: f32) -> f32 { return x * x}
+    srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
+        @(require_results) square :: proc(x: f32) -> f32 { return x * x}
         
         result.r = square(srgb.r)
         result.g = square(srgb.g)
@@ -871,9 +871,9 @@ srgb_255_to_linear_1 :: #force_inline proc(srgb: v4) -> (result: v4) {
 
 
 @(require_results)
-linear_1_to_srgb_255 :: #force_inline proc(linear: v4) -> (result: v4) {
+linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
     @(require_results)
-    linear_to_srgb :: #force_inline proc(linear: v4) -> (result: v4) {
+    linear_to_srgb :: proc(linear: v4) -> (result: v4) {
         result.r = math.sqrt(linear.r)
         result.g = math.sqrt(linear.g)
         result.b = math.sqrt(linear.b)

@@ -141,7 +141,7 @@ end_sim :: proc(region: ^SimRegion) {
     }
 }
 
-entity_overlaps_rectangle :: #force_inline proc(bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
+entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
     grown := rectangle_add_radius(bounds, 0.5 * rectangle_get_dimension(volume))
     result = rectangle_contains(grown, p + rectangle_get_center(volume))
     return result
@@ -164,7 +164,7 @@ get_hash_from_index :: proc(region: ^SimRegion, storage_index: StorageIndex) -> 
     return result
 }
 
-load_entity_reference :: #force_inline proc(region: ^SimRegion, ref: ^EntityReference) {
+load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
     if ref.index != 0 {
         entry := get_hash_from_index(region, ref.index)
         if entry.ptr == nil {
@@ -177,13 +177,13 @@ load_entity_reference :: #force_inline proc(region: ^SimRegion, ref: ^EntityRefe
     }
 }
 
-store_entity_reference :: #force_inline proc(ref: ^EntityReference) {
+store_entity_reference :: proc(ref: ^EntityReference) {
     if ref.ptr != nil {
         ref.index = ref.ptr.storage_index
     }
 }
 
-add_entity :: #force_inline proc(region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
+add_entity :: proc(region: ^SimRegion, storage_index: StorageIndex, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
     dest = add_entity_raw(region, storage_index, source)
     
     if dest != nil {
@@ -229,7 +229,7 @@ add_entity_raw :: proc(region: ^SimRegion, storage_index: StorageIndex, source: 
 
 InvalidP :: v3{100_000, 100_000, 100_000}
 
-get_sim_space_p :: #force_inline proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v3) {
+get_sim_space_p :: proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v3) {
     // TODO(viktor): Do we want to set this to signaling NAN in 
     // debug mode to make sure nobody ever uses the position of
     // a nonspatial entity?
@@ -246,7 +246,7 @@ MoveSpec :: struct {
     speed: f32,
 }
 
-default_move_spec :: #force_inline proc() -> MoveSpec {
+default_move_spec :: proc() -> MoveSpec {
     return { false, 1, 0}
 }
 
@@ -517,7 +517,7 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
     return result
 }
 
-get_stair_ground :: #force_inline proc(region: ^Entity, at_ground_point: v3) -> (result: f32) {
+get_stair_ground :: proc(region: ^Entity, at_ground_point: v3) -> (result: f32) {
     assert(region.type == .Stairwell)
     
     region_rect := rectangle_center_diameter(region.p.xy, region.walkable_dim)

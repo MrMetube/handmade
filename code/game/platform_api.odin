@@ -41,6 +41,6 @@ PlatformAPI :: struct {
 @common PlatformMarkFileError                 :: #type proc(handle: ^PlatformFileHandle, error_message: string)
 
 @common
-Platform_no_file_errors :: #force_inline proc(handle: ^PlatformFileHandle) -> b32 { 
+Platform_no_file_errors :: proc(handle: ^PlatformFileHandle) -> b32 { 
     return handle.no_errors
 }

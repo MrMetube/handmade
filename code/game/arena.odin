@@ -27,17 +27,17 @@ DefaultPushParams :: PushParams {
     flags     = {.ClearToZero},
 }
 
-no_clear       :: #force_inline proc () -> PushParams { return { DefaultAlignment, {} }}
-align_no_clear :: #force_inline proc (#any_int alignment: u32, clear_to_zero :b32= false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
-align_clear    :: #force_inline proc (#any_int alignment: u32, clear_to_zero :b32= true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+no_clear       :: proc () -> PushParams { return { DefaultAlignment, {} }}
+align_no_clear :: proc (#any_int alignment: u32, clear_to_zero :b32= false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+align_clear    :: proc (#any_int alignment: u32, clear_to_zero :b32= true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 
-init_arena :: #force_inline proc(arena: ^Arena, storage: []u8) {
+init_arena :: proc(arena: ^Arena, storage: []u8) {
     arena.storage = storage
 }
 
 push :: proc { push_slice, push_struct, push_size, copy_string }
 @require_results
-push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
+push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
     size := size_of(Element) * count
     data := cast([^]Element) push_size(arena, size, params)
     result = data[:count]
@@ -46,14 +46,14 @@ push_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int count
 }
 
 @require_results
-push_struct :: #force_inline proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
+push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
     result = cast(^T) push_size(arena, size_of(T), params)
     
     return result
 }
 
 @require_results
-push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: pmm) {
+push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: pmm) {
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
     size := size_init + alignment_offset
@@ -75,7 +75,7 @@ push_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, params :
 // NOTE(viktor): This is generally not for production use, this is probably
 // only really something we need during testing, but who knows
 @require_results
-copy_string :: #force_inline proc(arena: ^Arena, s: string) -> (result: string) {
+copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
     buffer := push_slice(arena, u8, len(s), no_clear())
     bytes  := transmute([]u8) s
     for r, i in bytes {
@@ -89,16 +89,16 @@ copy_string :: #force_inline proc(arena: ^Arena, s: string) -> (result: string) 
 
 arena_has_room :: proc { arena_has_room_slice, arena_has_room_struct, arena_has_room_size }
 @require_results
-arena_has_room_slice :: #force_inline proc(arena: ^Arena, $Element: typeid, #any_int len: u64, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
+arena_has_room_slice :: proc(arena: ^Arena, $Element: typeid, #any_int len: u64, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
     return arena_has_room_size(arena, size_of(Element) * len, alignment)
 }
 
 @require_results
-arena_has_room_struct :: #force_inline proc(arena: ^Arena, $T: typeid, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
+arena_has_room_struct :: proc(arena: ^Arena, $T: typeid, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
     return arena_has_room_size(arena, size_of(T), alignment)
 }
 
-arena_has_room_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
+arena_has_room_size :: proc(arena: ^Arena, #any_int size_init: u64, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
     size := arena_get_effective_size(arena, size_init, alignment)
     result = arena.used + size < cast(u64)len(arena.storage)
     return result
@@ -106,31 +106,31 @@ arena_has_room_size :: #force_inline proc(arena: ^Arena, #any_int size_init: u64
 
 
 zero :: proc { zero_size, zero_slice }
-zero_size :: #force_inline proc(memory: pmm, size: u64) {
+zero_size :: proc(memory: pmm, size: u64) {
     // :PointerArithmetic
     bytes := (cast([^]u8)memory)[:size]
     for &b in bytes {
         b = {}
     }
 }
-zero_slice :: #force_inline proc(data: []$T){
+zero_slice :: proc(data: []$T){
     for &entry in data do entry = {}
 }
 
-sub_arena :: #force_inline proc(sub_arena: ^Arena, arena: ^Arena, #any_int storage_size: u64, params: = DefaultPushParams) {
+sub_arena :: proc(sub_arena: ^Arena, arena: ^Arena, #any_int storage_size: u64, params: = DefaultPushParams) {
     assert(sub_arena != arena)
     
     storage := push(arena, u8, storage_size, params)
     init_arena(sub_arena, storage)
 }
 
-arena_get_effective_size :: #force_inline proc(arena: ^Arena, size_init: u64, alignment: u64) -> (result: u64) {
+arena_get_effective_size :: proc(arena: ^Arena, size_init: u64, alignment: u64) -> (result: u64) {
     alignment_offset := arena_alignment_offset(arena, alignment)
     result =  size_init + alignment_offset
     return result
 }
 
-arena_alignment_offset :: #force_inline proc(arena: ^Arena, #any_int alignment: u64 = DefaultAlignment) -> (result: u64) {
+arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: u64 = DefaultAlignment) -> (result: u64) {
     pointer := transmute(u64) &arena.storage[arena.used]
 
     alignment_mask := alignment - 1
@@ -141,14 +141,14 @@ arena_alignment_offset :: #force_inline proc(arena: ^Arena, #any_int alignment: 
     return result
 }
 
-arena_remaining_size :: #force_inline proc(arena: ^Arena, #any_int alignment: u64 = DefaultAlignment) -> (result: u64) {
+arena_remaining_size :: proc(arena: ^Arena, #any_int alignment: u64 = DefaultAlignment) -> (result: u64) {
     alignment_offset:= arena_alignment_offset(arena, alignment)
     result = (auto_cast len(arena.storage) - 1) - (arena.used + alignment_offset)
     
     return result
 }
 
-begin_temporary_memory :: #force_inline proc(arena: ^Arena) -> (result: TemporaryMemory) {
+begin_temporary_memory :: proc(arena: ^Arena) -> (result: TemporaryMemory) {
     result.arena = arena
     result.used = arena.used
     
@@ -157,7 +157,7 @@ begin_temporary_memory :: #force_inline proc(arena: ^Arena) -> (result: Temporar
     return result 
 }
 
-end_temporary_memory :: #force_inline proc(temp_mem: TemporaryMemory) {
+end_temporary_memory :: proc(temp_mem: TemporaryMemory) {
     arena := temp_mem.arena
     assert(arena.used >= temp_mem.used)
     assert(arena.temp_count > 0)
@@ -166,6 +166,6 @@ end_temporary_memory :: #force_inline proc(temp_mem: TemporaryMemory) {
     arena.temp_count -= 1
 }
 
-check_arena :: #force_inline proc(arena: ^Arena) {
+check_arena :: proc(arena: ^Arena) {
     assert(arena.temp_count == 0)
 }

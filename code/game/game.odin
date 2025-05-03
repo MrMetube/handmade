@@ -86,6 +86,27 @@ INTERNAL :: #config(INTERNAL, false)
 
 */
 
+////////////////////////////////////////////////
+// TODO(viktor): Find a better place for these configurations
+
+Global_ShowFramerate: b32
+Global_Assets_LoadAssetsSingleThreaded: b32
+Global_Audio_SoundPanningWithMouse: b32
+Global_Audio_SoundPitchingWithMouse: b32
+Global_Entity_HeroJumping: b32
+Global_Entity_FamiliarFollowsHero: b32
+Global_Particles_FountainTest: b32
+Global_Particles_ShowGrid: b32
+Global_Rendering_Environtment_Test: b32
+Global_Rendering_RenderSingleThreaded: b32
+Global_Rendering_ShowSpaceBounds: b32
+Global_Rendering_Camera_UseDebugCamera: b32
+Global_Rendering_Camera_DebugCameraDistance: f32 = 25
+Global_Rendering_Bounds_ShowGroundChunkBounds: b32
+Global_Rendering_Bounds_ShowRenderAndSimulationBounds: b32
+
+////////////////////////////////////////////////
+
 @common 
 InputButton :: struct {
     half_transition_count: u32,
@@ -251,6 +272,8 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     Platform = memory.Platform_api
     
+    debug_variable(f32, "test") // nocheckin the collation has a bug when there are no debug events, besides the framemarker
+    
     when DebugEnabled {
         if memory.debug_storage == nil do return
         assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
@@ -328,7 +351,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     ////////////////////////////////////////////////
     // Input
 
-    if debug_variable(b32, "Audio/SoundPanningWithMouse") {
+    if Global_Audio_SoundPanningWithMouse {
         // NOTE(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
         if state.music == nil {
@@ -340,7 +363,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         change_volume(&state.mixer, state.music, 0.01, music_volume)
     }
     
-    if debug_variable(b32, "Audio/SoundPitchingWithMouse") {
+    if Global_Audio_SoundPitchingWithMouse {
         // NOTE(viktor): test sound panning with the mouse 
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
@@ -363,7 +386,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     render_group: RenderGroup
     init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
     
-    if debug_variable(b32, "Particles/FountainTest") { 
+    if Global_Particles_FountainTest { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Particle system test
         font_id := first_font_from(tran_state.assets, .Font)
@@ -412,7 +435,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                 cell.velocity_times_density += density * particle.dp
             }
             
-            if debug_variable(b32, "Particles/ShowGrid") {
+            if Global_Particles_ShowGrid {
                 for row, y in state.cells {
                     for cell, x in row {
                         alpha := clamp_01(0.1 * cell.density)
@@ -512,7 +535,7 @@ begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWit
     return result
 }
 
-end_task_with_memory :: #force_inline proc (task: ^TaskWithMemory) {
+end_task_with_memory :: proc (task: ^TaskWithMemory) {
     end_temporary_memory(task.memory_flush)
     
     complete_previous_writes_before_future_writes()

@@ -113,7 +113,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena, ground_buffer_size: f32)
     ////////////////////////////////////////////////
     // "World Gen"
     
-    chunk_position_from_tile_positon :: #force_inline proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
+    chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
         tile_size_in_meters  :: 1.5
         tile_depth_in_meters :: 3
         offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_x, tile_y, tile_z) + {0.5, 0.5, 0})
@@ -265,7 +265,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
             
-            if debug_variable(b32, "Entity/HeroJumping") {
+            if Global_Entity_HeroJumping {
                 if controller.start.ended_down {
                     con_hero.dz = 2
                 }
@@ -333,7 +333,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             // these textures so its dificult to know when to upload to the gpu.
             // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
             
-            if debug_variable(b32, "Rendering/Bounds/ShowGroundChunkBounds") {
+            if Global_Rendering_Bounds_ShowGroundChunkBounds {
                 push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)
             }
         }
@@ -392,7 +392,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, input.delta_time)
     
     
-    if debug_variable(b32, "Rendering/Bounds/ShowRenderAndSimulationBounds") {
+    if Global_Rendering_Bounds_ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Yellow,0.1)
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
@@ -487,7 +487,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     }
                 }
                 
-                if debug_variable(b32, "Entity/FamiliarFollowsHero") {
+                if Global_Entity_FamiliarFollowsHero {
                     if closest_hero != nil && closest_hero_dsq > 1 {
                         mpss: f32 = 0.5
                         ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
@@ -571,7 +571,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
             
               case .Space: 
-                if debug_variable(b32, "Rendering/ShowSpaceBounds") {
+                if Global_Rendering_ShowSpaceBounds {
                     transform.upright = false
                     for volume in entity.collision.volumes {
                         push_rectangle_outline(render_group, volume, transform, Blue)
@@ -610,7 +610,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         }
     }
     
-    when false do if debug_variable(b32, "Rendering/Environtment/Test") { 
+    when false do if Global_Rendering_Environtment_Test { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
@@ -688,12 +688,12 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
 ////////////////////////////////////////////////
 
-null_position :: #force_inline proc() -> (result:WorldPosition) {
+null_position :: proc() -> (result:WorldPosition) {
     result.chunk.x = UninitializedChunk
     return result
 }
 
-is_valid :: #force_inline proc(p: WorldPosition) -> b32 {
+is_valid :: proc(p: WorldPosition) -> b32 {
     return p.chunk.x != UninitializedChunk
 }
 
@@ -717,7 +717,7 @@ make_simple_grounded_collision :: proc(world: ^World, size: v3) -> (result: ^Ent
     return result
 }
 
-change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p_init: WorldPosition) {
+change_entity_location :: proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p_init: WorldPosition) {
     new_p, old_p : ^WorldPosition
     if is_valid(new_p_init) {
         new_p_init := new_p_init
@@ -738,7 +738,7 @@ change_entity_location :: #force_inline proc(arena: ^Arena = nil, world: ^World,
     }
 }
 
-change_entity_location_raw :: #force_inline proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     timed_function()
     // TODO(viktor): if the entity moves  into the camera bounds, shoulds this force the entity into the high set immediatly?
     assert((old_p == nil || is_valid(old_p^)))
@@ -807,7 +807,7 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {
     return result
 }
 
-world_difference :: #force_inline proc(world: ^World, a, b: WorldPosition) -> (result: v3) {
+world_difference :: proc(world: ^World, a, b: WorldPosition) -> (result: v3) {
     chunk_delta  := vec_cast(f32, a.chunk) - vec_cast(f32, b.chunk)
     offset_delta := a.offset - b.offset
     result = chunk_delta * world.chunk_dim_meters
@@ -815,7 +815,7 @@ world_difference :: #force_inline proc(world: ^World, a, b: WorldPosition) -> (r
     return result
 }
 
-is_canonical :: #force_inline proc(world: ^World, offset: v3) -> b32 {
+is_canonical :: proc(world: ^World, offset: v3) -> b32 {
     epsilon: f32 = 0.0001
     half_size := 0.5 * world.chunk_dim_meters + epsilon
     return -half_size.x <= offset.x && offset.x <= half_size.x &&
@@ -823,7 +823,7 @@ is_canonical :: #force_inline proc(world: ^World, offset: v3) -> b32 {
            -half_size.z <= offset.z && offset.z <= half_size.z
 }
 
-are_in_same_chunk :: #force_inline proc(world: ^World, a, b: WorldPosition) -> b32 {
+are_in_same_chunk :: proc(world: ^World, a, b: WorldPosition) -> b32 {
     assert(is_canonical(world, a.offset))
     assert(is_canonical(world, b.offset))
 

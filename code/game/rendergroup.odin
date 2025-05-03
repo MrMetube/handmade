@@ -157,7 +157,7 @@ TileSortEntry :: struct {
     push_buffer_offset: u32,
 }
     
-init_render_group :: #force_inline proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
+init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
     group^ = {
         assets = assets,
         renders_in_background = renders_in_background,
@@ -167,10 +167,10 @@ init_render_group :: #force_inline proc(group: ^RenderGroup, assets: ^Assets, co
     }
 }
 
-default_flat_transform    :: #force_inline proc() -> Transform { return { scale = 1 } }
-default_upright_transform :: #force_inline proc() -> Transform { return { scale = 1, upright = true} }
+default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
+default_upright_transform :: proc() -> Transform { return { scale = 1, upright = true} }
 
-perspective :: #force_inline proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
+perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
     // TODO(viktor): need to adjust this based on buffer size
     pixels_to_meters := 1.0 / meters_to_pixels
     pixel_size := vec_cast(f32, pixel_count)
@@ -187,7 +187,7 @@ perspective :: #force_inline proc(group: ^RenderGroup, pixel_count: [2]i32, mete
     }
 }
 
-orthographic :: #force_inline proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels: f32) {
+orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels: f32) {
     // TODO(viktor): need to adjust this based on buffer size
     pixel_size := vec_cast(f32, pixel_count)
     group.monitor_half_diameter_in_meters = 0.5 * meters_to_pixels
@@ -203,12 +203,12 @@ orthographic :: #force_inline proc(group: ^RenderGroup, pixel_count: [2]i32, met
     }
 }
 
-all_assets_valid :: #force_inline proc(group: ^RenderGroup) -> (result: b32) {
+all_assets_valid :: proc(group: ^RenderGroup) -> (result: b32) {
     result = group.missing_asset_count == 0
     return result
 }
 
-push_render_element :: #force_inline proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
+push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
     assert(group.camera.mode != .None)
     
     header_size := cast(u32) size_of(RenderGroupEntryHeader)
@@ -252,7 +252,7 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true) {
+push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true, sort_bias:f32=0) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     if group.renders_in_background && bitmap == nil {
         load_bitmap(group.assets, id, true)
@@ -262,7 +262,7 @@ push_bitmap :: #force_inline proc(group: ^RenderGroup, id: BitmapId, transform: 
     
     if bitmap != nil {
         assert(bitmap.texture_handle != 0)
-        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment)
+        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment, sort_bias)
     } else {
         assert(!group.renders_in_background)
         load_bitmap(group.assets, id, false)
@@ -280,13 +280,13 @@ get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, transform: Tran
     return result
 }
 
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
+push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, sort_bias: f32 = 0) {
     assert(bitmap.width_over_height != 0)
     
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment)
     if used_dim.basis.valid {
         assert(bitmap.texture_handle != 0)
-        element := push_render_element(group, RenderGroupEntryBitmap, used_dim.basis.sort_key)
+        element := push_render_element(group, RenderGroupEntryBitmap, used_dim.basis.sort_key + sort_bias)
         
         if element != nil {
             alpha := v4{1,1,1, group.global_alpha}
@@ -302,10 +302,10 @@ push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: ^Bitmap, tran
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
-push_rectangle2 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
+push_rectangle2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
     push_rectangle(group, Rect3(rec, 0, 0), transform, color)
 }
-push_rectangle3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
+push_rectangle3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
     center := rectangle_get_center(rec)
     size   := rectangle_get_dimension(rec)
     p := center + 0.5*size
@@ -323,10 +323,10 @@ push_rectangle3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, tran
 }
 
 push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
-push_rectangle_outline2 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: f32 = 0.1) {
+push_rectangle_outline2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: f32 = 0.1) {
     push_rectangle_outline(group, Rect3(rec, 0, 0), transform, color, thickness)
 }
-push_rectangle_outline3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
     // TODO(viktor): there are rounding issues with draw_rectangle
     // @Cleanup offset and size
     
@@ -342,7 +342,7 @@ push_rectangle_outline3 :: #force_inline proc(group: ^RenderGroup, rec: Rectangl
     push_rectangle(group, rectangle_center_diameter(offset + {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
 }
 
-coordinate_system :: #force_inline proc(group: ^RenderGroup, transform: Transform, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
+coordinate_system :: proc(group: ^RenderGroup, transform: Transform, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
     basis := project_with_transform(group.camera, transform, 0)
     if basis.valid {
         result = push_render_element(group, RenderGroupEntryCoordinateSystem, basis.sort_key)
@@ -370,20 +370,20 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, tran
     }
 }
 
-get_camera_rectangle_at_target :: #force_inline proc(group: ^RenderGroup) -> (result: Rectangle2) {
+get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangle2) {
     result = get_camera_rectangle_at_distance(group, group.camera.distance_above_target)
 
     return result
 }
 
-get_camera_rectangle_at_distance :: #force_inline proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
+get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
     camera_half_diameter := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_diameter_in_meters).xy
     result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
 
     return result
 }
 
-project_with_transform :: #force_inline proc(camera: Camera, transform: Transform, base_p: v3) -> (result: ProjectedBasis) {
+project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3) -> (result: ProjectedBasis) {
     p := V3(base_p.xy, 0) + transform.offset
     near_clip_plane :: 0.2
     distance_above_target := camera.distance_above_target
@@ -393,8 +393,8 @@ project_with_transform :: #force_inline proc(camera: Camera, transform: Transfor
       case .Perspective:
         base_z: f32
         
-        if debug_variable(b32, "Rendering/Camera/UseDebugCamera") {
-            distance_above_target *= debug_variable(f32, "Rendering/Camera/DebugCameraDistance")
+        if Global_Rendering_Camera_UseDebugCamera {
+            distance_above_target *= Global_Rendering_Camera_DebugCameraDistance
         }
         
         distance_to_p_z := distance_above_target - p.z
@@ -419,7 +419,7 @@ project_with_transform :: #force_inline proc(camera: Camera, transform: Transfor
     return result
 }
 
-unproject_with_transform :: #force_inline proc(camera: Camera, transform: Transform, pixels_xy: v2) -> (result: v3) {
+unproject_with_transform :: proc(camera: Camera, transform: Transform, pixels_xy: v2) -> (result: v3) {
     result.xy = (pixels_xy - camera.screen_center) / camera.meters_to_pixels_for_monitor 
     result.z  = transform.offset.z
     

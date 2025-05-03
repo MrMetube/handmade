@@ -48,31 +48,31 @@ PairwiseCollsionRuleFlag :: enum {
     Temporary,
 }
 
-make_entity_nonspatial :: #force_inline proc(entity: ^Entity) {
+make_entity_nonspatial :: proc(entity: ^Entity) {
     entity.flags += {.Nonspatial}
     entity.p = InvalidP
 }
 
-make_entity_spatial :: #force_inline proc(entity: ^Entity, p, dp: v3) {
+make_entity_spatial :: proc(entity: ^Entity, p, dp: v3) {
     entity.flags -= {.Nonspatial}
     entity.p = p
     entity.dp = dp
 }
 
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
-get_entity_ground_point_ :: #force_inline proc(entity: ^Entity) -> (result: v3) {
+get_entity_ground_point_ :: proc(entity: ^Entity) -> (result: v3) {
     result = get_entity_ground_point(entity, entity.p)
 
     return result
 }
 
-get_entity_ground_point_with_p :: #force_inline proc(entity: ^Entity, for_entity_p: v3) -> (result: v3) {
+get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (result: v3) {
     result = for_entity_p
 
     return result
 }
 
-get_low_entity :: #force_inline proc(world: ^World, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
+get_low_entity :: proc(world: ^World, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
     if storage_index > 0 && storage_index <= world.stored_entity_count {
         entity = &world.stored_entities[storage_index]
     }

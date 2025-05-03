@@ -116,10 +116,10 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     }
     assets.tag_ranges[.FacingDirection] = Tau
     
-    read_data_from_file_into_struct :: #force_inline proc(handle: ^PlatformFileHandle, #any_int position: u64, destination: ^$T) {
+    read_data_from_file_into_struct :: proc(handle: ^PlatformFileHandle, #any_int position: u64, destination: ^$T) {
         Platform.read_data_from_file(handle, position, size_of(T), destination)
     }
-    read_data_from_file_into_slice :: #force_inline proc(handle: ^PlatformFileHandle, #any_int position: u64, destination: $T/[]$E) {
+    read_data_from_file_into_slice :: proc(handle: ^PlatformFileHandle, #any_int position: u64, destination: $T/[]$E) {
         Platform.read_data_from_file(handle, position, len(destination) * size_of(E), raw_data(destination))
     }
     
@@ -233,7 +233,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
 
 ////////////////////////////////////////////////
 
-get_asset :: #force_inline proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) -> (result: ^AssetMemoryHeader) {
+get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) -> (result: ^AssetMemoryHeader) {
     if is_valid_asset(id) {
         asset := &assets.assets[id]
         
@@ -257,7 +257,7 @@ get_asset :: #force_inline proc(assets: ^Assets, id: u32, generation_id: AssetGe
 }
 
 // TODO(viktor): optional ok?
-get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
+get_bitmap :: proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.value.(Bitmap)
@@ -265,7 +265,7 @@ get_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, generation_id: A
     return result
 }
 
-get_sound :: #force_inline proc(assets: ^Assets, id: SoundId, generation_id: AssetGenerationId) -> (result: ^Sound) {
+get_sound :: proc(assets: ^Assets, id: SoundId, generation_id: AssetGenerationId) -> (result: ^Sound) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.value.(Sound)
@@ -273,7 +273,7 @@ get_sound :: #force_inline proc(assets: ^Assets, id: SoundId, generation_id: Ass
     return result
 }
 
-get_font :: #force_inline proc(assets: ^Assets, id: FontId, generation_id: AssetGenerationId) -> (result: ^Font) {
+get_font :: proc(assets: ^Assets, id: FontId, generation_id: AssetGenerationId) -> (result: ^Font) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.value.(Font)
@@ -284,7 +284,7 @@ get_font :: #force_inline proc(assets: ^Assets, id: FontId, generation_id: Asset
 ////////////////////////////////////////////////
 // Additional Information
 
-is_valid_asset :: #force_inline proc(id: $T/u32) -> (result: b32) {
+is_valid_asset :: proc(id: $T/u32) -> (result: b32) {
     result = id != 0
     return result
 }
@@ -310,7 +310,7 @@ get_font_info :: proc(assets: ^Assets, id: FontId) -> (result: ^FontInfo) {
     return result
 }
 
-get_next_sound_in_chain :: #force_inline proc(assets: ^Assets, id: SoundId) -> (result: SoundId) {
+get_next_sound_in_chain :: proc(assets: ^Assets, id: SoundId) -> (result: SoundId) {
     switch get_sound_info(assets, id).chain {
     case .None:    result = 0
     case .Advance: result = id + 1
@@ -360,15 +360,15 @@ get_glyph_from_codepoint :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) 
 ////////////////////////////////////////////////
 // Queries
 
-first_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: SoundId) {
+first_sound_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: SoundId) {
     result = cast(SoundId) first_asset_from(assets, id)
     return result
 }
-first_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
+first_bitmap_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
     result = cast(BitmapId) first_asset_from(assets, id)
     return result
 }
-first_font_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId) -> (result: FontId) {
+first_font_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: FontId) {
     result = cast(FontId) first_asset_from(assets, id)
     return result
 }
@@ -382,13 +382,13 @@ first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: u32) {
     return result
 }
 
-best_match_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> SoundId {
+best_match_sound_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> SoundId {
     return cast(SoundId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
-best_match_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> BitmapId {
+best_match_bitmap_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> BitmapId {
     return cast(BitmapId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
-best_match_font_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> FontId {
+best_match_font_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> FontId {
     return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
 best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
@@ -425,11 +425,11 @@ best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, we
     return result
 }
 
-random_sound_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: SoundId) {
+random_sound_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: SoundId) {
     result = cast(SoundId) random_asset_from(assets, id, series)
     return result
 }
-random_bitmap_from :: #force_inline proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
+random_bitmap_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
     result = cast(BitmapId) random_asset_from(assets, id, series)
     return result
 }
@@ -447,7 +447,7 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 ////////////////////////////////////////////////
 // Memory Management
 
-begin_generation :: #force_inline proc(assets: ^Assets) -> (result: AssetGenerationId) {
+begin_generation :: proc(assets: ^Assets) -> (result: AssetGenerationId) {
     timed_function()
     begin_asset_lock(assets)
     
@@ -461,7 +461,7 @@ begin_generation :: #force_inline proc(assets: ^Assets) -> (result: AssetGenerat
     return result
 }
 
-end_generation :: #force_inline proc(assets: ^Assets, generation: AssetGenerationId) {
+end_generation :: proc(assets: ^Assets, generation: AssetGenerationId) {
     for &in_flight in assets.in_flight_generations[:assets.in_flight_generation_count] {
         if in_flight == generation {
             assets.in_flight_generation_count -= 1
@@ -497,7 +497,7 @@ end_asset_lock :: proc(assets: ^Assets) {
     volatile_store(&assets.memory_operation_lock, 0)
 }
 
-acquire_asset_memory :: #force_inline proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
+acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
     timed_function()
     size := div.total + size_of(AssetMemoryHeader)
     begin_asset_lock(assets)
@@ -622,20 +622,20 @@ merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> 
 ////////////////////////////////
 // Loading
 
-prefetch_sound  :: #force_inline proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id)  }
-prefetch_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
-prefetch_font   :: #force_inline proc(assets: ^Assets, id: FontId)   { load_font(assets,   id, false) }
+prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id)  }
+prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
+prefetch_font   :: proc(assets: ^Assets, id: FontId)   { load_font(assets,   id, false) }
 
-load_sound  :: #force_inline proc(assets: ^Assets, id: SoundId)                  { load_asset(assets, .Sound,  cast(u32) id, false)}
-load_bitmap :: #force_inline proc(assets: ^Assets, id: BitmapId, immediate: b32) { load_asset(assets, .Bitmap, cast(u32) id, immediate)}
-load_font   :: #force_inline proc(assets: ^Assets, id: FontId,   immediate: b32) { load_asset(assets, .Font,   cast(u32) id, immediate)}
+load_sound  :: proc(assets: ^Assets, id: SoundId)                  { load_asset(assets, .Sound,  cast(u32) id, false)}
+load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) { load_asset(assets, .Bitmap, cast(u32) id, immediate)}
+load_font   :: proc(assets: ^Assets, id: FontId,   immediate: b32) { load_asset(assets, .Font,   cast(u32) id, immediate)}
 
-get_file :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^AssetFile) {
+get_file :: proc(assets: ^Assets, file_index: u32) -> (result: ^AssetFile) {
     result = &assets.files[file_index]
     return result
 }
 
-get_file_handle_for :: #force_inline proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
+get_file_handle_for :: proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
     result = &get_file(assets, file_index).handle
     return result
 }
@@ -692,7 +692,7 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: pmm) {
 AssetKind :: enum {Font, Bitmap, Sound}
 load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
     immediate := immediate 
-    immediate ||= debug_variable(b32, "Assets/LoadAssetsSingleThreaded")
+    immediate ||= Global_Assets_LoadAssetsSingleThreaded
     
     if is_valid_asset(id) {
         asset := &assets.assets[id]

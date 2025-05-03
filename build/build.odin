@@ -22,13 +22,13 @@ debug    :: " -debug "
 internal :: " -define:INTERNAL=true " // TODO(viktor): get rid of this
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 commoner :: " -custom-attribute:common "
-optimizations    := false ? " -o:speed " : " -o:none "
+optimizations    := !false ? " -o:speed " : " -o:none "
 
 PedanticGame     :: false
 PedanticPlatform :: false
 
-src_path :: `.`
-exe_path :: `.\build.exe`
+src_path :: `.\build\`   
+exe_path :: `.\build\build.exe`
 
 build_dir :: `.\build\`
 data_dir  :: `.\data`
@@ -115,11 +115,14 @@ go_rebuild_yourself :: proc() -> (os2.Error) {
     exe_time := os2.modification_time_by_path(exe_path) or_return
     
     needs_to_rebuild: b32
+    
     for file in src_dir {
         if file.type == .Regular {
-            if time.diff(exe_time, file.modification_time) > 0 {
-                needs_to_rebuild = true
-                break
+            if strings.ends_with(file.name, ".odin") {   
+                if time.diff(exe_time, file.modification_time) > 0 {
+                    needs_to_rebuild = true
+                    break
+                }
             }
         }
     }

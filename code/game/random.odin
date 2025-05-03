@@ -24,62 +24,62 @@ next_random_u32 :: proc(series: ^RandomSeries) -> (result: u32) {
     return result
 }
 
-random_bool :: #force_inline proc(series: ^RandomSeries) -> (result: b32) {
+random_bool :: proc(series: ^RandomSeries) -> (result: b32) {
     result = (next_random_u32(series) & 1) == 0
     return result
 }
 
 random_choice :: proc { random_choice_integer_0_max, random_choice_integer_min_max, random_choice_data }
-random_choice_integer_0_max :: #force_inline proc(series: ^RandomSeries, max: u32) -> (result: u32) {
+random_choice_integer_0_max :: proc(series: ^RandomSeries, max: u32) -> (result: u32) {
     result = next_random_u32(series) % max
     return result
 }
-random_choice_integer_min_max :: #force_inline proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
+random_choice_integer_min_max :: proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
     result = next_random_u32(series) % (max - min) + min
     return result
 }
-random_choice_data :: #force_inline proc(series: ^RandomSeries, data:[]$T) -> (result: ^T) {
+random_choice_data :: proc(series: ^RandomSeries, data:[]$T) -> (result: ^T) {
     result = &data[random_choice(series, auto_cast len(data))]
     return result
 }
 
-random_unilateral :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
+random_unilateral :: proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
     result = cast(T) (cast(f64)(next_random_u32(series) - MinRandomValue) / (MaxRandomValue - MinRandomValue)) 
     return result
 }
-random_unilateral_2 :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
+random_unilateral_2 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
     return {random_unilateral(series, T), random_unilateral(series, T)}
 }
-random_unilateral_3 :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: [3]T) {
+random_unilateral_3 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [3]T) {
     return {random_unilateral(series, T), random_unilateral(series, T), random_unilateral(series, T)}
 }
 
-random_bilateral :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
+random_bilateral :: proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
     result = random_unilateral(series, T) * 2 - 1
     
     return result
 }
-random_bilateral_2 :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
+random_bilateral_2 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
     return {random_bilateral(series, T), random_bilateral(series, T)}
 }
-random_bilateral_3 :: #force_inline proc(series: ^RandomSeries, $T: typeid) -> (result: [3]T) {
+random_bilateral_3 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [3]T) {
     return {random_bilateral(series, T), random_bilateral(series, T), random_bilateral(series, T)}
 }
 
-random_between_i32 :: #force_inline proc(series: ^RandomSeries, min, max: i32) -> (result: i32) {
+random_between_i32 :: proc(series: ^RandomSeries, min, max: i32) -> (result: i32) {
     assert(min < max)
     result = min + cast(i32)(next_random_u32(series) % cast(u32)((max+1)-min))
     
     return result
 }
-random_between_f32 :: #force_inline proc(series: ^RandomSeries, min, max: f32) -> (result: f32) {
+random_between_f32 :: proc(series: ^RandomSeries, min, max: f32) -> (result: f32) {
     assert(min < max)
     val := next_random_u32(series)
     result = min + mod(cast(f32)val, ((max+1)-min))
     
     return result
 }
-random_between_u32 :: #force_inline proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
+random_between_u32 :: proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
     assert(min < max)
     result = min + (next_random_u32(series) % ((max+1)-min))
     assert(result >= min)

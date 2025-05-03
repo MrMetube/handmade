@@ -49,6 +49,14 @@ GlobalPerformanceCounterFrequency: f64
 
 GlobalPause := false
 
+RenderType :: enum {
+    RenderOpenGL_DisplayOpenGL,
+    RenderSoftware_DisplayOpenGL,
+    RenderSoftware_DisplayGDI,
+}
+
+GlobalRenderType: RenderType
+
 GlobalDebugShowCursor: b32
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
@@ -154,20 +162,16 @@ main :: proc() {
     high_queue, low_queue: PlatformWorkQueue
     high_infos: [9]CreateThreadInfo
     low_infos:  [2]CreateThreadInfo
-    {
-        window_dc := win.GetDC(window)
-        
-        gl_context := init_opengl(window_dc)
-        
-        
-        for &info in low_infos {
-            info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &gl_attribs[0])
-            info.window_dc  = window_dc
-        }
-        
-        init_work_queue(&high_queue, high_infos[:])
-        init_work_queue(&low_queue,  low_infos[:])
+    window_dc := win.GetDC(window)
+    gl_context := init_opengl(window_dc)
+    
+    for &info in low_infos {
+        info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &gl_attribs[0])
+        info.window_dc  = window_dc
     }
+    
+    init_work_queue(&high_queue, high_infos[:])
+    init_work_queue(&low_queue,  low_infos[:])
 
     fmt.print("\033[2J") // Clear the terminal
 
@@ -311,9 +315,9 @@ main :: proc() {
         }
         
         // :PointerArithmetic
-        game_memory.permanent_storage = storage_ptr[0:][:PermanentStorageSize]
-        game_memory.transient_storage = storage_ptr[PermanentStorageSize:][:TransientStorageSize]
-        game_memory.debug_storage     = storage_ptr[TransientStorageSize:][:DebugStorageSize]
+        game_memory.permanent_storage = storage_ptr[0 :][: PermanentStorageSize]
+        game_memory.transient_storage = storage_ptr[PermanentStorageSize :][: TransientStorageSize]
+        game_memory.debug_storage     = storage_ptr[TransientStorageSize :][: DebugStorageSize]
         
         when INTERNAL {
             game_memory.Platform_api.debug = {
@@ -340,7 +344,13 @@ main :: proc() {
     //  Game Loop
     
     for GlobalRunning {
-
+        // debug_begin_data_block()
+        // debug_value("Platform/Paused",    GlobalPause)
+        // debug_value("Platform/Rendering", GlobalRenderViaHardware)
+        // debug_value("Platform/Rendering", GlobalDisplayViaSoftware)
+        // debug_end_data_block()
+        
+        
         ////////////////////////////////////////////////
         //  Hot Reload
         executable_refresh := game.begin_timed_block("executable refresh")
@@ -369,7 +379,7 @@ main :: proc() {
         {
             new_input.delta_time = target_seconds_per_frame
             
-            is_down :: #force_inline proc(vk: win.INT) -> b32 {
+            is_down :: proc(vk: win.INT) -> b32 {
                 is_down_mask :: min(i16) // 1 << 15
                 return cast(b32) (win.GetKeyState(vk)  & is_down_mask)
             }
@@ -891,10 +901,7 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
         }
     */
     
-    RenderViaHardware :: true
-    DisplayViaSoftware :: !true
-    
-    if RenderViaHardware {
+    if GlobalRenderType == .RenderOpenGL_DisplayOpenGL {
         gl_render_commands(commands, window_width, window_height)
         win.SwapBuffers(device_context)
     } else {
@@ -906,15 +913,15 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
         
         software_render_commands(render_queue, commands, offscreen_buffer)
         
-        when DisplayViaSoftware {
-            win_display_bitmap(&GlobalBackBuffer, device_context, window_width, window_height)
+        if GlobalRenderType == .RenderSoftware_DisplayGDI {
+            display_bitmap_gdi(&GlobalBackBuffer, device_context, window_width, window_height)
         } else {
-            gl_display_bitmap(window_width, window_height, offscreen_buffer, device_context)
+            display_bitmap_gl(window_width, window_height, offscreen_buffer, device_context)
         }
     }
 }
 
-win_display_bitmap :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {
+display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {
     #no_bounds_check if true {
         for y in 0..<buffer.height {
             row := buffer.memory[y * buffer.width:][:buffer.width]
@@ -947,7 +954,7 @@ win_display_bitmap :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, wi
     )
 }
 
-gl_display_bitmap :: #force_inline proc(width, height: i32, bitmap: Bitmap, device_context: win.HDC) {
+display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: win.HDC) {
     gl.Viewport(0, 0, width, height)
     
     gl_set_screenspace(width, height)
@@ -1146,13 +1153,13 @@ deallocate_memory : PlatformDeallocateMemory : proc(memory: pmm) {
 ////////////////////////////////////////////////
 // Performance Timers
 
-get_wall_clock :: #force_inline proc() -> i64 {
+get_wall_clock :: proc() -> i64 {
     result: win.LARGE_INTEGER
     win.QueryPerformanceCounter(&result)
     return cast(i64) result
 }
 
-get_seconds_elapsed :: #force_inline proc(start, end: i64) -> f32 {
+get_seconds_elapsed :: proc(start, end: i64) -> f32 {
     return cast(f32) (cast(f64) (end - start) / GlobalPerformanceCounterFrequency)
 }
 
@@ -1291,7 +1298,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 ////////////////////////////////////////////////   
 //  Window Drawing
 
-get_window_dimension :: #force_inline proc "system" (window: win.HWND) -> (width, height: i32) {
+get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
     client_rect: win.RECT
     win.GetClientRect(window, &client_rect)
     width  = client_rect.right  - client_rect.left
@@ -1401,7 +1408,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     return result
 }
         
-process_win_keyboard_message :: #force_inline proc(new_state: ^InputButton, is_down: b32) {
+process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
     if is_down != new_state.ended_down {
         new_state.ended_down = is_down
         new_state.half_transition_count += 1
@@ -1465,6 +1472,6 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
     }
 }
 
-build_exe_path :: #force_inline proc(state: PlatformState, filename: string) -> win.wstring {
+build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
     return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
 }

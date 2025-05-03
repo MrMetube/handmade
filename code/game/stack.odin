@@ -7,21 +7,21 @@ Stack :: struct($Array: typeid) where intrinsics.type_is_array(Array) {
     data:  Array,
 }
 
-stack_push :: #force_inline proc(using stack: ^Stack($A/[$N]$T), element: T) -> (result: ^T) {
+stack_push :: proc(using stack: ^Stack($A/[$N]$T), element: T) -> (result: ^T) {
     result  = &data[depth]
     result^ = element
     depth += 1
     return result
 }
 
-stack_peek :: #force_inline proc(using stack: ^Stack($A/[$N]$T)) -> (result: ^T) {
+stack_peek :: proc(using stack: ^Stack($A/[$N]$T)) -> (result: ^T) {
     if depth > 0 {
         result = &data[depth-1]
     }
     return result
 }
 
-stack_pop :: #force_inline proc(using stack: ^Stack($A/[$N]$T)) -> (result: ^T) {
+stack_pop :: proc(using stack: ^Stack($A/[$N]$T)) -> (result: ^T) {
     depth -= 1
     result = &data[depth]
     return result
