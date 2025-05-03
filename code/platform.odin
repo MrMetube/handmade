@@ -161,7 +161,7 @@ main :: proc() {
     
     high_queue, low_queue: PlatformWorkQueue
     high_infos: [9]CreateThreadInfo
-    low_infos:  [2]CreateThreadInfo
+    low_infos:  [1]CreateThreadInfo
     window_dc := win.GetDC(window)
     gl_context := init_opengl(window_dc)
     
@@ -650,7 +650,7 @@ main :: proc() {
             device_context := win.GetDC(window)
             
             needed_sort_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(TileSortEntry) )
-            if needed_sort_memory_size < current_sort_memory_size {
+            if needed_sort_memory_size > current_sort_memory_size {
                 deallocate_memory(sort_memory)
                 current_sort_memory_size = needed_sort_memory_size
                 sort_memory = allocate_memory(needed_sort_memory_size)

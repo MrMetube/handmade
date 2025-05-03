@@ -378,11 +378,13 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
 
         debug.work_queue = work_queue
         
-        add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
+        debug_tree := add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
         
         debug.left_edge  = -0.5 * cast(f32) render_commands.width
         debug.right_edge =  0.5 * cast(f32) render_commands.width
         debug.top_edge   =  0.5 * cast(f32) render_commands.height   
+        
+        debug_tree.p = { debug.left_edge + 50, debug.top_edge - 50 }
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
@@ -811,7 +813,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     draw_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
-    if (true || Global_ShowFramerate) && debug.frames.first != nil {
+    if Global_ShowFramerate && debug.frames.first != nil {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames.first.seconds_elapsed*1000))
         debug_push_text_line(debug, fmt.tprintf("Last Frame memory footprint: %m/%m", debug.per_frame_arena.used, len(debug.per_frame_arena.storage)))
     }
@@ -1241,9 +1243,10 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
 draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugElement, id: DebugId, input: Input) {
     oldest := element.events.last
     if oldest != nil {
+        view := get_debug_view_for_variable(debug, id)
+
         #partial switch value in oldest.event.value {
           case Profile:
-            view := get_debug_view_for_variable(debug, id)
             
             block, ok := &view.kind.(DebugViewBlock)
             if !ok {
@@ -1266,6 +1269,7 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
             debug_draw_profile(debug, input, mouse_p, element.bounds)
             
           case BeginDataBlock:
+            
             least_recently_opened_block := element.events.last
             for event := least_recently_opened_block; event != nil; event = event.next {
                 if _, ok := event.event.value.(BeginDataBlock); ok {
@@ -1273,10 +1277,44 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
                 }
             }
             
-            for event := least_recently_opened_block; event != nil; event = event.next {
-                event_id := debug_id_from_guid(tree, raw_data(event.event.loc.name))
-                draw_event(layout, event_id, event)
+            event := &least_recently_opened_block.event
+            
+            last_slash: u32
+            #reverse for r, index in event.loc.name {
+                if r == '/' {
+                    last_slash = auto_cast index
+                    break
+                }
             }
+            text := fmt.tprintf("%s %v", last_slash != 0 ? event.loc.name[last_slash+1:] : event.loc.name, value)
+            
+            text_bounds := debug_measure_text(debug, text)
+            
+            size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+            
+            element := begin_ui_element_rectangle(layout, &size)
+            
+            toggle := DebugInteraction{
+                kind = .ToggleExpansion,
+                id = id, 
+            }
+            set_ui_element_default_interaction(&element, toggle)
+            is_hot := interaction_is_hot(debug, toggle)
+            color := is_hot ? Blue : White
+            
+            set_ui_element_default_interaction(&element, toggle)
+            end_ui_element(&element, false)
+            
+            debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
+            
+            collapsible, ok := view.kind.(DebugViewCollapsible)
+            if ok && collapsible.expanded_always {
+                for event := least_recently_opened_block; event != nil; event = event.next {
+                    event_id := debug_id_from_guid(tree, raw_data(event.event.loc.name))
+                    draw_event(layout, event_id, event)
+                }
+            }
+          
           case: 
             assert(value != nil)
             
@@ -1308,7 +1346,6 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             
           case SoundId, FontId, 
             BeginCodeBlock, EndCodeBlock,
-            BeginDataBlock, EndDataBlock,
             FrameMarker, MarkEvent:
             // NOTE(viktor): nothing
             
@@ -1334,8 +1371,14 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                 push_rectangle(&debug.render_group, element.bounds, default_flat_transform(), DarkBlue )
                 push_bitmap(&debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false)
             }
+        
+          case BeginDataBlock:
+            layout.depth += 1
             
-        case DebugEventLink, DebugEventGroup,
+          case EndDataBlock:
+            layout.depth -= 1
+            
+          case DebugEventLink, DebugEventGroup,
             b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
             if _, ok := &event.value.(DebugEventGroup); ok {
                 collapsible, okc := &view.kind.(DebugViewCollapsible)

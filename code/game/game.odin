@@ -89,7 +89,7 @@ INTERNAL :: #config(INTERNAL, false)
 ////////////////////////////////////////////////
 // TODO(viktor): Find a better place for these configurations
 
-Global_ShowFramerate: b32
+Global_ShowFramerate: b32 = true
 Global_Assets_LoadAssetsSingleThreaded: b32
 Global_Audio_SoundPanningWithMouse: b32
 Global_Audio_SoundPitchingWithMouse: b32
@@ -272,8 +272,6 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     Platform = memory.Platform_api
     
-    debug_variable(f32, "test") // nocheckin the collation has a bug when there are no debug events, besides the framemarker
-    
     when DebugEnabled {
         if memory.debug_storage == nil do return
         assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
@@ -338,6 +336,24 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         
         tran_state.is_initialized = true
     }
+    
+    debug_begin_data_block(debug_pointer_id(state), "Globals")
+    debug_record_value(Global_ShowFramerate)
+    debug_record_value(Global_Assets_LoadAssetsSingleThreaded)
+    debug_record_value(Global_Audio_SoundPanningWithMouse)
+    debug_record_value(Global_Audio_SoundPitchingWithMouse)
+    debug_record_value(Global_Entity_HeroJumping)
+    debug_record_value(Global_Entity_FamiliarFollowsHero)
+    debug_record_value(Global_Particles_FountainTest)
+    debug_record_value(Global_Particles_ShowGrid)
+    debug_record_value(Global_Rendering_Environtment_Test)
+    debug_record_value(Global_Rendering_RenderSingleThreaded)
+    debug_record_value(Global_Rendering_ShowSpaceBounds)
+    debug_record_value(Global_Rendering_Camera_UseDebugCamera)
+    debug_record_value(Global_Rendering_Camera_DebugCameraDistance)
+    debug_record_value(Global_Rendering_Bounds_ShowGroundChunkBounds)
+    debug_record_value(Global_Rendering_Bounds_ShowRenderAndSimulationBounds)
+    debug_end_data_block()
     
     if memory.reloaded_executable {
         for &ground_buffer in tran_state.ground_buffers {

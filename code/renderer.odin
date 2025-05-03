@@ -810,7 +810,7 @@ is_sorted :: proc(entries: []TileSortEntry) {
     }
 }
 
-radix_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) #no_bounds_check {
+radix_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) {
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
         sort_key_offsets: [256]u32
@@ -835,7 +835,8 @@ radix_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) #no_bo
             radix_value := sort_key_to_u32(entry.sort_key)
             radix_byte := (radix_value >> (byte_index * 8)) & 0xFF
             
-            dest[sort_key_offsets[radix_byte]] = entry
+            index := sort_key_offsets[radix_byte]
+            dest[index] = entry
             sort_key_offsets[radix_byte] += 1
         }
         
@@ -858,7 +859,7 @@ sort_key_to_u32 :: proc(sort_key: f32) -> (result: u32) {
 }
 
 
-merge_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) #no_bounds_check {
+merge_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) {
     entries := entries
     count := len(entries)
     
