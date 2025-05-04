@@ -32,8 +32,8 @@ Resolution :: [2]i32 {1920, 1080}
 
 MonitorRefreshHz: u32 : 60
 
-HighPriorityThreads :: 10
-LowPriorityThreads  :: 2
+HighPriorityThreads :: 2
+LowPriorityThreads  :: 10
 
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
@@ -370,7 +370,6 @@ main :: proc() {
             
             game_memory.reloaded_executable = true
         }
-        
         
         game.end_timed_block(executable_refresh)
         ////////////////////////////////////////////////   

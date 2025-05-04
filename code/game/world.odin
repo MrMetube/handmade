@@ -557,10 +557,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 push_hitpoints(render_group, &entity, 1.6, transform)
             
               case .Wall:
-                // @Speed maybe just dont do this
-                rock_series := seed_random_series(entity.storage_index)
-                rock_id := random_bitmap_from(tran_state.assets, AssetTypeId.Rock, &rock_series)
-                // rock_id := first_bitmap_from(tran_state.assets, AssetTypeId.Rock)
+                rock_id := first_bitmap_from(tran_state.assets, AssetTypeId.Rock)
                 
                 push_bitmap(render_group, rock_id, transform, 1.5)
     

@@ -45,7 +45,7 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
         // A further call for the low_priority_queue then is able to create 4 more threads.
         //     result := win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
         
-        thread.create_and_start_with_data(&info, thread_proc)
+        thread.create_and_start_with_data(&info, worker_thread)
     }
 }
 
@@ -80,9 +80,9 @@ complete_all_work : PlatformCompleteAllWork : proc(queue: ^PlatformWorkQueue) {
 
 do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b32) {
     old_next_entry := queue.next_entry_to_read
-    new_next_entry := (old_next_entry + 1) % len(queue.entries)
     
     if old_next_entry != queue.next_entry_to_write {
+        new_next_entry := (old_next_entry + 1) % len(queue.entries)
         index, ok := intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_read, old_next_entry, new_next_entry)
     
         if ok {
@@ -100,7 +100,7 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
     return should_sleep
 }
 
-thread_proc :: proc (parameter: pmm) {
+worker_thread :: proc (parameter: pmm) {
     context = runtime.default_context()
     
     info := cast(^CreateThreadInfo) parameter
@@ -108,9 +108,6 @@ thread_proc :: proc (parameter: pmm) {
     context.user_index = cast(int) info.index
     
     if info.gl_context != nil {
-        // TODO(viktor): @RaceCondition @Bug
-        // if we are too fast for some reason this can fail
-        win.Sleep(3000)
         ok := win.wglMakeCurrent(info.window_dc, info.gl_context)
         assert(ok)
     }

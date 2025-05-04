@@ -89,20 +89,20 @@ INTERNAL :: #config(INTERNAL, false)
 ////////////////////////////////////////////////
 // TODO(viktor): Find a better place for these configurations
 
-ShowFramerate: b32 = true
-LoadAssetsSingleThreaded: b32
-SoundPanningWithMouse: b32
-SoundPitchingWithMouse: b32
-HeroJumping: b32
-FamiliarFollowsHero: b32
-FountainTest: b32
-ShowGrid: b32
-EnvironmentTest: b32
-RenderSingleThreaded: b32
-ShowSpaceBounds: b32
-UseDebugCamera: b32
-DebugCameraDistance: f32 = 25
-ShowGroundChunkBounds: b32
+ShowFramerate:                 b32 = true
+LoadAssetsSingleThreaded:      b32
+SoundPanningWithMouse:         b32
+SoundPitchingWithMouse:        b32
+HeroJumping:                   b32
+FamiliarFollowsHero:           b32
+FountainTest:                  b32
+ShowGrid:                      b32
+EnvironmentTest:               b32
+RenderSingleThreaded:          b32
+ShowSpaceBounds:               b32
+UseDebugCamera:                b32
+DebugCameraDistance:           f32 = 25
+ShowGroundChunkBounds:         b32
 ShowRenderAndSimulationBounds: b32
 
 ////////////////////////////////////////////////
@@ -308,8 +308,8 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             task.in_use = false
             sub_arena(&task.arena, &tran_state.arena, 16 * Megabyte)
         }
-
-        tran_state.assets = make_assets(&tran_state.arena, 64 * Megabyte, tran_state)
+        
+        tran_state.assets = make_assets(&tran_state.arena, 512 * Megabyte, tran_state)
         
         state.mixer.master_volume = 0.1
         
@@ -358,25 +358,26 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             debug_record_value(FountainTest)
             debug_record_value(ShowGrid)
         }
-        
-        { debug_data_block("Renderer")
-            debug_record_value(EnvironmentTest)
-            debug_record_value(RenderSingleThreaded)
-            debug_record_value(ShowSpaceBounds)
-            { debug_data_block("Renderer/Camera")
-                debug_record_value(UseDebugCamera)
-                debug_record_value(DebugCameraDistance)
-            }
-            { debug_data_block("Renderer/Bounds")
-                debug_record_value(ShowGroundChunkBounds)
-                debug_record_value(ShowRenderAndSimulationBounds)
-            }
-        }
-        
+
         { debug_data_block("Game/Profile")
             debug_profile(update_and_render)
         }
     }
+    
+    { debug_data_block("Renderer")
+        debug_record_value(EnvironmentTest)
+        debug_record_value(RenderSingleThreaded)
+        debug_record_value(ShowSpaceBounds)
+        { debug_data_block("Renderer/Camera")
+            debug_record_value(UseDebugCamera)
+            debug_record_value(DebugCameraDistance)
+        }
+        { debug_data_block("Renderer/Bounds")
+            debug_record_value(ShowGroundChunkBounds)
+            debug_record_value(ShowRenderAndSimulationBounds)
+        }
+    }
+
     
     if memory.reloaded_executable {
         for &ground_buffer in tran_state.ground_buffers {

@@ -119,7 +119,7 @@ DebugThreadLink :: struct {
 DebugOpenBlock :: struct {
     frame_index:   u32,
     opening_event: ^DebugEvent,
-    group:         ^DebugEvent,
+    group:         ^DebugEventGroup,
     element:       ^DebugElement,
     
     using next : struct #raw_union {
@@ -372,7 +372,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.right_edge =  0.5 * cast(f32) render_commands.width
         debug.top_edge   =  0.5 * cast(f32) render_commands.height   
         
-        debug_tree.p = { debug.left_edge + 50, debug.top_edge - 50 }
+        debug_tree.p = { debug.left_edge + 200, debug.top_edge - 50 }
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
@@ -397,135 +397,6 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
 debug_get_state :: proc() -> (result: ^DebugState) {
     result = cast(^DebugState) raw_data(GlobalDebugMemory.debug_storage)
     return result
-}
-
-// TODO(viktor): @Cleanup
-debug_dump_var :: proc(debug: ^DebugState, a: any) {
-    prefix : string
-    for _ in 0..<debug.dump_depth {
-        prefix = fmt.tprint(prefix, "    ", sep="")
-    }
-    
-    data, type := a.data, a.id
-    info := type_info_of(type)
-    
-    if reflect.is_struct(info) || reflect.is_raw_union(info) {
-        for field in reflect.struct_fields_zipped(type) {
-            field := field
-            field_buffer := fmt.tprint(prefix, field.name, " =", sep="")
-            base_len := len(field_buffer)
-            manually: b32
-            
-            member_pointer :pmm= &(cast([^]u8) data)[field.offset]
-            switch reflect.type_info_base(field.type) {
-              case type_info_of(string):
-                value := cast(^string) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(u8):
-                value := cast(^u8) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(u16):
-                value := cast(^u16) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(u32):
-                value := cast(^u32) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(u64):
-                value := cast(^u32) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(i32):
-                value := cast(^i32) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(i64):
-                value := cast(^i64) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(f32):
-                value := cast(^f32) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(b32):
-                value := cast(^b32) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(v2):
-                value := cast(^v2) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(v3):
-                value := cast(^v3) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case type_info_of(v4):
-                value := cast(^v4) member_pointer
-                field_buffer = fmt.tprint(field_buffer, value^)
-              case:
-                if reflect.is_enum(field.type) {
-                    names := reflect.enum_field_names(field.type.id)
-                    value := (cast(^u64) member_pointer)^
-                    if value < auto_cast len(names) {
-                        field_buffer = fmt.tprint(field_buffer, names[value])
-                    }
-                } else if reflect.is_bit_set(field.type) {
-                    // TODO(viktor):    
-                } else if reflect.is_pointer(field.type) {
-                    field_buffer = fmt.tprint(field_buffer, member_pointer)
-                    bogus := cast(^^u8) member_pointer
-                    
-                    if bogus^ != nil {
-                        // @Copypasta from below
-                        debug.dump_depth += 1
-                        defer debug.dump_depth -= 1
-                        
-                        
-                        debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
-                        raw_any :: struct{data:pmm, type:typeid}
-                        debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
-                        manually = true
-                    }
-                } else {
-                    debug.dump_depth += 1
-                    defer debug.dump_depth -= 1
-                    
-                    if struct_named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
-                        debug_push_text_line(debug, fmt.tprint(prefix, field.name, " :", struct_named.name, sep=""))
-                    } else {
-                        debug_push_text_line(debug, fmt.tprint(prefix, field.name, ":", sep=""))
-                    }
-                    
-                    raw_any :: struct{data:pmm, type:typeid}
-                    debug_dump_var(debug, transmute(any) raw_any{member_pointer, field.type.id})
-                    manually = true
-                }
-            }
-            
-            if len(field_buffer) != base_len {
-                debug_push_text_line(debug, field_buffer)
-            } else if !manually {
-                if named, ok := field.type.variant.(reflect.Type_Info_Named); ok {
-                    debug_push_text_line(debug, fmt.tprint("Unhandled: ", prefix, field.name, " = ", named.name, sep=""))
-                } else {
-                    debug_push_text_line(debug, fmt.tprint("Unhandled: ", prefix, field.name, sep=""))
-                }
-            }
-        }
-    } else if reflect.is_array(info) || reflect.is_slice(info) {
-        debug.dump_depth += 1
-        defer debug.dump_depth -= 1
-        
-        too_many: b32
-        it: int
-        for e in reflect.iterate_array(a, &it) {
-            debug_dump_var(debug, e)
-            if it > 3 {
-                too_many = true
-                break
-            }
-        }
-        if too_many {
-            debug_push_text_line(debug, fmt.tprint(prefix, "...", sep=""))
-        }
-    } else {
-        // TODO(viktor): bitfield
-        if named, ok := info.variant.(reflect.Type_Info_Named); ok {
-            debug_push_text_line(debug, fmt.tprint(prefix,"Unhandled: ", named.name, sep=""))
-        }
-    }
 }
 
 ////////////////////////////////////////////////
@@ -600,15 +471,18 @@ free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
     list_push(&debug.first_free_frame, frame)
 }
 
-get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result: ^DebugElement) {
+get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil) -> (result: ^DebugElement) {
     timed_function()
     assert(event.guid != {})
     
+    parent := parent
+    if parent == nil do parent = debug.root_group
+    
     // TODO(viktor): BETTER HASH FUNCTION
     hash_value: u32
-    for b in event.guid.name do hash_value = hash_value * 65599 + cast(u32) b
-    for b in event.guid.file_path do hash_value = hash_value * 65599 + cast(u32) b
-    for b in event.guid.procedure do hash_value = hash_value * 65599 + cast(u32) b
+    for i in 0..<len(event.guid.name)      do hash_value = hash_value * 65599 + cast(u32) event.guid.name[i]
+    for i in 0..<len(event.guid.file_path) do hash_value = hash_value * 65599 + cast(u32) event.guid.file_path[i]
+    for i in 0..<len(event.guid.procedure) do hash_value = hash_value * 65599 + cast(u32) event.guid.procedure[i]
     assert(hash_value != 0)
     
     index := hash_value % len(debug.element_hash)
@@ -616,11 +490,11 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
     for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
         guids_are_equal := true
         
-        if chain.guid.line      != event.guid.line      do guids_are_equal = false
-        if chain.guid.column    != event.guid.column    do guids_are_equal = false
-        if chain.guid.name      != event.guid.name      do guids_are_equal = false
-        if chain.guid.file_path != event.guid.file_path do guids_are_equal = false
-        if chain.guid.procedure != event.guid.procedure do guids_are_equal = false
+        if guids_are_equal && chain.guid.line      != event.guid.line      do guids_are_equal = false
+        if guids_are_equal && chain.guid.column    != event.guid.column    do guids_are_equal = false
+        if guids_are_equal && chain.guid.name      != event.guid.name      do guids_are_equal = false
+        if guids_are_equal && chain.guid.file_path != event.guid.file_path do guids_are_equal = false
+        if guids_are_equal && chain.guid.procedure != event.guid.procedure do guids_are_equal = false
         
         if guids_are_equal {
             result = chain
@@ -639,8 +513,8 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
         }
         list_push(&debug.element_hash[index], result)
         
-        parent := get_group_by_hierarchical_name(debug, debug.root_group, event.guid.name)
-        add_element_to_group(debug, parent, result)
+        parent_group := get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
+        add_element_to_group(debug, parent_group, result)
     }
     
     return result
@@ -668,6 +542,10 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         assert(thread.thread_index == event.thread_index)
         
         frame_index := debug.collation_frame.frame_index
+        default_parent_group := debug.root_group
+        if thread.first_open_data_block != nil {
+            default_parent_group = thread.first_open_data_block.group
+        }
         
         switch value in event.value {
           case FrameMarker:
@@ -684,9 +562,9 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             assert(debug.collation_frame != nil)
             
           case BeginDataBlock:
-            element := get_element_from_event(debug, event)
-            alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, element)
-            store_event(debug, event, element) 
+            group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
+            block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, nil)
+            block.group = group
             
           case Profile, DebugEventLink, DebugEventGroup,
             BitmapId, SoundId, FontId, 
@@ -694,23 +572,18 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             v2, v3, v4, 
             Rectangle2, Rectangle3:
             
-            parent_element := get_element_from_event(debug, event)
-            if thread.first_open_data_block != nil {
-                parent_element = thread.first_open_data_block.element
-            }
-            store_event(debug, event, parent_element) 
+            element := get_element_from_event(debug, event, default_parent_group)
+            store_event(debug, event, element)
             
           case EndDataBlock:
-            element := get_element_from_event(debug, event)
             matching_block := thread.first_open_data_block
             if matching_block != nil {
                 free_open_block(thread, &thread.first_open_data_block)
             }
-            store_event(debug, event, element) 
-               
+            
           case BeginTimedBlock:
-            element := get_element_from_event(debug, event)
-            // nocheckin this blows up our arena alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
+            // element := get_element_from_event(debug, event)
+            // nocheckin this blows up our arena for some reason alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
 
           case EndTimedBlock:
             matching_block := thread.first_open_code_block
@@ -1226,57 +1099,8 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
 
         #partial switch value in oldest.event.value {
           case Profile:
-            unreachable()
+            // Nothing
             
-          case BeginDataBlock:
-            
-            least_recently_opened_block := element.events.last
-            for event := least_recently_opened_block; event != nil; event = event.next {
-                if _, ok := event.event.value.(BeginDataBlock); ok {
-                    least_recently_opened_block = event
-                }
-            }
-            
-            event := &least_recently_opened_block.event
-            
-            last_slash: u32
-            #reverse for r, index in event.guid.name {
-                if r == '/' {
-                    last_slash = auto_cast index
-                    break
-                }
-            }
-            text := fmt.tprintf("%s", last_slash != 0 ? event.guid.name[last_slash+1:] : event.guid.name)
-            
-            text_bounds := debug_measure_text(debug, text)
-            
-            size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
-            
-            element := begin_ui_element_rectangle(layout, &size)
-            
-            toggle := DebugInteraction{
-                kind = .ToggleExpansion,
-                id = id, 
-            }
-            set_ui_element_default_interaction(&element, toggle)
-            is_hot := interaction_is_hot(debug, toggle)
-            color := is_hot ? Blue : White
-            
-            set_ui_element_default_interaction(&element, toggle)
-            end_ui_element(&element, false)
-            
-            debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
-            
-            collapsible, ok := view.kind.(DebugViewCollapsible)
-            if ok && collapsible.expanded_always {
-                layout.depth += 1
-                defer layout.depth -= 1
-                for event := least_recently_opened_block; event != nil; event = event.next {
-                    event_id := debug_id_from_guid(tree, raw_data(event.event.guid.name))
-                    draw_event(layout, event_id, event)
-                }
-            }
-          
           case: 
             assert(value != nil)
             
@@ -1325,6 +1149,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             
           case SoundId, FontId, 
             BeginTimedBlock, EndTimedBlock,
+            BeginDataBlock, EndDataBlock,
             FrameMarker:
             // NOTE(viktor): nothing
             
@@ -1351,9 +1176,6 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                 push_bitmap(&debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false, sort_bias = 10_000)
             }
         
-          case BeginDataBlock:
-          case EndDataBlock:
-            
           case DebugEventLink, DebugEventGroup,
             b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
             if _, ok := &event.value.(DebugEventGroup); ok {
@@ -1395,7 +1217,7 @@ interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) ->
 
 ////////////////////////////////////////////////
 
-get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: string) -> (result: ^DebugEventGroup) {
+get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: string, create_terminal: b32) -> (result: ^DebugEventGroup) {
     assert(parent != nil)
     result = parent
     
@@ -1407,10 +1229,13 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGr
         }
     }
     
-    if first_slash != -1 {
-        left, right := name[:first_slash], name[first_slash+1:]
-        group := get_or_create_group_with_name(debug, parent, left)
-        result = get_group_by_hierarchical_name(debug, group, right)
+    if first_slash != -1 || create_terminal {
+        left := first_slash != -1 ? name[:first_slash] : name
+        result = get_or_create_group_with_name(debug, parent, left)
+        if first_slash != -1 {
+            right := name[first_slash+1:]
+            result = get_group_by_hierarchical_name(debug, result, right, create_terminal)
+        }
     }
     
     
