@@ -596,21 +596,21 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         }
                     }
                     
-                    if debug_begin_data_block(debug_id, "Entity/HotEntity/") {
+                    // TODO(viktor): Fix this with if for selected and such.
+                    when false { debug_data_block(debug_id, "Entity/HotEntity/")
                         debug_record_value(cast(u32) entity.storage_index, name = "storage_index")
                         debug_record_value(entity.updatable)
                         debug_record_value(entity.p)
                         debug_record_value(entity.dp)
                         debug_record_value(first_bitmap_from(tran_state.assets, .Body))
                         debug_record_value(entity.distance_limit)
-                        debug_end_data_block()
                     }
                 }
             }
         }
     }
     
-    when false do if Global_Rendering_Environtment_Test { 
+    when false do if Global_Rendering_EnvironmentTest { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}

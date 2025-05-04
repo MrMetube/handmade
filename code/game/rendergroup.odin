@@ -280,7 +280,7 @@ get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, transform: Tran
     return result
 }
 
-push_bitmap_raw :: #force_inline proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, sort_bias: f32 = 0) {
+push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, sort_bias: f32 = 0) {
     assert(bitmap.width_over_height != 0)
     
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment)

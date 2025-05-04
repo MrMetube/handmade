@@ -9,10 +9,10 @@ game: GameApi = stubbed
 
 @(private="file")
 stubbed := GameApi {
-    debug_frame_end   = proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {},
-    frame_marker      = proc(seconds_elapsed: f32, loc := #caller_location) {},
-    begin_timed_block = proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock)  { return result },
-    end_timed_block   = proc(block: TimedBlock) {},
+    _debug_frame_end   = proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {},
+    _frame_marker      = proc(seconds_elapsed: f32, loc := #caller_location) {},
+    _begin_timed_block = proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock)  { return result },
+    _end_timed_block   = proc(block: TimedBlock) {},
 }
 
 @(private="file")

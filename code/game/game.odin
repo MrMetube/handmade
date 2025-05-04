@@ -97,7 +97,7 @@ Global_Entity_HeroJumping: b32
 Global_Entity_FamiliarFollowsHero: b32
 Global_Particles_FountainTest: b32
 Global_Particles_ShowGrid: b32
-Global_Rendering_Environtment_Test: b32
+Global_Rendering_EnvironmentTest: b32
 Global_Rendering_RenderSingleThreaded: b32
 Global_Rendering_ShowSpaceBounds: b32
 Global_Rendering_Camera_UseDebugCamera: b32
@@ -270,6 +270,8 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
 
 @export
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
+    timed_function()
+    
     Platform = memory.Platform_api
     
     when DebugEnabled {
@@ -337,23 +339,42 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         tran_state.is_initialized = true
     }
     
-    debug_begin_data_block(debug_pointer_id(state), "Globals")
-    debug_record_value(Global_ShowFramerate)
-    debug_record_value(Global_Assets_LoadAssetsSingleThreaded)
-    debug_record_value(Global_Audio_SoundPanningWithMouse)
-    debug_record_value(Global_Audio_SoundPitchingWithMouse)
-    debug_record_value(Global_Entity_HeroJumping)
-    debug_record_value(Global_Entity_FamiliarFollowsHero)
-    debug_record_value(Global_Particles_FountainTest)
-    debug_record_value(Global_Particles_ShowGrid)
-    debug_record_value(Global_Rendering_Environtment_Test)
-    debug_record_value(Global_Rendering_RenderSingleThreaded)
-    debug_record_value(Global_Rendering_ShowSpaceBounds)
-    debug_record_value(Global_Rendering_Camera_UseDebugCamera)
-    debug_record_value(Global_Rendering_Camera_DebugCameraDistance)
-    debug_record_value(Global_Rendering_Bounds_ShowGroundChunkBounds)
-    debug_record_value(Global_Rendering_Bounds_ShowRenderAndSimulationBounds)
-    debug_end_data_block()
+    { debug_data_block("Game")
+        debug_record_value(Global_ShowFramerate)
+        { debug_data_block("Game/Assets")
+            debug_record_value(Global_Assets_LoadAssetsSingleThreaded)
+        }
+        { debug_data_block("Game/Audio")
+            debug_record_value(Global_Audio_SoundPanningWithMouse)
+            debug_record_value(Global_Audio_SoundPitchingWithMouse)
+        }
+        { debug_data_block("Game/Entity")
+            debug_record_value(Global_Entity_HeroJumping)
+            debug_record_value(Global_Entity_FamiliarFollowsHero)
+        }
+        { debug_data_block("Game/Particles")
+            debug_record_value(Global_Particles_FountainTest)
+            debug_record_value(Global_Particles_ShowGrid)
+        }
+        
+        { debug_data_block("Renderer")
+            debug_record_value(Global_Rendering_EnvironmentTest)
+            debug_record_value(Global_Rendering_RenderSingleThreaded)
+            debug_record_value(Global_Rendering_ShowSpaceBounds)
+            { debug_data_block("Renderer/Camera")
+                debug_record_value(Global_Rendering_Camera_UseDebugCamera)
+                debug_record_value(Global_Rendering_Camera_DebugCameraDistance)
+            }
+            { debug_data_block("Renderer/Bounds")
+                debug_record_value(Global_Rendering_Bounds_ShowGroundChunkBounds)
+                debug_record_value(Global_Rendering_Bounds_ShowRenderAndSimulationBounds)
+            }
+        }
+        
+        { debug_data_block("Game/Profile")
+            debug_profile(update_and_render)
+        }
+    }
     
     if memory.reloaded_executable {
         for &ground_buffer in tran_state.ground_buffers {

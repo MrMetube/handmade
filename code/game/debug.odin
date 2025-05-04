@@ -153,8 +153,7 @@ DebugEventsState :: bit_field u64 {
 
 // TODO(viktor): compact this, we have a lot of them
 DebugEvent :: struct {
-    // TODO(viktor): find a better id value
-    loc: DebugEventLocation,
+    guid: string,
     
     clock:        i64,
     thread_index: u16,
@@ -164,11 +163,9 @@ DebugEvent :: struct {
 }
 
 DebugValue :: union {
-    MarkEvent,
-    
     FrameMarker,
-    
     BeginCodeBlock, EndCodeBlock,
+    
     BeginDataBlock, EndDataBlock,
     
     b32, i32, u32, f32,
@@ -182,8 +179,6 @@ DebugValue :: union {
     DebugEventLink,
     DebugEventGroup,
 }
-
-MarkEvent :: struct { event: ^DebugEvent }
 
 FrameMarker :: struct {
     seconds_elapsed: f32,
@@ -680,15 +675,10 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             debug.collation_frame = new_frame(debug, event.clock)
             assert(debug.collation_frame != nil)
             
-          case MarkEvent:
-            element := get_element_from_event(debug, event)
-            store_event(debug, value.event^, element)
-         
           case BeginDataBlock:
             element := get_element_from_event(debug, event)
             alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, element)
             store_event(debug, event, element) 
-            
             
           case Profile, DebugEventLink, DebugEventGroup,
             BitmapId, SoundId, FontId, 
@@ -820,7 +810,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 }
 
 // @Cleanup
-debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect: Rectangle2) {
+debug_draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2) {
     push_rectangle(&debug.render_group, rect, default_flat_transform(), DarkBlue )
     
     target_fps :: 72
@@ -878,19 +868,6 @@ debug_draw_profile :: proc (debug: ^DebugState, input: Input, mouse_p: v2, rect:
             }
         }
     }
-    
-    if was_pressed(input.mouse.left) { 
-        // TODO(viktor): This probably wont update the view properly
-        when false {
-            if hot_region != nil {
-                debug.scope_to_record = hot_region.event.loc.name
-                // @Cleanup clicking regions and variables at the same time should be handled better
-                debug.hot_interaction.kind = .NOP
-            } else {
-                debug.scope_to_record = ""
-            }
-        }
-    }
 }
 
 debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
@@ -899,7 +876,6 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: 
             target := debug.hot_interaction.target.(^DebugEvent)
             switch value in target.value {
               case FrameMarker, 
-                   MarkEvent,
                    BitmapId, SoundId, FontId,
                    BeginCodeBlock, EndCodeBlock,
                    BeginDataBlock, EndDataBlock,
@@ -1205,7 +1181,8 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                             }
                         }
                         
-                        text := fmt.tprint(expanded ? "-" : "+", last_slash != 0 ? value.name[last_slash+1:] : value.name)
+                        view_name := last_slash != 0 ? value.name[last_slash+1:] : value.name
+                        text := fmt.tprint(expanded ? "-" : "+", view_name)
                         text_bounds := debug_measure_text(debug, text)
                         
                         size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
@@ -1247,26 +1224,7 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
 
         #partial switch value in oldest.event.value {
           case Profile:
-            
-            block, ok := &view.kind.(DebugViewBlock)
-            if !ok {
-                view.kind = DebugViewBlock{}
-                block = &view.kind.(DebugViewBlock)
-            }
-            
-            
-            element := begin_ui_element_rectangle(layout, &block.size)
-            make_ui_element_resizable(&element)
-            // TODO(viktor): reenable pausing the profiler
-            // pause := DebugInteraction{
-            //     kind   = .ToggleValue,
-            //     id     = id,
-            //     target = event,
-            // }
-            // set_ui_element_default_interaction(&element, pause)
-            end_ui_element(&element, true)
-            
-            debug_draw_profile(debug, input, mouse_p, element.bounds)
+            unreachable()
             
           case BeginDataBlock:
             
@@ -1342,11 +1300,28 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
         
         switch value in event.value {
           case Profile: 
-            unreachable()
+            block, ok := &view.kind.(DebugViewBlock)
+            if !ok {
+                view.kind = DebugViewBlock{}
+                block = &view.kind.(DebugViewBlock)
+            }
+            
+            element := begin_ui_element_rectangle(layout, &block.size)
+            make_ui_element_resizable(&element)
+            // TODO(viktor): reenable pausing the profiler
+            // pause := DebugInteraction{
+            //     kind   = .ToggleValue,
+            //     id     = id,
+            //     target = event,
+            // }
+            // set_ui_element_default_interaction(&element, pause)
+            end_ui_element(&element, true)
+            
+            debug_draw_profile(debug, mouse_p, element.bounds)
             
           case SoundId, FontId, 
             BeginCodeBlock, EndCodeBlock,
-            FrameMarker, MarkEvent:
+            FrameMarker:
             // NOTE(viktor): nothing
             
           case BitmapId:
