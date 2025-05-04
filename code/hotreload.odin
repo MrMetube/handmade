@@ -9,20 +9,26 @@ game := game_stubs
 
 @(private="file")
 game_stubs := GameApi {
-    debug_frame_end   = proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {},
-    frame_marker      = proc(seconds_elapsed: f32, loc := #caller_location) {},
-    begin_timed_block = proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: i64)  { return result },
-    end_timed_block   = proc(hit_count: i64) {},
+    debug_frame_end         = proc(_: ^GameMemory, _: Input, _: ^RenderCommands) {},
+    frame_marker            = proc(_: f32, _ := #caller_location) {},
+    begin_timed_block       = proc(_: string, _ := #caller_location, _: i64 = 1) -> (result: i64)  { return result },
+    end_timed_block         = proc(_: i64) {},
+    debug_record_b32        = proc(_:^b32, _:string, _ := #caller_location) {},
+    debug_begin_data_block  = proc(name: string, loc := #caller_location) {},
+    debug_end_data_block    = proc() {},
 }
 
 @(private="file")
 GameApi :: struct {
-    update_and_render:    UpdateAndRender,
-    output_sound_samples: OutputSoundSamples,
-    debug_frame_end:      DebugFrameEnd,
-    begin_timed_block:    BeginTimedBlock,
-    end_timed_block:      EndTimedBlock,
-    frame_marker:         FrameMarker,
+    update_and_render:      UpdateAndRender,
+    output_sound_samples:   OutputSoundSamples,
+    debug_frame_end:        DebugFrameEnd,
+    begin_timed_block:      BeginTimedBlock,
+    end_timed_block:        EndTimedBlock,
+    frame_marker:           FrameMarker,
+    debug_record_b32:       DebugRecordB32,
+    debug_begin_data_block: DebugBeginDataBlock,
+    debug_end_data_block:   DebugEndDataBlock,
 }
 
 load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
@@ -46,10 +52,13 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
             
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil
             
-            game.debug_frame_end      = auto_cast win.GetProcAddress(game_lib, "debug_frame_end")
-            game.begin_timed_block    = auto_cast win.GetProcAddress(game_lib, "begin_timed_block")
-            game.end_timed_block      = auto_cast win.GetProcAddress(game_lib, "end_timed_block")
-            game.frame_marker         = auto_cast win.GetProcAddress(game_lib, "frame_marker")
+            game.debug_frame_end        = auto_cast win.GetProcAddress(game_lib, "debug_frame_end")
+            game.begin_timed_block      = auto_cast win.GetProcAddress(game_lib, "begin_timed_block")
+            game.end_timed_block        = auto_cast win.GetProcAddress(game_lib, "end_timed_block")
+            game.frame_marker           = auto_cast win.GetProcAddress(game_lib, "frame_marker")
+            game.debug_record_b32       = auto_cast win.GetProcAddress(game_lib, "debug_record_b32")
+            game.debug_begin_data_block = auto_cast win.GetProcAddress(game_lib, "debug_begin_data_block")
+            game.debug_end_data_block   = auto_cast win.GetProcAddress(game_lib, "debug_end_data_block")
         } else {
             // @Logging 
             fmt.println("Failed to initialize game api")
@@ -99,8 +108,11 @@ game_lib: win.HMODULE
 
 @(private="file") UpdateAndRender    :: #type proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands)
 @(private="file") OutputSoundSamples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
-@(private="file") DebugFrameEnd      :: #type proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands)
 
-@(private="file") BeginTimedBlock    :: #type proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: i64) 
-@(private="file") EndTimedBlock      :: #type proc(hit_count: i64)
-@(private="file") FrameMarker        :: #type proc(seconds_elapsed: f32, loc := #caller_location)
+@(private="file") DebugFrameEnd       :: #type proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands)
+@(private="file") BeginTimedBlock     :: #type proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: i64) 
+@(private="file") EndTimedBlock       :: #type proc(hit_count: i64)
+@(private="file") FrameMarker         :: #type proc(seconds_elapsed: f32, loc := #caller_location)
+@(private="file") DebugRecordB32      :: #type proc(value: ^b32, name: string = #caller_expression(value), loc := #caller_location)
+@(private="file") DebugBeginDataBlock :: #type proc(name: string, loc := #caller_location)
+@(private="file") DebugEndDataBlock   :: #type proc()

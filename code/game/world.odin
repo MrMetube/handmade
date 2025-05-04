@@ -302,39 +302,41 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     clear(render_group, Red)
     
-    for &ground_buffer in tran_state.ground_buffers {
-        if is_valid(ground_buffer.p) {
-            offset := world_difference(world, ground_buffer.p, world.camera_p)
-            transform := default_flat_transform()
-            
-            transform.offset = offset
-            
-            // @Cleanup @CopyPasta from entity loop
-            camera_relative_ground := offset
-            fade_top_end      :=  0.75 * world.typical_floor_height
-            fade_top_start    :=  0.5  * world.typical_floor_height
-            fade_bottom_start := -1    * world.typical_floor_height
-            fade_bottom_end   := -1.5  * world.typical_floor_height 
-            
-            render_group.global_alpha = 1
-            if camera_relative_ground.z > fade_top_start {
-                render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
-            } else if camera_relative_ground.z < fade_bottom_start {
-                render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
-            }
-            
-            
-            bitmap := ground_buffer.bitmap
-            bitmap.align_percentage = 0
-            
-            ground_chunk_size := world.chunk_dim_meters.x
-            
-            // TODO(viktor): Disables for now as we dynamically change and reuse 
-            // these textures so its dificult to know when to upload to the gpu.
-            // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
-            
-            if ShowGroundChunkBounds {
-                push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)
+    if RenderGroundChunks {
+        for &ground_buffer in tran_state.ground_buffers {
+            if is_valid(ground_buffer.p) {
+                offset := world_difference(world, ground_buffer.p, world.camera_p)
+                transform := default_flat_transform()
+                
+                transform.offset = offset
+                
+                // @Cleanup @CopyPasta from entity loop
+                camera_relative_ground := offset
+                fade_top_end      :=  0.75 * world.typical_floor_height
+                fade_top_start    :=  0.5  * world.typical_floor_height
+                fade_bottom_start := -1    * world.typical_floor_height
+                fade_bottom_end   := -1.5  * world.typical_floor_height 
+                
+                render_group.global_alpha = 1
+                if camera_relative_ground.z > fade_top_start {
+                    render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
+                } else if camera_relative_ground.z < fade_bottom_start {
+                    render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
+                }
+                
+                
+                bitmap := ground_buffer.bitmap
+                bitmap.align_percentage = 0
+                
+                ground_chunk_size := world.chunk_dim_meters.x
+                
+                // TODO(viktor): Disables for now as we dynamically change and reuse 
+                // these textures so its dificult to know when to upload to the gpu.
+                // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
+                
+                if ShowGroundChunkBounds {
+                    push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)
+                }
             }
         }
     }
@@ -345,7 +347,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         V3(screen_bounds.max, 4 * world.typical_floor_height),
     }
 
-    {
+    if RenderGroundChunks {
         min_p := map_into_worldspace(world, world.camera_p, camera_bounds.min)
         max_p := map_into_worldspace(world, world.camera_p, camera_bounds.max)
 

@@ -32,8 +32,8 @@ Resolution :: [2]i32 {1920, 1080}
 
 MonitorRefreshHz: u32 : 60
 
-HighPriorityThreads :: 2
-LowPriorityThreads  :: 10
+HighPriorityThreads :: 10
+LowPriorityThreads  :: 0
 
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
@@ -49,12 +49,12 @@ GlobalSoundBuffer: ^IDirectSoundBuffer
 
 GlobalPerformanceCounterFrequency: f64
 
-GlobalPause := false
+GlobalPause :b32= false
 
 RenderType :: enum {
     RenderOpenGL_DisplayOpenGL,
-    RenderSoftware_DisplayOpenGL,
     RenderSoftware_DisplayGDI,
+    RenderSoftware_DisplayOpenGL,
 }
 
 GlobalRenderType: RenderType
@@ -345,11 +345,11 @@ main :: proc() {
     //  Game Loop
     
     for GlobalRunning {
-        // debug_begin_data_block()
-        // debug_value("Platform/Paused",    GlobalPause)
-        // debug_value("Platform/Rendering", GlobalRenderViaHardware)
-        // debug_value("Platform/Rendering", GlobalDisplayViaSoftware)
-        // debug_end_data_block()
+        { game.debug_begin_data_block("Platform"); defer game.debug_end_data_block()
+            
+            game.debug_record_b32(&GlobalPause)
+            game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
+        }
         
         
         ////////////////////////////////////////////////
@@ -620,6 +620,10 @@ main :: proc() {
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
+            for seconds_elapsed_for_frame < target_seconds_per_frame && !do_next_work_queue_entry(&low_queue) {
+                seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
+            }
+            
             if seconds_elapsed_for_frame < target_seconds_per_frame {
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000

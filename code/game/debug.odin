@@ -2,7 +2,6 @@ package game
 
 import "base:intrinsics"
 
-import "core:reflect"
 import "core:fmt"
 
 /*
@@ -25,10 +24,13 @@ import "core:fmt"
 // such in each arena?Maybe a table view of largest entries or 
 // most entries of a type.
 
-GlobalDebugTable:  DebugTable
+GlobalDebugTable:     DebugTable
+
 GlobalDebugMemory: ^GameMemory
+
 DebugMaxEventsCount     :: 5_000_000 when DebugEnabled else 0
 DebugMaxRegionsPerFrame :: 15000     when DebugEnabled else 0
+
 
 ////////////////////////////////////////////////
 
@@ -131,6 +133,8 @@ DebugOpenBlock :: struct {
 ////////////////////////////////////////////////
 
 DebugTable :: struct {
+    edit_event: DebugEvent,
+    
     // @Correctness No attempt is currently made to ensure that the final
     // debug records being written to the event array actually complete
     // their output prior to the swap of the event array index.
@@ -182,8 +186,8 @@ FrameMarker :: struct {
 
 BeginTimedBlock :: struct {}
 EndTimedBlock   :: struct {}
-BeginDataBlock :: struct { id: pmm }
-EndDataBlock   :: struct {}
+BeginDataBlock  :: struct {}
+EndDataBlock    :: struct {}
 
 Profile :: struct {}
 
@@ -228,6 +232,7 @@ DebugViewBlock :: struct {
     size: v2,
 }
 
+// TODO(viktor): Remove this and use the GUID
 DebugId :: struct {
     value: [2]pmm,
 }
@@ -391,11 +396,14 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     collate_debug_records(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
     overlay_debug_info(debug, input)
     
-    debug.next_hot_interaction = {}
+    debug.next_hot_interaction  = {}
+    if debug.hot_interaction == {} do GlobalDebugTable.edit_event = {}
 }
 
 debug_get_state :: proc() -> (result: ^DebugState) {
-    result = cast(^DebugState) raw_data(GlobalDebugMemory.debug_storage)
+    if GlobalDebugMemory != nil {
+        result = cast(^DebugState) raw_data(GlobalDebugMemory.debug_storage)
+    }
     return result
 }
 
@@ -471,20 +479,19 @@ free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
     list_push(&debug.first_free_frame, frame)
 }
 
-get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil) -> (result: ^DebugElement) {
-    timed_function()
-    assert(event.guid != {})
-    
-    parent := parent
-    if parent == nil do parent = debug.root_group
-    
+get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {
     // TODO(viktor): BETTER HASH FUNCTION
-    hash_value: u32
-    for i in 0..<len(event.guid.name)      do hash_value = hash_value * 65599 + cast(u32) event.guid.name[i]
-    for i in 0..<len(event.guid.file_path) do hash_value = hash_value * 65599 + cast(u32) event.guid.file_path[i]
-    for i in 0..<len(event.guid.procedure) do hash_value = hash_value * 65599 + cast(u32) event.guid.procedure[i]
-    assert(hash_value != 0)
+    for i in 0..<len(guid.name)      do result = result * 65599 + cast(u32) guid.name[i]
+    for i in 0..<len(guid.file_path) do result = result * 65599 + cast(u32) guid.file_path[i]
+    for i in 0..<len(guid.procedure) do result = result * 65599 + cast(u32) guid.procedure[i]
     
+    return result
+}
+
+get_element_from_event :: proc { get_element_from_event_by_hash, get_element_from_event_by_parent }
+get_element_from_event_by_hash :: proc (debug: ^DebugState, event: DebugEvent, hash_value: u32) -> (result: ^DebugElement) {
+    assert(hash_value != 0)
+
     index := hash_value % len(debug.element_hash)
     
     for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
@@ -502,6 +509,16 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent, parent: ^D
         }
     }
     
+    return result
+}
+get_element_from_event_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil) -> (result: ^DebugElement) {
+    timed_function()
+    assert(event.guid != {})
+    
+    hash_value := get_hash_from_guid(event.guid)
+    
+    result = get_element_from_event(debug, event, hash_value)
+    
     if result == nil {
         result = push(&debug.arena, DebugElement)
         result.guid = DebugGUID {
@@ -511,8 +528,13 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent, parent: ^D
             file_path = copy_string(&debug.arena, event.guid.file_path),
             procedure = copy_string(&debug.arena, event.guid.procedure),
         }
+
+        index := hash_value % len(debug.element_hash)
         list_push(&debug.element_hash[index], result)
-        
+
+        parent := parent
+        if parent == nil do parent = debug.root_group
+                
         parent_group := get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
         add_element_to_group(debug, parent_group, result)
     }
@@ -820,17 +842,19 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             event := interaction.target.(^DebugEvent)
             value := &event.value.(f32)
             value^ += 0.1 * mouse_dp.x
+            GlobalDebugTable.edit_event = event^
             
           case .Resize:
             value := interaction.target.(^v2)
             value^ += mouse_dp * {1,-1}
             value.x = max(value.x, 10)
             value.y = max(value.y, 10)
-          
+            if event, ok := interaction.target.(^DebugEvent); ok do GlobalDebugTable.edit_event = event^
+            
           case .Move:
             value := interaction.target.(^v2)
             value^ += mouse_dp
-            
+            if event, ok := interaction.target.(^DebugEvent); ok do GlobalDebugTable.edit_event = event^
         }
         
         // Click interaction
@@ -888,7 +912,7 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
             // Taking ref to value in the switch will cause an infinite loop in the compiler.
             value_ref := &target.value.(b32)
             value_ref^ = !value_ref^
-        
+            GlobalDebugTable.edit_event = interaction.target.(^DebugEvent)^
         }
     }
 }
@@ -1095,8 +1119,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
 draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugElement, id: DebugId, input: Input) {
     oldest := element.events.last
     if oldest != nil {
-        view := get_debug_view_for_variable(debug, id)
-
+        // @Cleanup
         #partial switch value in oldest.event.value {
           case Profile:
             // Nothing

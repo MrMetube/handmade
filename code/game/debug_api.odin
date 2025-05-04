@@ -10,6 +10,18 @@ DebugGUID :: struct {
     procedure: string,
 }
 
+@export
+debug_record_b32 :: proc(value: ^b32, name: string = #caller_expression(value), loc := #caller_location) { debug_record_value(value, name, loc) }
+debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(value), loc := #caller_location) { 
+    guid := DebugGUID{name, loc.file_path, cast(u32) loc.line, cast(u32) loc.column, loc.procedure}
+    
+    event := debug_record_event(nil, guid)
+    if GlobalDebugTable.edit_event.guid == guid {
+        value^ = GlobalDebugTable.edit_event.value.(Value)
+    }
+    event.value = value^
+}
+
 ////////////////////////////////////////////////
 // Selection
 
@@ -95,20 +107,20 @@ debug_data_block :: proc(name: string, loc := #caller_location) {
     debug_record_event(BeginDataBlock{}, name, loc)
 }
 
-debug_begin_data_block :: proc(id: DebugId, name: string, loc := #caller_location) {
-    if !DebugEnabled do return
+@export
+debug_begin_data_block :: proc(name: string, loc := #caller_location) {
     debug_record_event(BeginDataBlock{}, name, loc)
 }
 
+@export
 debug_end_data_block :: proc() {
-    if !DebugEnabled do return
     debug_record_event(EndDataBlock{}, "EndDataBlock")
 }
 
 ////////////////////////////////////////////////
 // Timed Blocks and Functions
 
-@(export)
+@export
 begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64) {
     when !DebugEnabled do return result 
     
@@ -137,20 +149,6 @@ timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> 
     return begin_timed_block(loc.procedure, loc, hit_count)
 }
 
-////////////////////////////////////////////////
-// Only used by the platform layer
-
-@export
-frame_marker :: proc(seconds_elapsed: f32, loc := #caller_location) {
-    if !DebugEnabled do return
-    
-    debug_record_event(FrameMarker{seconds_elapsed}, "Frame Marker", loc)
-}
-
-debug_record_value :: proc(value: DebugValue, name: string = #caller_expression(value), loc := #caller_location) { 
-    debug_record_event(value, name, loc)
-}
-
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }
 debug_record_event_loc :: proc(value: DebugValue, name: string, loc:= #caller_location) -> (result: ^DebugEvent) {
     return debug_record_event_guid(value, { name, loc.file_path, cast(u32) loc.line, cast(u32) loc.column, loc.procedure })
@@ -168,8 +166,18 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
         thread_index = cast(u16) context.user_index,
         core_index   = 0,
         
-        value        = value,
+        value = value,
     }
     
     return result
+}
+
+////////////////////////////////////////////////
+// Only used by the platform layer
+
+@export
+frame_marker :: proc(seconds_elapsed: f32, loc := #caller_location) {
+    if !DebugEnabled do return
+    
+    debug_record_event(FrameMarker{seconds_elapsed}, "Frame Marker", loc)
 }
