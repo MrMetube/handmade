@@ -89,21 +89,21 @@ INTERNAL :: #config(INTERNAL, false)
 ////////////////////////////////////////////////
 // TODO(viktor): Find a better place for these configurations
 
-Global_ShowFramerate: b32 = true
-Global_Assets_LoadAssetsSingleThreaded: b32
-Global_Audio_SoundPanningWithMouse: b32
-Global_Audio_SoundPitchingWithMouse: b32
-Global_Entity_HeroJumping: b32
-Global_Entity_FamiliarFollowsHero: b32
-Global_Particles_FountainTest: b32
-Global_Particles_ShowGrid: b32
-Global_Rendering_EnvironmentTest: b32
-Global_Rendering_RenderSingleThreaded: b32
-Global_Rendering_ShowSpaceBounds: b32
-Global_Rendering_Camera_UseDebugCamera: b32
-Global_Rendering_Camera_DebugCameraDistance: f32 = 25
-Global_Rendering_Bounds_ShowGroundChunkBounds: b32
-Global_Rendering_Bounds_ShowRenderAndSimulationBounds: b32
+ShowFramerate: b32 = true
+LoadAssetsSingleThreaded: b32
+SoundPanningWithMouse: b32
+SoundPitchingWithMouse: b32
+HeroJumping: b32
+FamiliarFollowsHero: b32
+FountainTest: b32
+ShowGrid: b32
+EnvironmentTest: b32
+RenderSingleThreaded: b32
+ShowSpaceBounds: b32
+UseDebugCamera: b32
+DebugCameraDistance: f32 = 25
+ShowGroundChunkBounds: b32
+ShowRenderAndSimulationBounds: b32
 
 ////////////////////////////////////////////////
 
@@ -257,15 +257,14 @@ ControlledHero :: struct {
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
-debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, work_queue: ^PlatformWorkQueue, generation_id: AssetGenerationId) {
+debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, generation_id: AssetGenerationId) {
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if tran_state.is_initialized {
         assets = tran_state.assets
-        work_queue = tran_state.high_priority_queue
         generation_id = tran_state.generation_id
     }
     
-    return assets, work_queue, generation_id
+    return assets, generation_id
 }
 
 @export
@@ -340,34 +339,37 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Game")
-        debug_record_value(Global_ShowFramerate)
+        debug_record_value(ShowFramerate)
         { debug_data_block("Game/Assets")
-            debug_record_value(Global_Assets_LoadAssetsSingleThreaded)
+            debug_record_value(LoadAssetsSingleThreaded)
         }
+        
         { debug_data_block("Game/Audio")
-            debug_record_value(Global_Audio_SoundPanningWithMouse)
-            debug_record_value(Global_Audio_SoundPitchingWithMouse)
+            debug_record_value(SoundPanningWithMouse)
+            debug_record_value(SoundPitchingWithMouse)
         }
+        
         { debug_data_block("Game/Entity")
-            debug_record_value(Global_Entity_HeroJumping)
-            debug_record_value(Global_Entity_FamiliarFollowsHero)
+            debug_record_value(HeroJumping)
+            debug_record_value(FamiliarFollowsHero)
         }
+        
         { debug_data_block("Game/Particles")
-            debug_record_value(Global_Particles_FountainTest)
-            debug_record_value(Global_Particles_ShowGrid)
+            debug_record_value(FountainTest)
+            debug_record_value(ShowGrid)
         }
         
         { debug_data_block("Renderer")
-            debug_record_value(Global_Rendering_EnvironmentTest)
-            debug_record_value(Global_Rendering_RenderSingleThreaded)
-            debug_record_value(Global_Rendering_ShowSpaceBounds)
+            debug_record_value(EnvironmentTest)
+            debug_record_value(RenderSingleThreaded)
+            debug_record_value(ShowSpaceBounds)
             { debug_data_block("Renderer/Camera")
-                debug_record_value(Global_Rendering_Camera_UseDebugCamera)
-                debug_record_value(Global_Rendering_Camera_DebugCameraDistance)
+                debug_record_value(UseDebugCamera)
+                debug_record_value(DebugCameraDistance)
             }
             { debug_data_block("Renderer/Bounds")
-                debug_record_value(Global_Rendering_Bounds_ShowGroundChunkBounds)
-                debug_record_value(Global_Rendering_Bounds_ShowRenderAndSimulationBounds)
+                debug_record_value(ShowGroundChunkBounds)
+                debug_record_value(ShowRenderAndSimulationBounds)
             }
         }
         
@@ -388,7 +390,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     ////////////////////////////////////////////////
     // Input
 
-    if Global_Audio_SoundPanningWithMouse {
+    if SoundPanningWithMouse {
         // NOTE(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
         if state.music == nil {
@@ -400,7 +402,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         change_volume(&state.mixer, state.music, 0.01, music_volume)
     }
     
-    if Global_Audio_SoundPitchingWithMouse {
+    if SoundPitchingWithMouse {
         // NOTE(viktor): test sound panning with the mouse 
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
@@ -423,7 +425,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     render_group: RenderGroup
     init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
     
-    if Global_Particles_FountainTest { 
+    if FountainTest { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Particle system test
         font_id := first_font_from(tran_state.assets, .Font)
@@ -472,7 +474,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                 cell.velocity_times_density += density * particle.dp
             }
             
-            if Global_Particles_ShowGrid {
+            if ShowGrid {
                 for row, y in state.cells {
                     for cell, x in row {
                         alpha := clamp_01(0.1 * cell.density)

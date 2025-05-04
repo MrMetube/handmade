@@ -63,16 +63,12 @@ DebugState :: struct {
     hot_interaction:      DebugInteraction,
     next_hot_interaction: DebugInteraction,
     
-    compiling:    b32,
-    compiler:     DebugExecutingProcess,
     menu_p:       v2,
     profile_on:   b32,
     framerate_on: b32,
     
     // Overlay rendering
     render_group: RenderGroup,
-    
-    work_queue: ^PlatformWorkQueue, 
     
     font_scale:   f32,
     top_edge:     f32,
@@ -146,14 +142,14 @@ DebugTable :: struct {
 // TODO(viktor): we now only need 1 bit to know the array index
 DebugEventsState :: bit_field u64 {
     // @Volatile Later on we transmute this to a u64 to 
-    // atomically increment one of the fields
+    // atomically increment the events_index
     events_index: u32 | 32,
     array_index:  u32 | 32,
 }
 
 // TODO(viktor): compact this, we have a lot of them
 DebugEvent :: struct {
-    guid: string,
+    guid: DebugGUID,
     
     clock:        i64,
     thread_index: u16,
@@ -164,7 +160,7 @@ DebugEvent :: struct {
 
 DebugValue :: union {
     FrameMarker,
-    BeginCodeBlock, EndCodeBlock,
+    BeginTimedBlock, EndTimedBlock,
     
     BeginDataBlock, EndDataBlock,
     
@@ -184,8 +180,8 @@ FrameMarker :: struct {
     seconds_elapsed: f32,
 }
 
-BeginCodeBlock :: struct {}
-EndCodeBlock   :: struct {}
+BeginTimedBlock :: struct {}
+EndTimedBlock   :: struct {}
 BeginDataBlock :: struct { id: pmm }
 EndDataBlock   :: struct {}
 
@@ -193,16 +189,16 @@ Profile :: struct {}
 
 ////////////////////////////////////////////////
 
+DebugElement :: #type SingleLinkedList(DebugElementLink)
+DebugElementLink :: struct {
+    guid:   DebugGUID,
+    events: Deque(DebugStoredEvent),
+}
+
 DebugStoredEvent :: #type SingleLinkedList(DebugStoredEventLink)
 DebugStoredEventLink :: struct {
     event:       DebugEvent,
     frame_index: u32,
-}
-
-DebugElement :: #type SingleLinkedList(DebugElementLink)
-DebugElementLink :: struct {
-    guid:   u32,
-    events: Deque(DebugStoredEvent),
 }
 
 DebugTree :: #type LinkedList(DebugTreeData)
@@ -348,7 +344,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     assert(len(memory.debug_storage) >= size_of(DebugState))
     debug := cast(^DebugState) raw_data(memory.debug_storage)
     
-    assets, work_queue, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
+    assets, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
     if assets == nil do return
     
     if !debug.initialized {
@@ -365,14 +361,11 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         }
         
         debug.root_group = create_group(debug, "Root")
-        // debug_record_event_common(Profile{}, {name="Profile"})
         
         list_init_sentinel(&debug.tree_sentinel)
         
         debug.font_scale = 0.6
 
-        debug.work_queue = work_queue
-        
         debug_tree := add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
         
         debug.left_edge  = -0.5 * cast(f32) render_commands.width
@@ -609,17 +602,27 @@ free_frame :: proc(debug: ^DebugState, frame: ^DebugFrame) {
 
 get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result: ^DebugElement) {
     timed_function()
+    assert(event.guid != {})
     
-    assert(event.loc != {})
     // TODO(viktor): BETTER HASH FUNCTION
-    hash_value := 19 * cast(u32) (cast(umm) raw_data(event.loc.file_path) >> 2) +  31 * cast(u32) (cast(umm) raw_data(event.loc.name) >> 2) + 5 * event.loc.line
+    hash_value: u32
+    for b in event.guid.name do hash_value = hash_value * 65599 + cast(u32) b
+    for b in event.guid.file_path do hash_value = hash_value * 65599 + cast(u32) b
+    for b in event.guid.procedure do hash_value = hash_value * 65599 + cast(u32) b
     assert(hash_value != 0)
+    
     index := hash_value % len(debug.element_hash)
     
-    count : i32
     for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
-        defer count += 1
-        if chain.guid == hash_value {
+        guids_are_equal := true
+        
+        if chain.guid.line      != event.guid.line      do guids_are_equal = false
+        if chain.guid.column    != event.guid.column    do guids_are_equal = false
+        if chain.guid.name      != event.guid.name      do guids_are_equal = false
+        if chain.guid.file_path != event.guid.file_path do guids_are_equal = false
+        if chain.guid.procedure != event.guid.procedure do guids_are_equal = false
+        
+        if guids_are_equal {
             result = chain
             break
         }
@@ -627,11 +630,16 @@ get_element_from_event :: proc(debug: ^DebugState, event: DebugEvent) -> (result
     
     if result == nil {
         result = push(&debug.arena, DebugElement)
-        result.guid = hash_value
+        result.guid = DebugGUID {
+            line      = event.guid.line,
+            column    = event.guid.column,
+            name      = copy_string(&debug.arena, event.guid.name),
+            file_path = copy_string(&debug.arena, event.guid.file_path),
+            procedure = copy_string(&debug.arena, event.guid.procedure),
+        }
         list_push(&debug.element_hash[index], result)
         
-        name   := event.loc.name
-        parent := get_group_by_hierarchical_name(debug, debug.root_group, &name)
+        parent := get_group_by_hierarchical_name(debug, debug.root_group, event.guid.name)
         add_element_to_group(debug, parent, result)
     }
     
@@ -700,22 +708,23 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             }
             store_event(debug, event, element) 
                
-          case BeginCodeBlock:
+          case BeginTimedBlock:
             element := get_element_from_event(debug, event)
-            alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
+            // nocheckin this blows up our arena alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
 
-          case EndCodeBlock:
+          case EndTimedBlock:
             matching_block := thread.first_open_code_block
             if matching_block != nil {
                 opening_event := matching_block.opening_event
                 if events_match(&event, opening_event) {
                     defer free_open_block(thread, &thread.first_open_code_block)
                     
-                    if matching_block.frame_index == frame_index {
+                    // TODO(viktor): Reenable displaying timed_blocks
+                    when false do if matching_block.frame_index == frame_index {
                         matching_name := ""
-                        if matching_block.parent != nil do matching_name = matching_block.parent.opening_event.loc.name
+                        if matching_block.parent != nil do matching_name = matching_block.parent.opening_event.guid.name
                         
-                        when false { // TODO(viktor): 
+                        when false {
                             if matching_name == debug.scope_to_record {
                                 t_min := cast(f32) (opening_event.clock - debug.collation_frame.begin_clock)
                                 t_max := cast(f32) (event.clock - debug.collation_frame.begin_clock)
@@ -755,6 +764,7 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
         thread.first_free_block = result.next_free
     } else {
         result = push(&debug.arena, DebugOpenBlock, no_clear())
+        result = result
     }
     
     result ^= {
@@ -778,7 +788,7 @@ free_open_block :: proc(thread: ^DebugThread, first_open: ^^DebugOpenBlock) {
 }
 
 events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
-    result = b != nil && b.loc.name == a.loc.name
+    result = b != nil && b.guid.name == a.guid.name
     return result
 }
 
@@ -789,21 +799,11 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
     orthographic(&debug.render_group, {debug.render_group.commands.width, debug.render_group.commands.height}, 1)
 
-    if debug.compiling {
-        state := Platform.debug.get_process_state(debug.compiler)
-        if state.is_running {
-            debug_push_text_line(debug, "Recompiling...")
-        } else {
-            fmt.println("ERROR: failed to recompile")
-            debug.compiling = false
-        }
-    }
-
     mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
     draw_main_menu(debug, input, mouse_p)
     debug_interact(debug, input, mouse_p)
     
-    if Global_ShowFramerate && debug.frames.first != nil {
+    if ShowFramerate && debug.frames.first != nil {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames.first.seconds_elapsed*1000))
         debug_push_text_line(debug, fmt.tprintf("Last Frame memory footprint: %m/%m", debug.per_frame_arena.used, len(debug.per_frame_arena.storage)))
     }
@@ -811,7 +811,9 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
 // @Cleanup
 debug_draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2) {
-    push_rectangle(&debug.render_group, rect, default_flat_transform(), DarkBlue )
+    color := Black
+    color.a = 0.7
+    push_rectangle(&debug.render_group, rect, default_flat_transform(), color, sort_bias = 10_000)
     
     target_fps :: 72
     bar_padding :: 1
@@ -855,14 +857,14 @@ debug_draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2) {
                 
                 color_wheel := color_wheel
                 event := region.event
-                color_index := event.loc.line % len(color_wheel)
+                color_index := event.guid.line % len(color_wheel)
                 color := color_wheel[color_index]
                             
-                push_rectangle(debug.render_group, stack_rect, color)
+                push_rectangle(debug.render_group, stack_rect, color, sort_bias = 10_000)
                 if rectangle_contains(stack_rect, mouse_p) {
                     hot_region = &region
                     
-                    text := fmt.tprintf("%s - %d cycles [%s:% 4d]", event.loc.name, region.cycle_count, event.loc.file_path, event.loc.line)
+                    text := fmt.tprintf("%s - %d cycles [%s:% 4d]", event.guid.name, region.cycle_count, event.guid.file_path, event.guid.line)
                     debug_push_text(debug, text, mouse_p)
                 }
             }
@@ -877,7 +879,7 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: 
             switch value in target.value {
               case FrameMarker, 
                    BitmapId, SoundId, FontId,
-                   BeginCodeBlock, EndCodeBlock,
+                   BeginTimedBlock, EndTimedBlock,
                    BeginDataBlock, EndDataBlock,
                    DebugEventGroup,
                    Rectangle2, Rectangle3,
@@ -1037,10 +1039,10 @@ set_ui_element_default_interaction :: proc(element: ^LayoutElement, interaction:
 }
 
 end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) {
-    SizeHandlePixels :: 8
+    SizeHandlePixels :: 4
     frame: v2
     if .Resizable in element.flags {
-        frame = SizeHandlePixels
+        frame = SizeHandlePixels / 2
     }
     total_size := element.size^ + frame * 2
     
@@ -1052,13 +1054,13 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
 
     was_resized: b32
     if .Resizable in element.flags {
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black)
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black)
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
         
-        resize_box := rectangle_min_diameter(v2{element.bounds.max.x, total_min.y}, frame)
-        push_rectangle(&layout.debug.render_group, resize_box, default_flat_transform(), White)
+        resize_box := rectangle_add_radius(rectangle_min_diameter(v2{element.bounds.max.x, total_min.y}, frame), 4)
+        push_rectangle(&layout.debug.render_group, resize_box, default_flat_transform(), White, sort_bias = 20_000)
         
         resize_interaction := DebugInteraction {
             kind   = .Resize,
@@ -1208,7 +1210,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             }
             
             move_handle := rectangle_min_diameter(tree.p, v2{8, 8})
-            push_rectangle(&debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White)
+            push_rectangle(&debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White, sort_bias = 10_000)
         
             if rectangle_contains(move_handle, mouse_p) {
                 debug.next_hot_interaction = move_interaction
@@ -1238,13 +1240,13 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
             event := &least_recently_opened_block.event
             
             last_slash: u32
-            #reverse for r, index in event.loc.name {
+            #reverse for r, index in event.guid.name {
                 if r == '/' {
                     last_slash = auto_cast index
                     break
                 }
             }
-            text := fmt.tprintf("%s %v", last_slash != 0 ? event.loc.name[last_slash+1:] : event.loc.name, value)
+            text := fmt.tprintf("%s", last_slash != 0 ? event.guid.name[last_slash+1:] : event.guid.name)
             
             text_bounds := debug_measure_text(debug, text)
             
@@ -1267,8 +1269,10 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
             
             collapsible, ok := view.kind.(DebugViewCollapsible)
             if ok && collapsible.expanded_always {
+                layout.depth += 1
+                defer layout.depth -= 1
                 for event := least_recently_opened_block; event != nil; event = event.next {
-                    event_id := debug_id_from_guid(tree, raw_data(event.event.loc.name))
+                    event_id := debug_id_from_guid(tree, raw_data(event.event.guid.name))
                     draw_event(layout, event_id, event)
                 }
             }
@@ -1320,7 +1324,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             debug_draw_profile(debug, mouse_p, element.bounds)
             
           case SoundId, FontId, 
-            BeginCodeBlock, EndCodeBlock,
+            BeginTimedBlock, EndTimedBlock,
             FrameMarker:
             // NOTE(viktor): nothing
             
@@ -1343,15 +1347,12 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                 
                 bitmap_height := block.size.y
                 bitmap_offset := V3(element.bounds.min, 0)
-                push_rectangle(&debug.render_group, element.bounds, default_flat_transform(), DarkBlue )
-                push_bitmap(&debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false)
+                push_rectangle(&debug.render_group, element.bounds, default_flat_transform(), DarkBlue , sort_bias = 10_000)
+                push_bitmap(&debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false, sort_bias = 10_000)
             }
         
           case BeginDataBlock:
-            layout.depth += 1
-            
           case EndDataBlock:
-            layout.depth -= 1
             
           case DebugEventLink, DebugEventGroup,
             b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
@@ -1361,16 +1362,16 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                     view.kind = DebugViewCollapsible{}
                     collapsible = &view.kind.(DebugViewCollapsible)
                 }
-                text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+", event.loc.name)
+                text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+", event.guid.name)
             } else {
                 last_slash: u32
-                #reverse for r, index in event.loc.name {
+                #reverse for r, index in event.guid.name {
                     if r == '/' {
                         last_slash = auto_cast index
                         break
                     }
                 }
-                text = fmt.tprintf("%s %v", last_slash != 0 ? event.loc.name[last_slash+1:] : event.loc.name, value)
+                text = fmt.tprintf("%s %v", last_slash != 0 ? event.guid.name[last_slash+1:] : event.guid.name, value)
             }
             
             text_bounds := debug_measure_text(debug, text)
@@ -1394,7 +1395,7 @@ interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) ->
 
 ////////////////////////////////////////////////
 
-get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: ^string) -> (result: ^DebugEventGroup) {
+get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: string) -> (result: ^DebugEventGroup) {
     assert(parent != nil)
     result = parent
     
@@ -1408,8 +1409,8 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGr
     
     if first_slash != -1 {
         left, right := name[:first_slash], name[first_slash+1:]
-        group := get_or_create_group_with_name(debug, parent, &left)
-        result = get_group_by_hierarchical_name(debug, group, &right)
+        group := get_or_create_group_with_name(debug, parent, left)
+        result = get_group_by_hierarchical_name(debug, group, right)
     }
     
     
@@ -1417,15 +1418,15 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGr
     return result
 }
 
-get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: ^string) -> (result: ^DebugEventGroup) {
+get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: string) -> (result: ^DebugEventGroup) {
     for link := parent.sentinel.next; link != &parent.sentinel; link = link.next {
-        if group, ok := link.value.(^DebugEventGroup); ok && group != nil && group.name == name^ {
+        if group, ok := link.value.(^DebugEventGroup); ok && group != nil && group.name == name {
             result = group
         }
     }
     
     if result == nil {
-        result = create_group(debug, name^)
+        result = create_group(debug, name)
         add_group_to_group(debug, parent, result)
     }
     
@@ -1523,8 +1524,8 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
         switch operation {
             case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0), color, sort_bias = 100_010)
-                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0) + {2,-2,0}, {0,0,0,1}, sort_bias = 100_000)
+                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0), color, sort_bias = 10_010)
+                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0) + {2,-2,0}, {0,0,0,1}, sort_bias = 10_000)
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)

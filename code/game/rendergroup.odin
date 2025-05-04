@@ -126,6 +126,7 @@ RenderGroupEntryRectangle :: struct {
     rect:  Rectangle2,
 }
 
+// @Cleanup
 @common
 RenderGroupEntryCoordinateSystem :: struct {
     color:  v4,
@@ -302,17 +303,17 @@ push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transfo
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
-push_rectangle2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
-    push_rectangle(group, Rect3(rec, 0, 0), transform, color)
+push_rectangle2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, sort_bias : f32 =0) {
+    push_rectangle(group, Rect3(rec, 0, 0), transform, color, sort_bias)
 }
-push_rectangle3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
+push_rectangle3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color := v4{1,1,1,1}, sort_bias : f32 =0) {
     center := rectangle_get_center(rec)
     size   := rectangle_get_dimension(rec)
     p := center + 0.5*size
     basis := project_with_transform(group.camera, transform, p)
     
     if basis.valid {
-        element := push_render_element(group, RenderGroupEntryRectangle, basis.sort_key)
+        element := push_render_element(group, RenderGroupEntryRectangle, basis.sort_key + sort_bias)
         
         if element != nil {
             alpha := v4{1,1,1, group.global_alpha}
@@ -393,8 +394,8 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
       case .Perspective:
         base_z: f32
         
-        if Global_Rendering_Camera_UseDebugCamera {
-            distance_above_target *= Global_Rendering_Camera_DebugCameraDistance
+        if UseDebugCamera {
+            distance_above_target *= DebugCameraDistance
         }
         
         distance_to_p_z := distance_above_target - p.z

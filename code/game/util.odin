@@ -168,7 +168,7 @@ assert :: proc(condition: $T, message := #caller_expression(condition), loc := #
         }
         
         when ODIN_DEBUG {
-            runtime.debug_trap()
+             runtime.debug_trap()
         } else {
             runtime.trap()
         }
@@ -176,4 +176,3 @@ assert :: proc(condition: $T, message := #caller_expression(condition), loc := #
 }
 
 @common panic :: proc(message := "", loc := #caller_location) { assert(false, message, loc, prefix = "Panic") }
-

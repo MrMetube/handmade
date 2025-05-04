@@ -31,8 +31,8 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
     sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
     temp_space   := (cast([^]TileSortEntry) temp_memory)[:count]
 
-    // merge_sort(sort_entries, temp_space)
-    radix_sort(sort_entries, temp_space)
+    merge_sort(sort_entries, temp_space)
+    // radix_sort(sort_entries, temp_space)
     
     when INTERNAL do is_sorted(sort_entries)
 }

@@ -5,14 +5,14 @@ import "core:os"
 import "core:fmt"
 import win "core:sys/windows"
 
-game: GameApi = stubbed
+game := game_stubs
 
 @(private="file")
-stubbed := GameApi {
-    _debug_frame_end   = proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {},
-    _frame_marker      = proc(seconds_elapsed: f32, loc := #caller_location) {},
-    _begin_timed_block = proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock)  { return result },
-    _end_timed_block   = proc(block: TimedBlock) {},
+game_stubs := GameApi {
+    debug_frame_end   = proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {},
+    frame_marker      = proc(seconds_elapsed: f32, loc := #caller_location) {},
+    begin_timed_block = proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: i64)  { return result },
+    end_timed_block   = proc(hit_count: i64) {},
 }
 
 @(private="file")
@@ -27,7 +27,7 @@ GameApi :: struct {
 
 load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid:b32, last_write_time: u64) {
     if game_lib == nil {
-        assert(game == stubbed, "game.dll has already been initialized")
+        assert(game == game_stubs, "game.dll has already been initialized")
     } else {
         if !win.FreeLibrary(game_lib) {
             // @Logging 
@@ -43,12 +43,13 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
         if (game_lib != nil) {
             game.update_and_render    = auto_cast win.GetProcAddress(game_lib, "update_and_render")
             game.output_sound_samples = auto_cast win.GetProcAddress(game_lib, "output_sound_samples")
+            
+            is_valid = game.update_and_render != nil && game.output_sound_samples != nil
+            
             game.debug_frame_end      = auto_cast win.GetProcAddress(game_lib, "debug_frame_end")
             game.begin_timed_block    = auto_cast win.GetProcAddress(game_lib, "begin_timed_block")
             game.end_timed_block      = auto_cast win.GetProcAddress(game_lib, "end_timed_block")
             game.frame_marker         = auto_cast win.GetProcAddress(game_lib, "frame_marker")
-
-            is_valid = game.update_and_render != nil && game.output_sound_samples != nil
         } else {
             // @Logging 
             fmt.println("Failed to initialize game api")
@@ -57,7 +58,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
     }
 
     if !is_valid {
-        game = stubbed
+        game = game_stubs
     }
     
     return is_valid, last_write_time
@@ -70,7 +71,7 @@ unload_game_lib :: proc() {
         }
         game_lib = nil
     }
-    game = stubbed
+    game = game_stubs
 }
 
 get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
@@ -100,6 +101,6 @@ game_lib: win.HMODULE
 @(private="file") OutputSoundSamples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
 @(private="file") DebugFrameEnd      :: #type proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands)
 
-@(private="file") BeginTimedBlock    :: #type proc(name: string, loc: runtime.Source_Code_Location = #caller_location, hit_count: i64 = 1) -> (result: TimedBlock) 
-@(private="file") EndTimedBlock      :: #type proc(block: TimedBlock)
+@(private="file") BeginTimedBlock    :: #type proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: i64) 
+@(private="file") EndTimedBlock      :: #type proc(hit_count: i64)
 @(private="file") FrameMarker        :: #type proc(seconds_elapsed: f32, loc := #caller_location)

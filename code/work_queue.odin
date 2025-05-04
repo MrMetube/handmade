@@ -29,7 +29,7 @@ CreateThreadInfo :: struct {
     window_dc: win.HDC,
 }
 
-@(private="file") created_thread_count: u32
+@(private="file") created_thread_count: u32 = 1
 
 init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
     queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast len(infos), nil)
@@ -108,7 +108,11 @@ thread_proc :: proc (parameter: pmm) {
     context.user_index = cast(int) info.index
     
     if info.gl_context != nil {
-        win.wglMakeCurrent(info.window_dc, info.gl_context)
+        // TODO(viktor): @RaceCondition @Bug
+        // if we are too fast for some reason this can fail
+        win.Sleep(3000)
+        ok := win.wglMakeCurrent(info.window_dc, info.gl_context)
+        assert(ok)
     }
     
     for {

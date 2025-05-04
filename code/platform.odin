@@ -30,8 +30,10 @@ Resolution :: [2]i32 {1920, 1080}
 // Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 144
+MonitorRefreshHz: u32 : 60
 
+HighPriorityThreads :: 10
+LowPriorityThreads  :: 2
 
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
@@ -160,19 +162,20 @@ main :: proc() {
     // Platform Setup
     
     high_queue, low_queue: PlatformWorkQueue
-    high_infos: [9]CreateThreadInfo
-    low_infos:  [1]CreateThreadInfo
+    high_infos: [HighPriorityThreads]CreateThreadInfo
+    low_infos:  [LowPriorityThreads]CreateThreadInfo
     window_dc := win.GetDC(window)
     gl_context := init_opengl(window_dc)
     
     for &info in low_infos {
         info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &gl_attribs[0])
+        assert(info.gl_context != nil)
         info.window_dc  = window_dc
     }
     
     init_work_queue(&high_queue, high_infos[:])
     init_work_queue(&low_queue,  low_infos[:])
-
+    
     fmt.print("\033[2J") // Clear the terminal
 
     state: PlatformState
@@ -291,8 +294,6 @@ main :: proc() {
         total_size := cast(uint) (PermanentStorageSize + TransientStorageSize + DebugStorageSize)
         
         storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-        // TODO(viktor): why limit ourselves?
-        assert(total_size < 4 * Gigabyte)
         state.game_memory_block = storage_ptr[:total_size]
         
         // TODO(viktor): TransientStorage needs to be broken up

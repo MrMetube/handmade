@@ -692,7 +692,7 @@ do_load_asset_work : PlatformWorkQueueCallback : proc(data: pmm) {
 AssetKind :: enum {Font, Bitmap, Sound}
 load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
     immediate := immediate 
-    immediate ||= Global_Assets_LoadAssetsSingleThreaded
+    immediate ||= LoadAssetsSingleThreaded
     
     if is_valid_asset(id) {
         asset := &assets.assets[id]
@@ -766,7 +766,7 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
         info := asset.info.font
         
         asset.header.value = Font{
-            bitmap_id_offset = get_file(assets, asset.file_index).font_bitmap_id_offset
+            bitmap_id_offset = get_file(assets, asset.file_index).font_bitmap_id_offset,
         }
         font := &asset.header.value.(Font)
         
@@ -796,7 +796,7 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
         info := asset.info.sound
         
         asset.header.value = Sound{
-            channel_count = cast(u8) info.channel_count
+            channel_count = cast(u8) info.channel_count,
         }
         sound := &asset.header.value.(Sound)
                                 

@@ -265,7 +265,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
             
-            if Global_Entity_HeroJumping {
+            if HeroJumping {
                 if controller.start.ended_down {
                     con_hero.dz = 2
                 }
@@ -333,7 +333,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             // these textures so its dificult to know when to upload to the gpu.
             // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
             
-            if Global_Rendering_Bounds_ShowGroundChunkBounds {
+            if ShowGroundChunkBounds {
                 push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)
             }
         }
@@ -392,7 +392,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, input.delta_time)
     
     
-    if Global_Rendering_Bounds_ShowRenderAndSimulationBounds {
+    if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Yellow,0.1)
         push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
@@ -487,7 +487,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     }
                 }
                 
-                if Global_Entity_FamiliarFollowsHero {
+                if FamiliarFollowsHero {
                     if closest_hero != nil && closest_hero_dsq > 1 {
                         mpss: f32 = 0.5
                         ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
@@ -571,7 +571,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
             
               case .Space: 
-                if Global_Rendering_ShowSpaceBounds {
+                if ShowSpaceBounds {
                     transform.upright = false
                     for volume in entity.collision.volumes {
                         push_rectangle_outline(render_group, volume, transform, Blue)
@@ -597,12 +597,13 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     }
                     
                     // TODO(viktor): Fix this with if for selected and such.
-                    when false { debug_data_block(debug_id, "Entity/HotEntity/")
+                    when false do if debug_requested(debug_id) { 
+                        debug_data_block("Entity/HotEntity/")
                         debug_record_value(cast(u32) entity.storage_index, name = "storage_index")
                         debug_record_value(entity.updatable)
                         debug_record_value(entity.p)
                         debug_record_value(entity.dp)
-                        debug_record_value(first_bitmap_from(tran_state.assets, .Body))
+                        debug_record_value(first_bitmap_from(tran_state.assets, .Body), name = "bitmap")
                         debug_record_value(entity.distance_limit)
                     }
                 }
@@ -610,7 +611,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         }
     }
     
-    when false do if Global_Rendering_EnvironmentTest { 
+    when false do if EnvironmentTest { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
