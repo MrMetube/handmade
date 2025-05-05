@@ -60,6 +60,7 @@ DebugState :: struct {
     selected_count: u32,
     selected_ids:   [64]DebugId,
     
+    alt_ui:               b32,
     last_mouse_p:         v2,
     interaction:          DebugInteraction,
     hot_interaction:      DebugInteraction,
@@ -232,7 +233,6 @@ DebugViewBlock :: struct {
     size: v2,
 }
 
-// TODO(viktor): Remove this and use the GUID
 DebugId :: struct {
     value: [2]pmm,
 }
@@ -261,8 +261,9 @@ DebugInteraction :: struct {
     id:   DebugId,
     kind: DebugInteractionKind,
     target: union {
-        ^DebugEvent, 
+        ^DebugElement, 
         ^DebugTree,
+        ^DebugEventLink,
         ^v2,
     },
 }
@@ -341,7 +342,7 @@ DebugExecutingProcess :: struct {
 @common DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
 
 ////////////////////////////////////////////////
-
+cas :: "Hello World"
 @export
 debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
@@ -398,6 +399,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     
     debug.next_hot_interaction  = {}
     if debug.hot_interaction == {} do GlobalDebugTable.edit_event = {}
+    debug.alt_ui = input.alt_down
 }
 
 debug_get_state :: proc() -> (result: ^DebugState) {
@@ -767,11 +769,14 @@ debug_draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2) {
     }
 }
 
-debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: b32) {
+debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
     if debug.hot_interaction.kind != .None {
+        // Detect Auto Interaction
         if debug.hot_interaction.kind == .AutoDetect {
-            target := debug.hot_interaction.target.(^DebugEvent)
-            switch value in target.value {
+            target := debug.hot_interaction.target.(^DebugElement)
+            event := &target.events.first.event
+            
+            switch value in event.value {
               case FrameMarker, 
                    BitmapId, SoundId, FontId,
                    BeginTimedBlock, EndTimedBlock,
@@ -787,24 +792,20 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input, alt_ui: 
               case DebugEventLink, Profile:
                 debug.hot_interaction.kind = .ToggleValue
             }
-            
-            if alt_ui {
-                debug.hot_interaction.kind = .Move
-            }
         }
         
+        // Maybe change the target
         #partial switch debug.hot_interaction.kind {
           case .Move:
             switch target in debug.hot_interaction.target {
               case ^v2:
                 // Nothing
-              case ^DebugEvent:
-                // @Cleanup
-                root_group := create_group(debug, "NewUserGroup")
-                // add_element_to_group(debug, root_group, debug.hot_interaction.target.(^DebugEvent))
-                tree := add_tree(debug, root_group, {0, 0})
+              case ^DebugEventLink:
+                group := clone_group(debug, target)
+                
+                tree := add_tree(debug, group, {0, 0})
                 debug.hot_interaction.target = &tree.p
-              case ^DebugTree:
+              case ^DebugTree, ^DebugElement:
                 unreachable()
             }
             
@@ -820,11 +821,13 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     mouse_dp := mouse_p - debug.last_mouse_p
     defer debug.last_mouse_p = mouse_p
     
-    alt_ui := input.alt_down
-    
     interaction := &debug.interaction
     if interaction.kind != .None {
         // Mouse move interaction
+        event: ^DebugEvent
+        
+        if element, ok := interaction.target.(^DebugElement); ok do event = &element.events.first.event
+        
         switch interaction.kind {
           case .None: 
             unreachable()
@@ -839,7 +842,6 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             select(debug, interaction.id)
             
           case .DragValue:
-            event := interaction.target.(^DebugEvent)
             value := &event.value.(f32)
             value^ += 0.1 * mouse_dp.x
             GlobalDebugTable.edit_event = event^
@@ -847,20 +849,20 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
           case .Resize:
             value := interaction.target.(^v2)
             value^ += mouse_dp * {1,-1}
-            value.x = max(value.x, 10)
-            value.y = max(value.y, 10)
-            if event, ok := interaction.target.(^DebugEvent); ok do GlobalDebugTable.edit_event = event^
+            value.x = max(value.x, 80)
+            value.y = max(value.y, 60)
+            if event != nil do GlobalDebugTable.edit_event = event^
             
           case .Move:
             value := interaction.target.(^v2)
             value^ += mouse_dp
-            if event, ok := interaction.target.(^DebugEvent); ok do GlobalDebugTable.edit_event = event^
+            if event != nil do GlobalDebugTable.edit_event = event^
         }
         
         // Click interaction
         for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             debug_end_click_interaction(debug, input)
-            debug_begin_click_interaction(debug, input, alt_ui)
+            debug_begin_click_interaction(debug, input)
         }
         
         if !input.mouse.left.ended_down {
@@ -870,12 +872,12 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
         debug.hot_interaction = debug.next_hot_interaction
         
         for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
-            debug_begin_click_interaction(debug, input, alt_ui)
+            debug_begin_click_interaction(debug, input)
             debug_end_click_interaction(debug, input)
         }
         
         if input.mouse.left.ended_down {
-            debug_begin_click_interaction(debug, input, alt_ui)
+            debug_begin_click_interaction(debug, input)
         }
     }
 }
@@ -902,17 +904,14 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         collapsible.expanded_always = !collapsible.expanded_always
         
       case .ToggleValue:
-        target := interaction.target.(^DebugEvent)
+        event := &interaction.target.(^DebugElement).events.first.event
         
-        #partial switch value in target.value {
+        #partial switch &value in event.value {
           case Profile:
             debug.paused = !debug.paused
           case b32:
-            // @CompilerBug 
-            // Taking ref to value in the switch will cause an infinite loop in the compiler.
-            value_ref := &target.value.(b32)
-            value_ref^ = !value_ref^
-            GlobalDebugTable.edit_event = interaction.target.(^DebugEvent)^
+            value = !value
+            GlobalDebugTable.edit_event = event^
         }
     }
 }
@@ -946,17 +945,17 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
     total_min    := layout.p + {layout.depth * 2 * layout.line_advance, -total_size.y}
     interior_min := total_min + frame
     
-    total_bounds := rectangle_min_diameter(total_min, total_size)
-    element.bounds = rectangle_min_diameter(interior_min, element.size^)
+    total_bounds := rectangle_min_dimension(total_min, total_size)
+    element.bounds = rectangle_min_dimension(interior_min, element.size^)
 
     was_resized: b32
     if .Resizable in element.flags {
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
-        push_rectangle(&layout.debug.render_group, rectangle_min_diameter(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
         
-        resize_box := rectangle_add_radius(rectangle_min_diameter(v2{element.bounds.max.x, total_min.y}, frame), 4)
+        resize_box := rectangle_min_dimension(v2{element.bounds.max.x, total_min.y}, frame * 3)
         push_rectangle(&layout.debug.render_group, resize_box, default_flat_transform(), White, sort_bias = 20_000)
         
         resize_interaction := DebugInteraction {
@@ -983,7 +982,7 @@ debug_id_from_link :: proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: 
     return result
 }
 
-debug_id_from_guid :: proc(tree: ^DebugTree, guid: ^u8) -> (result: DebugId) {
+debug_id_from_guid :: proc(tree: ^DebugTree, guid: ^DebugGUID) -> (result: DebugId) {
     result.value[0] = tree
     result.value[1] = guid
     return result
@@ -1027,7 +1026,6 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
         }
         
         group := tree.root
-        group = debug.root_group
         
         if group != nil {
             stack_push(&stack, DebugEventInterator{
@@ -1050,26 +1048,34 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                     switch &value in link.value {
                       case ^DebugEventGroup:
                         view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
-                        expanded: b32
-                        if collapsible, ok := view.kind.(DebugViewCollapsible); ok {
-                            if collapsible.expanded_always {
-                                expanded = true
-                                stack_push(&stack, DebugEventInterator{
-                                    link     = value.sentinel.next,
-                                    sentinel = &value.sentinel,
-                                })
-                                depth_delta = 1
-                            }
-                        } else {
+
+                        collapsible, ok := view.kind.(DebugViewCollapsible)
+                        if !ok {
                             view.kind = DebugViewCollapsible{}
+                            collapsible = view.kind.(DebugViewCollapsible)
                         }
                         
-                        toggle := DebugInteraction{
+                        expanded: b32
+                        if collapsible.expanded_always {
+                            expanded = true
+                            stack_push(&stack, DebugEventInterator{
+                                link     = value.sentinel.next,
+                                sentinel = &value.sentinel,
+                            })
+                            depth_delta = 1
+                        }
+                        
+                        interaction := DebugInteraction{
                             kind = .ToggleExpansion,
                             id   = debug_id_from_link(tree, link),
                         }
                         
-                        is_hot := interaction_is_hot(debug, toggle)
+                        if debug.alt_ui {
+                            interaction.kind = .Move
+                            interaction.target = link
+                        }
+                        
+                        is_hot := interaction_is_hot(debug, interaction)
                         color := is_hot ? Blue : White
                         
                         last_slash: u32
@@ -1087,7 +1093,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
                         
                         element := begin_ui_element_rectangle(&layout, &size)
-                        set_ui_element_default_interaction(&element, toggle)
+                        set_ui_element_default_interaction(&element, interaction)
                         end_ui_element(&element, false)
                         
                         debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
@@ -1104,9 +1110,10 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             move_interaction := DebugInteraction{
                 kind   = .Move,
                 target = &tree.p,
+                id = debug_id_from_link(tree, &group.sentinel)
             }
             
-            move_handle := rectangle_min_diameter(tree.p, v2{8, 8})
+            move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
             push_rectangle(&debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White, sort_bias = 10_000)
         
             if rectangle_contains(move_handle, mouse_p) {
@@ -1119,42 +1126,16 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
 draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugElement, id: DebugId, input: Input) {
     oldest := element.events.last
     if oldest != nil {
-        // @Cleanup
+        // TODO(viktor): @Cleanup
         #partial switch value in oldest.event.value {
           case Profile:
-            // Nothing
+            view := get_debug_view_for_variable(debug, id)
             
-          case: 
-            assert(value != nil)
-            
-            draw_event(layout, id, element.events.first)
-        }
-    }
-}
-
-draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStoredEvent) {
-    view := get_debug_view_for_variable(debug, id)
-    
-    if stored_event != nil {
-        event := &stored_event.event
-        
-        text: string
-        
-        autodetect_interaction := DebugInteraction{ 
-            kind = .AutoDetect, 
-            id = id, 
-            target = event,
-        }
-        
-        is_hot := interaction_is_hot(debug, autodetect_interaction)
-        color := is_hot ? Blue : White
-        
-        switch value in event.value {
-          case Profile: 
             block, ok := &view.kind.(DebugViewBlock)
             if !ok {
                 view.kind = DebugViewBlock{}
                 block = &view.kind.(DebugViewBlock)
+                block.size = {80, 60}
             }
             
             element := begin_ui_element_rectangle(layout, &block.size)
@@ -1169,6 +1150,35 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
             end_ui_element(&element, true)
             
             debug_draw_profile(debug, mouse_p, element.bounds)
+            
+          case:
+            assert(value != nil)
+            
+            draw_event(layout, id, element, element.events.first)
+        }
+    }
+}
+
+draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement, stored_event: ^DebugStoredEvent) {
+    view := get_debug_view_for_variable(debug, id)
+    
+    if stored_event != nil {
+        event := &stored_event.event
+        
+        text: string
+        
+        autodetect_interaction := DebugInteraction{ 
+            kind = .AutoDetect, 
+            id = id, 
+            target = in_element,
+        }
+        
+        is_hot := interaction_is_hot(debug, autodetect_interaction)
+        color := is_hot ? Blue : White
+        
+        switch value in event.value {
+          case Profile: 
+            unreachable()
             
           case SoundId, FontId, 
             BeginTimedBlock, EndTimedBlock,
@@ -1189,7 +1199,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, stored_event: ^DebugStore
                 
                 element := begin_ui_element_rectangle(layout, &block.size)
                 make_ui_element_resizable(&element)
-                move := DebugInteraction{ kind = .Move, id = id, target = event}
+                move := DebugInteraction{ kind = .Move, id = id, target = in_element}
                 set_ui_element_default_interaction(&element, move)
                 end_ui_element(&element, true)
                 
@@ -1301,6 +1311,30 @@ create_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEventGr
     return result
 }
 
+clone_group :: proc (debug: ^DebugState, source: ^DebugEventLink) -> (result: ^DebugEventGroup) {
+    result = create_group(debug, copy_string(&debug.arena, "Cloned"))
+    clone_event_link(debug, result, source)
+    return result
+}
+
+clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventGroup, source: ^DebugEventLink) -> (result: ^DebugEventLink) {
+    if group, ok := source.value.(^DebugEventGroup); ok {
+        result = add_group_to_group(debug, parent, group)
+    } else {
+        result = add_element_to_group(debug, parent, source.value.(^DebugElement))
+    }
+    
+    group, ok := source.value.(^DebugEventGroup)
+    if ok && group.sentinel.next != nil {
+        sub_group := create_group(debug, group.name)
+        for child := group.sentinel.next; child != &group.sentinel; child = child.next {
+            clone_event_link(debug, sub_group, child)
+        }
+    }
+    
+    return result
+}
+
 add_element_to_group :: proc(debug: ^DebugState, parent: ^DebugEventGroup, element: ^DebugElement) -> (result: ^DebugEventLink) {
     result = push(&debug.arena, DebugEventLink)
     assert(element != nil)
@@ -1379,7 +1413,7 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)
             if bitmap != nil {
                 dim := get_used_bitmap_dim(group, bitmap^, default_flat_transform(), height, V3(p, 0))
-                glyph_rect := rectangle_min_diameter(dim.p.xy, dim.size)
+                glyph_rect := rectangle_min_dimension(dim.p.xy, dim.size)
                 result = rectangle_union(result, glyph_rect)
             }
         }

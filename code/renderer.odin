@@ -133,9 +133,9 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             y := p + entry.y_axis
             size := v2{10, 10}
             
-            // draw_rectangle(target, rectangle_center_diameter(p, size), Red, clip_rect)
-            // draw_rectangle(target, rectangle_center_diameter(x, size), Red * 0.7, clip_rect)
-            // draw_rectangle(target, rectangle_center_diameter(y, size), Red * 0.7, clip_rect)
+            // draw_rectangle(target, rectangle_center_dimension(p, size), Red, clip_rect)
+            // draw_rectangle(target, rectangle_center_dimension(x, size), Red * 0.7, clip_rect)
+            // draw_rectangle(target, rectangle_center_dimension(y, size), Red * 0.7, clip_rect)
             
           case:
             panic("Unhandled Entry")

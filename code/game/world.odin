@@ -335,7 +335,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
                 
                 if ShowGroundChunkBounds {
-                    push_rectangle_outline(render_group, rectangle_center_diameter(offset.xy, ground_chunk_size), transform, Yellow)
+                    push_rectangle_outline(render_group, rectangle_center_dimension(offset.xy, ground_chunk_size), transform, Yellow)
                 }
             }
         }
@@ -396,9 +396,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Yellow,0.1)
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
-        push_rectangle_outline(render_group, rectangle_center_diameter(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Yellow,0.1)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
     }
     
     camera_p := world_difference(world, world.camera_p, sim_origin)
@@ -523,11 +523,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             switch entity.type {
               case .Nil: // NOTE(viktor): nothing
               case .Hero:
+                
+                { debug_data_block("Game/Entity")
+                    debug_record_value(&entity.facing_direction, "Hero Direction")
+                }
+                
                 cape_id  := best_match_bitmap_from(tran_state.assets, .Cape,  facing_match, facing_weights)
                 sword_id := best_match_bitmap_from(tran_state.assets, .Sword, facing_match, facing_weights)
                 body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
-                
+
                 hero_height :f32= 1.6
                 push_bitmap(render_group, cape_id,  transform, hero_height)
                 push_bitmap(render_group, body_id,  transform, hero_height)
@@ -565,9 +570,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
               case .Stairwell: 
                 transform.upright = false
-                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), transform, Blue)
+                push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue)
                 transform.offset.z += world.typical_floor_height
-                push_rectangle(render_group, rectangle_center_diameter(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
+                push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
             
               case .Space: 
                 if ShowSpaceBounds {
@@ -625,7 +630,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 for x: i32; x < lod.width; x += checker_dim.x {
                     color := map_color[it_index]
                     size := vec_cast(f32, checker_dim)
-                    draw_rectangle(lod, rectangle_min_diameter(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)})
+                    draw_rectangle(lod, rectangle_min_dimension(vec_cast(f32, x, y), size), on ? color : Black, {min(i32), max(i32)})
                     on = !on
                 }
                 row_on = !row_on
@@ -708,7 +713,7 @@ make_simple_grounded_collision :: proc(world: ^World, size: v3) -> (result: ^Ent
     // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result^ = {
-        total_volume = rectangle_center_diameter(v3{0, 0, 0.5*size.z}, size),
+        total_volume = rectangle_center_dimension(v3{0, 0, 0.5*size.z}, size),
         volumes = push(&world.arena, Rectangle3, 1),
     }
     

@@ -23,7 +23,7 @@ internal :: " -define:INTERNAL=true " // TODO(viktor): get rid of this
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 commoner :: " -custom-attribute:common "
 
-optimizations    :: false ? " -o:speed " : " -o:none "
+optimizations    :: " -o:none " when true else " -o:speed "
 PedanticGame     :: false
 PedanticPlatform :: false
 

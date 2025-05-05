@@ -480,8 +480,8 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
 entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
     outer: for a_volume in a.collision.volumes {
         for b_volume in b.collision.volumes {
-            a_rect := rectangle_center_diameter(a.p + rectangle_get_center(a_volume), rectangle_get_dimension(a_volume) + epsilon)
-            b_rect := rectangle_center_diameter(b.p + rectangle_get_center(b_volume), rectangle_get_dimension(b_volume))
+            a_rect := rectangle_center_dimension(a.p + rectangle_get_center(a_volume), rectangle_get_dimension(a_volume) + epsilon)
+            b_rect := rectangle_center_dimension(b.p + rectangle_get_center(b_volume), rectangle_get_dimension(b_volume))
             
             if rectangle_intersects(a_rect, b_rect) {
                 result = true
@@ -520,7 +520,7 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
 get_stair_ground :: proc(region: ^Entity, at_ground_point: v3) -> (result: f32) {
     assert(region.type == .Stairwell)
     
-    region_rect := rectangle_center_diameter(region.p.xy, region.walkable_dim)
+    region_rect := rectangle_center_dimension(region.p.xy, region.walkable_dim)
     bary := clamp_01(rectangle_get_barycentric(region_rect, at_ground_point.xy))
     result = region.p.z + region.walkable_height * bary.y
     

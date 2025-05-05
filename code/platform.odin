@@ -351,7 +351,6 @@ main :: proc() {
             game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
         }
         
-        
         ////////////////////////////////////////////////
         //  Hot Reload
         executable_refresh := game.begin_timed_block("executable refresh")
@@ -400,6 +399,7 @@ main :: proc() {
                     button.ended_down = old_input.mouse.buttons[index].ended_down
                     button.half_transition_count = 0
                 }
+                
                 // TODO: support mouse wheel
                 new_input.mouse.wheel = 0
                 // TODO: Do we need to update the input button on every event?

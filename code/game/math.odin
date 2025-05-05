@@ -345,14 +345,14 @@ linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
 @(require_results) rectangle_min_max  :: proc(min, max: $T) -> Rectangle(T) {
     return { min, max }
 }
-@(require_results) rectangle_min_diameter  :: proc(min, dim: $T) -> Rectangle(T) {
-    return { min, min + dim }
+@(require_results) rectangle_min_dimension  :: proc(min, dimension: $T) -> Rectangle(T) {
+    return { min, min + dimension }
 }
-@(require_results) rectangle_center_diameter :: proc(center, diameter: $T) -> Rectangle(T) {
-    return { center - (diameter / 2), center + (diameter / 2) }
+@(require_results) rectangle_center_dimension :: proc(center, dimension: $T) -> Rectangle(T) {
+    return { center - (dimension / 2), center + (dimension / 2) }
 }
-@(require_results) rectangle_center_half_diameter :: proc(center, half_diameter: $T) -> Rectangle(T) {
-    return { center - half_diameter, center + half_diameter }
+@(require_results) rectangle_center_half_dimension :: proc(center, half_dimension: $T) -> Rectangle(T) {
+    return { center - half_dimension, center + half_dimension }
 }
 
 @(require_results) inverted_infinity_rectangle :: proc($R: typeid) -> (result: R) {
@@ -375,6 +375,14 @@ linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
     result = rect
     result.min -= radius
     result.max += radius
+    return result
+}
+
+@(require_results) rectangle_scale_radius :: proc(rect: $R/Rectangle($T), factor: T) -> (result: R) {
+    result = rect
+    center := rectangle_get_center(rect)
+    result.min = lerp(center, result.min, factor)
+    result.max = lerp(center, result.max, factor)
     return result
 }
 

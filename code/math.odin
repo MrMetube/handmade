@@ -342,13 +342,13 @@ linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
 @(require_results) rectangle_min_max  :: proc(min, max: $T) -> Rectangle(T) {
     return { min, max }
 }
-@(require_results) rectangle_min_diameter  :: proc(min, dim: $T) -> Rectangle(T) {
+@(require_results) rectangle_min_dimension  :: proc(min, dim: $T) -> Rectangle(T) {
     return { min, min + dim }
 }
-@(require_results) rectangle_center_diameter :: proc(center, diameter: $T) -> Rectangle(T) {
+@(require_results) rectangle_center_dimension :: proc(center, diameter: $T) -> Rectangle(T) {
     return { center - (diameter / 2), center + (diameter / 2) }
 }
-@(require_results) rectangle_center_half_diameter :: proc(center, half_diameter: $T) -> Rectangle(T) {
+@(require_results) rectangle_center_half_dimension :: proc(center, half_diameter: $T) -> Rectangle(T) {
     return { center - half_diameter, center + half_diameter }
 }
 

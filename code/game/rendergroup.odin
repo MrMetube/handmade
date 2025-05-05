@@ -318,7 +318,7 @@ push_rectangle3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transfo
         if element != nil {
             alpha := v4{1,1,1, group.global_alpha}
             element.color = color * alpha
-            element.rect  = rectangle_center_diameter(basis.p - 0.5 * basis.scale * size.xy, basis.scale * size.xy)
+            element.rect  = rectangle_center_dimension(basis.p - 0.5 * basis.scale * size.xy, basis.scale * size.xy)
         }
     }
 }
@@ -335,12 +335,12 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     size   := rectangle_get_dimension(rec)
     
     // Top and Bottom
-    push_rectangle(group, rectangle_center_diameter(offset - {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), transform, color)
-    push_rectangle(group, rectangle_center_diameter(offset + {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset - {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset + {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), transform, color)
 
     // Left and Right
-    push_rectangle(group, rectangle_center_diameter(offset - {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
-    push_rectangle(group, rectangle_center_diameter(offset + {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset - {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
 }
 
 coordinate_system :: proc(group: ^RenderGroup, transform: Transform, color:= v4{1,1,1,1}) -> (result: ^RenderGroupEntryCoordinateSystem) {
@@ -365,7 +365,7 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, tran
             hit_point := entity.hit_points[index]
             color := hit_point.filled_amount == 0 ? Gray : Red
             // @Cleanup rect
-            push_rectangle(group, rectangle_center_diameter(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
+            push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
             health_x += spacing_between
         }
     }
@@ -379,7 +379,7 @@ get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangl
 
 get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
     camera_half_diameter := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_diameter_in_meters).xy
-    result = rectangle_center_half_diameter(v2{}, camera_half_diameter)
+    result = rectangle_center_half_dimension(v2{}, camera_half_diameter)
 
     return result
 }

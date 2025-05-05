@@ -430,6 +430,8 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     render_group: RenderGroup
     init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
     
+    update_and_render_world(&state.world, tran_state, &render_group, input)
+    
     if FountainTest { 
         ////////////////////////////////////////////////
         // NOTE(viktor): Particle system test
@@ -439,7 +441,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             load_font(tran_state.assets, font_id, false)
         } else {
             font_info := get_font_info(tran_state.assets, font_id)
-            for _ in 0..<4 {
+            for _ in 0..<2 {
                 particle := &state.particles[state.next_particle]
                 state.next_particle += 1
                 if state.next_particle >= len(state.particles) {
@@ -451,7 +453,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                 particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
                 particle.dcolor = {0,0,0,-0.2}
                 
-                nothings := "NOTHINGS"
+                nothings := "Handmade"
                 
                 r := random_choice_data(&state.effects_entropy, transmute([]u8) nothings)^
                 
@@ -485,7 +487,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                         alpha := clamp_01(0.1 * cell.density)
                         color := v4{1,1,1, alpha}
                         position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
-                        push_rectangle(&render_group, rectangle_center_diameter(position.xy, grid_scale), default_flat_transform(), color)
+                        push_rectangle_outline(&render_group, rectangle_center_dimension(position.xy, grid_scale), default_flat_transform(), color, 0.05)
                     }
                 }
             }
@@ -534,8 +536,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             }
         }             
     }
-    
-    update_and_render_world(&state.world, tran_state, &render_group, input)
     
     // TODO(viktor): We should probably pull the generation stuff, because
     // if we don't do ground chunks its a huge waste of effort
