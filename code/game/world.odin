@@ -844,7 +844,7 @@ get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) 
     return get_chunk_3(arena, world, point.chunk)
 }
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chunk {
-    timed_function()
+    //timed_function()
     ChunkSafeMargin :: 256
 
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -911,7 +911,7 @@ do_fill_ground_chunk_work : PlatformWorkQueueCallback : proc(data: pmm) {
         buffer_size := world.chunk_dim_meters.xy
         assert(buffer_size.x == buffer_size.y)
         half_dim := buffer_size * 0.5
-        render_group := init_render_group(&task.arena, tran_state.assets, 8 * Megabyte, true)
+        render_group := init_render_group(&task.arena, tran_state.assets, 32 * Megabyte, true)
         begin_render(render_group)
         
         orthographic(render_group, {bitmap.width, bitmap.height}, cast(f32) (bitmap.width-2) / buffer_size.x)

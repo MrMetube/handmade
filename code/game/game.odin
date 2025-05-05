@@ -361,7 +361,8 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
         
         { debug_data_block("Game/Profile")
-            debug_profile(update_and_render)
+            debug_thread_interval_profile()
+            debug_thread_interval_profile(update_and_render_world)
         }
         
         { debug_data_block("Renderer")

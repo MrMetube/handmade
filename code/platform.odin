@@ -37,7 +37,7 @@ LowPriorityThreads  :: 0
 
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
-DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
+DebugStorageSize     ::   2 * Gigabyte when INTERNAL else 0
 
 ////////////////////////////////////////////////
 //  Globals
@@ -263,7 +263,7 @@ main :: proc() {
     
     // TODO(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
-    push_buffer_size :: 4 * Megabyte
+    push_buffer_size :: 32 * Megabyte
     push_buffer := allocate_memory(push_buffer_size)
     
     game_memory := GameMemory{
@@ -293,7 +293,7 @@ main :: proc() {
         
         total_size := cast(uint) (PermanentStorageSize + TransientStorageSize + DebugStorageSize)
         
-        storage_ptr := cast([^]u8) win.VirtualAlloc( base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+        storage_ptr := cast([^]u8) win.VirtualAlloc(base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         state.game_memory_block = storage_ptr[:total_size]
         
         // TODO(viktor): TransientStorage needs to be broken up
@@ -353,7 +353,7 @@ main :: proc() {
         
         ////////////////////////////////////////////////
         //  Hot Reload
-        executable_refresh := game.begin_timed_block("executable refresh")
+        executable_refresh, _ := game.begin_timed_block("executable refresh")
         
         game_memory.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
@@ -370,10 +370,10 @@ main :: proc() {
             game_memory.reloaded_executable = true
         }
         
-        game.end_timed_block(executable_refresh)
+        game.end_timed_block(executable_refresh, "executable refresh")
         ////////////////////////////////////////////////   
         //  Input
-        input_processed := game.begin_timed_block("input processed")
+        input_processed, _ := game.begin_timed_block("input processed")
         
         {
             new_input.delta_time = target_seconds_per_frame
@@ -504,10 +504,10 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(input_processed)
+        game.end_timed_block(input_processed, "input processed")
         ////////////////////////////////////////////////
         //  Update and Render
-        game_updated := game.begin_timed_block("game updated")
+        game_updated, _ := game.begin_timed_block("game updated")
         
         init_render_commands(&render_commands, push_buffer_size, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
         
@@ -525,10 +525,10 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(game_updated)
+        game.end_timed_block(game_updated, "game updated")
         ////////////////////////////////////////////////
         // Sound Output
-        audio_update := game.begin_timed_block("audio update")
+        audio_update, _ := game.begin_timed_block("audio update")
         
         if !GlobalPause {
             sound_is_valid = true
@@ -609,15 +609,15 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(audio_update)
+        game.end_timed_block(audio_update, "audio update")
         ////////////////////////////////////////////////
-        debug_colation := game.begin_timed_block("debug colation")
+        debug_colation, _ := game.begin_timed_block("debug colation")
         
         game.debug_frame_end(&game_memory, new_input^, &render_commands)
         
-        game.end_timed_block(debug_colation)
+        game.end_timed_block(debug_colation, "debug colation")
         ////////////////////////////////////////////////
-        frame_end_sleep := game.begin_timed_block("frame end sleep")
+        frame_end_sleep, _ := game.begin_timed_block("frame end sleep")
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
             for seconds_elapsed_for_frame < target_seconds_per_frame && !do_next_work_queue_entry(&low_queue) {
@@ -645,9 +645,9 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(frame_end_sleep)
+        game.end_timed_block(frame_end_sleep, "frame end sleep")
         ////////////////////////////////////////////////
-        frame_display := game.begin_timed_block("frame display")
+        frame_display, _ := game.begin_timed_block("frame display")
         
         {
             window_width, window_height := get_window_dimension(window)
@@ -667,7 +667,7 @@ main :: proc() {
             flip_counter = get_wall_clock()
         }
         
-        game.end_timed_block(frame_display)
+        game.end_timed_block(frame_display, "frame display")
         ////////////////////////////////////////////////
         swap(&new_input, &old_input)
         

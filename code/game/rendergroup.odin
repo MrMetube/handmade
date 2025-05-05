@@ -94,14 +94,14 @@ EnvironmentMap :: struct {
 // TODO(viktor): Why always prefix rendergroup?
 // NOTE(viktor): RenderGroupEntry is a "compact discriminated union"
 @common
-RenderGroupEntryType :: enum {
+RenderGroupEntryType :: enum u8 {
     RenderGroupEntryClear,
     RenderGroupEntryBitmap,
     RenderGroupEntryRectangle,
     RenderGroupEntryCoordinateSystem,
 }
 @common
-RenderGroupEntryHeader :: struct {
+RenderGroupEntryHeader :: struct { // 1
     type: RenderGroupEntryType,
 }
 
@@ -111,7 +111,7 @@ RenderGroupEntryClear :: struct {
 }
 
 @common
-RenderGroupEntryBitmap :: struct {
+RenderGroupEntryBitmap :: struct { // 12
     color:  v4,
     p:      v2,
     size:   v2,

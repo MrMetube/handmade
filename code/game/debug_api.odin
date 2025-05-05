@@ -98,8 +98,13 @@ is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
 ////////////////////////////////////////////////
 // Record Insertion
 
-debug_profile :: proc(function: $P, name := #caller_expression(function), loc := #caller_location) {
-    debug_record_event(Profile{}, name, loc)
+// TODO(viktor): whats the best default?
+debug_thread_interval_profile :: proc {debug_thread_interval_profile_all, debug_thread_interval_profile_proc}
+debug_thread_interval_profile_all :: proc(loc := #caller_location) {
+    debug_thread_interval_profile_proc(update_and_render, "All", loc)
+}
+debug_thread_interval_profile_proc :: proc(function: $P, name := #caller_expression(function), loc := #caller_location) {
+    debug_record_event(ThreadIntervalProfile{}, name, loc)
 }
 
 @(deferred_none=debug_end_data_block)
@@ -121,32 +126,32 @@ debug_end_data_block :: proc() {
 // Timed Blocks and Functions
 
 @export
-begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64) {
+begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) {
     when !DebugEnabled do return result 
     
     debug_record_event(BeginTimedBlock{}, name, loc)
     
     result = hit_count
-    return result
+    return result, name
 }
 
 @export
-end_timed_block :: proc(hit_count: i64) {
+end_timed_block :: proc(hit_count: i64, name: string) {
     when !DebugEnabled do return
     // TODO(viktor): record the hit count here
-    debug_record_event(EndTimedBlock{}, "EndTimedBlock")
+    debug_record_event(EndTimedBlock{}, name)
 }
 
 @(deferred_out=end_timed_block)
-timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64) {
+timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) {
     return begin_timed_block(name, loc, hit_count)
 }
 
 
-
-@(deferred_out = end_timed_block)
-timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64) { 
-    return begin_timed_block(loc.procedure, loc, hit_count)
+// IMPORTANT TODO(viktor): reenable this and fix the end_timed_block name/guid passing
+// @(deferred_out = end_timed_block)
+timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) { 
+    return //begin_timed_block(loc.procedure, loc, hit_count)
 }
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }

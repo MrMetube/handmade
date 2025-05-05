@@ -460,6 +460,10 @@ linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
     return result
 }
 
-@(require_results) rectangle_has_area :: proc(rect: Rectangle2i) -> (result: b32) {
-    return rect.min.x < rect.max.x && rect.min.y < rect.max.y
+@(require_results) rectangle_has_area :: proc(rect: $R/Rectangle($T)) -> (result: b32) {
+    result = rect.min.x < rect.max.x && rect.min.y < rect.max.y
+    when len(T) >= 3 {
+        result &= rect.min.z < rect.max.z
+    }
+    return result
 }

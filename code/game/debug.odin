@@ -53,6 +53,7 @@ DebugState :: struct {
     element_hash: [1024]^DebugElement,
     
     root_group:    ^DebugEventGroup,
+    profile_group: ^DebugEventGroup,
     
     view_hash:     [4096]^DebugView,
     tree_sentinel: DebugTree,
@@ -83,9 +84,6 @@ DebugState :: struct {
     font:         ^Font,
     font_info:    ^FontInfo,
     
-    // @Cleanup
-    dump_depth: u32,
-    
     // Per-frame storage management
     per_frame_arena:         Arena,
     first_free_frame:        ^DebugFrame,
@@ -103,6 +101,7 @@ DebugFrameLink :: struct {
     frame_bar_lane_count: u32,
 }
 
+// TODO(viktor): Remove this its no longer used
 DebugRegion :: struct {
     event:        ^DebugEvent,
     cycle_count:  i64,
@@ -175,7 +174,7 @@ DebugValue :: union {
     
     BitmapId, SoundId, FontId,
     
-    Profile,
+    ThreadIntervalProfile,
     
     DebugEventLink,
     DebugEventGroup,
@@ -190,6 +189,7 @@ EndTimedBlock   :: struct {}
 BeginDataBlock  :: struct {}
 EndDataBlock    :: struct {}
 
+ThreadIntervalProfile :: struct {}
 Profile :: struct {}
 
 ////////////////////////////////////////////////
@@ -204,6 +204,7 @@ DebugStoredEvent :: #type SingleLinkedList(DebugStoredEventLink)
 DebugStoredEventLink :: struct {
     event:       DebugEvent,
     frame_index: u32,
+    // TODO(viktor): Store call attribution data here?
 }
 
 DebugTree :: #type LinkedList(DebugTreeData)
@@ -342,7 +343,7 @@ DebugExecutingProcess :: struct {
 @common DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
 
 ////////////////////////////////////////////////
-cas :: "Hello World"
+
 @export
 debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
@@ -366,7 +367,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
             sub_arena(&debug.per_frame_arena, &debug.arena, 20 * Kilobyte)
         }
         
-        debug.root_group = create_group(debug, "Root")
+        debug.root_group    = create_group(debug, "Root")
+        debug.profile_group = create_group(debug, "Profiles")
         
         list_init_sentinel(&debug.tree_sentinel)
         
@@ -513,8 +515,7 @@ get_element_from_event_by_hash :: proc (debug: ^DebugState, event: DebugEvent, h
     
     return result
 }
-get_element_from_event_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil) -> (result: ^DebugElement) {
-    timed_function()
+get_element_from_event_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil, create_hierarchy: b32 = true) -> (result: ^DebugElement) {
     assert(event.guid != {})
     
     hash_value := get_hash_from_guid(event.guid)
@@ -536,8 +537,10 @@ get_element_from_event_by_parent :: proc(debug: ^DebugState, event: DebugEvent, 
 
         parent := parent
         if parent == nil do parent = debug.root_group
-                
-        parent_group := get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
+        
+        parent_group := parent
+        if create_hierarchy do parent_group = get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
+        
         add_element_to_group(debug, parent_group, result)
     }
     
@@ -590,7 +593,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, nil)
             block.group = group
             
-          case Profile, DebugEventLink, DebugEventGroup,
+          case ThreadIntervalProfile, DebugEventLink, DebugEventGroup,
             BitmapId, SoundId, FontId, 
             b32, f32, u32, i32, 
             v2, v3, v4, 
@@ -606,9 +609,10 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             }
             
           case BeginTimedBlock:
-            // element := get_element_from_event(debug, event)
-            // nocheckin this blows up our arena for some reason alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
-
+            element := get_element_from_event(debug, event, parent = debug.profile_group, create_hierarchy = false)
+            alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
+            store_event(debug, event, element)
+            
           case EndTimedBlock:
             matching_block := thread.first_open_code_block
             if matching_block != nil {
@@ -616,37 +620,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
                 if events_match(&event, opening_event) {
                     defer free_open_block(thread, &thread.first_open_code_block)
                     
-                    // TODO(viktor): Reenable displaying timed_blocks
-                    when false do if matching_block.frame_index == frame_index {
-                        matching_name := ""
-                        if matching_block.parent != nil do matching_name = matching_block.parent.opening_event.guid.name
-                        
-                        when false {
-                            if matching_name == debug.scope_to_record {
-                                t_min := cast(f32) (opening_event.clock - debug.collation_frame.begin_clock)
-                                t_max := cast(f32) (event.clock - debug.collation_frame.begin_clock)
-                                
-                                threshold :: 0.001
-                                if t_max - t_min > threshold {
-                                    region := &debug.collation_frame.regions[debug.collation_frame.region_count]
-                                    debug.collation_frame.region_count += 1
-                                    
-                                    region^ = {
-                                        event       = &event,
-                                        cycle_count = event.clock - opening_event.clock,
-                                        lane_index  = cast(u32) event.thread_index,
-                                        
-                                        t_min = t_min,
-                                        t_max = t_max,
-                                    }
-                                }
-                            }
-                        } else {
-                            // TODO(viktor): nested regions
-                        }
-                    } else {
-                        // TODO(viktor): Record all frames in between and begin/end spans
-                    }
+                    store_event(debug, event, matching_block.element)
                 } else {
                     // TODO(viktor): Record span that goes to the beginning of the frame
                 }
@@ -702,67 +676,69 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     
     if ShowFramerate && debug.frames.first != nil {
         debug_push_text_line(debug, fmt.tprintf("Last Frame time: %5.4f ms", debug.frames.first.seconds_elapsed*1000))
-        debug_push_text_line(debug, fmt.tprintf("Last Frame memory footprint: %m/%m", debug.per_frame_arena.used, len(debug.per_frame_arena.storage)))
+        debug_push_text_line(debug, fmt.tprintf("Remaining Frame memory: %m", cast(u64) len(debug.per_frame_arena.storage) - debug.per_frame_arena.used))
     }
 }
 
-// @Cleanup
-debug_draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2) {
-    color := Black
-    color.a = 0.7
-    push_rectangle(&debug.render_group, rect, default_flat_transform(), color, sort_bias = 10_000)
-    
-    target_fps :: 72
-    bar_padding :: 1
-
-    lane_count: f32
-    frame_bar_scale :: 1. / 60_000_000.
-    for frame := debug.frames.last; frame != nil; frame = frame.next {
-        lane_count = max(lane_count, cast(f32) frame.frame_bar_lane_count + 1)
+debug_draw_profile :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2) {
+    debug := layout.debug
+    {
+        color := Black
+        color.a = 0.7
+        push_rectangle(&layout.debug.render_group, rect, default_flat_transform(), color, sort_bias = 10_000)
     }
     
-    frame_index: u32
-    for frame := debug.frames.last; frame != nil; frame = frame.next {
-        defer frame_index += 1
+    frame := debug.frames.first
+    // target_fps :: 72
+    // frame_span :f32= 4*1000*1000*1000 / target_fps// cast(f32) (frame.end_clock - frame.begin_clock)
+    frame_span := cast(f32) (frame.end_clock - frame.begin_clock)
+    pixel_span := rectangle_get_dimension(rect).x
+    
+    frame_scale := safe_ratio_0(pixel_span, frame_span)
+    
+    
+    lane_count :f32= 1 // cast(f32) frame.frame_bar_lane_count
+    
+    lane_height := safe_ratio_0(rectangle_get_dimension(rect).y, lane_count)
+    
+    for link := debug.profile_group.sentinel.next; link != &debug.profile_group.sentinel; link = link.next {
+        element := link.value.(^DebugElement)
         
-        when false {
-            lane_height :f32
-            if frame_count > 0 && lane_count > 0 {
-                lane_height = ((rectangle_get_dimension(rect).y / frame_count) - bar_padding) / lane_count
-            }
+        opening_event: ^DebugStoredEvent
+        for stored_event := element.events.last; stored_event != nil; stored_event = stored_event.next {
+            if stored_event.frame_index != frame.frame_index do continue 
             
-            bar_height       := lane_height * lane_count
-            bar_plus_spacing := bar_height + bar_padding
-            
-            chart_left  := rect.min.x
-            chart_top   := rect.max.y - bar_plus_spacing
-            chart_width := rectangle_get_dimension(rect).x
-            
-            scale := frame_bar_scale * chart_width
-            
-            stack_x := chart_left
-            stack_y := chart_top - bar_plus_spacing * cast(f32) frame_index
-            // @Cleanup
-            for &region in frame.regions[:frame.region_count] {
+            #partial switch value in stored_event.event.value {
+              case BeginTimedBlock:
+                opening_event = stored_event
                 
-                x_min := stack_x + scale * region.t_min
-                x_max := stack_x + scale * region.t_max
-
-                y_min := stack_y + lane_height * cast(f32) region.lane_index
-                y_max := y_min + lane_height - bar_padding
-                stack_rect := rectangle_min_max(v2{x_min, y_min}, v2{x_max, y_max})
-                
-                color_wheel := color_wheel
-                event := region.event
-                color_index := event.guid.line % len(color_wheel)
-                color := color_wheel[color_index]
-                            
-                push_rectangle(debug.render_group, stack_rect, color, sort_bias = 10_000)
-                if rectangle_contains(stack_rect, mouse_p) {
-                    hot_region = &region
+              case EndTimedBlock:
+                if opening_event != nil && opening_event.event.guid.name == stored_event.event.guid.name {
+                    closing_event := stored_event
                     
-                    text := fmt.tprintf("%s - %d cycles [%s:% 4d]", event.guid.name, region.cycle_count, event.guid.file_path, event.guid.line)
-                    debug_push_text(debug, text, mouse_p)
+                    x_min := rect.min.x + frame_scale * cast(f32) (opening_event.event.clock - frame.begin_clock)
+                    x_max := rect.min.x + frame_scale * cast(f32) (closing_event.event.clock - frame.begin_clock)
+
+                    event := closing_event.event
+                    lane_index := cast(f32) event.thread_index
+                    
+                    region_rect : Rectangle2 = rectangle_min_max(
+                        v2{x_min, rect.max.y - lane_height * (lane_index+1)},
+                        v2{x_max, rect.max.y - lane_height * (lane_index+0)},
+                    )
+                    
+                    color_wheel := color_wheel
+                    color_index := (len(event.guid.name)+10) % len(color_wheel)
+                    color := color_wheel[color_index]
+                    
+                    if rectangle_has_area(region_rect) {
+                        push_rectangle(&layout.debug.render_group, region_rect, default_flat_transform(), color, sort_bias = 10_000)
+                        
+                        if rectangle_contains(region_rect, mouse_p) {
+                            text := fmt.tprintf("%s - %d cycles [%s:% 4d]", event.guid.name, closing_event.event.clock - opening_event.event.clock, event.guid.file_path, event.guid.line)
+                            debug_push_text(debug, text, mouse_p)
+                        }
+                    }
                 }
             }
         }
@@ -783,13 +759,14 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
                    BeginDataBlock, EndDataBlock,
                    DebugEventGroup,
                    Rectangle2, Rectangle3,
+                   ThreadIntervalProfile,
                    u32, i32, v2, v3, v4:
                 debug.hot_interaction.kind = .NOP
               case b32:
                 debug.hot_interaction.kind = .ToggleValue
               case f32:
                 debug.hot_interaction.kind = .DragValue
-              case DebugEventLink, Profile:
+              case DebugEventLink:
                 debug.hot_interaction.kind = .ToggleValue
             }
         }
@@ -907,8 +884,9 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         event := &interaction.target.(^DebugElement).events.first.event
         
         #partial switch &value in event.value {
-          case Profile:
-            debug.paused = !debug.paused
+        // TODO(viktor): reenable pausing profiles
+        //   case Profile:
+        //     debug.paused = !debug.paused
           case b32:
             value = !value
             GlobalDebugTable.edit_event = event^
@@ -1100,7 +1078,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         
                       case ^DebugElement:
                         id := debug_id_from_link(tree, link)
-                        draw_element(&layout, tree, value, id, input)
+                        draw_event(&layout, id, value, value.events.first)
                     }
                 }
             }
@@ -1123,14 +1101,25 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     }
 }
 
-draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugElement, id: DebugId, input: Input) {
-    oldest := element.events.last
-    if oldest != nil {
-        // TODO(viktor): @Cleanup
-        #partial switch value in oldest.event.value {
-          case Profile:
-            view := get_debug_view_for_variable(debug, id)
-            
+draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement, stored_event: ^DebugStoredEvent) {
+    if stored_event != nil {
+        view := get_debug_view_for_variable(debug, id)
+        
+        event := &stored_event.event
+        
+        text: string
+        
+        autodetect_interaction := DebugInteraction{ 
+            kind = .AutoDetect, 
+            id = id, 
+            target = in_element,
+        }
+        
+        is_hot := interaction_is_hot(debug, autodetect_interaction)
+        color := is_hot ? Blue : White
+        
+        switch value in event.value {
+          case ThreadIntervalProfile:
             block, ok := &view.kind.(DebugViewBlock)
             if !ok {
                 view.kind = DebugViewBlock{}
@@ -1149,36 +1138,7 @@ draw_element :: proc(using layout: ^Layout, tree: ^DebugTree, element: ^DebugEle
             // set_ui_element_default_interaction(&element, pause)
             end_ui_element(&element, true)
             
-            debug_draw_profile(debug, mouse_p, element.bounds)
-            
-          case:
-            assert(value != nil)
-            
-            draw_event(layout, id, element, element.events.first)
-        }
-    }
-}
-
-draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement, stored_event: ^DebugStoredEvent) {
-    view := get_debug_view_for_variable(debug, id)
-    
-    if stored_event != nil {
-        event := &stored_event.event
-        
-        text: string
-        
-        autodetect_interaction := DebugInteraction{ 
-            kind = .AutoDetect, 
-            id = id, 
-            target = in_element,
-        }
-        
-        is_hot := interaction_is_hot(debug, autodetect_interaction)
-        color := is_hot ? Blue : White
-        
-        switch value in event.value {
-          case Profile: 
-            unreachable()
+            debug_draw_profile(layout, mouse_p, element.bounds)
             
           case SoundId, FontId, 
             BeginTimedBlock, EndTimedBlock,
