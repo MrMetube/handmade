@@ -149,7 +149,7 @@ timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i
 
 
 // IMPORTANT TODO(viktor): reenable this and fix the end_timed_block name/guid passing
-// @(deferred_out = end_timed_block)
+//@(deferred_out = end_timed_block)
 timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) { 
     return //begin_timed_block(loc.procedure, loc, hit_count)
 }

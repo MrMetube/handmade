@@ -844,7 +844,7 @@ get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) 
     return get_chunk_3(arena, world, point.chunk)
 }
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chunk {
-    //timed_function()
+    timed_function()
     ChunkSafeMargin :: 256
 
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
