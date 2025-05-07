@@ -30,7 +30,7 @@ Resolution :: [2]i32 {1920, 1080}
 // Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 60
+MonitorRefreshHz: u32 : 120
 
 HighPriorityThreads :: 10
 LowPriorityThreads  :: 0
@@ -242,11 +242,14 @@ main :: proc() {
     
     init_xInput()
     
+    // TODO(viktor): Monitor xbox controllers for being plugged in after the fact
+    xbox_controller_present: [XUSER_MAX_COUNT]b32 = true
+    
     input: [2]Input
     old_input, new_input := &input[0], &input[1]
     
     ////////////////////////////////////////////////
-    //  Memory Setup
+    // Memory Setup
     
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
@@ -353,7 +356,7 @@ main :: proc() {
         
         ////////////////////////////////////////////////
         //  Hot Reload
-        executable_refresh, _ := game.begin_timed_block("executable refresh")
+        executable_refresh := game.begin_timed_block("executable refresh")
         
         game_memory.reloaded_executable = false
         if get_last_write_time(game_dll_name) != game_dll_write_time {
@@ -370,10 +373,10 @@ main :: proc() {
             game_memory.reloaded_executable = true
         }
         
-        game.end_timed_block(executable_refresh, "executable refresh")
+        game.end_timed_block(executable_refresh)
         ////////////////////////////////////////////////   
         //  Input
-        input_processed, _ := game.begin_timed_block("input processed")
+        input_processed := game.begin_timed_block("input processed")
         
         {
             new_input.delta_time = target_seconds_per_frame
@@ -390,6 +393,9 @@ main :: proc() {
             }
             
             { // Mouse Input 
+                mouse_input := game.begin_timed_block("mouse_input")
+                defer game.end_timed_block(mouse_input)
+                
                 mouse: win.POINT
                 win.GetCursorPos(&mouse)
                 win.ScreenToClient(window, &mouse)
@@ -411,6 +417,9 @@ main :: proc() {
             }
             
             { // Keyboard Input
+                keyboard_input := game.begin_timed_block("keyboard_input")
+                defer game.end_timed_block(keyboard_input)
+                
                 old_keyboard_controller := &old_input.controllers[0]
                 new_keyboard_controller := &new_input.controllers[0]
                 new_keyboard_controller^ = {}
@@ -428,6 +437,9 @@ main :: proc() {
             // on older libraries.
             // TODO(viktor): should we poll this more frequently
             // TODO(viktor): only check connected controllers, catch messages on connect / disconnect
+            controller_input := game.begin_timed_block("controller_input")
+            defer game.end_timed_block(controller_input)
+            
             for controller_index in 0..<max_controller_count {
                 controller_state: XINPUT_STATE
                 
@@ -436,7 +448,7 @@ main :: proc() {
                 old_controller := old_input.controllers[our_controller_index]
                 new_controller := &new_input.controllers[our_controller_index]
                 
-                if XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
+                if xbox_controller_present[controller_index] && XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
                     new_controller.is_connected = true
                     new_controller.is_analog = old_controller.is_analog
                     // TODO: see if dwPacketNumber increments too rapidly
@@ -500,14 +512,15 @@ main :: proc() {
                     if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do GlobalRunning = false
                 } else {
                     new_controller.is_connected = false
+                    xbox_controller_present[controller_index] = false
                 }
             }
         }
         
-        game.end_timed_block(input_processed, "input processed")
+        game.end_timed_block(input_processed)
         ////////////////////////////////////////////////
         //  Update and Render
-        game_updated, _ := game.begin_timed_block("game updated")
+        game_updated := game.begin_timed_block("game updated")
         
         init_render_commands(&render_commands, push_buffer_size, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
         
@@ -525,10 +538,10 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(game_updated, "game updated")
+        game.end_timed_block(game_updated)
         ////////////////////////////////////////////////
         // Sound Output
-        audio_update, _ := game.begin_timed_block("audio update")
+        audio_update := game.begin_timed_block("audio update")
         
         if !GlobalPause {
             sound_is_valid = true
@@ -609,15 +622,15 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(audio_update, "audio update")
+        game.end_timed_block(audio_update)
         ////////////////////////////////////////////////
-        debug_colation, _ := game.begin_timed_block("debug colation")
+        debug_colation := game.begin_timed_block("debug colation")
         
         game.debug_frame_end(&game_memory, new_input^, &render_commands)
         
-        game.end_timed_block(debug_colation, "debug colation")
+        game.end_timed_block(debug_colation)
         ////////////////////////////////////////////////
-        frame_end_sleep, _ := game.begin_timed_block("frame end sleep")
+        frame_end_sleep := game.begin_timed_block("frame end sleep")
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
             for seconds_elapsed_for_frame < target_seconds_per_frame && !do_next_work_queue_entry(&low_queue) {
@@ -645,9 +658,9 @@ main :: proc() {
             }
         }
         
-        game.end_timed_block(frame_end_sleep, "frame end sleep")
+        game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
-        frame_display, _ := game.begin_timed_block("frame display")
+        frame_display := game.begin_timed_block("frame display")
         
         {
             window_width, window_height := get_window_dimension(window)
@@ -667,7 +680,7 @@ main :: proc() {
             flip_counter = get_wall_clock()
         }
         
-        game.end_timed_block(frame_display, "frame display")
+        game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
         swap(&new_input, &old_input)
         
@@ -766,7 +779,7 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
             
             extensions := opengl_get_extensions(context_is_modern)
             
-            if extensions.GL_EXT_texture_sRGB{
+            if extensions.GL_EXT_texture_sRGB {
                 GlDefaultTextureFormat = gl.SRGB8_ALPHA8
             }
             
@@ -964,8 +977,9 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
     gl_set_screenspace(width, height)
     
     gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
+    defer gl.BindTexture(gl.TEXTURE_2D, 0)
     
-    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory))
+    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory))
     
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
@@ -1044,7 +1058,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
             entry := cast(^RenderGroupEntryRectangle) entry_data
             
             // TODO(viktor): Why are these colors not correct?
-            // check alpha blending on software renderer!
             color := entry.color
             gl.Disable(gl.TEXTURE_2D)
             gl_rectangle(entry.rect.min, entry.rect.max, color)

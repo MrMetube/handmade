@@ -1,5 +1,7 @@
 package game
 
+import "base:runtime"
+
 DebugEnabled :: true
 
 DebugGUID :: struct {
@@ -125,32 +127,40 @@ debug_end_data_block :: proc() {
 ////////////////////////////////////////////////
 // Timed Blocks and Functions
 
+@common TimedBlockInfo :: struct {
+    hit_count: i64, 
+    name: string,
+    loc: runtime.Source_Code_Location,
+}
+
 @export
-begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) {
+begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
     when !DebugEnabled do return result 
     
     debug_record_event(BeginTimedBlock{}, name, loc)
     
-    result = hit_count
-    return result, name
+    result.hit_count = hit_count
+    result.name = name
+    result.loc = loc
+    return result
 }
 
 @export
-end_timed_block :: proc(hit_count: i64, name: string) {
+end_timed_block :: proc(info: TimedBlockInfo) {
     when !DebugEnabled do return
     // TODO(viktor): record the hit count here
-    debug_record_event(EndTimedBlock{}, name)
+    debug_record_event(EndTimedBlock{}, info.name, info.loc)
 }
 
 @(deferred_out=end_timed_block)
-timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) {
+timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
     return begin_timed_block(name, loc, hit_count)
 }
 
 
 // IMPORTANT TODO(viktor): reenable this and fix the end_timed_block name/guid passing
-//@(deferred_out = end_timed_block)
-timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: i64, out: string) { 
+// @(deferred_out = end_timed_block)
+timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) { 
     return //begin_timed_block(loc.procedure, loc, hit_count)
 }
 

@@ -74,6 +74,10 @@ DebugState :: struct {
     // Overlay rendering
     render_group: RenderGroup,
     
+    text_transform:    Transform,
+    shadow_transform:  Transform,
+    backing_transform: Transform,
+    
     font_scale:   f32,
     top_edge:     f32,
     ascent:       f32,
@@ -400,6 +404,13 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.root_group    = create_group(debug, "Root")
         debug.profile_group = create_group(debug, "Profiles")
         
+        debug.backing_transform = default_flat_transform()
+        debug.shadow_transform  = default_flat_transform()
+        debug.text_transform    = default_flat_transform()
+        debug.backing_transform.sort_bias = 100_000
+        debug.shadow_transform.sort_bias  = 200_000
+        debug.text_transform.sort_bias    = 300_000
+        
         list_init_sentinel(&debug.tree_sentinel)
         
         debug.font_scale = 0.6
@@ -633,6 +644,10 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             collation_frame.end_clock       = event.clock
             collation_frame.seconds_elapsed = value.seconds_elapsed
             
+            if collation_frame.root_profile_node != nil {
+                collation_frame.root_profile_node.node.duration = cast(u32) (collation_frame.end_clock - collation_frame.begin_clock)
+            }
+            
             if debug.paused {
                 free_frame(debug, collation_frame)
             } else {
@@ -645,10 +660,12 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             assert(debug.collation_frame != nil)
             
           case BeginDataBlock:
-            group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
-            block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, nil)
-            block.group = group
             collation_frame.data_block_count += 1
+            if default_parent_group != nil {
+                group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
+                block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, nil)
+                block.group = group
+            }
             
           case ThreadIntervalProfile, DebugEventLink, DebugEventGroup,
             BitmapId, SoundId, FontId, 
@@ -680,9 +697,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
                     collation_frame.root_profile_node = store_event(debug, {}, element)
                 }
                 parent_event = collation_frame.root_profile_node
-                
-                node := &parent_event.node
-                node.duration = cast(u32) (collation_frame.end_clock - collation_frame.begin_clock)
+                clock_basis = collation_frame.begin_clock
             }
             
             stored_event := store_event(debug, event, element)
@@ -780,7 +795,7 @@ debug_draw_profile :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, root
     {
         color := Black
         color.a = 0.7
-        push_rectangle(&layout.debug.render_group, rect, default_flat_transform(), color, sort_bias = 10_000)
+        push_rectangle(&layout.debug.render_group, rect, debug.backing_transform, color)
     }
     
     frame_span := cast(f32) (root.node.duration)
@@ -812,16 +827,16 @@ debug_draw_profile :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, root
         )
         
         color_wheel := color_wheel
-        color_index := (cast(umm) element) % len(color_wheel)
+        color_index := cast(umm) element % len(color_wheel)
         color := color_wheel[color_index]
         
         if rectangle_has_area(region_rect) {
-            push_rectangle(&layout.debug.render_group, region_rect, default_flat_transform(), color, sort_bias = 10_000)
+            push_rectangle(&layout.debug.render_group, region_rect, debug.shadow_transform, color)
             
-            // if rectangle_contains(region_rect, mouse_p) {
-            //     text := fmt.tprintf("%s - %d cycles [%s:% 4d]", event.guid.name, closing_event.event.clock - opening_event.event.clock, event.guid.file_path, event.guid.line)
-            //     debug_push_text(debug, text, mouse_p)
-            // }
+            if rectangle_contains(region_rect, mouse_p) {
+                text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
+                debug_push_text(debug, text, mouse_p)
+            }
         }
     }
 }
@@ -966,8 +981,8 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         
         #partial switch &value in event.value {
         // TODO(viktor): reenable pausing profiles
-        //   case Profile:
-        //     debug.paused = !debug.paused
+          case ThreadIntervalProfile:
+            debug.paused = !debug.paused
           case b32:
             value = !value
             GlobalDebugTable.edit_event = event^
@@ -1009,13 +1024,14 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
 
     was_resized: b32
     if .Resizable in element.flags {
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min,                                   v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), default_flat_transform(), Black, sort_bias = 10_000)
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             default_flat_transform(), Black, sort_bias = 10_000)
+        debug := element.layout.debug
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min,                                   v2{total_size.x, frame.y}),             debug.shadow_transform, Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), debug.shadow_transform, Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), debug.shadow_transform, Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             debug.shadow_transform, Black)
         
         resize_box := rectangle_min_dimension(v2{element.bounds.max.x, total_min.y}, frame * 3)
-        push_rectangle(&layout.debug.render_group, resize_box, default_flat_transform(), White, sort_bias = 20_000)
+        push_rectangle(&layout.debug.render_group, resize_box, debug.text_transform, White)
         
         resize_interaction := DebugInteraction {
             kind   = .Resize,
@@ -1173,7 +1189,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             }
             
             move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
-            push_rectangle(&debug.render_group, move_handle, default_flat_transform(), interaction_is_hot(debug, move_interaction) ? Blue : White, sort_bias = 10_000)
+            push_rectangle(&debug.render_group, move_handle, debug.text_transform, interaction_is_hot(debug, move_interaction) ? Blue : White)
         
             if rectangle_contains(move_handle, mouse_p) {
                 debug.next_hot_interaction = move_interaction
@@ -1249,8 +1265,8 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement
                 
                 bitmap_height := block.size.y
                 bitmap_offset := V3(element.bounds.min, 0)
-                push_rectangle(&debug.render_group, element.bounds, default_flat_transform(), DarkBlue , sort_bias = 10_000)
-                push_bitmap(&debug.render_group, value, default_flat_transform(), bitmap_height, bitmap_offset, use_alignment = false, sort_bias = 10_000)
+                push_rectangle(&debug.render_group, element.bounds, debug.backing_transform, DarkBlue )
+                push_bitmap(&debug.render_group, value, debug.shadow_transform, bitmap_height, bitmap_offset, use_alignment = false)
             }
         
           case DebugEventLink, DebugEventGroup,
@@ -1405,13 +1421,13 @@ add_group_to_group :: proc(debug: ^DebugState, parent: ^DebugEventGroup, child: 
 
 debug_push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = 1) {
     if debug.font != nil {
-        text_op(.Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
+        text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
     }
 }
 
 debug_measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
     if debug.font != nil {
-        result = text_op(.Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
+        result = text_op(debug, .Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
     }
     
     return result
@@ -1429,7 +1445,7 @@ TextRenderOperation:: enum {
     Measure, Draw, 
 }
 
-text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = 1) -> (result: Rectangle2) {
+text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = 1) -> (result: Rectangle2) {
     result = inverted_infinity_rectangle(Rectangle2)
     // TODO(viktor): @Robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
@@ -1450,8 +1466,8 @@ text_op :: proc(operation: TextRenderOperation, group: ^RenderGroup, font: ^Font
         switch operation {
             case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0), color, sort_bias = 10_010)
-                push_bitmap(group, bitmap_id, default_flat_transform(), height, V3(p, 0) + {2,-2,0}, {0,0,0,1}, sort_bias = 10_000)
+                push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, 0), color)
+                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, 0) + {2,-2,0}, {0,0,0,1})
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)

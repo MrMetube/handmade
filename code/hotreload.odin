@@ -11,8 +11,8 @@ game := game_stubs
 game_stubs := GameApi {
     debug_frame_end         = proc(_: ^GameMemory, _: Input, _: ^RenderCommands) {},
     frame_marker            = proc(_: f32, _ := #caller_location) {},
-    begin_timed_block       = proc(_: string, _ := #caller_location, _: i64 = 1) -> (result: i64, out:string)  { return result, out },
-    end_timed_block         = proc(_: i64,_: string) {},
+    begin_timed_block       = proc(_: string, _ := #caller_location, _: i64 = 1) -> (result: TimedBlockInfo)  { return result },
+    end_timed_block         = proc(_: TimedBlockInfo) {},
     debug_record_b32        = proc(_:^b32, _:string, _ := #caller_location) {},
     debug_begin_data_block  = proc(name: string, loc := #caller_location) {},
     debug_end_data_block    = proc() {},
@@ -110,8 +110,8 @@ game_lib: win.HMODULE
 @(private="file") OutputSoundSamples :: #type proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
 
 @(private="file") DebugFrameEnd       :: #type proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands)
-@(private="file") BeginTimedBlock     :: #type proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: i64, out: string) 
-@(private="file") EndTimedBlock       :: #type proc(hit_count: i64, name: string)
+@(private="file") BeginTimedBlock     :: #type proc(name: string, loc := #caller_location, hit_count: i64 = 1) -> (result: TimedBlockInfo) 
+@(private="file") EndTimedBlock       :: #type proc(info: TimedBlockInfo)
 @(private="file") FrameMarker         :: #type proc(seconds_elapsed: f32, loc := #caller_location)
 @(private="file") DebugRecordB32      :: #type proc(value: ^b32, name: string = #caller_expression(value), loc := #caller_location)
 @(private="file") DebugBeginDataBlock :: #type proc(name: string, loc := #caller_location)

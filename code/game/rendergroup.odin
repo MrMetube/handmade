@@ -66,9 +66,10 @@ RenderGroup :: struct {
 }
 
 Transform :: struct {
-    offset:  v3,  
-    scale:   f32,
-    upright: b32,
+    offset:    v3,  
+    scale:     f32,
+    upright:   b32,
+    sort_bias: f32,
 }
 
 Camera :: struct {
@@ -253,7 +254,7 @@ clear :: proc(group: ^RenderGroup, color: v4) {
     }
 }
 
-push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true, sort_bias:f32=0) {
+push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     if group.renders_in_background && bitmap == nil {
         load_bitmap(group.assets, id, true)
@@ -263,7 +264,7 @@ push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, hei
     
     if bitmap != nil {
         assert(bitmap.texture_handle != 0)
-        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment, sort_bias)
+        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment)
     } else {
         assert(!group.renders_in_background)
         load_bitmap(group.assets, id, false)
@@ -281,13 +282,13 @@ get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, transform: Tran
     return result
 }
 
-push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, sort_bias: f32 = 0) {
+push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
     assert(bitmap.width_over_height != 0)
     
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment)
     if used_dim.basis.valid {
         assert(bitmap.texture_handle != 0)
-        element := push_render_element(group, RenderGroupEntryBitmap, used_dim.basis.sort_key + sort_bias)
+        element := push_render_element(group, RenderGroupEntryBitmap, used_dim.basis.sort_key)
         
         if element != nil {
             alpha := v4{1,1,1, group.global_alpha}
@@ -303,17 +304,17 @@ push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transfo
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
-push_rectangle2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, sort_bias : f32 =0) {
-    push_rectangle(group, Rect3(rec, 0, 0), transform, color, sort_bias)
+push_rectangle2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
+    push_rectangle(group, Rect3(rec, 0, 0), transform, color)
 }
-push_rectangle3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color := v4{1,1,1,1}, sort_bias : f32 =0) {
+push_rectangle3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
     center := rectangle_get_center(rec)
     size   := rectangle_get_dimension(rec)
     p := center + 0.5*size
     basis := project_with_transform(group.camera, transform, p)
     
     if basis.valid {
-        element := push_render_element(group, RenderGroupEntryRectangle, basis.sort_key + sort_bias)
+        element := push_render_element(group, RenderGroupEntryRectangle, basis.sort_key)
         
         if element != nil {
             alpha := v4{1,1,1, group.global_alpha}
@@ -415,7 +416,7 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
         result.valid = true
     }
 
-    result.sort_key = 4096 * (p.z + 0.5 * (transform.upright ? 1 : 0)) - p.y
+    result.sort_key = transform.sort_bias + 4096 * (p.z + 0.5 * (transform.upright ? 1 : 0)) - p.y
     
     return result
 }
