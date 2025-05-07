@@ -116,7 +116,7 @@ InputButton :: struct {
 
 @common 
 InputController :: struct {
-    // TODO: allow outputing vibration
+    // TODO(viktor): allow outputing vibration
     is_connected: b32,
     is_analog:    b32,
 
@@ -172,7 +172,19 @@ GameMemory :: struct {
     // NOTE: REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
+    
     debug_storage:     []u8,
+    debug_table:       ^DebugTable,
+    
+    high_priority_queue: ^PlatformWorkQueue,
+    low_priority_queue:  ^PlatformWorkQueue,
+    
+    Platform_api: PlatformAPI,
+} when INTERNAL else struct {
+    reloaded_executable: b32,
+    // NOTE: REQUIRED to be cleared to zero at startup
+    permanent_storage: []u8,
+    transient_storage: []u8,
     
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
@@ -270,15 +282,16 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
 
 @export
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
-    timed_function()
-    
     Platform = memory.Platform_api
     
     when DebugEnabled {
         if memory.debug_storage == nil do return
         assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
         GlobalDebugMemory = memory
+        GlobalDebugTable = memory.debug_table
     }
+    
+    timed_function()
     
     ground_buffer_size :: 512
     
@@ -553,8 +566,8 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
 
 // NOTE: at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
-// TODO: reduce the pressure on the performance of this function by measuring
-// TODO: Allow sample offsets here for more robust platform options
+// TODO(viktor): reduce the pressure on the performance of this function by measuring
+// TODO(viktor): Allow sample offsets here for more robust platform options
 @export 
 output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
     state      := cast(^State)          raw_data(memory.permanent_storage)

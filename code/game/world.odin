@@ -523,7 +523,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             switch entity.type {
               case .Nil: // NOTE(viktor): nothing
               case .Hero:
-                
                 { debug_data_block("Game/Entity")
                     debug_record_value(&entity.facing_direction, "Hero Direction")
                 }
@@ -573,7 +572,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue)
                 transform.offset.z += world.typical_floor_height
                 push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
-            
+              
               case .Space: 
                 if ShowSpaceBounds {
                     transform.upright = false

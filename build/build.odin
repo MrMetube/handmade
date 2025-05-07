@@ -1,5 +1,3 @@
-#+feature dynamic-literals
-
 package build
 
 import "base:intrinsics"
@@ -14,13 +12,10 @@ import "core:time"
 
 import win "core:sys/windows"
 
-
-// TODO(viktor): Maybe switch to radlink?
-
 flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true " // TODO(viktor): get rid of this
-pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables  -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
+pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 commoner :: " -custom-attribute:common "
 
 optimizations    :: " -o:none " when true else " -o:speed "
@@ -37,12 +32,8 @@ main :: proc() {
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
     context.logger.lowest_level = .Info
     
-    
-    // TODO(viktor): confirm in which directory we are running, handle subdirectories
     go_rebuild_yourself()
     
-    make_directory_if_not_exists(build_dir)
-    // TODO(viktor): create gitignore if necessary
     make_directory_if_not_exists(data_dir)
     
     err := os.set_current_directory(build_dir)
@@ -107,9 +98,18 @@ build_platform :: proc() {
 
 
 
+Error :: union { os2.Error, os.Error }
 
-go_rebuild_yourself :: proc() -> (os2.Error) {
+go_rebuild_yourself :: proc() -> Error {
     log.Level_Headers = { 0..<50 = "" }
+    
+    if strings.ends_with(os.get_current_directory(), "build") do os.set_current_directory("..")
+    
+    gitignore := fmt.tprint(build_dir, `\.gitignore`, sep="")
+    if !os.exists(gitignore) {
+        contents := "*\n!*.odin"
+        os.write_entire_file(gitignore, transmute([]u8) contents)
+    }
     
     src_dir  := os2.read_directory_by_path(src_path, -1, context.allocator) or_return
     exe_time := os2.modification_time_by_path(exe_path) or_return
@@ -130,15 +130,26 @@ go_rebuild_yourself :: proc() -> (os2.Error) {
     if needs_to_rebuild {
         log.info("Rebuilding!")
         
+        pdb_path, _ := strings.replace(exe_path, ".exe", ".pdb", -1)
+        remove_if_exists(pdb_path)
+         
         old_path := fmt.tprintf("%s-old", exe_path)
-        if os.exists(old_path) do delete_all_like(old_path)
+        os.rename(exe_path, old_path) or_return
         
-        if err := os.rename(exe_path, old_path); err != nil do fmt.println(os.error_string(err))
-        run_command_or_exit(`C:\Odin\odin.exe`, "odin run ", src_path, " -out:", exe_path, debug, pedantic)
+        if !run_command(`C:\Odin\odin.exe`, "odin run ", src_path, " -out:", exe_path, debug, pedantic) {
+            os.rename(old_path, exe_path) or_return
+        }
+        
+        remove_if_exists(old_path)
         
         os.exit(0)
     }
+    
     return nil
+}
+
+remove_if_exists :: proc(path: string) {
+    if os.exists(path) do os.remove(path)
 }
 
 get_last_write_time_ :: proc(filename: string) -> (last_write_time: u64) {
@@ -170,12 +181,12 @@ delete_all_like :: proc(pattern: string) {
         assert(err == nil)
         file_path := fmt.tprintf(`.\%v`, file_name)
         
-        if err := os.remove(file_path); err != nil {
-            log.errorf("Failed to delete file: %s because of error: %s", file_path, os.error_string(os.get_last_error()))
+        if err := os.remove(file_path); err != nil && err != .FILE_NOT_FOUND {
+            log.errorf("Failed to delete file: %s because of error: %s", file_path, err)
         }
         
         if !win.FindNextFileW(handle, &find_data){
-            break
+            break 
         }
     }
 }
@@ -203,14 +214,6 @@ is_running :: proc(exe_name: string) -> (running: b32) {
     return false
 }
 
-/* TODO(viktor): cmd.exe /C also 
-    STARTF_USESHOWWINDOW :: 0x00000001
-    startup_info := win.STARTUPINFOW{
-        cb          = size_of(win.STARTUPINFOW),
-        dwFlags     = STARTF_USESHOWWINDOW,
-        wShowWindow = auto_cast win.SW_HIDE,
-    }
- */
 run_command_or_exit :: proc(program: string, args: ..string) {
     if !run_command(program, ..args) {
         os.exit(1)

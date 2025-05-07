@@ -5,6 +5,6 @@
 *.input
 *.raddbg*
 
-/code/generated*.odin
+/code/*generated*.odin
 
 lock.tmp

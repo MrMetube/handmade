@@ -24,12 +24,10 @@ import "core:fmt"
 // such in each arena?Maybe a table view of largest entries or 
 // most entries of a type.
 
-GlobalDebugTable:     DebugTable
-
 GlobalDebugMemory: ^GameMemory
+GlobalDebugTable: ^DebugTable
 
-DebugMaxEventsCount     :: 5_000_000 when DebugEnabled else 0
-DebugMaxRegionsPerFrame :: 15000     when DebugEnabled else 0
+DebugMaxEventsCount :: 5_000_000 when DebugEnabled else 0
 
 
 ////////////////////////////////////////////////
@@ -120,27 +118,35 @@ DebugThread :: #type SingleLinkedList(DebugThreadLink)
 DebugThreadLink :: struct {
     thread_index: u16,
     
-    first_free_block:      ^DebugOpenBlock,
-    first_open_code_block: ^DebugOpenBlock,
-    first_open_data_block: ^DebugOpenBlock,
+    first_free_block:       ^DebugOpenBlock,
+    first_open_timed_block: ^DebugOpenBlock,
+    first_open_data_block:  ^DebugOpenBlock,
 }
 
 DebugOpenBlock :: struct {
-    frame_index:   u32,
-    opening_event: ^DebugEvent,
-    group:         ^DebugEventGroup,
-    element:       ^DebugElement,
-
-    event:       ^DebugStoredEvent,
-    
     using next: struct #raw_union {
         parent, 
         next_free:     ^DebugOpenBlock,
     },
+    
+    frame_index: u32,
+    begin_clock: i64,
+    element: ^DebugElement,
+    
+    event: ^DebugStoredEvent,
+    
+    group: ^DebugEventGroup,
 }
 
 ////////////////////////////////////////////////
 
+#assert(size_of(DebugEventLinkData) == 16)
+#assert(size_of(DebugEventLink) == 32)
+#assert(size_of(DebugEventGroup) == 48)
+#assert(size_of(DebugValue) == 56)
+#assert(size_of(DebugGUID) == 56)
+#assert(size_of(DebugEvent) == 128) // !!!!
+#assert(size_of(DebugTable) == 1_280_000_144)
 DebugTable :: struct {
     edit_event: DebugEvent,
     
@@ -160,7 +166,7 @@ DebugEventsState :: bit_field u64 {
     array_index:  u32 | 32,
 }
 
-// TODO(viktor): compact this, we have a lot of them
+// IMPORTANT TODO(viktor): @Size Compact this, we have a lot of them
 DebugEvent :: struct {
     guid: DebugGUID,
     
@@ -661,9 +667,10 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             
           case BeginDataBlock:
             collation_frame.data_block_count += 1
+            
             if default_parent_group != nil {
+                block := alloc_open_block(debug, thread, frame_index, event.clock, &thread.first_open_data_block, nil)
                 group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
-                block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_data_block, nil)
                 block.group = group
             }
             
@@ -689,9 +696,9 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             
             parent_event: ^DebugStoredEvent
             clock_basis := collation_frame.begin_clock
-            if thread.first_open_code_block != nil && thread.first_open_code_block.event != nil {
-                clock_basis = thread.first_open_code_block.opening_event.clock
-                parent_event = thread.first_open_code_block.event
+            if thread.first_open_timed_block != nil && thread.first_open_timed_block.event != nil {
+                clock_basis = thread.first_open_timed_block.begin_clock
+                parent_event = thread.first_open_timed_block.event
             } else {
                 if collation_frame.root_profile_node == nil {
                     collation_frame.root_profile_node = store_event(debug, {}, element)
@@ -713,30 +720,27 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             node.next_same_parent = parent_event.node.first_child
             parent_event.node.first_child = stored_event
             
-            block := alloc_open_block(debug, thread, frame_index, &event, &thread.first_open_code_block, element)
+            block := alloc_open_block(debug, thread, frame_index, event.clock, &thread.first_open_timed_block, element)
             block.event = stored_event
             
           case EndTimedBlock:
-            matching_block := thread.first_open_code_block
+            matching_block := thread.first_open_timed_block
             if matching_block != nil {
-                opening_event := matching_block.opening_event
-                if events_match(&event, opening_event) {
-                    defer free_open_block(thread, &thread.first_open_code_block)
-                    
-                    node := &matching_block.event.node
-                    assert(node != nil)
-                    
-                    node.duration = cast(u32) (event.clock - opening_event.clock)
-                    node.aggregate_count += 1
-                } else {
-                    // TODO(viktor): Record span that goes to the beginning of the frame
-                }
+                assert(thread.thread_index == event.thread_index)
+                
+                assert(matching_block.event != nil)
+                node := &matching_block.event.node
+                assert(node != nil)
+                
+                node.duration = cast(u32) (event.clock - matching_block.begin_clock)
+                node.aggregate_count += 1
+                free_open_block(thread, &thread.first_open_timed_block)
             }
         }
     }
 }
 
-alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, opening_event: ^DebugEvent, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
+alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: u32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
     result = thread.first_free_block
     if result != nil {
         thread.first_free_block = result.next_free
@@ -746,9 +750,9 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
     }
     
     result ^= {
-        frame_index   = frame_index,
-        opening_event = opening_event,
-        element       = element,
+        frame_index = frame_index,
+        begin_clock = begin_clock,
+        element     = element,
     }
     
     result.parent = parent^
@@ -763,11 +767,6 @@ free_open_block :: proc(thread: ^DebugThread, first_open: ^^DebugOpenBlock) {
     thread.first_free_block = free_block
     
     first_open^ = free_block.parent
-}
-
-events_match :: proc(a, b: ^DebugEvent) -> (result: b32) {
-    result = b != nil && b.guid.name == a.guid.name
-    return result
 }
 
 ////////////////////////////////////////////////
@@ -1087,8 +1086,7 @@ get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result:
 draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     assert(debug.font_info != nil)
     
-    stack: Stack([128]DebugEventInterator)
-    // :LinkedListIteration
+    stack: Stack([64]DebugEventInterator)
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
         layout := Layout {
             debug        = debug,
@@ -1185,7 +1183,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             move_interaction := DebugInteraction{
                 kind   = .Move,
                 target = &tree.p,
-                id = debug_id_from_link(tree, &group.sentinel)
+                id = debug_id_from_link(tree, &group.sentinel),
             }
             
             move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
@@ -1386,7 +1384,10 @@ clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventGroup, source: 
     
     group, ok := source.value.(^DebugEventGroup)
     if ok && group.sentinel.next != nil {
-        sub_group := create_group(debug, group.name)
+        sub_group := push(&debug.arena, DebugEventGroup)
+        sub_group.name = group.name
+        list_init_sentinel(&sub_group.sentinel)
+        
         for child := group.sentinel.next; child != &group.sentinel; child = child.next {
             clone_event_link(debug, sub_group, child)
         }

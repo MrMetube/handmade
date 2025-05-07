@@ -1,21 +1,22 @@
 package game
 
-import "base:runtime"
+@common import "base:runtime"
 
-DebugEnabled :: true
+@common DebugEnabled :: true && INTERNAL
 
-DebugGUID :: struct {
-    name: string,
+@common DebugGUID :: struct {
+    name:      string,
     file_path: string,
+    procedure: string,
     line:   u32,
     column: u32,
-    procedure: string,
 }
 
 @export
 debug_record_b32 :: proc(value: ^b32, name: string = #caller_expression(value), loc := #caller_location) { debug_record_value(value, name, loc) }
 debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(value), loc := #caller_location) { 
-    guid := DebugGUID{name, loc.file_path, cast(u32) loc.line, cast(u32) loc.column, loc.procedure}
+    if GlobalDebugTable == nil do return
+    guid := DebugGUID{name, loc.file_path, loc.procedure, cast(u32) loc.line, cast(u32) loc.column}
     
     event := debug_record_event(nil, guid)
     if GlobalDebugTable.edit_event.guid == guid {
@@ -148,6 +149,7 @@ begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_co
 @export
 end_timed_block :: proc(info: TimedBlockInfo) {
     when !DebugEnabled do return
+    if info == {} do return
     // TODO(viktor): record the hit count here
     debug_record_event(EndTimedBlock{}, info.name, info.loc)
 }
@@ -166,10 +168,11 @@ timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> 
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }
 debug_record_event_loc :: proc(value: DebugValue, name: string, loc:= #caller_location) -> (result: ^DebugEvent) {
-    return debug_record_event_guid(value, { name, loc.file_path, cast(u32) loc.line, cast(u32) loc.column, loc.procedure })
+    return debug_record_event_guid(value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
 }
 debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
+    if GlobalDebugTable == nil do return
     
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
     result = &GlobalDebugTable.events[state.array_index][state.events_index]

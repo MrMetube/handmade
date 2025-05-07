@@ -3,7 +3,6 @@ package main
 import "core:fmt"
 import "core:os" // TODO(viktor): remove this
 import win "core:sys/windows"
-import gl "vendor:OpenGL"
 
 /*
     TODO(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
@@ -59,14 +58,18 @@ RenderType :: enum {
 
 GlobalRenderType: RenderType
 
-GlobalDebugShowCursor: b32
+GlobalDebugShowCursor: b32 = INTERNAL
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
 GlobalBlitTextureHandle: u32
 BlitVertexArrayObject: u32
 BlitVertexBufferObject, BlitTextureCoordinatesVbo: u32
 
-// Uniforms: gl.Uniforms
+
+GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
+_GlobalDebugTable: DebugTable
+DebugTableSize :: 1_280_000_144
+DebugTable :: struct {} // Definition in game/debug.odin
 
 ////////////////////////////////////////////////
 // Types
@@ -127,10 +130,6 @@ main :: proc() {
             // hIcon =,
         }
         
-        when INTERNAL {
-            GlobalDebugShowCursor = true
-        }
-        
         resize_DIB_section(&GlobalBackBuffer, Resolution.x, Resolution.y)
         
         if win.RegisterClassW(&window_class) == 0 {
@@ -168,7 +167,7 @@ main :: proc() {
     gl_context := init_opengl(window_dc)
     
     for &info in low_infos {
-        info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &gl_attribs[0])
+        info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &GlAttribs[0])
         assert(info.gl_context != nil)
         info.window_dc  = window_dc
     }
@@ -201,7 +200,7 @@ main :: proc() {
     ////////////////////////////////////////////////
     //  Video Setup
     
-    // TODO: how do we reliably query this on windows?
+    // TODO(viktor): how do we reliably query this on windows?
     game_update_hz: f32
     {
         when false {
@@ -226,7 +225,7 @@ main :: proc() {
     sound_output.num_channels       = 2
     sound_output.bytes_per_sample   = size_of(Sample)
     sound_output.buffer_size        = sound_output.samples_per_second * sound_output.bytes_per_sample
-    // TODO: actually computre this variance and set a reasonable value
+    // TODO(viktor): actually computre this variance and set a reasonable value
     sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32)sound_output.samples_per_second * cast(f32)sound_output.bytes_per_sample)
     
     init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
@@ -323,6 +322,8 @@ main :: proc() {
         game_memory.transient_storage = storage_ptr[PermanentStorageSize :][: TransientStorageSize]
         game_memory.debug_storage     = storage_ptr[TransientStorageSize :][: DebugStorageSize]
         
+        game_memory.debug_table = cast(^DebugTable) allocate_memory(DebugTableSize)
+        
         when INTERNAL {
             game_memory.Platform_api.debug = {
                 read_entire_file       = DEBUG_read_entire_file,
@@ -366,7 +367,7 @@ main :: proc() {
             assert(high_queue.completion_count == high_queue.completion_goal)
             assert(low_queue.completion_count  == low_queue.completion_goal)
             
-            // TODO: if this is too slow the audio and the whole game will lag
+            // TODO(viktor): if this is too slow the audio and the whole game will lag
             unload_game_lib()
             game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
             
@@ -406,9 +407,9 @@ main :: proc() {
                     button.half_transition_count = 0
                 }
                 
-                // TODO: support mouse wheel
+                // TODO(viktor): support mouse wheel
                 new_input.mouse.wheel = 0
-                // TODO: Do we need to update the input button on every event?
+                // TODO(viktor): Do we need to update the input button on every event?
                 process_win_keyboard_message(&new_input.mouse.left,   is_down(win.VK_LBUTTON))
                 process_win_keyboard_message(&new_input.mouse.right,  is_down(win.VK_RBUTTON))
                 process_win_keyboard_message(&new_input.mouse.middle, is_down(win.VK_MBUTTON))
@@ -451,7 +452,7 @@ main :: proc() {
                 if xbox_controller_present[controller_index] && XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
                     new_controller.is_connected = true
                     new_controller.is_analog = old_controller.is_analog
-                    // TODO: see if dwPacketNumber increments too rapidly
+                    // TODO(viktor): see if dwPacketNumber increments too rapidly
                     pad := controller_state.Gamepad
                     
                     process_Xinput_button :: proc(new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
@@ -487,8 +488,8 @@ main :: proc() {
                         return 0
                     }
                     
-                    // TODO: right stick, triggers
-                    // TODO: This is a square deadzone, check XInput to
+                    // TODO(viktor): right stick, triggers
+                    // TODO(viktor): This is a square deadzone, check XInput to
                     // verify that the deadzone is "round" and show how to do
                     // round deadzone processing.
                     new_controller.stick_average = {
@@ -497,7 +498,7 @@ main :: proc() {
                     }
                     if new_controller.stick_average != {0,0} do new_controller.is_analog = true
                     
-                    // TODO: what if we don't want to override the stick
+                    // TODO(viktor): what if we don't want to override the stick
                     if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) { new_controller.stick_average.x =  1; new_controller.is_analog = false }
                     if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
                     if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
@@ -692,223 +693,6 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-OpenGlInfo :: struct {
-    modern_context: b32,
-    
-    vendor, renderer, version, shading_language_version, extensions: cstring,
-    GL_EXT_texture_sRGB: b32,
-    GL_EXT_framebuffer_sRGB: b32,
-}
-
-opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
-    result.modern_context = modern_context
-    
-    result.vendor     = gl.GetString(gl.VENDOR)
-    result.renderer   = gl.GetString(gl.RENDERER)
-    result.version    = gl.GetString(gl.VERSION)
-    result.extensions = gl.GetString(gl.EXTENSIONS)
-    
-    if modern_context {
-        result.shading_language_version = gl.GetString(gl.SHADING_LANGUAGE_VERSION)
-    } else {
-        result.shading_language_version = "(none)"
-    }
-    
-    len: u32
-    extensions := cast(string) result.extensions
-    for extensions != "" {
-        len += 1
-        if extensions[len] == ' ' {
-            part      := extensions[:len]
-            extensions = extensions[len+1:]
-            len = 0
-            if      "GL_EXT_texture_sRGB"     == part do result.GL_EXT_texture_sRGB = true
-            else if "GL_EXT_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
-        }
-    }
-    
-    return result
-}
-
-GlDefaultTextureFormat :i32= gl.RGBA8
-
-GlMajorVersion :: 4
-GlMinorVersion :: 6
-
-gl_attribs := [?]i32{
-    win.WGL_CONTEXT_MAJOR_VERSION_ARB, GlMajorVersion,
-    win.WGL_CONTEXT_MINOR_VERSION_ARB, GlMinorVersion,
-    
-    win.WGL_CONTEXT_FLAGS_ARB, (win.WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
-    
-    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-    0,
-}
-
-OpenGLSupportsSRGBFrameBuffer: b32
-
-glBegin: proc(_: u32)
-glEnd: proc()
-glMatrixMode: proc(_: i32)
-glLoadIdentity: proc()
-glLoadMatrixf: proc(_:[^]f32)
-glTexCoord2f: proc(_,_:f32)
-glVertex2f: proc(_,_:f32)
-glColor4f: proc(_,_,_,_:f32)
-glTexEnvi: proc(target: u32, pname: u32, param: u32)
-
-init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
-    load_wgl_extensions()
-    
-    if win.wglCreateContextAttribsARB != nil {
-        set_pixel_format(dc)
-        gl_context = win.wglCreateContextAttribsARB(dc, nil, raw_data(gl_attribs[:]))
-    }
-    
-    context_is_modern :b32= true
-    if gl_context == nil {
-        context_is_modern = false
-        gl_context = win.wglCreateContext(dc)
-    }
-    
-    if gl_context != nil {
-        if win.wglMakeCurrent(dc, gl_context) {
-            
-            // OpenGLInit
-            gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
-            
-            extensions := opengl_get_extensions(context_is_modern)
-            
-            if extensions.GL_EXT_texture_sRGB {
-                GlDefaultTextureFormat = gl.SRGB8_ALPHA8
-            }
-            
-            if extensions.GL_EXT_framebuffer_sRGB {
-                gl.Enable(gl.FRAMEBUFFER_SRGB)
-            }
-            
-            gl.GenTextures(1, &GlobalBlitTextureHandle)
-            
-            if win.wglSwapIntervalEXT != nil {
-                win.wglSwapIntervalEXT(1)
-            }
-        }
-    }
-    
-    return gl_context
-}
-
-load_wgl_extensions :: proc() {
-    window_class := win.WNDCLASSW {
-        lpfnWndProc = win.DefWindowProcW,
-        hInstance = auto_cast win.GetModuleHandleW(nil),
-        lpszClassName = win.L("HandmadeWGLLoader"),
-    }
-    
-    if win.RegisterClassW(&window_class) != 0 {
-        window := win.CreateWindowExW(
-            0,
-            window_class.lpszClassName,
-            win.L("Handmade Hero"),
-            0,
-            win.CW_USEDEFAULT,
-            win.CW_USEDEFAULT,
-            win.CW_USEDEFAULT,
-            win.CW_USEDEFAULT,
-            nil,
-            nil,
-            window_class.hInstance,
-            nil,
-        )
-        defer win.DestroyWindow(window)
-        
-        dummy_dc := win.GetDC(window)
-        defer win.ReleaseDC(window, dummy_dc)
-        
-        set_pixel_format(dummy_dc)
-        
-        dummy_context := win.wglCreateContext(dummy_dc)
-        defer win.wglDeleteContext(dummy_context)
-        
-        if win.wglMakeCurrent(dummy_dc, dummy_context) {
-            defer win.wglMakeCurrent(nil, nil)
-            
-            win.wglChoosePixelFormatARB    = auto_cast win.wglGetProcAddress("wglChoosePixelFormatARB")
-            win.wglCreateContextAttribsARB = auto_cast win.wglGetProcAddress("wglCreateContextAttribsARB")
-            win.wglSwapIntervalEXT         = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
-            win.wglGetExtensionsStringARB  = auto_cast win.wglGetProcAddress("wglGetExtensionsStringARB")
-            
-            if win.wglGetExtensionsStringARB != nil {
-                len: u32
-                extensions := cast(string) win.wglGetExtensionsStringARB(dummy_dc)
-                for extensions != "" {
-                    len += 1
-                    if extensions[len] == ' ' {
-                        part      := extensions[:len]
-                        extensions = extensions[len+1:]
-                        len = 0
-                        if "WGL_EXT_framebuffer_sRGB" == part do OpenGLSupportsSRGBFrameBuffer = true
-                    }
-                }
-            }
-            
-            win.gl_set_proc_address(&glBegin, "glBegin")
-            win.gl_set_proc_address(&glEnd, "glEnd")
-            win.gl_set_proc_address(&glMatrixMode,   "glMatrixMode")
-            win.gl_set_proc_address(&glLoadIdentity, "glLoadIdentity")
-            win.gl_set_proc_address(&glLoadMatrixf, "glLoadMatrixf")
-            win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
-            win.gl_set_proc_address(&glVertex2f, "glVertex2f")
-            win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
-            win.gl_set_proc_address(&glColor4f, "glColor4f")
-        }
-    }
-}
-
-set_pixel_format :: proc(dc: win.HDC) {
-    suggested_pixel_format: win.PIXELFORMATDESCRIPTOR
-    suggested_pixel_format_index: i32
-    extended_pick: u32
-    
-    if win.wglChoosePixelFormatARB != nil {
-        TRUE :: 1
-        
-        int_attribs := [?]i32{
-            win.WGL_DRAW_TO_WINDOW_ARB, TRUE,
-            win.WGL_ACCELERATION_ARB, win.WGL_FULL_ACCELERATION_ARB,
-            win.WGL_SUPPORT_OPENGL_ARB, TRUE,
-            win.WGL_DOUBLE_BUFFER_ARB, TRUE,
-            win.WGL_PIXEL_TYPE_ARB, win.WGL_TYPE_RGBA_ARB,
-            win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
-            0,
-        }
-        
-        if !OpenGLSupportsSRGBFrameBuffer {
-            int_attribs[10] = 0 // @Volatile Coupled to the ordering of the attribs itself
-        }
-        
-        win.wglChoosePixelFormatARB(dc, raw_data(int_attribs[:]), nil, 1, &suggested_pixel_format_index, &extended_pick)
-    }
-    
-    if extended_pick == 0 {
-        desired_pixel_format := win.PIXELFORMATDESCRIPTOR{
-            nSize      = size_of(win.PIXELFORMATDESCRIPTOR),
-            nVersion   = 1,
-            dwFlags    = win.PFD_SUPPORT_OPENGL | win.PFD_DRAW_TO_WINDOW | win.PFD_DOUBLEBUFFER,
-            iPixelType = win.PFD_TYPE_RGBA,
-            cColorBits = 32,
-            cAlphaBits = 8,
-            iLayerType = win.PFD_MAIN_PLANE,
-        }
-        
-        suggested_pixel_format_index = win.ChoosePixelFormat(dc, &desired_pixel_format)
-    }
-    
-    win.DescribePixelFormat(dc, suggested_pixel_format_index, size_of(suggested_pixel_format), &suggested_pixel_format)
-    win.SetPixelFormat(dc, suggested_pixel_format_index, &suggested_pixel_format)
-    
-}
-
 render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_memory: pmm) {
     sort_render_elements(commands, sort_memory)
     
@@ -958,8 +742,8 @@ display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, wi
     win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height,             win.BLACKNESS )
     win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_height, win.BLACKNESS )
     
-    // TODO: aspect ratio correction
-    // TODO: stretch to fill window once we are fine with our renderer
+    // TODO(viktor): aspect ratio correction
+    // TODO(viktor): stretch to fill window once we are fine with our renderer
     win.StretchDIBits(
         device_context,
         offset.x, offset.y, buffer.width, buffer.height,
@@ -971,192 +755,8 @@ display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, wi
     )
 }
 
-display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: win.HDC) {
-    gl.Viewport(0, 0, width, height)
-    
-    gl_set_screenspace(width, height)
-    
-    gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
-    defer gl.BindTexture(gl.TEXTURE_2D, 0)
-    
-    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory))
-    
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
-    glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
-    
-    gl.Enable(gl.TEXTURE_2D)
-
-    gl.ClearColor(1, 0, 1, 0)
-    gl.Clear(gl.COLOR_BUFFER_BIT)
-
-    glMatrixMode(gl.TEXTURE)
-    glLoadIdentity()
-
-    glMatrixMode(gl.MODELVIEW)
-    glLoadIdentity()
-
-    glMatrixMode(gl.PROJECTION)
-    glLoadIdentity()
-
-    glBegin(gl.TRIANGLES)
-    
-    P :f32= 1
-    
-    // NOTE(viktor): Lower triangle
-    glTexCoord2f(0.0, 0.0)
-    glVertex2f(-P, -P)
-    
-    glTexCoord2f(1.0, 0.0)
-    glVertex2f(P, -P)
-    
-    glTexCoord2f(1.0, 1.0)
-    glVertex2f(P, P)
-    
-    // NOTE(viktor): Upper triangle
-    glTexCoord2f(0.0, 0.0)
-    glVertex2f(-P, -P)
-    
-    glTexCoord2f(1.0, 1.0)
-    glVertex2f(P, P)
-    
-    glTexCoord2f(0.0, 1.0)
-    glVertex2f(-P, P)
-    
-    glEnd()
-    
-    win.SwapBuffers(device_context)
-}
-
-gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_height: i32) {
-    gl.Viewport(0, 0, commands.width, commands.height)
-    gl_set_screenspace(window_width, window_height)
-    
-    gl.Enable(gl.TEXTURE_2D)
-    gl.Enable(gl.BLEND)
-    gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-    
-    // :PointerArithmetic
-    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:commands.push_buffer_element_count]
-    
-    for sort_entry, i in sort_entries {
-        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.push_buffer_offset]
-        //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.push_buffer_offset + size_of(RenderGroupEntryHeader)]
-        
-        switch header.type {
-          case .RenderGroupEntryClear:
-            entry := cast(^RenderGroupEntryClear) entry_data
-            
-            color := entry.color
-            gl.ClearColor(color.r, color.g, color.b, color.a)
-            gl.Clear(gl.COLOR_BUFFER_BIT)
-            
-          case .RenderGroupEntryRectangle:
-            entry := cast(^RenderGroupEntryRectangle) entry_data
-            
-            // TODO(viktor): Why are these colors not correct?
-            color := entry.color
-            gl.Disable(gl.TEXTURE_2D)
-            gl_rectangle(entry.rect.min, entry.rect.max, color)
-            gl.Enable(gl.TEXTURE_2D)
-            
-          case .RenderGroupEntryBitmap:
-            entry := cast(^RenderGroupEntryBitmap) entry_data
-            
-            bitmap := entry.bitmap
-            assert(bitmap.texture_handle != 0)
-            
-            gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
-            
-            min := entry.p
-            max := min + entry.size
-            gl_rectangle(min, max, entry.color)
-            
-          case .RenderGroupEntryCoordinateSystem:
-          case:
-            panic("Unhandled Entry")
-        }
-    }
-}
-
-gl_rectangle :: proc(min, max: v2, color: v4) {
-    glBegin(gl.TRIANGLES)
-    
-    glColor4f(color.r, color.g, color.b, color.a)
-    
-    // NOTE(viktor): Lower triangle
-    glTexCoord2f(0.0, 0.0)
-    glVertex2f(min.x, min.y)
-
-    glTexCoord2f(1.0, 0.0)
-    glVertex2f(max.x, min.y)
-
-    glTexCoord2f(1.0, 1.0)
-    glVertex2f(max.x, max.y)
-
-    // NOTE(viktor): Upper triangle
-    glTexCoord2f(0.0, 0.0)
-    glVertex2f(min.x, min.y)
-
-    glTexCoord2f(1.0, 1.0)
-    glVertex2f(max.x, max.y)
-
-    glTexCoord2f(0.0, 1.0)
-    glVertex2f(min.x, max.y)
-    glEnd()
-}
-
-gl_set_screenspace :: proc(width, height: i32) {
-    a := safe_ratio_1(2, cast(f32) width)
-    b := safe_ratio_1(2, cast(f32) height)
-    
-    glMatrixMode(gl.TEXTURE)
-    glLoadIdentity()
-    
-    glMatrixMode(gl.MODELVIEW)
-    glLoadIdentity()
-    
-    transform := m4 {
-        a, 0, 0, -1,
-        0, b, 0, -1,
-        0, 0, 1,  0,
-        0, 0, 0,  1,
-    }
-    
-    glMatrixMode(gl.PROJECTION)
-    glLoadMatrixf(&transform[0,0])
-}
-
 ////////////////////////////////////////////////
 // Exports to the game
-
-allocate_texture : PlatformAllocateTexture = proc(width, height: i32, data: pmm) -> (result: u32) {
-    handle: u32
-    gl.GenTextures(1, &handle)
-    
-    gl.BindTexture(gl.TEXTURE_2D, handle)
-    
-    gl.TexImage2D(gl.TEXTURE_2D, 0, GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
-    
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
-    glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
-    
-    gl.BindTexture(gl.TEXTURE_2D, 0)
-    
-    result = handle
-    return result
-}
-
-deallocate_texture : PlatformDeallocateTexture : proc(texture: u32) {
-    handle := texture
-    gl.DeleteTextures(1, &handle)
-}
 
 allocate_memory : PlatformAllocateMemory : proc(#any_int size: u64) -> (result: pmm) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
@@ -1193,7 +793,7 @@ begin_recording_input :: proc(state: ^PlatformState, input_recording_index: i32)
     if replay_buffer.memory_block != nil {
         state.input_record_index = input_recording_index
         state.input_record_handle = replay_buffer.filehandle
-        // TODO: this is slow on the first start
+        // TODO(viktor): this is slow on the first start
         file_position := cast(win.LARGE_INTEGER) len(state.game_memory_block)
         win.SetFilePointerEx(state.input_record_handle, file_position, nil, win.FILE_BEGIN)
         
@@ -1250,8 +850,8 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
     region1_size, region2_size: win.DWORD
     
     if result := GlobalSoundBuffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-        // TODO: assert that region1/2_size is valid
-        // TODO: Collapse these two loops
+        // TODO(viktor): assert that region1/2_size is valid
+        // TODO(viktor): Collapse these two loops
         
         dest_samples := cast([^]Sample) region1
         region1_sample_count := region1_size / sound_output.bytes_per_sample
@@ -1281,7 +881,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
         
         GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
-        return // TODO: Logging
+        return // TODO(viktor): Logging
     }
 }
 
@@ -1290,9 +890,9 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
     region1_size, region2_size: win.DWORD
     
     if result := GlobalSoundBuffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-        // TODO: assert that region1/2_size is valid
-        // TODO: Collapse these two loops
-        // TODO: Copy pasta of fill_sound_buffer
+        // TODO(viktor): assert that region1/2_size is valid
+        // TODO(viktor): Collapse these two loops
+        // TODO(viktor): Copy pasta of fill_sound_buffer
         
         dest_samples := cast([^]u8) region1
         for index in 0..<region1_size {
@@ -1308,7 +908,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
         
         GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
-        return // TODO: Logging
+        return // TODO(viktor): @Logging
     }
 }
 
@@ -1324,7 +924,7 @@ get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32)
 }
 
 resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i32) {
-    // TODO: Bulletproof this.
+    // TODO(viktor): Bulletproof this.
     // Maybe don't free first, free after, then free first if that fails.
     if buffer.memory != nil {
         win.VirtualFree(raw_data(buffer.memory), 0, win.MEM_RELEASE)
@@ -1354,7 +954,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]
     
-    // TODO: probably clear this to black
+    // TODO(viktor): probably clear this to black
 }
 
 toggle_fullscreen :: proc(window: win.HWND) {
@@ -1391,9 +991,9 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     switch message {
       case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
         assert_contextless(false, "keyboard-event came in through a non-dispatched event")
-      case win.WM_CLOSE: // TODO: Handle this with a message to the user
+      case win.WM_CLOSE: // TODO(viktor): Handle this with a message to the user
         GlobalRunning = false
-      case win.WM_DESTROY: // TODO: handle this as an error - recreate window?
+      case win.WM_DESTROY: // TODO(viktor): handle this as an error - recreate window?
         GlobalRunning = false
       case win.WM_ACTIVATEAPP:
         LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
@@ -1414,9 +1014,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         }
         win.EndPaint(window, &paint)
       case win.WM_SETCURSOR: 
-        if GlobalDebugShowCursor {
-            // NOTE(viktor): Don't do anything
-        } else {
+        if !GlobalDebugShowCursor {
             win.SetCursor(nil)
         }
       case:

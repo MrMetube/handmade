@@ -1,5 +1,6 @@
 package game
 
+@(common="file")
 import "base:intrinsics"
 import "base:builtin"
 import "core:math"
@@ -9,7 +10,6 @@ import "core:simd"
 // ---------------------- Types
 // ---------------------- ---------------------- ----------------------
 
-// TODO(viktor): @common_file
 v2 :: [2]f32
 v3 :: [3]f32
 v4 :: [4]f32
