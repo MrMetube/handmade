@@ -233,6 +233,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena, ground_buffer_size: f32)
 }
 
 update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
+    timed_function()
+    
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
 

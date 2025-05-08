@@ -358,45 +358,43 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     { debug_data_block("Game")
         debug_record_value(&ShowFramerate)
-        { debug_data_block("Game/Assets")
+        { debug_data_block("Assets")
             debug_record_value(&LoadAssetsSingleThreaded)
         }
         
-        { debug_data_block("Game/Audio")
+        { debug_data_block("Audio")
             debug_record_value(&SoundPanningWithMouse)
             debug_record_value(&SoundPitchingWithMouse)
         }
         
-        { debug_data_block("Game/Entity")
+        { debug_data_block("Entity")
             debug_record_value(&HeroJumping)
             debug_record_value(&FamiliarFollowsHero)
         }
         
-        { debug_data_block("Game/Particles")
+        { debug_data_block("Particles")
             debug_record_value(&FountainTest)
             debug_record_value(&ShowGrid)
         }
         
-        { debug_data_block("Game/Profile")
-            debug_thread_interval_profile()
-            debug_thread_interval_profile(update_and_render_world)
+    }
+    { debug_data_block("Profile")
+        debug_thread_interval_profile()
+    }
+    { debug_data_block("Renderer")
+        debug_record_value(&EnvironmentTest)
+        debug_record_value(&RenderSingleThreaded)
+        debug_record_value(&ShowSpaceBounds)
+        debug_record_value(&ShowRenderAndSimulationBounds)
+        
+        { debug_data_block("Camera")
+            debug_record_value(&UseDebugCamera)
+            debug_record_value(&DebugCameraDistance)
         }
         
-        { debug_data_block("Renderer")
-            debug_record_value(&EnvironmentTest)
-            debug_record_value(&RenderSingleThreaded)
-            debug_record_value(&ShowSpaceBounds)
-            debug_record_value(&ShowRenderAndSimulationBounds)
-            
-            { debug_data_block("Renderer/Camera")
-                debug_record_value(&UseDebugCamera)
-                debug_record_value(&DebugCameraDistance)
-            }
-            
-            { debug_data_block("Renderer/GroundChunks")
-                debug_record_value(&RenderGroundChunks)
-                debug_record_value(&ShowGroundChunkBounds)
-            }
+        { debug_data_block("GroundChunks")
+            debug_record_value(&RenderGroundChunks)
+            debug_record_value(&ShowGroundChunkBounds)
         }
     }
     

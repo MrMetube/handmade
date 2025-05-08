@@ -36,7 +36,7 @@ LowPriorityThreads  :: 0
 
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
-DebugStorageSize     ::   2 * Gigabyte when INTERNAL else 0
+DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
 ////////////////////////////////////////////////
 //  Globals
@@ -681,7 +681,9 @@ main :: proc() {
                 sort_memory = allocate_memory(needed_sort_memory_size)
             }
             
+            render := game.begin_timed_block("render")
             render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_memory)
+            game.end_timed_block(render)
             
             win.ReleaseDC(window, device_context)
             
