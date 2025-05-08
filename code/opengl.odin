@@ -19,8 +19,6 @@ GlAttribs := [?]i32{
     0,
 }
 
-OpenGLSupportsSRGBFrameBuffer: b32
-
 glBegin: proc(_: u32)
 glEnd: proc()
 glMatrixMode: proc(_: i32)
@@ -42,10 +40,10 @@ OpenGlInfo :: struct {
 ////////////////////////////////////////////////
 
 init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
-    load_wgl_extensions()
+    framebuffer_supports_srgb := load_wgl_extensions()
     
     if win.wglCreateContextAttribsARB != nil {
-        set_pixel_format(dc)
+        set_pixel_format(dc, framebuffer_supports_srgb)
         gl_context = win.wglCreateContextAttribsARB(dc, nil, raw_data(GlAttribs[:]))
     }
     
@@ -63,11 +61,11 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
             
             extensions := opengl_get_extensions(context_is_modern)
             
-            if extensions.GL_EXT_texture_sRGB {
+            // NOTE(viktor): If we believe we can do full sRGB on the texture side
+            // and the framebuffer side, then we can enable it, otherwise it is
+            // safer for us to pass it straight through.
+            if extensions.GL_EXT_texture_sRGB && framebuffer_supports_srgb {
                 GlDefaultTextureFormat = gl.SRGB8_ALPHA8
-            }
-            
-            if extensions.GL_EXT_framebuffer_sRGB {
                 gl.Enable(gl.FRAMEBUFFER_SRGB)
             }
             
@@ -82,7 +80,7 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
     return gl_context
 }
 
-load_wgl_extensions :: proc() {
+load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
     window_class := win.WNDCLASSW {
         lpfnWndProc = win.DefWindowProcW,
         hInstance = auto_cast win.GetModuleHandleW(nil),
@@ -109,7 +107,7 @@ load_wgl_extensions :: proc() {
         dummy_dc := win.GetDC(window)
         defer win.ReleaseDC(window, dummy_dc)
         
-        set_pixel_format(dummy_dc)
+        set_pixel_format(dummy_dc, false)
         
         dummy_context := win.wglCreateContext(dummy_dc)
         defer win.wglDeleteContext(dummy_context)
@@ -131,7 +129,8 @@ load_wgl_extensions :: proc() {
                         part      := extensions[:len]
                         extensions = extensions[len+1:]
                         len = 0
-                        if "WGL_EXT_framebuffer_sRGB" == part do OpenGLSupportsSRGBFrameBuffer = true
+                        if      part == "WGL_EXT_framebuffer_sRGB" do framebuffer_supports_srgb = true
+                        else if part == "WGL_ARB_framebuffer_sRGB" do framebuffer_supports_srgb = true
                     }
                 }
             }
@@ -147,6 +146,8 @@ load_wgl_extensions :: proc() {
             win.gl_set_proc_address(&glColor4f, "glColor4f")
         }
     }
+    
+    return framebuffer_supports_srgb
 }
 
 opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
@@ -173,13 +174,14 @@ opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
             len = 0
             if      "GL_EXT_texture_sRGB"     == part do result.GL_EXT_texture_sRGB = true
             else if "GL_EXT_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
+            else if "GL_ARB_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
         }
     }
     
     return result
 }
 
-set_pixel_format :: proc(dc: win.HDC) {
+set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
     suggested_pixel_format: win.PIXELFORMATDESCRIPTOR
     suggested_pixel_format_index: i32
     extended_pick: u32
@@ -197,7 +199,7 @@ set_pixel_format :: proc(dc: win.HDC) {
             0,
         }
         
-        if !OpenGLSupportsSRGBFrameBuffer {
+        if !framebuffer_supports_srgb {
             int_attribs[10] = 0 // @Volatile Coupled to the ordering of the attribs itself
         }
         
@@ -323,11 +325,19 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
             bitmap := entry.bitmap
             assert(bitmap.texture_handle != 0)
             
-            gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
-            
-            min := entry.p
-            max := min + entry.size
-            gl_rectangle(min, max, entry.color)
+            if bitmap.width != 0 && bitmap.height != 0 {
+                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
+                
+                min := entry.p
+                max := min + entry.size
+                
+                texel_x := 1 / cast(f32) bitmap.width
+                texel_y := 1 / cast(f32) bitmap.height
+                
+                min_uv := v2{0+texel_x, 0+texel_y}
+                max_uv := v2{1-texel_x, 1-texel_y}
+                gl_rectangle(min, max, entry.color, min_uv, max_uv)
+            }
             
           case .RenderGroupEntryCoordinateSystem:
           case:
@@ -336,29 +346,29 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     }
 }
 
-gl_rectangle :: proc(min, max: v2, color: v4) {
+gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
     glBegin(gl.TRIANGLES)
     
     glColor4f(color.r, color.g, color.b, color.a)
     
     // NOTE(viktor): Lower triangle
-    glTexCoord2f(0.0, 0.0)
+    glTexCoord2f(min_uv.x, min_uv.y)
     glVertex2f(min.x, min.y)
 
-    glTexCoord2f(1.0, 0.0)
+    glTexCoord2f(max_uv.x, min_uv.y)
     glVertex2f(max.x, min.y)
 
-    glTexCoord2f(1.0, 1.0)
+    glTexCoord2f(max_uv.x, max_uv.y)
     glVertex2f(max.x, max.y)
 
     // NOTE(viktor): Upper triangle
-    glTexCoord2f(0.0, 0.0)
+    glTexCoord2f(min_uv.x, min_uv.y)
     glVertex2f(min.x, min.y)
 
-    glTexCoord2f(1.0, 1.0)
+    glTexCoord2f(max_uv.x, max_uv.y)
     glVertex2f(max.x, max.y)
 
-    glTexCoord2f(0.0, 1.0)
+    glTexCoord2f(min_uv.x, max_uv.y)
     glVertex2f(min.x, max.y)
     glEnd()
 }

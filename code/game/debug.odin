@@ -47,6 +47,7 @@ DebugState :: struct {
     
     thread:            ^DebugThread,
     first_free_thread: ^DebugThread,
+    max_thread_count: u32,
     
     element_hash: [1024]^DebugElement,
     
@@ -74,6 +75,7 @@ DebugState :: struct {
     
     text_transform:    Transform,
     shadow_transform:  Transform,
+    ui_transform:      Transform,
     backing_transform: Transform,
     
     font_scale:   f32,
@@ -412,11 +414,13 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.profile_group = create_group(debug, "Profiles")
         
         debug.backing_transform = default_flat_transform()
+        debug.ui_transform  = default_flat_transform()
         debug.shadow_transform  = default_flat_transform()
         debug.text_transform    = default_flat_transform()
         debug.backing_transform.sort_bias = 100_000
-        debug.shadow_transform.sort_bias  = 200_000
-        debug.text_transform.sort_bias    = 300_000
+        debug.ui_transform.sort_bias  = 200_000
+        debug.shadow_transform.sort_bias  = 300_000
+        debug.text_transform.sort_bias    = 400_000
         
         list_init_sentinel(&debug.tree_sentinel)
         
@@ -630,7 +634,11 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
         assert(collation_frame != nil)
         
         thread: ^DebugThread
-        for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {}
+        thread_count: u32 = 1
+        for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {
+            thread_count += 1
+        }
+        debug.max_thread_count = max(debug.max_thread_count, thread_count)
         
         if thread == nil {
             thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
@@ -806,9 +814,9 @@ debug_draw_profile :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, root
     
     frame_scale := safe_ratio_0(pixel_span, frame_span)
     
-    lane_count :f32= 1 // cast(f32) frame.frame_bar_lane_count
+    lane_count := cast(f32) debug.max_thread_count
     
-    lane_height := safe_ratio_0(rectangle_get_dimension(rect).y, lane_count)
+    lane_height := safe_ratio_n(rectangle_get_dimension(rect).y, lane_count, rectangle_get_dimension(rect).y)
     
     for event := root.node.first_child; event != nil; event = event.node.next_same_parent {
         node := event.node
@@ -834,7 +842,7 @@ debug_draw_profile :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, root
         color := color_wheel[color_index]
         
         if rectangle_has_area(region_rect) {
-            push_rectangle(&layout.debug.render_group, region_rect, debug.shadow_transform, color)
+            push_rectangle(&layout.debug.render_group, region_rect, debug.ui_transform, color)
             
             if rectangle_contains(region_rect, mouse_p) {
                 text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
@@ -1034,7 +1042,7 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
         push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             debug.shadow_transform, Black)
         
         resize_box := rectangle_min_dimension(v2{element.bounds.max.x, total_min.y}, frame * 3)
-        push_rectangle(&layout.debug.render_group, resize_box, debug.text_transform, White)
+        push_rectangle(&layout.debug.render_group, resize_box, debug.ui_transform, White)
         
         resize_interaction := DebugInteraction {
             kind   = .Resize,
@@ -1191,7 +1199,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             }
             
             move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
-            push_rectangle(&debug.render_group, move_handle, debug.text_transform, interaction_is_hot(debug, move_interaction) ? Blue : White)
+            push_rectangle(&debug.render_group, move_handle, debug.ui_transform, interaction_is_hot(debug, move_interaction) ? Blue : White)
         
             if rectangle_contains(move_handle, mouse_p) {
                 debug.next_hot_interaction = move_interaction
@@ -1268,7 +1276,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement
                 bitmap_height := block.size.y
                 bitmap_offset := V3(element.bounds.min, 0)
                 push_rectangle(&debug.render_group, element.bounds, debug.backing_transform, DarkBlue )
-                push_bitmap(&debug.render_group, value, debug.shadow_transform, bitmap_height, bitmap_offset, use_alignment = false)
+                push_bitmap(&debug.render_group, value, debug.ui_transform, bitmap_height, bitmap_offset, use_alignment = false)
             }
         
           case DebugEventLink, DebugEventGroup,

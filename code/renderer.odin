@@ -90,6 +90,8 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
+    block := game.begin_timed_block(#procedure)
+    defer game.end_timed_block(block)
     using work := cast(^TileRenderWork) data
 
     assert(commands != nil)
@@ -567,7 +569,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
     }
     fill_rect = rectangle_intersection(fill_rect, clip_rect)
-
+    
     if rectangle_has_area(fill_rect) {
         maskFF :: 0xffffffff
         
@@ -624,7 +626,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-            
+        
         // NOTE(viktor): premultiply color alpha
         color := color
         color.rgb *= color.a
@@ -639,13 +641,13 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         color_r = square(color_r)
         color_g = square(color_g)
         color_b = square(color_b)
-
+        
         color_r = clamp(color_r, 0, max_color_value)
         color_g = clamp(color_g, 0, max_color_value)
         color_b = clamp(color_b, 0, max_color_value)
         
         inv_color_a := (1 - (inv_255 * color_a))
-
+        
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
             // NOTE(viktor): Iterative calculations will lead to arithmetic errors,
             // so we always calculate based of the index.
@@ -654,7 +656,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
             y_index := cast(f32) (y - fill_rect.min.y)
             u_row := delta_x * normal_x_axis_x + delta_y_n_x_axis_y + y_index * normal_x_axis_y
             v_row := delta_x * normal_y_axis_x + delta_y_n_y_axis_y + y_index * normal_y_axis_y
-
+            
             clip_mask = start_clip_mask
             for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
                 x_index := cast(f32) (x - fill_rect.min.x) / 8
@@ -670,11 +672,11 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
                 
                 // u >= 0 && u <= 1 && v >= 0 && v <= 1
                 write_mask := clip_mask & simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
-
+                
                 pixel := buffer.memory[y * buffer.width + x:][:8]
                 // assert(cast(uintpointer) (&pixel[0]) & 31 == 0)
                 original_pixel := simd.masked_load((&pixel[0]), cast(u32x8) 0, write_mask)
-    
+                
                 pixel_r := cast(f32x8) (0xff &          original_pixel      )
                 pixel_g := cast(f32x8) (0xff & simd.shr(original_pixel,  8) )
                 pixel_b := cast(f32x8) (0xff & simd.shr(original_pixel,  16))
@@ -691,19 +693,19 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
                 blended_g := inv_color_a * pixel_g + color_g
                 blended_b := inv_color_a * pixel_b + color_b
                 blended_a := inv_color_a * pixel_a + color_a
-
+                
                 // NOTE(viktor): linear to srgb
                 blended_r = square_root(blended_r)
                 blended_g = square_root(blended_g)
                 blended_b = square_root(blended_b)
-
+                
                 intr := cast(u32x8) blended_r
                 intg := cast(u32x8) blended_g
                 intb := cast(u32x8) blended_b
                 inta := cast(u32x8) blended_a
                 
                 mixed := intr | simd.shl_masked(intg, 8) | simd.shl_masked(intb, 16) | simd.shl_masked(inta, 24)
-
+                
                 simd.masked_store(&pixel[0], mixed, write_mask)
             }
         }
