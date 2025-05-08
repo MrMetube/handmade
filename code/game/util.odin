@@ -148,13 +148,6 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
     return result
 }
 
-modular_add :: proc(value:^$N, addend, one_past_maximum: N) where intrinsics.type_is_numeric(N) {
-    value^ += addend
-    if value^ >= one_past_maximum {
-        value^ = 0
-    }
-}
-
 swap :: proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 
 
