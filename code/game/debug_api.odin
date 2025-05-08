@@ -174,7 +174,7 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
     when !DebugEnabled do return
     if GlobalDebugTable == nil do return
     
-    state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, 1)
+    state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, GlobalDebugTable.record_increment)
     result = &GlobalDebugTable.events[state.array_index][state.events_index]
     
     result^ = {
@@ -192,6 +192,14 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
 
 ////////////////////////////////////////////////
 // Only used by the platform layer
+
+@export
+debug_set_event_recording :: proc(active: b32, table:=GlobalDebugTable) {
+    if !DebugEnabled do return
+    if table == nil do return
+    
+    table.record_increment = active ? 1 : 0
+}
 
 @export
 frame_marker :: proc(seconds_elapsed: f32, loc := #caller_location) {

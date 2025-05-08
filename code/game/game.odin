@@ -307,6 +307,10 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         init_mixer(&state.mixer, &state.mode_arena)
         init_world(&state.world, &state.mode_arena, ground_buffer_size)
         
+        when DebugEnabled {
+            debug_set_event_recording(true)
+        }
+        
         state.is_initialized = true
     }
 
@@ -569,7 +573,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
 // TODO(viktor): reduce the pressure on the performance of this function by measuring
 // TODO(viktor): Allow sample offsets here for more robust platform options
 @export 
-output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer){
+output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer) {
     state      := cast(^State)          raw_data(memory.permanent_storage)
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     

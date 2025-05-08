@@ -68,7 +68,6 @@ BlitVertexBufferObject, BlitTextureCoordinatesVbo: u32
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
-DebugTableSize :: 1_280_000_144
 DebugTable :: struct {} // Definition in game/debug.odin
 
 ////////////////////////////////////////////////
@@ -249,7 +248,7 @@ main :: proc() {
     
     ////////////////////////////////////////////////
     // Memory Setup
-    
+
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
@@ -336,6 +335,7 @@ main :: proc() {
     }
     
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
+        panic()
         return // @Logging 
     }
     
@@ -347,7 +347,7 @@ main :: proc() {
     
     ////////////////////////////////////////////////
     //  Game Loop
-    
+        
     for GlobalRunning {
         { game.debug_begin_data_block("Platform"); defer game.debug_end_data_block()
             
@@ -355,26 +355,6 @@ main :: proc() {
             game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
         }
         
-        ////////////////////////////////////////////////
-        //  Hot Reload
-        executable_refresh := game.begin_timed_block("executable refresh")
-        
-        game_memory.reloaded_executable = false
-        if get_last_write_time(game_dll_name) != game_dll_write_time {
-            // NOTE(viktor): clear out the queue, as they may call into unloaded game code
-            complete_all_work(&high_queue)
-            complete_all_work(&low_queue)
-            assert(high_queue.completion_count == high_queue.completion_goal)
-            assert(low_queue.completion_count  == low_queue.completion_goal)
-            
-            // TODO(viktor): if this is too slow the audio and the whole game will lag
-            unload_game_lib()
-            game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
-            
-            game_memory.reloaded_executable = true
-        }
-        
-        game.end_timed_block(executable_refresh)
         ////////////////////////////////////////////////   
         //  Input
         input_processed := game.begin_timed_block("input processed")
@@ -625,11 +605,38 @@ main :: proc() {
         
         game.end_timed_block(audio_update)
         ////////////////////////////////////////////////
-        debug_colation := game.begin_timed_block("debug colation")
-        
-        game.debug_frame_end(&game_memory, new_input^, &render_commands)
-        
-        game.end_timed_block(debug_colation)
+        when INTERNAL {
+            debug_colation := game.begin_timed_block("debug colation")
+            
+            game_memory.reloaded_executable = false
+            executable_needs_to_be_reloaded := get_last_write_time(game_dll_name) != game_dll_write_time
+            if executable_needs_to_be_reloaded {
+                // NOTE(viktor): clear out the queue, as they may call into unloaded game code
+                complete_all_work(&high_queue)
+                complete_all_work(&low_queue)
+                assert(high_queue.completion_count == high_queue.completion_goal)
+                assert(low_queue.completion_count  == low_queue.completion_goal)
+                game.debug_set_event_recording(false)
+            }
+            
+            game.debug_frame_end(&game_memory, new_input^, &render_commands)
+                        
+            if executable_needs_to_be_reloaded {
+                // TODO(viktor): if this is too slow the audio and the whole game will lag
+                unload_game_lib()
+
+                for attempt in 0..<100 {
+                    game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
+                    if game_lib_is_valid do break
+                    win.Sleep(100)
+                }
+                
+                game_memory.reloaded_executable = true
+                game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
+            }
+            
+            game.end_timed_block(debug_colation)
+        }
         ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         {

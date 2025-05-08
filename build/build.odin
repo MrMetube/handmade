@@ -74,7 +74,7 @@ build_game :: proc() {
 build_platform :: proc() {
     debug_exe := "debug.exe" 
     if !is_running(debug_exe) {
-        extract_common_game_declarations()
+        extract_common_and_exports()
         
         run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PedanticPlatform else ""))
     }

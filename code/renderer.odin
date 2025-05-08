@@ -28,13 +28,15 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
     // TODO(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := commands.push_buffer_element_count
-    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
-    temp_space   := (cast([^]TileSortEntry) temp_memory)[:count]
+    if count != 0 {
+        sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
+        temp_space   := (cast([^]TileSortEntry) temp_memory)[:count]
 
-    merge_sort(sort_entries, temp_space)
-    // radix_sort(sort_entries, temp_space)
-    
-    when INTERNAL do is_sorted(sort_entries)
+        merge_sort(sort_entries, temp_space)
+        // radix_sort(sort_entries, temp_space)
+        
+        when INTERNAL do is_sorted(sort_entries)
+    }
 }
 
 software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {

@@ -260,6 +260,7 @@ get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) ->
 get_bitmap :: proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
+        // TODO(viktor): When Hotreloading this type assertion fails
         result = &header.value.(Bitmap)
     }
     return result

@@ -145,11 +145,12 @@ DebugOpenBlock :: struct {
 #assert(size_of(DebugEventGroup) == 48)
 #assert(size_of(DebugValue) == 56)
 #assert(size_of(DebugGUID) == 56)
-#assert(size_of(DebugEvent) == 128) // !!!!
-#assert(size_of(DebugTable) == 1_280_000_144)
+#assert(size_of(DebugEvent) == 128) // !!!! See below
+@common DebugTableSize :: 1_280_000_152
+#assert(size_of(DebugTable) == DebugTableSize)
 DebugTable :: struct {
+    record_increment: u64,
     edit_event: DebugEvent,
-    
     // @Correctness No attempt is currently made to ensure that the final
     // debug records being written to the event array actually complete
     // their output prior to the swap of the event array index.
@@ -724,17 +725,20 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             block.event = stored_event
             
           case EndTimedBlock:
-            matching_block := thread.first_open_timed_block
-            if matching_block != nil {
+            if thread.first_open_timed_block != nil {
+                matching_block := thread.first_open_timed_block
+                
                 assert(thread.thread_index == event.thread_index)
                 
-                assert(matching_block.event != nil)
-                node := &matching_block.event.node
-                assert(node != nil)
-                
-                node.duration = cast(u32) (event.clock - matching_block.begin_clock)
-                node.aggregate_count += 1
-                free_open_block(thread, &thread.first_open_timed_block)
+                // TODO(viktor): How can this happen?
+                if matching_block.event != nil {
+                    node := &matching_block.event.node
+                    assert(node != nil)
+                    
+                    node.duration = cast(u32) (event.clock - matching_block.begin_clock)
+                    node.aggregate_count += 1
+                    free_open_block(thread, &thread.first_open_timed_block)
+                }
             }
         }
     }

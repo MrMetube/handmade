@@ -290,8 +290,10 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
+    count := commands.push_buffer_element_count
     // :PointerArithmetic
-    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:commands.push_buffer_element_count]
+    if count == 0 do return
+    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
     
     for sort_entry, i in sort_entries {
         header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.push_buffer_offset]
