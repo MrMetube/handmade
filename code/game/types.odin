@@ -6,6 +6,17 @@ Deque :: struct($L: typeid) {
     first, last: ^L,
 }
 
+deque_prepend :: proc(deque: ^Deque($L), element: ^L) {
+    if deque.first == nil {
+        assert(deque.last == nil)
+        deque.last  = element
+        deque.first = element
+    }  else {
+        deque.last.next = element
+        deque.last      = element
+    }
+}
+
 deque_append :: proc(deque: ^Deque($L), element: ^L) {
     if deque.first == nil {
         assert(deque.last == nil)
@@ -46,9 +57,17 @@ list_init_sentinel :: proc(sentinel: ^LinkedList($T)) {
     sentinel.prev = sentinel
 }
 
-list_insert :: proc(previous, element: ^LinkedList($T)) {
-    element.prev = previous
-    element.next = previous.next
+list_insert_before :: proc(after: ^$L/LinkedList($T), element: ^L) {
+    element.prev = after.prev
+    element.next = after
+    
+    element.next.prev = element
+    element.prev.next = element
+}
+
+list_insert_after :: proc(before: ^$L/LinkedList($T), element: ^L) {
+    element.prev = before
+    element.next = before.next
     
     element.next.prev = element
     element.prev.next = element

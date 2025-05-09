@@ -89,7 +89,6 @@ INTERNAL :: #config(INTERNAL, false)
 ////////////////////////////////////////////////
 // TODO(viktor): Find a better place for these configurations
 
-ShowFramerate:                 b32 = true
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
@@ -355,7 +354,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Game")
-        debug_record_value(&ShowFramerate)
         { debug_data_block("Assets")
             debug_record_value(&LoadAssetsSingleThreaded)
         }
@@ -374,11 +372,15 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             debug_record_value(&FountainTest)
             debug_record_value(&ShowGrid)
         }
-        
     }
+    
     { debug_data_block("Profile")
-        debug_thread_interval_profile()
+        debug_ui_element(FrameSlider{})
+        debug_ui_element(ThreadIntervalProfile{})
+        debug_ui_element(FrameInfo{})
+        debug_ui_element(MemoryInfo{})
     }
+    
     { debug_data_block("Renderer")
         debug_record_value(&EnvironmentTest)
         debug_record_value(&RenderSingleThreaded)

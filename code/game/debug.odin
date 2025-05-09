@@ -26,7 +26,7 @@ GlobalDebugMemory: ^GameMemory
 GlobalDebugTable: ^DebugTable
 
 DebugMaxEventCount :: 5_000_000 when DebugEnabled else 0
-MaxFrameCount :: 256
+MaxFrameCount :: 512
 
 ////////////////////////////////////////////////
 
@@ -43,6 +43,8 @@ DebugState :: struct {
     collating_frame_ordinal:   i32,
     frames:       [MaxFrameCount]DebugFrame,
     profile_root: ^DebugElement,
+    
+    viewed_frame_ordinal: i32,
     
     thread:            ^DebugThread,
     first_free_thread: ^DebugThread,
@@ -80,10 +82,7 @@ DebugState :: struct {
     backing_transform: Transform,
     
     font_scale:   f32,
-    top_edge:     f32,
     ascent:       f32,
-    left_edge:    f32,
-    right_edge:   f32,
     
     font_id:      FontId,
     font:         ^Font,
@@ -185,8 +184,12 @@ DebugValue :: union {
     
     ThreadIntervalProfile,
     
+    MemoryInfo, FrameInfo,
+    
     DebugEventLink,
     DebugEventGroup,
+    
+    FrameSlider,
 }
 
 FrameMarker :: struct {
@@ -198,6 +201,9 @@ EndTimedBlock   :: struct {}
 BeginDataBlock  :: struct {}
 EndDataBlock    :: struct {}
 
+FrameSlider :: struct {}
+MemoryInfo :: struct {}
+FrameInfo  :: struct {}
 ThreadIntervalProfile :: struct {}
 Profile :: struct {}
 
@@ -317,13 +323,13 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         
         debug.font_scale = 0.6
         
-        debug.left_edge  = -0.5 * cast(f32) render_commands.width
-        debug.right_edge =  0.5 * cast(f32) render_commands.width
-        debug.top_edge   =  0.5 * cast(f32) render_commands.height   
+        left_edge  := -0.5 * cast(f32) render_commands.width
+        right_edge :=  0.5 * cast(f32) render_commands.width
+        top_edge   :=  0.5 * cast(f32) render_commands.height   
         
         list_init_sentinel(&debug.tree_sentinel)
-        debug_tree := add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
-        debug_tree.p = { debug.left_edge + 200, debug.top_edge - 50 }
+        debug_tree := add_tree(debug, debug.root_group, { left_edge, top_edge })
+        debug_tree.p = { left_edge + 60, top_edge - 50 }
         
         debug.backing_transform = default_flat_transform()
         debug.ui_transform      = default_flat_transform()
@@ -354,6 +360,10 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     debug.next_hot_interaction  = {}
     if debug.hot_interaction == {} do GlobalDebugTable.edit_event = {}
     debug.alt_ui = input.alt_down
+    
+    if !debug.paused {
+        debug.viewed_frame_ordinal = debug.most_recent_frame_ordinal
+    }
 }
 
 debug_get_state :: proc() -> (result: ^DebugState) {
@@ -403,12 +413,17 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             
             debug.total_frame_count += 1
             
-            debug.most_recent_frame_ordinal = debug.collating_frame_ordinal
-            increment_frame_ordinal(&debug.collating_frame_ordinal)
-            if debug.collating_frame_ordinal == debug.oldest_frame_ordinal_that_is_already_freed {
-                free_oldest_frame(debug)
+            if debug.paused {
+                free_frame(debug, debug.collating_frame_ordinal)
+            } else {
+                debug.most_recent_frame_ordinal = debug.collating_frame_ordinal
+                increment_frame_ordinal(&debug.collating_frame_ordinal)
+                if debug.collating_frame_ordinal == debug.oldest_frame_ordinal_that_is_already_freed {
+                    free_oldest_frame(debug)
+                }
+                collation_frame = &debug.frames[debug.collating_frame_ordinal]
             }
-            collation_frame = &debug.frames[debug.collating_frame_ordinal]
+            
             init_frame(debug, collation_frame, event.clock)
             
           case BeginDataBlock:
@@ -419,6 +434,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             block.group = group
             
           case ThreadIntervalProfile, DebugEventLink, DebugEventGroup,
+            FrameInfo, MemoryInfo, FrameSlider,
             BitmapId, SoundId, FontId, 
             b32, f32, u32, i32, 
             v2, v3, v4, 
@@ -561,6 +577,7 @@ free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
     
     frame := &debug.frames[frame_ordinal]
     assert(freed_count == frame.stored_event_count)
+    frame^ = {}
 }
 
 get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {

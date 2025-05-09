@@ -352,6 +352,7 @@ main :: proc() {
         { game.debug_begin_data_block("Platform"); defer game.debug_end_data_block()
             
             game.debug_record_b32(&GlobalPause)
+            game.debug_record_b32(&GlobalDebugShowCursor)
             game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
         }
         

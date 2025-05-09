@@ -244,7 +244,7 @@ get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) ->
             result = asset.header
             
             list_remove(result)
-            list_insert(&assets.loaded_asset_sentinel, result)
+            list_insert_after(&assets.loaded_asset_sentinel, result)
             
             if asset.header.generation_id < generation_id {
                 asset.header.generation_id = generation_id
@@ -570,7 +570,7 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
         header.total_size  = size
         header.asset_index = cast(u32) asset_index
         
-        list_insert(&assets.loaded_asset_sentinel, header)
+        list_insert_after(&assets.loaded_asset_sentinel, header)
     }
 
     return result
@@ -583,7 +583,7 @@ insert_block :: proc(previous: ^AssetMemoryBlock, memory: pmm, size: u64) -> (re
     
     result.flags = {}
     
-    list_insert(previous, result)
+    list_insert_after(previous, result)
     
     return result
 }

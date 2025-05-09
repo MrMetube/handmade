@@ -101,13 +101,8 @@ is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
 ////////////////////////////////////////////////
 // Record Insertion
 
-// TODO(viktor): whats the best default?
-debug_thread_interval_profile :: proc {debug_thread_interval_profile_all, debug_thread_interval_profile_proc}
-debug_thread_interval_profile_all :: proc(loc := #caller_location) {
-    debug_thread_interval_profile_proc(update_and_render, "All", loc)
-}
-debug_thread_interval_profile_proc :: proc(function: $P, name := #caller_expression(function), loc := #caller_location) {
-    debug_record_event(ThreadIntervalProfile{}, name, loc)
+debug_ui_element :: proc(kind: DebugValue, loc := #caller_location) {
+    debug_record_event(kind, loc.procedure, loc)
 }
 
 @(deferred_none=debug_end_data_block)
