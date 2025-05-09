@@ -1041,11 +1041,18 @@ process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
 
 process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^InputController) {
     message: win.MSG
-    for win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE) {
+    for {
+        peek_message := game.begin_timed_block("peek_message")
+        has_message := win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE)
+        game.end_timed_block(peek_message)
+        if !has_message do break
+        
         switch message.message {
           case win.WM_QUIT:
             GlobalRunning = false
           case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
+            key_message := game.begin_timed_block("key_message")
+            defer game.end_timed_block(key_message)
             vk_code := message.wParam
             
             was_down := cast(b32) (message.lParam & (1 << 30))
@@ -1068,7 +1075,7 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                   case win.VK_SPACE: process_win_keyboard_message(&keyboard_controller.start,          is_down)
                   case win.VK_ESCAPE:
                     GlobalRunning = false
-                    process_win_keyboard_message(&keyboard_controller.back,           is_down)
+                    process_win_keyboard_message(&keyboard_controller.back, is_down)
                   case win.VK_L:
                     if is_down {
                         if state.input_replay_index != 0 {
@@ -1090,6 +1097,8 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                 }
             }
           case:
+            default_message_handler := game.begin_timed_block("default_message_handler")
+            defer game.end_timed_block(default_message_handler)
             win.TranslateMessage(&message)
             win.DispatchMessageW(&message)
         }

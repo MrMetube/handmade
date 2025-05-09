@@ -38,10 +38,11 @@ DebugState :: struct {
 
     total_frame_count: i32,
     
+    oldest_frame_ordinal_that_is_already_freed: i32,
     most_recent_frame_ordinal: i32,
-    oldest_frame_ordinal_that_is_already_freed:      i32,
     collating_frame_ordinal:   i32,
-    frames: [MaxFrameCount]DebugFrame,
+    frames:       [MaxFrameCount]DebugFrame,
+    profile_root: ^DebugElement,
     
     thread:            ^DebugThread,
     first_free_thread: ^DebugThread,
@@ -203,7 +204,6 @@ Profile :: struct {}
 ////////////////////////////////////////////////
 
 DebugElementFrame :: struct {
-    total_clocks: u64,
     events: Deque(DebugStoredEvent),
 }
 
@@ -231,14 +231,11 @@ DebugProfileNode :: struct {
     first_child:      ^DebugStoredEvent,
     next_same_parent: ^DebugStoredEvent,
     
-    parent_relative_clock: u32,
-    duration:              u32,
+    parent_relative_clock: i64,
+    duration:              i64,
     
     thread_index: u16,
     core_index:   u16,
-    
-    aggregate_count: u32,
-    
 }
 
 DebugId :: struct {
@@ -288,11 +285,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     
     if !debug.initialized {
         debug.initialized = true
-        
-        debug.collating_frame_ordinal   = 1
-        debug.most_recent_frame_ordinal = 0
-        debug.oldest_frame_ordinal_that_is_already_freed      = 0
-        
+   
         // :PointerArithmetic
         total_memory := memory.debug_storage[size_of(DebugState):]
         init_arena(&debug.arena, total_memory)
@@ -304,29 +297,42 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
             sub_arena(&debug.per_frame_arena, &debug.arena, 200 * Kilobyte)
         }
         
+        debug.collating_frame_ordinal   = 1
+        debug.most_recent_frame_ordinal = 0
+        debug.oldest_frame_ordinal_that_is_already_freed = 0
+        
+        
+        root_guid := DebugGUID {
+            name      = "ProfileRoot",
+            file_path = #location(debug).file_path,
+            line      = auto_cast #location(debug).line,
+            column    = auto_cast #location(debug).column,
+            procedure = #location(debug).procedure,
+        }
+        debug.profile_root = get_element_from_guid_by_parent(debug, root_guid, parent = nil, create_hierarchy = false)
+        
+        // TODO(viktor): @Cleanup
         debug.root_group    = create_group(debug, "Root")
         debug.profile_group = create_group(debug, "Profiles")
         
-        debug.backing_transform = default_flat_transform()
-        debug.ui_transform  = default_flat_transform()
-        debug.shadow_transform  = default_flat_transform()
-        debug.text_transform    = default_flat_transform()
-        debug.backing_transform.sort_bias = 100_000
-        debug.ui_transform.sort_bias  = 200_000
-        debug.shadow_transform.sort_bias  = 400_000
-        debug.text_transform.sort_bias    = 800_000
-        
-        list_init_sentinel(&debug.tree_sentinel)
-        
         debug.font_scale = 0.6
-        
-        debug_tree := add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
         
         debug.left_edge  = -0.5 * cast(f32) render_commands.width
         debug.right_edge =  0.5 * cast(f32) render_commands.width
         debug.top_edge   =  0.5 * cast(f32) render_commands.height   
         
+        list_init_sentinel(&debug.tree_sentinel)
+        debug_tree := add_tree(debug, debug.root_group, { debug.left_edge, debug.top_edge })
         debug_tree.p = { debug.left_edge + 200, debug.top_edge - 50 }
+        
+        debug.backing_transform = default_flat_transform()
+        debug.ui_transform      = default_flat_transform()
+        debug.shadow_transform  = default_flat_transform()
+        debug.text_transform    = default_flat_transform()
+        debug.backing_transform.sort_bias = 100_000
+        debug.ui_transform.sort_bias      = 200_000
+        debug.shadow_transform.sort_bias  = 400_000
+        debug.text_transform.sort_bias    = 800_000
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
@@ -342,7 +348,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
     
-    collate_debug_records(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
+    collate_events(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
     overlay_debug_info(debug, input)
     
     debug.next_hot_interaction  = {}
@@ -359,7 +365,7 @@ debug_get_state :: proc() -> (result: ^DebugState) {
 
 ////////////////////////////////////////////////
 
-collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
+collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
     timed_function()
     
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
@@ -392,7 +398,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             
             root := collation_frame.profile_root
             if root != nil {
-                root.node.duration = cast(u32) (collation_frame.end_clock - collation_frame.begin_clock)
+                root.node.duration = collation_frame.end_clock - collation_frame.begin_clock
             }
             
             debug.total_frame_count += 1
@@ -402,7 +408,8 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             if debug.collating_frame_ordinal == debug.oldest_frame_ordinal_that_is_already_freed {
                 free_oldest_frame(debug)
             }
-            init_frame(debug, &debug.frames[debug.collating_frame_ordinal], event.clock)
+            collation_frame = &debug.frames[debug.collating_frame_ordinal]
+            init_frame(debug, collation_frame, event.clock)
             
           case BeginDataBlock:
             collation_frame.data_block_count += 1
@@ -437,7 +444,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
                 clock_basis = thread.first_open_timed_block.begin_clock
                 parent_event = thread.first_open_timed_block.event
             } else if parent_event == nil {
-                parent_event = store_event(debug, {}, element)
+                parent_event = store_event(debug, {}, debug.profile_root)
                 collation_frame.profile_root = parent_event
                 clock_basis = collation_frame.begin_clock
             }
@@ -447,7 +454,7 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
             node := &stored_event.node
             node^ = {
                 element = element,
-                parent_relative_clock = cast(u32) (event.clock - clock_basis),
+                parent_relative_clock = event.clock - clock_basis,
                 
                 thread_index = thread.thread_index,
                 core_index   = event.core_index,
@@ -462,15 +469,10 @@ collate_debug_records :: proc(debug: ^DebugState, events: []DebugEvent) {
           case EndTimedBlock:
             if thread.first_open_timed_block != nil {
                 matching_block := thread.first_open_timed_block
-                
                 assert(matching_block.event != nil)
                 
                 node := &matching_block.event.node
-                assert(node != nil)
-                assert(node.duration == 0)
-                
-                node.duration = cast(u32) (event.clock - matching_block.begin_clock)
-                node.aggregate_count += 1
+                node.duration = event.clock - matching_block.begin_clock
                 free_open_block(thread, &thread.first_open_timed_block)
             }
         }
@@ -483,10 +485,8 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
     collation_frame.stored_event_count += 1
     
-    attempts := 100
     ok: b32
     for result == nil {
-        attempts -= 1
         { // NOTE(viktor): inlined list_pop because polymorphic types kinda suck
             head := &debug.first_free_stored_event
             if head^ != nil {
@@ -507,14 +507,9 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
         }
     }
     
-    if attempts == 0 {
-        panic("failed to free a frame")
-    }
-    
     result^ = {
         event       = event,
         frame_index = collation_frame.frame_index,
-        
     }
     
     deque_append(&element.frames[debug.collating_frame_ordinal].events, result)
@@ -614,7 +609,7 @@ get_element_from_guid_by_parent :: proc(debug: ^DebugState, guid: DebugGUID, par
         
         if result == nil {
             result = push(&debug.arena, DebugElement)
-            result.guid = DebugGUID {
+            result.guid = {
                 line      = guid.line,
                 column    = guid.column,
                 name      = copy_string(&debug.arena, guid.name),
@@ -625,13 +620,14 @@ get_element_from_guid_by_parent :: proc(debug: ^DebugState, guid: DebugGUID, par
             index := hash_value % len(debug.element_hash)
             list_push(&debug.element_hash[index], result)
 
-            parent := parent
-            if parent == nil do parent = debug.root_group
             
-            parent_group := parent
-            if create_hierarchy do parent_group = get_group_by_hierarchical_name(debug, parent, guid.name, false)
-            
-            add_element_to_group(debug, parent_group, result)
+            if create_hierarchy {
+                parent := parent
+                if parent == nil do parent = debug.root_group
+                
+                parent = get_group_by_hierarchical_name(debug, parent, guid.name, false)
+                add_element_to_group(debug, parent, result)
+            }
         }
     }
     

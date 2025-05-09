@@ -25,6 +25,8 @@ init_render_commands :: proc(commands: ^RenderCommands, max_push_buffer_size: u3
 }
 
 sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
+    block := game.begin_timed_block(#procedure)
+    defer game.end_timed_block(block)
     // TODO(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := commands.push_buffer_element_count
@@ -32,8 +34,8 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
         sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
         temp_space   := (cast([^]TileSortEntry) temp_memory)[:count]
 
-        merge_sort(sort_entries, temp_space)
-        // radix_sort(sort_entries, temp_space)
+        // merge_sort(sort_entries, temp_space)
+        radix_sort(sort_entries, temp_space)
         
         when INTERNAL do is_sorted(sort_entries)
     }
@@ -152,6 +154,9 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
 
 @(enable_target_feature="sse,sse2")
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, clip_rect: Rectangle2i) {
+    block := game.begin_timed_block(#procedure)
+    defer game.end_timed_block(block)
+    
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
     if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&
         (auto_cast len(texture.memory) == texture.height * texture.width) &&
@@ -403,6 +408,9 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
 }
 
 draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture, normal_map: Bitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
+    block := game.begin_timed_block(#procedure)
+    defer game.end_timed_block(block)
+    
     assert(texture.memory != nil)
 
     // NOTE(viktor): premultiply color
@@ -815,6 +823,9 @@ is_sorted :: proc(entries: []TileSortEntry) {
 }
 
 radix_sort :: proc(entries: []TileSortEntry, temp_space: []TileSortEntry) {
+    block := game.begin_timed_block(#procedure)
+    defer game.end_timed_block(block)
+    
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
         sort_key_offsets: [256]u32

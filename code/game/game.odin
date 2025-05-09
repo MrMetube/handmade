@@ -291,8 +291,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         GlobalDebugTable = memory.debug_table
     }
     
-    timed_function()
-    
     ground_buffer_size :: 512
     
     ////////////////////////////////////////////////

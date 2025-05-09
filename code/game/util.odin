@@ -152,7 +152,7 @@ swap :: proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 
 
 @(disabled=ODIN_DISABLE_ASSERT)
-assert :: proc(condition: $T, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(T) {
+assert :: proc(condition: $B, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(B) {
     if !condition {
         // TODO(viktor): We are not a console application
         fmt.print(loc, prefix)

@@ -407,6 +407,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
+            timed_block("update and render entity")
             dt := input.delta_time;
 
             // TODO(viktor): Probably indicates we want to separate update ann render for entities sometime soon?

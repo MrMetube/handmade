@@ -112,6 +112,8 @@ LayoutElementFlag :: enum {
 ////////////////////////////////////////////////
 
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
+    timed_function()
+
     if debug.render_group.assets == nil do return
 
     orthographic(&debug.render_group, {debug.render_group.commands.width, debug.render_group.commands.height}, 1)
@@ -134,6 +136,8 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 }
 
 draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+    timed_function()
+    
     assert(debug.font_info != nil)
     
     frame_ordinal := debug.most_recent_frame_ordinal
@@ -266,40 +270,6 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement
         color := is_hot ? Blue : White
         
         switch value in event.value {
-          case ThreadIntervalProfile:
-            graph, ok := &view.kind.(DebugViewProfileGraph)
-            if !ok {
-                view.kind = DebugViewProfileGraph{}
-                graph = &view.kind.(DebugViewProfileGraph)
-                graph.block.size = {800, 600}
-            }
-            
-            element := begin_ui_element_rectangle(layout, &graph.block.size)
-            make_ui_element_resizable(&element)
-            // TODO(viktor): reenable pausing the profiler
-            // pause := DebugInteraction{
-            //     kind   = .ToggleValue,
-            //     id     = id,
-            //     target = event,
-            // }
-            // set_ui_element_default_interaction(&element, pause)
-            end_ui_element(&element, true)
-            
-            root: ^DebugStoredEvent
-            
-            viewed_element :^DebugElement= get_element_from_guid(debug, graph.root)
-            if viewed_element != nil {
-                root = viewed_element.frames[debug.most_recent_frame_ordinal].events.last
-            }
-            
-            if root == nil {
-                root = debug.frames[debug.most_recent_frame_ordinal].profile_root
-            }
-            
-            if root != nil {
-                debug_draw_profile(layout, mouse_p, element.bounds, id, root)
-                // debug_draw_frame_bars(layout, mouse_p, element.bounds, id, root)
-            }
           case SoundId, FontId, 
             BeginTimedBlock, EndTimedBlock,
             BeginDataBlock, EndDataBlock,
@@ -358,37 +328,82 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, in_element: ^DebugElement
             end_ui_element(&element, false)
             
             debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
+        
+          case ThreadIntervalProfile:
+            graph, ok := &view.kind.(DebugViewProfileGraph)
+            if !ok {
+                view.kind = DebugViewProfileGraph{}
+                graph = &view.kind.(DebugViewProfileGraph)
+                graph.block.size = {800, 600}
+            }
+            
+            element := begin_ui_element_rectangle(layout, &graph.block.size)
+            make_ui_element_resizable(&element)
+            // TODO(viktor): reenable pausing the profiler
+            // pause := DebugInteraction{
+            //     kind   = .ToggleValue,
+            //     id     = id,
+            //     target = event,
+            // }
+            // set_ui_element_default_interaction(&element, pause)
+            end_ui_element(&element, true)
+            
+            viewed_element := get_element_from_guid(debug, graph.root)
+            if viewed_element == nil {
+                viewed_element = debug.profile_root
+            }
+            
+            draw_profile(debug, mouse_p, element.bounds, id, viewed_element)
+            // draw_frame_bars(debug, mouse_p, element.bounds, id, viewed_element)
         }
     }
 }
 
-debug_draw_frame_bars :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, first_event: ^DebugStoredEvent, frame_count: u32 = 128) {
-    if frame_count == 0 do return
-    
-    debug := layout.debug
-    {
+get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
+    for event := frame.events.last; event != nil; event = event.next {
+        result += event.node.duration
+    }
+    return result
+}
+
+draw_frame_bars :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_element: ^DebugElement) {
+    { // @Copypasta with draw_profile
+        debug_push_text(debug, root_element.guid.name, {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
         color := Black
         color.a = 0.7
-        push_rectangle(&layout.debug.render_group, rect, debug.backing_transform, color)
+        push_rectangle(&debug.render_group, rect, debug.backing_transform, color)
+        if rectangle_contains(rect, mouse_p) {
+            debug.next_hot_interaction = DebugInteraction {
+                id = graph_id,
+                kind = .SetProfileGraphRoot,
+                target = root_element
+            }
+        }
     }
     
     debug.mouse_text_stack_y = 10
 
     dim := rectangle_get_dimension(rect)
-    bar_width := dim.x / cast(f32) frame_count
+    bar_width := dim.x / cast(f32) (len(root_element.frames)-1)
     
     at_x := rect.min.x
-    for root := first_event; root != nil; root = root.next {
-        frame_scale := safe_ratio_n(dim.y, cast(f32) root.node.duration, dim.y)
-                
-        for event := root.node.first_child; event != nil; event = event.node.next_same_parent {
+    for &frame in root_element.frames {
+        if frame.events.first == nil do continue
+        
+        root_node := &frame.events.first.node
+        frame_span := cast(f32) root_node.duration
+        pixel_span := dim.y
+        scale := safe_ratio_0(pixel_span, frame_span)
+        
+        // TODO(viktor): the frame seems to end and start at _frame sleep_ so after collation and not at the top of the game loop
+        for event := root_node.first_child; event != nil; event = event.node.next_same_parent {
             node := &event.node
             
             element := node.element
             if element == nil do continue
             
-            y_max := rect.min.y + frame_scale * cast(f32) node.parent_relative_clock
-            y_min := y_max      + frame_scale * cast(f32) node.duration
+            y_min := rect.min.y + scale * cast(f32) node.parent_relative_clock
+            y_max := y_min      + scale * cast(f32) node.duration
             
             region_rect := rectangle_min_max(
                 v2{at_x, y_min},
@@ -398,20 +413,21 @@ debug_draw_frame_bars :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, g
             color_wheel := color_wheel
             color_index := cast(umm) element % len(color_wheel)
             color := color_wheel[color_index]
-            push_rectangle(&layout.debug.render_group, region_rect, debug.ui_transform, color/* , 0.01 * bar_width */)
+            push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
             
-            if rectangle_contains(rectangle_add_radius(region_rect, v2{5, 0}), mouse_p) {
+            if rectangle_contains(region_rect, mouse_p) {
                 text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
                 debug_push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
                 debug.mouse_text_stack_y -= debug_get_line_advance(debug)
                 
-                set_root := DebugInteraction {
-                    id = graph_id,
-                    kind = .SetProfileGraphRoot,
-                    target = element
+                // @Copypasta with draw_profile
+                if node.first_child != nil {
+                    debug.next_hot_interaction = DebugInteraction {
+                        id = graph_id,
+                        kind = .SetProfileGraphRoot,
+                        target = element
+                    }
                 }
-                
-                debug.next_hot_interaction = set_root
             }
         }
         
@@ -419,24 +435,48 @@ debug_draw_frame_bars :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, g
     }
 }
 
-debug_draw_profile :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_event: ^DebugStoredEvent) {
-    debug := layout.debug
-    {
-        color := Black
-        color.a = 0.7
-        push_rectangle(&layout.debug.render_group, rect, debug.backing_transform, color)
-    }
-    
+draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_element: ^DebugElement) {
     debug.mouse_text_stack_y = 10
     
     lane_count := cast(f32) debug.max_thread_count
     lane_height := safe_ratio_n(rectangle_get_dimension(rect).y, lane_count, rectangle_get_dimension(rect).y)
     
-    debug_draw_profile_lane(layout, mouse_p, rect, graph_id, root_event, lane_height, lane_height)
+    frame := &root_element.frames[debug.most_recent_frame_ordinal]
+    total_clocks := get_total_clocks(frame)
+    root_event := frame.events.first
+    
+    {
+        color := Black
+        color.a = 0.7
+        push_rectangle(&debug.render_group, rect, debug.backing_transform, color)
+        
+        debug_push_text(debug, fmt.tprintf("%s %v/cycles", root_element.guid.name, total_clocks), {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
+        
+        if rectangle_contains(rect, mouse_p) {
+            debug.next_hot_interaction = DebugInteraction {
+                id = graph_id,
+                kind = .SetProfileGraphRoot,
+                target = root_element
+            }
+        }
+    }
+    
+    next_x := rect.min.x
+    relative_clock: i64
+    for event := frame.events.last; event != nil; event = event.next {
+        relative_clock += event.node.duration
+        t := cast(f32) (cast(f64) relative_clock / cast(f64) total_clocks)
+        
+        event_rect := rect
+        event_rect.min.x = next_x
+        event_rect.max.x = lerp(rect.min.x, rect.max.x, t)
+        next_x = event_rect.max.x
+        
+        draw_profile_lane(debug, mouse_p, event_rect, graph_id, event, lane_height, lane_height)
+    }
 }
 
-debug_draw_profile_lane :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_event: ^DebugStoredEvent, lane_stride, lane_height: f32) {
-    debug := layout.debug
+draw_profile_lane :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_event: ^DebugStoredEvent, lane_stride, lane_height: f32) {
     root := root_event.node
     
     frame_span := cast(f32) (root.duration)
@@ -464,24 +504,24 @@ debug_draw_profile_lane :: proc (layout: ^Layout, mouse_p: v2, rect: Rectangle2,
         color_wheel := color_wheel
         color_index := cast(umm) element % len(color_wheel)
         color := color_wheel[color_index]
-        push_rectangle_outline(&layout.debug.render_group, region_rect, debug.ui_transform, color, 0.01 * lane_height)
+        push_rectangle_outline(&debug.render_group, region_rect, debug.ui_transform, color, 2)
         
-        if rectangle_contains(rectangle_add_radius(region_rect, v2{5, 0}), mouse_p) {
+        if rectangle_contains(region_rect, mouse_p) {
             text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
             debug_push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
             debug.mouse_text_stack_y -= debug_get_line_advance(debug)
             
-            set_root := DebugInteraction {
-                id = graph_id,
-                kind = .SetProfileGraphRoot,
-                target = element
+            if node.first_child != nil {
+                debug.next_hot_interaction = DebugInteraction {
+                    id = graph_id,
+                    kind = .SetProfileGraphRoot,
+                    target = element
+                }
             }
-            
-            debug.next_hot_interaction = set_root
         }
         
         if node.first_child != nil {
-            debug_draw_profile_lane(layout, mouse_p, region_rect, graph_id, event, lane_height, lane_height*0.618033988749)
+            draw_profile_lane(debug, mouse_p, region_rect, graph_id, event, lane_height, lane_height/1.618033988749)
         }
     }
 }
@@ -699,6 +739,8 @@ interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) ->
 }
 
 debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+    timed_function()
+    
     mouse_dp := mouse_p - debug.last_mouse_p
     defer debug.last_mouse_p = mouse_p
     
@@ -836,8 +878,12 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         graph := &view.kind.(DebugViewProfileGraph)
         
         target := interaction.target.(^DebugElement)
-        graph.root = target.guid
-        
+        if input.alt_down {
+            graph.root = {}
+        } else {
+            graph.root = target.guid
+        }
+            
       case .ToggleExpansion:
         view := get_debug_view_for_variable(debug, interaction.id)
         collapsible, ok := &view.kind.(DebugViewCollapsible)
