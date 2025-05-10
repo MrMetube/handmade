@@ -57,17 +57,17 @@ list_init_sentinel :: proc(sentinel: ^LinkedList($T)) {
     sentinel.prev = sentinel
 }
 
-list_insert_before :: proc(after: ^$L/LinkedList($T), element: ^L) {
-    element.prev = after.prev
-    element.next = after
+list_insert_before :: proc(list: ^$L/LinkedList($T), element: ^L) {
+    element.prev = list
+    element.next = list.next
     
     element.next.prev = element
     element.prev.next = element
 }
 
-list_insert_after :: proc(before: ^$L/LinkedList($T), element: ^L) {
-    element.prev = before
-    element.next = before.next
+list_insert_after :: proc(list: ^$L/LinkedList($T), element: ^L) {
+    element.prev = list.prev
+    element.next = list
     
     element.next.prev = element
     element.prev.next = element

@@ -117,8 +117,7 @@ DebugThreadLink :: struct {
 
 DebugOpenBlock :: struct {
     using next: struct #raw_union {
-        parent, 
-        next_free:     ^DebugOpenBlock,
+        parent, next_free: ^DebugOpenBlock,
     },
     
     frame_index: i32,
@@ -138,8 +137,8 @@ DebugOpenBlock :: struct {
 #assert(size_of(DebugValue) == 56)
 #assert(size_of(DebugGUID) == 56)
 #assert(size_of(DebugEvent) == 128) // !!!! See below
-@common DebugTableSize :: 1_280_000_152
 #assert(size_of(DebugTable) == DebugTableSize)
+@common DebugTableSize :: 1_280_000_152
 DebugTable :: struct {
     record_increment: u64,
     edit_event: DebugEvent,
@@ -182,7 +181,8 @@ DebugValue :: union {
     
     BitmapId, SoundId, FontId,
     
-    ThreadIntervalProfile,
+    ThreadProfileGraph,
+    FrameBarsGraph,
     
     MemoryInfo, FrameInfo,
     
@@ -202,9 +202,10 @@ BeginDataBlock  :: struct {}
 EndDataBlock    :: struct {}
 
 FrameSlider :: struct {}
-MemoryInfo :: struct {}
-FrameInfo  :: struct {}
-ThreadIntervalProfile :: struct {}
+MemoryInfo  :: struct {}
+FrameInfo   :: struct {}
+ThreadProfileGraph :: struct {}
+FrameBarsGraph     :: struct {}
 Profile :: struct {}
 
 ////////////////////////////////////////////////
@@ -216,6 +217,7 @@ DebugElementFrame :: struct {
 DebugElement :: #type SingleLinkedList(DebugElementLink)
 DebugElementLink :: struct {
     guid:   DebugGUID,
+    type:   DebugValue,
     frames: [MaxFrameCount]DebugElementFrame,
 }
 
@@ -308,14 +310,16 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.oldest_frame_ordinal_that_is_already_freed = 0
         
         
-        root_guid := DebugGUID {
-            name      = "ProfileRoot",
-            file_path = #location(debug).file_path,
-            line      = auto_cast #location(debug).line,
-            column    = auto_cast #location(debug).column,
-            procedure = #location(debug).procedure,
+        root_event := DebugEvent{ 
+            guid = {
+                name      = "ProfileRoot",
+                file_path = #location(debug).file_path,
+                line      = auto_cast #location(debug).line,
+                column    = auto_cast #location(debug).column,
+                procedure = #location(debug).procedure,
+            }
         }
-        debug.profile_root = get_element_from_guid_by_parent(debug, root_guid, parent = nil, create_hierarchy = false)
+        debug.profile_root = get_element_from_guid_by_parent(debug, root_event, parent = nil, create_hierarchy = false)
         
         // TODO(viktor): @Cleanup
         debug.root_group    = create_group(debug, "Root")
@@ -433,14 +437,15 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
             block.group = group
             
-          case ThreadIntervalProfile, DebugEventLink, DebugEventGroup,
+          case ThreadProfileGraph, FrameBarsGraph,
+            DebugEventLink, DebugEventGroup,
             FrameInfo, MemoryInfo, FrameSlider,
             BitmapId, SoundId, FontId, 
             b32, f32, u32, i32, 
             v2, v3, v4, 
             Rectangle2, Rectangle3:
             
-            element := get_element_from_guid(debug, event.guid, default_parent_group)
+            element := get_element_from_guid(debug, event, default_parent_group)
             store_event(debug, event, element)
             
           case EndDataBlock:
@@ -452,7 +457,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
           case BeginTimedBlock:
             collation_frame.profile_block_count += 1
             
-            element := get_element_from_guid(debug, event.guid, parent = debug.profile_group, create_hierarchy = false)
+            element := get_element_from_guid(debug, event, parent = debug.profile_group, create_hierarchy = false)
             
             parent_event := collation_frame.profile_root
             clock_basis := collation_frame.begin_clock
@@ -593,7 +598,9 @@ get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {
 get_element_from_guid :: proc { get_element_from_guid_by_hash, get_element_from_guid_by_parent, get_element_from_guid_raw }
 get_element_from_guid_raw :: proc(debug: ^DebugState, guid: DebugGUID) -> (result: ^DebugElement) {
     hash_value := get_hash_from_guid(guid)
-    result = get_element_from_guid_by_hash(debug, guid, hash_value)
+    if hash_value != 0 {
+        result = get_element_from_guid_by_hash(debug, guid, hash_value)
+    }
     return result
 }
 get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash_value: u32) -> (result: ^DebugElement) {
@@ -618,31 +625,40 @@ get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash
     
     return result
 }
-get_element_from_guid_by_parent :: proc(debug: ^DebugState, guid: DebugGUID, parent: ^DebugEventGroup = nil, create_hierarchy: b32 = true) -> (result: ^DebugElement) {
-    if guid != {} {   
-        hash_value := get_hash_from_guid(guid)
+get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil, create_hierarchy: b32 = true) -> (result: ^DebugElement) {
+    if event.guid != {} {   
+        hash_value := get_hash_from_guid(event.guid)
         
-        result = get_element_from_guid_by_hash(debug, guid, hash_value)
+        result = get_element_from_guid_by_hash(debug, event.guid, hash_value)
         
         if result == nil {
             result = push(&debug.arena, DebugElement)
             result.guid = {
-                line      = guid.line,
-                column    = guid.column,
-                name      = copy_string(&debug.arena, guid.name),
-                file_path = copy_string(&debug.arena, guid.file_path),
-                procedure = copy_string(&debug.arena, guid.procedure),
+                line      = event.guid.line,
+                column    = event.guid.column,
+                name      = copy_string(&debug.arena, event.guid.name),
+                file_path = copy_string(&debug.arena, event.guid.file_path),
+                procedure = copy_string(&debug.arena, event.guid.procedure),
             }
+            // TODO(viktor): There should be a better way of copying just the tag.
+            raw_union :: struct{
+                data: [size_of(DebugValue)-size_of(u64)]u8,
+                tag: u64,
+            }
+            #assert(size_of(raw_union) == size_of(DebugValue))
+            
+            raw_result := cast(^raw_union) &result.type
+            raw_value  := transmute(raw_union) event.value
+            raw_result.tag = raw_value.tag
 
             index := hash_value % len(debug.element_hash)
             list_push(&debug.element_hash[index], result)
-
             
             if create_hierarchy {
                 parent := parent
                 if parent == nil do parent = debug.root_group
                 
-                parent = get_group_by_hierarchical_name(debug, parent, guid.name, false)
+                parent = get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
                 add_element_to_group(debug, parent, result)
             }
         }
