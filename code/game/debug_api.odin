@@ -38,7 +38,7 @@ debug_pointer_id_raw :: proc(pointer: pmm) -> (result: DebugId) {
 }
 
 debug_hit :: proc(id: DebugId, z: f32) {
-    debug := debug_get_state()
+    debug := get_debug_state()
     
     debug.next_hot_interaction = {
         id = id,
@@ -49,16 +49,16 @@ debug_hit :: proc(id: DebugId, z: f32) {
 debug_highlighted :: proc(id: DebugId) -> (highlighted: b32, color: v4) {
     when !DebugEnabled do return highlighted, color
     
-    debug := debug_get_state()
+    debug := get_debug_state()
 
     if debug.hot_interaction.id == id {
         highlighted = true
-        color = Green
+        color = Emerald
     }
     
     if is_selected(debug, id) {
         highlighted = true
-        color = Yellow
+        color = Isabelline
     }
         
     return highlighted, color
@@ -67,7 +67,7 @@ debug_highlighted :: proc(id: DebugId) -> (highlighted: b32, color: v4) {
 debug_requested :: proc(id: DebugId) -> (result: b32) {
     when !DebugEnabled do return result
     
-    debug := debug_get_state()
+    debug := get_debug_state()
 
     if debug.hot_interaction.id == id || is_selected(debug, id) {
         result = true

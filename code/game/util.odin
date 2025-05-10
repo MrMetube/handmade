@@ -11,15 +11,36 @@ was_pressed :: proc(button: InputButton) -> (result:b32) {
     return result
 }
 
+		
+// ------- Low Contrast
+// #C1B28B gray
+
+// ------- High Contrast
+// #009052 green
+
+// #2EC4B6 sea green
+// #7C7A8B taupe gray
+// #FF7E6B salmon
+
+// #C92F5F rose
+// #12a4cc blue
+// #9B1144 wine
+// #fe163d red
+// #e46738 hazel 
+// #ffb433 orange 
+
+Isabelline :: v4{0.96, 0.95, 0.94, 1}
+Jasmine    :: v4{0.95, 0.82, 0.52  , 1}
+DarkGreen  :: v4{0   , 0.07, 0.0353, 1}
+Emerald    :: v4{0.21, 0.82, 0.54, 1}
+
 White     :: v4{1   ,1    ,1      , 1}
 Gray      :: v4{0.5 ,0.5  ,0.5    , 1}
 Black     :: v4{0   ,0    ,0      , 1}
 Blue      :: v4{0.08, 0.49, 0.72  , 1}
-Yellow    :: v4{0.91, 0.81, 0.09  , 1}
 Orange    :: v4{1   , 0.71, 0.2   , 1}
 Green     :: v4{0   , 0.59, 0.28  , 1}
 Red       :: v4{1   , 0.09, 0.24  , 1}
-DarkGreen :: v4{0   , 0.07, 0.0353, 1}
 DarkBlue  :: v4{0.08, 0.08, 0.2   , 1}
 
 color_wheel :: [?]v4 {

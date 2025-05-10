@@ -337,7 +337,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 // push_bitmap_raw(render_group, &bitmap, transform, ground_chunk_size)
                 
                 if ShowGroundChunkBounds {
-                    push_rectangle_outline(render_group, rectangle_center_dimension(offset.xy, ground_chunk_size), transform, Yellow)
+                    push_rectangle_outline(render_group, rectangle_center_dimension(offset.xy, ground_chunk_size), transform, Orange)
                 }
             }
         }
@@ -398,7 +398,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Yellow,0.1)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Orange,0.1)
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
     }

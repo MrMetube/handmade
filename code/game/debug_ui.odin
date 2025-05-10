@@ -33,6 +33,10 @@ DebugViewData :: struct {
     },
 }
 
+DebugId :: struct {
+    value: [2]pmm,
+}
+
 DebugViewVariable :: struct {}
 
 DebugViewCollapsible :: struct {
@@ -58,16 +62,22 @@ DebugEventInterator :: struct {
 DebugInteraction :: struct {
     id:   DebugId,
     kind: DebugInteractionKind,
-    element: ^DebugElement, 
     
-    target: union {
+    // TODO(viktor): fix up the old usages and give this a proper type
+    // Can we use only one tag for both target and value?
+    target_: pmm,
+    
+    value: union {
         ^DebugTree,
         ^DebugEventLink,
         ^v2,
+        ^b32,
         
         i32,
+        b32,
         DebugInteractionKind,
         DebugValue,
+        DebugGUID,
     },
 }
 
@@ -80,15 +90,13 @@ DebugInteractionKind :: enum {
     ToggleValue,
     DragValue,
     
+    Tear,
     Move,
     Resize,
-    ToggleExpansion,
     
-    SetViewedFrameOrdinal,
-    SetProfileGraphRoot,
     Select,
     
-    SetElementType,
+    SetValue,
 }
 
 ////////////////////////////////////////////////
@@ -106,7 +114,8 @@ Layout :: struct {
     line_advance: f32,
     spacing:      v2,
     
-    no_line_feed: u32,
+    no_line_feed:     u32,
+    line_initialized: b32,
 }
 
 LayoutElement :: struct {
@@ -127,6 +136,12 @@ LayoutElementFlag :: enum {
 
 ////////////////////////////////////////////////
 
+TextRenderOperation:: enum {
+    Measure, Draw, 
+}
+
+////////////////////////////////////////////////
+
 overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     timed_function()
 
@@ -136,7 +151,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     
     mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
     draw_main_menu(debug, input, mouse_p)
-    debug_interact(debug, input, mouse_p)
+    interact(debug, input, mouse_p)
 }
 
 draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
@@ -148,17 +163,8 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     
     stack: Stack([64]DebugEventInterator)
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
-        layout := Layout {
-            debug   = debug,
-            mouse_p = mouse_p,
-            
-            p      = tree.p,
-            base_p = tree.p,
-            
-            depth        = 0,
-            line_advance = debug_get_line_advance(debug),
-            spacing      = {12, 4}
-        }
+        layout := begin_layout(debug, tree.p, mouse_p)
+        defer end_layout(&layout)
         
         group := tree.root
         
@@ -182,13 +188,12 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                     
                     switch &value in link.value {
                       case ^DebugEventGroup:
-                        view := get_debug_view_for_variable(debug, debug_id_from_link(tree, link))
-
-                        collapsible, ok := view.kind.(DebugViewCollapsible)
-                        if !ok {
+                        id := id_from_link(tree, link)
+                        view := get_view_for_variable(debug, id)
+                        if _, ok := view.kind.(DebugViewCollapsible); !ok {
                             view.kind = DebugViewCollapsible{}
-                            collapsible = view.kind.(DebugViewCollapsible)
                         }
+                        collapsible := &view.kind.(DebugViewCollapsible)
                         
                         expanded: b32
                         if collapsible.expanded_always {
@@ -210,25 +215,25 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                         
                         view_name := last_slash != 0 ? value.name[last_slash+1:] : value.name
                         text := fmt.tprint(expanded ? "-" : "+", view_name)
-                        text_bounds := debug_measure_text(debug, text)
+                        text_bounds := measure_text(debug, text)
                         
                         size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
                         
-                        interaction := DebugInteraction{ kind = .ToggleExpansion, id = debug_id_from_link(tree, link) }
+                        interaction := set_value_interaction(id, &collapsible.expanded_always, !collapsible.expanded_always)
                         if debug.alt_ui {
-                            interaction.kind = .Move
-                            interaction.target = link
+                            interaction.kind = .Tear
+                            interaction.target_ = link
                         }
                         
                         element := begin_ui_element_rectangle(&layout, &size)
                         set_ui_element_default_interaction(&element, interaction)
                         end_ui_element(&element, false)
                         
-                        color := interaction_is_hot(debug, interaction) ? Blue : White
-                        debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
+                        color := interaction_is_hot(debug, interaction) ? Isabelline : Jasmine
+                        push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
                         
                       case ^DebugElement:
-                        id := debug_id_from_link(tree, link)
+                        id := id_from_link(tree, link)
                         draw_event(&layout, id, value)
                     }
                 }
@@ -236,12 +241,13 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             
             move_interaction := DebugInteraction{
                 kind   = .Move,
-                target = &tree.p,
-                id = debug_id_from_link(tree, &group.sentinel),
+                target_ = nil,
+                value = &tree.p,
+                id = id_from_link(tree, &group.sentinel),
             }
             
             move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
-            color := interaction_is_hot(debug, move_interaction) ? Blue : White
+            color := interaction_is_hot(debug, move_interaction) ? Isabelline : Jasmine
             push_rectangle(&debug.render_group, move_handle, debug.ui_transform, color)
         
             if rectangle_contains(move_handle, mouse_p) {
@@ -252,7 +258,7 @@ draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
 }
 
 draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* , stored_event: ^DebugStoredEvent, frame_ordinal: i32 */) {
-    view := get_debug_view_for_variable(debug, id)
+    view := get_view_for_variable(debug, id)
     
     oldest_stored_event := element.frames[debug.viewed_frame_ordinal].events.last
     
@@ -280,8 +286,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
             
             ui_element := begin_ui_element_rectangle(layout, &block.size)
             make_ui_element_resizable(&ui_element)
-            move := DebugInteraction{ kind = .Move, id = id, element = element}
-            set_ui_element_default_interaction(&ui_element, move)
+            // set_ui_element_default_interaction(&ui_element, { kind = .Move, id = id, target_ = element})
             end_ui_element(&ui_element, true)
             
             bitmap_height := block.size.y
@@ -320,7 +325,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
             text = fmt.tprintf("%s %v", last_slash != 0 ? event.guid.name[last_slash+1:] : event.guid.name, value)
         }
         
-        autodetect_interaction := DebugInteraction{ id = id, kind = .AutoDetect, element = element }
+        autodetect_interaction := DebugInteraction{ id = id, kind = .AutoDetect, target_ = element }
         basic_text_element(layout, text, autodetect_interaction)
         
       case MemoryInfo:
@@ -337,7 +342,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         size := v2{1600, 32}
         ui_element := begin_ui_element_rectangle(layout, &size)
         end_ui_element(&ui_element, false)
-        debug_draw_frame_slider(debug, mouse_p, ui_element.bounds, id, element)
+        draw_frame_slider(debug, mouse_p, ui_element.bounds, element)
         
         
       case ThreadProfileGraph, FrameBarsGraph:
@@ -352,9 +357,13 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         _, is_frame_bars := element.type.(FrameBarsGraph)
         
         begin_ui_row(layout)
-            action_button(layout, "Root", { id = id, kind = .SetProfileGraphRoot, target = nil })
-            boolean_button(layout, "Threads", is_profile,   { id = id, kind = .SetElementType, element = element, target = cast(DebugValue) ThreadProfileGraph{} })
-            boolean_button(layout, "Frames", is_frame_bars, { id = id, kind = .SetElementType, element = element, target = cast(DebugValue) FrameBarsGraph{} })
+            boolean_button(layout, "Pause", debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
+            boolean_button(layout, "Oldest", debug.paused, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.oldest_frame_ordinal_that_is_already_freed))
+            boolean_button(layout, "Most Recent", debug.paused, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
+            
+            action_button(layout,  "Root", set_value_interaction(id, &graph.root, DebugGUID{} ))
+            boolean_button(layout, "Threads", is_profile,   set_value_interaction(id, &element.type, cast(DebugValue) ThreadProfileGraph{}))
+            boolean_button(layout, "Frames", is_frame_bars, set_value_interaction(id, &element.type, cast(DebugValue) FrameBarsGraph{}))
         end_ui_row(layout)
         
         ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
@@ -368,9 +377,9 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         
         #partial switch value in element.type {
             case ThreadProfileGraph:
-                draw_profile(debug, mouse_p, ui_element.bounds, id, viewed_element)
+                draw_profile(debug, &graph.root, mouse_p, ui_element.bounds, viewed_element)
             case FrameBarsGraph:
-                draw_frame_bars(debug, mouse_p, ui_element.bounds, id, viewed_element)
+                draw_frame_bars(debug, &graph.root, mouse_p, ui_element.bounds, viewed_element)
             case: unreachable()
         }
     }
@@ -383,7 +392,7 @@ get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
     return result
 }
 
-debug_draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_element: ^DebugElement) {
+draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
     
     dim := rectangle_get_dimension(rect)
@@ -401,7 +410,7 @@ debug_draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle
         color := v4{.05, .05, .05, 0.4}
         
         if frame_ordinal == debug.most_recent_frame_ordinal {
-            color = Yellow
+            color = Emerald
         }
         
         if frame_ordinal == debug.oldest_frame_ordinal_that_is_already_freed {
@@ -415,17 +424,14 @@ debug_draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle
         if rectangle_contains(region_rect, mouse_p) {
             color = Blue
             
-            debug.next_hot_interaction = DebugInteraction {
-                id     = graph_id,
-                target = frame_ordinal,
-                kind   = .SetViewedFrameOrdinal,
-            }
+            id := DebugId{ value = {root_element, &frame} }
+            debug.next_hot_interaction = set_value_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
             
             frame_delta := debug.most_recent_frame_ordinal - frame_ordinal
             if frame_delta < 0 {
                 frame_delta += MaxFrameCount
             }
-            debug_push_text(debug, fmt.tprintf("%v frames ago", frame_delta), mouse_p + {5, -5})
+            push_text(debug, fmt.tprintf("%v frames ago", frame_delta), mouse_p + {5, -5})
         }
         
         push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
@@ -433,12 +439,13 @@ debug_draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle
     }
 }
 
-draw_frame_bars :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_element: ^DebugElement) {
+draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     // @Copypasta with draw_profile
-    debug_push_text(debug, root_element.guid.name, {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
+    push_text(debug, root_element.guid.name, {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
     push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
     if rectangle_contains(rect, mouse_p) {
-        debug.next_hot_interaction = { id = graph_id, kind = .SetProfileGraphRoot, element = root_element }
+        id := DebugId{ value = {graph_root, root_element} }
+        debug.next_hot_interaction = set_value_interaction(id, graph_root, root_element.guid)
     }
     
     debug.mouse_text_stack_y = 10
@@ -482,13 +489,14 @@ draw_frame_bars :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph
             push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
             
             if rectangle_contains(region_rect, mouse_p) {
-                text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
-                debug_push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
+                text := fmt.tprintf("%s - %v cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
+                push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
                 debug.mouse_text_stack_y -= debug_get_line_advance(debug)
                 
                 // @Copypasta with draw_profile
                 if node.first_child != nil {
-                    debug.next_hot_interaction = { id = graph_id, kind = .SetProfileGraphRoot, element = element }
+                    id := DebugId { value = { graph_root, &element } }
+                    debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
                 }
             }
         }
@@ -497,7 +505,7 @@ draw_frame_bars :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph
     }
 }
 
-draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_element: ^DebugElement) {
+draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     debug.mouse_text_stack_y = 10
     
     lane_count := cast(f32) debug.max_thread_count
@@ -507,10 +515,11 @@ draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_i
     total_clocks := get_total_clocks(frame)
     root_event := frame.events.first
     
-    debug_push_text(debug, fmt.tprintf("%s %v/cycles", root_element.guid.name, total_clocks), {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
+    push_text(debug, fmt.tprintf("%s %v cycles", root_element.guid.name, total_clocks), {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
     push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
     if rectangle_contains(rect, mouse_p) {
-        debug.next_hot_interaction = { id = graph_id, kind = .SetProfileGraphRoot, element = root_element }
+        id := DebugId{ value = {graph_root, root_element} }
+        debug.next_hot_interaction = set_value_interaction(id, graph_root, root_element.guid)
     }
     
     next_x := rect.min.x
@@ -524,11 +533,11 @@ draw_profile :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_i
         event_rect.max.x = lerp(rect.min.x, rect.max.x, t)
         next_x = event_rect.max.x
         
-        draw_profile_lane(debug, mouse_p, event_rect, graph_id, event, lane_height, lane_height)
+        draw_profile_lane(debug, graph_root, mouse_p, event_rect, event, lane_height, lane_height)
     }
 }
 
-draw_profile_lane :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, graph_id: DebugId, root_event: ^DebugStoredEvent, lane_stride, lane_height: f32) {
+draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_event: ^DebugStoredEvent, lane_stride, lane_height: f32) {
     root := root_event.node
     
     frame_span := cast(f32) (root.duration)
@@ -563,21 +572,40 @@ draw_profile_lane :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, gr
         
         if rectangle_contains(region_rect, mouse_p) {
             text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
-            debug_push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
+            push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
             debug.mouse_text_stack_y -= debug_get_line_advance(debug)
             
             if node.first_child != nil {
-                debug.next_hot_interaction = {id = graph_id, kind = .SetProfileGraphRoot, element = element }
+                id := DebugId { value = { graph_root, &element } }
+                debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
             }
         }
         
         if node.first_child != nil {
-            draw_profile_lane(debug, mouse_p, region_rect, graph_id, event, lane_height, lane_height/1.618033988749)
+            draw_profile_lane(debug, graph_root, mouse_p, region_rect, event, lane_height, lane_height/1.618033988749)
         }
     }
 }
 
 ///////////////////////////////////////////////
+
+begin_layout :: proc(debug: ^DebugState, p: v2, mouse_p: v2) -> (result: Layout) {
+    result = {
+        debug   = debug,
+        mouse_p = mouse_p,
+        
+        p      = p,
+        base_p = p,
+        
+        line_advance = debug_get_line_advance(debug),
+        spacing      = {12, 4},
+    }
+    return result
+}
+
+end_layout :: proc(layout: ^Layout) {
+    
+}
 
 begin_ui_element_rectangle :: proc(layout: ^Layout, size: ^v2) -> (result: LayoutElement) {
     result.layout  = layout
@@ -596,6 +624,12 @@ set_ui_element_default_interaction :: proc(element: ^LayoutElement, interaction:
 }
 
 end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) {
+    if !layout.line_initialized {
+        layout.line_initialized = true
+        layout.p.x = layout.base_p.x + layout.depth * 2 * layout.line_advance
+        layout.next_line_dy = 0
+    }
+    
     SizeHandlePixels :: 4
     frame: v2
     if .Resizable in element.flags {
@@ -618,11 +652,11 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
         push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             debug.shadow_transform, Black)
         
         resize_box := rectangle_min_dimension(v2{element.bounds.max.x, total_min.y}, frame * 3)
-        push_rectangle(&layout.debug.render_group, resize_box, debug.text_transform, White)
+        push_rectangle(&layout.debug.render_group, resize_box, debug.text_transform, Emerald)
         
         resize_interaction := DebugInteraction {
             kind   = .Resize,
-            target = element.size,
+            value = element.size,
         }
         if rectangle_contains(resize_box, layout.mouse_p) {
             was_resized = true
@@ -642,9 +676,7 @@ advance_element :: proc(layout: ^Layout, element_rect: Rectangle2) {
     
     if layout.no_line_feed == 0 {
         layout.p.y += layout.next_line_dy - layout.spacing.y
-        layout.p.x = layout.base_p.x + layout.depth * 2 * layout.line_advance
-        
-        layout.next_line_dy = 0
+        layout.line_initialized = false
     } else {
         layout.p.x += rectangle_get_dimension(element_rect).x + layout.spacing.x
     }
@@ -655,11 +687,11 @@ begin_ui_row :: proc(layout: ^Layout) {
 }
 
 action_button :: proc(layout: ^Layout, label: string, interaction: DebugInteraction) {
-    basic_text_element(layout, label, interaction)
+    basic_text_element(layout, label, interaction, padding = 5, backdrop_color = DarkGreen)
 }
 
-boolean_button :: proc(layout: ^Layout, label: string, highlighted: bool,  interaction: DebugInteraction) {
-    basic_text_element(layout, label, interaction, highlighted ? Green : White)
+boolean_button :: proc(layout: ^Layout, label: string, highlighted: $bool,  interaction: DebugInteraction) {
+    basic_text_element(layout, label, interaction, highlighted ? Isabelline : Jasmine, padding = 5, backdrop_color = DarkGreen)
 }
 
 end_ui_row :: proc(layout: ^Layout) {
@@ -669,21 +701,35 @@ end_ui_row :: proc(layout: ^Layout) {
     advance_element(layout, rectangle_min_max(layout.p, layout.p))
 }
 
-basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInteraction = {}, item_color := White, hot_color := Blue) {
+basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInteraction = {}, item_color := Jasmine, hot_color := Isabelline, padding :v2 = 0, backdrop_color :v4= 0) {
     color := interaction_is_hot(layout.debug, interaction) ? hot_color : item_color
     
     debug := layout.debug
-    text_bounds := debug_measure_text(debug, text)
+    text_bounds := measure_text(debug, text)
     size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+    size += 2*padding
     
     element := begin_ui_element_rectangle(layout, &size)
     set_ui_element_default_interaction(&element, interaction)
     end_ui_element(&element, false)
     
-    debug_push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
+    p := v2{element.bounds.min.x + padding.x, element.bounds.max.y - padding.y - debug.ascent * debug.font_scale}
+    push_text(debug, text, p, color)
+    if backdrop_color.a > 0 {
+        push_rectangle(&debug.render_group, element.bounds, debug.backing_transform, backdrop_color)
+    }
 }
 
 ////////////////////////////////////////////////
+
+set_value_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
+    result.id = id
+    result.kind = .SetValue
+    result.target_ = target
+    result.value = value
+    
+    return result
+}
 
 interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
     if interaction.kind != .None {
@@ -692,7 +738,7 @@ interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) ->
     return result
 }
 
-debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     timed_function()
     
     mouse_dp := mouse_p - debug.last_mouse_p
@@ -705,22 +751,13 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
         // NOTE(viktor): Continous Interactions
         // Mouse move interaction
         
-        element := interaction.element
-        event: ^DebugEvent
-        if element != nil {
-            event = &element.frames[frame_ordinal].events.first.event
-        }
-        
         switch interaction.kind {
           case .None: 
             unreachable()
             
-          case .NOP, .AutoDetect, .ToggleValue, .ToggleExpansion, .SetProfileGraphRoot, .SetViewedFrameOrdinal:
+          case .NOP, .AutoDetect, .ToggleValue, .SetValue:
             // nothing
          
-          case .SetElementType:
-            // TODO(viktor): 
-            
           case .Select:
             if !input.shift_down {
                 clear_selection(debug)
@@ -728,53 +765,71 @@ debug_interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             select(debug, interaction.id)
             
           case .DragValue:
+            element := cast(^DebugElement) interaction.target_
+            event: ^DebugEvent
+            if element != nil {
+                event = &element.frames[frame_ordinal].events.first.event
+            }
+            
             value := &event.value.(f32)
             value^ += 0.1 * mouse_dp.x
             GlobalDebugTable.edit_event = event^
             
           case .Resize:
-            value := interaction.target.(^v2)
+            element := cast(^DebugElement) interaction.target_
+            event: ^DebugEvent
+            if element != nil {
+                event = &element.frames[frame_ordinal].events.first.event
+            }
+            
+            value := interaction.value.(^v2)
             value^ += mouse_dp * {1,-1}
             value.x = max(value.x, 80)
             value.y = max(value.y, 60)
             if event != nil do GlobalDebugTable.edit_event = event^
             
-          case .Move:
-            value := interaction.target.(^v2)
+          case .Tear:
+            value := interaction.value.(^v2)
             value^ += mouse_dp
+            
+          case .Move:
+            value := interaction.value.(^v2)
+            value^ += mouse_dp
+            
+            event := cast(^DebugEvent) interaction.target_
             if event != nil do GlobalDebugTable.edit_event = event^
         }
         
         // Click interaction
         for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
-            debug_end_click_interaction(debug, input)
-            debug_begin_click_interaction(debug, input)
+            end_click_interaction(debug, input)
+            begin_click_interaction(debug, input)
         }
         
         if !input.mouse.left.ended_down {
-            debug_end_click_interaction(debug, input)
+            end_click_interaction(debug, input)
         }
     } else {
         debug.hot_interaction = debug.next_hot_interaction
         
         for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
-            debug_begin_click_interaction(debug, input)
-            debug_end_click_interaction(debug, input)
+            begin_click_interaction(debug, input)
+            end_click_interaction(debug, input)
         }
         
         if input.mouse.left.ended_down {
-            debug_begin_click_interaction(debug, input)
+            begin_click_interaction(debug, input)
         }
     }
 }
 
-debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
+begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
     frame_ordinal := debug.most_recent_frame_ordinal
     
     if debug.hot_interaction.kind != .None {
         // Detect Auto Interaction
         if debug.hot_interaction.kind == .AutoDetect {
-            target := debug.hot_interaction.element
+            target := cast(^DebugElement) debug.hot_interaction.target_
             event := &target.frames[frame_ordinal].events.first.event
             
             switch value in event.value {
@@ -798,21 +853,12 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
             }
         }
         
-        // NOTE(viktor): Maybe change the target
-        #partial switch debug.hot_interaction.kind {
-          case .Move:
-            switch target in debug.hot_interaction.target {
-              case ^v2:
-                // Nothing
-              case ^DebugEventLink:
-                group := clone_group(debug, target)
-                
-                tree := add_tree(debug, group, {0, 0})
-                debug.hot_interaction.target = &tree.p
-              case ^DebugTree, i32, DebugInteractionKind, DebugValue:
-                unreachable()
-            }
+        if debug.hot_interaction.kind == .Tear {
+            target := cast(^DebugEventLink) debug.hot_interaction.target_
+            group := clone_group(debug, target)
             
+            tree := add_tree(debug, group, {0,0})
+            debug.hot_interaction.value = &tree.p
         }
         
         debug.interaction = debug.hot_interaction
@@ -821,7 +867,7 @@ debug_begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
     }
 }
 
-debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
+end_click_interaction :: proc(debug: ^DebugState, input: Input) {
     interaction := &debug.interaction
     defer interaction^ = {}
     
@@ -832,45 +878,48 @@ debug_end_click_interaction :: proc(debug: ^DebugState, input: Input) {
       case .None: 
         unreachable()
       
-      case .NOP, .Move, .Resize, .Select, .AutoDetect, .DragValue:
+      case .NOP, .Move, .Resize, .Select, .AutoDetect, .DragValue, .Tear:
         // NOTE(viktor): nothing
       
-      case .SetElementType:
-        element := interaction.element
-        assert(element != nil)
-        element.type = interaction.target.(DebugValue)
+      case .SetValue:
+        target := interaction.target_
+        assert(target != nil)
+        switch value in interaction.value {
+          case DebugValue: 
+            target := cast(^DebugValue) target 
+            target^ = value
+          case i32: 
+            target := cast(^i32) target 
+            target^ = value
+          case b32: 
+            target := cast(^b32) target 
+            target^ = value
+          case DebugInteractionKind: 
+            target := cast(^DebugInteractionKind) target 
+            target^ = value
         
-      case .SetViewedFrameOrdinal:
-        debug.paused = true
-        debug.viewed_frame_ordinal = interaction.target.(i32)
-        
-      case .SetProfileGraphRoot:
-        view := get_debug_view_for_variable(debug, interaction.id)
-        graph := &view.kind.(DebugViewProfileGraph)
-        
-        target := interaction.element
-        if input.alt_down || target == nil {
-            graph.root = {}
-        } else {
-            graph.root = target.guid
+          case DebugGUID: 
+            target := cast(^DebugGUID) target 
+            target^ = value    
+          case ^b32: 
+            target := cast(^^b32) target 
+            target^ = value
+          case ^v2: 
+            target := cast(^^v2) target 
+            target^ = value
+          case ^DebugEventLink: 
+            target := cast(^^DebugEventLink) target 
+            target^ = value
+          case ^DebugTree: 
+            target := cast(^^DebugTree) target 
+            target^ = value
         }
-            
-      case .ToggleExpansion:
-        view := get_debug_view_for_variable(debug, interaction.id)
-        collapsible, ok := &view.kind.(DebugViewCollapsible)
-        if !ok {
-            view.kind = DebugViewCollapsible{}
-            collapsible = &view.kind.(DebugViewCollapsible)
-        }
-        
-        collapsible.expanded_always = !collapsible.expanded_always
         
       case .ToggleValue:
-        event := &interaction.element.frames[frame_ordinal].events.first.event
+        element := cast(^DebugElement) interaction.target_
+        event := &element.frames[frame_ordinal].events.first.event
         
         #partial switch &value in event.value {
-          case FrameSlider:
-            debug.paused = !debug.paused
           case b32:
             value = !value
             GlobalDebugTable.edit_event = event^
@@ -990,19 +1039,19 @@ add_group_to_group :: proc(debug: ^DebugState, parent: ^DebugEventGroup, child: 
     return result
 }
 
-debug_id_from_link :: proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
+id_from_link :: proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
     result.value[0] = tree
     result.value[1] = link
     return result
 }
 
-debug_id_from_guid :: proc(guid: ^DebugGUID) -> (result: DebugId) {
+id_from_guid :: proc(guid: ^DebugGUID) -> (result: DebugId) {
     result.value[0] = guid
     result.value[1] = nil
     return result
 }
 
-get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
+get_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
     timed_function()
     // TODO(viktor): BETTER HASH FUNCTION
     hash_index := ((cast(umm) id.value[0] >> 2) + (cast(umm) id.value[1] >> 2)) % len(debug.view_hash)
@@ -1026,17 +1075,13 @@ get_debug_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result:
 
 ////////////////////////////////////////////////
 
-TextRenderOperation:: enum {
-    Measure, Draw, 
-}
-
-debug_push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = 1) {
+push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = 1) {
     if debug.font != nil && debug.font_info != nil {
         text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
     }
 }
 
-debug_measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
+measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
     if debug.font != nil && debug.font_info != nil {
         result = text_op(debug, .Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
     }

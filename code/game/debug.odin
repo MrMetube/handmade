@@ -14,8 +14,7 @@ import "core:fmt"
     ////////////////////////////////////////////////
 */
 
-// TODO(viktor): "Mark Loop Point" as debug action
-// TODO(viktor): pause/unpause profiling
+// TODO(viktor): "Mark Loop Point" for input recording(currently on 'L' key) as debug action
 
 // @Idea Memory Debugger with tracking allocator and maybe a 
 // tree graph to visualize the size of the allocated types and 
@@ -23,7 +22,7 @@ import "core:fmt"
 // most entries of a type.
 
 GlobalDebugMemory: ^GameMemory
-GlobalDebugTable: ^DebugTable
+GlobalDebugTable:  ^DebugTable
 
 DebugMaxEventCount :: 5_000_000 when DebugEnabled else 0
 MaxFrameCount :: 512
@@ -81,12 +80,12 @@ DebugState :: struct {
     ui_transform:      Transform,
     backing_transform: Transform,
     
-    font_scale:   f32,
-    ascent:       f32,
+    font_scale: f32,
+    ascent:     f32,
     
-    font_id:      FontId,
-    font:         ^Font,
-    font_info:    ^FontInfo,
+    font_id:   FontId,
+    font:      ^Font,
+    font_info: ^FontInfo,
     
     // Per-frame storage management
     per_frame_arena:         Arena,
@@ -150,7 +149,7 @@ DebugTable :: struct {
     events:         [2][DebugMaxEventCount]DebugEvent,
 }
 
-// TODO(viktor): we now only need 1 bit to know the array index
+// TODO(viktor): we now only need 1 bit to know the debugtable events array index
 DebugEventsState :: bit_field u64 {
     // @Volatile Later on we transmute this to a u64 to 
     // atomically increment the events_index
@@ -246,11 +245,8 @@ DebugProfileNode :: struct {
     core_index:   u16,
 }
 
-DebugId :: struct {
-    value: [2]pmm,
-}
-
 ////////////////////////////////////////////////
+// @Cleanup what here is even used anymore?
 
 @common 
 DebugCode :: struct {
@@ -370,7 +366,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     }
 }
 
-debug_get_state :: proc() -> (result: ^DebugState) {
+get_debug_state :: proc() -> (result: ^DebugState) {
     if GlobalDebugMemory != nil {
         result = cast(^DebugState) raw_data(GlobalDebugMemory.debug_storage)
     }
