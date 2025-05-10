@@ -153,12 +153,6 @@ ProjectedBasis :: struct {
     sort_key: f32,
 }
 
-@common
-TileSortEntry :: struct {
-    sort_key:           f32,
-    push_buffer_offset: u32,
-}
-    
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
     group^ = {
         assets = assets,
@@ -218,7 +212,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
     
     commands := group.commands
     // :PointerArithmetic
-    if commands.push_buffer_size + size < commands.sort_entry_at - size_of(TileSortEntry) {
+    if commands.push_buffer_size + size < commands.sort_entry_at - size_of(SortEntry) {
         offset := commands.push_buffer_size
         header := cast(^RenderGroupEntryHeader) &commands.push_buffer[offset]
         
@@ -231,11 +225,11 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
 
         result = cast(^T) &commands.push_buffer[offset + header_size]
 
-        commands.sort_entry_at -= size_of(TileSortEntry)
-        entry := cast(^TileSortEntry) &commands.push_buffer[commands.sort_entry_at]
+        commands.sort_entry_at -= size_of(SortEntry)
+        entry := cast(^SortEntry) &commands.push_buffer[commands.sort_entry_at]
         entry^ = {
-            sort_key           = sort_key,
-            push_buffer_offset = offset,
+            sort_key = sort_key,
+            index    = offset,
         }
         
         commands.push_buffer_size += size

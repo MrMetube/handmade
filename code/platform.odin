@@ -675,7 +675,7 @@ main :: proc() {
             window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
             
-            needed_sort_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(TileSortEntry) )
+            needed_sort_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(SortEntry) )
             if needed_sort_memory_size > current_sort_memory_size {
                 deallocate_memory(sort_memory)
                 current_sort_memory_size = needed_sort_memory_size

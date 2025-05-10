@@ -376,7 +376,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     { debug_data_block("Profile")
         debug_ui_element(FrameSlider{})
-        debug_ui_element(FrameBarsGraph{})
+        debug_ui_element(TopClocksList{})
         debug_ui_element(FrameInfo{})
         debug_ui_element(MemoryInfo{})
     }

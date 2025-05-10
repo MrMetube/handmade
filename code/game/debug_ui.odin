@@ -338,49 +338,63 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         text := fmt.tprintf("Viewed Frame: %5.4f ms, %d events, %d data blocks, %d profile_blocks", viewed_frame.seconds_elapsed*1000, viewed_frame.stored_event_count, viewed_frame.data_block_count, viewed_frame.profile_block_count)
         basic_text_element(layout, text)
         
-        case FrameSlider:
-        size := v2{1600, 32}
+      case FrameSlider:
+        begin_ui_row(layout)
+            boolean_button(layout, "< Back",      false, set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
+            boolean_button(layout, "Pause",       debug.paused,                                                                   set_value_interaction(id, &debug.paused, !debug.paused))
+            boolean_button(layout, "Forward >",      false, set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount))
+            boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal,                  set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
+        end_ui_row(layout)
+        
+        size := v2{1000, 32}
         ui_element := begin_ui_element_rectangle(layout, &size)
         end_ui_element(&ui_element, false)
         draw_frame_slider(debug, mouse_p, ui_element.bounds, element)
         
         
-      case ThreadProfileGraph, FrameBarsGraph:
+      case ThreadProfileGraph, FrameBarsGraph, TopClocksList:
         graph, ok := &view.kind.(DebugViewProfileGraph)
         if !ok {
             view.kind = DebugViewProfileGraph{}
             graph = &view.kind.(DebugViewProfileGraph)
-            graph.block.size = {1600, 400}
+            graph.block.size = {1000, 100}
         }
         
-        _, is_profile := element.type.(ThreadProfileGraph)
+        _, is_profile    := element.type.(ThreadProfileGraph)
         _, is_frame_bars := element.type.(FrameBarsGraph)
-        
-        begin_ui_row(layout)
-            boolean_button(layout, "Pause", debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
-            boolean_button(layout, "Oldest", debug.paused, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.oldest_frame_ordinal_that_is_already_freed))
-            boolean_button(layout, "Most Recent", debug.paused, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
-            
-            action_button(layout,  "Root", set_value_interaction(id, &graph.root, DebugGUID{} ))
-            boolean_button(layout, "Threads", is_profile,   set_value_interaction(id, &element.type, cast(DebugValue) ThreadProfileGraph{}))
-            boolean_button(layout, "Frames", is_frame_bars, set_value_interaction(id, &element.type, cast(DebugValue) FrameBarsGraph{}))
-        end_ui_row(layout)
-        
-        ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
-        make_ui_element_resizable(&ui_element)
-        end_ui_element(&ui_element, true)
-        
+        _, is_top_clocks := element.type.(TopClocksList)
+
         viewed_element := get_element_from_guid(debug, graph.root)
         if viewed_element == nil {
             viewed_element = debug.profile_root
         }
         
+        begin_ui_row(layout)
+            boolean_button(layout, "Threads", is_profile,   set_value_interaction(id, &element.type, cast(DebugValue) ThreadProfileGraph{}))
+            boolean_button(layout, "Frames", is_frame_bars, set_value_interaction(id, &element.type, cast(DebugValue) FrameBarsGraph{}))
+            boolean_button(layout, "Clocks", is_top_clocks, set_value_interaction(id, &element.type, cast(DebugValue) TopClocksList{}))
+            action_button(layout,  "Root", set_value_interaction(id, &graph.root, DebugGUID{} ))
+            basic_text_element(layout, fmt.tprint("Viewing:", viewed_element.guid.name), padding = 5)
+        end_ui_row(layout)
+        
+        ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
+        make_ui_element_resizable(&ui_element)
+        end_ui_element(&ui_element, true)
+                
+        rect := ui_element.bounds
+        push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
+        if rectangle_contains(rect, mouse_p) {
+            debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
+        }
+        
         #partial switch value in element.type {
-            case ThreadProfileGraph:
-                draw_profile(debug, &graph.root, mouse_p, ui_element.bounds, viewed_element)
-            case FrameBarsGraph:
-                draw_frame_bars(debug, &graph.root, mouse_p, ui_element.bounds, viewed_element)
-            case: unreachable()
+          case ThreadProfileGraph:
+            draw_profile(debug, &graph.root, mouse_p, rect, viewed_element)
+          case FrameBarsGraph:
+            draw_frame_bars(debug, &graph.root, mouse_p, rect, viewed_element)
+          case TopClocksList:
+            draw_top_clocks(debug, &graph.root, mouse_p, rect, viewed_element)
+          case: unreachable()
         }
     }
 }
@@ -439,15 +453,97 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
     }
 }
 
-draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
-    // @Copypasta with draw_profile
-    push_text(debug, root_element.guid.name, {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
-    push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
-    if rectangle_contains(rect, mouse_p) {
-        id := DebugId{ value = {graph_root, root_element} }
-        debug.next_hot_interaction = set_value_interaction(id, graph_root, root_element.guid)
+DebugStatistic :: struct {
+    sum, avg, min, max: f32, count: u32,
+}
+
+begin_debug_statistic :: proc(stat: ^DebugStatistic) {
+    stat ^= {
+        min = max(f32),
+        max = min(f32),
+    }
+}
+
+accumulate_debug_statistic :: proc(stat: ^DebugStatistic, value: f32) {
+    stat.sum += value
+    stat.min = min(stat.min, value)
+    stat.max = max(stat.max, value)
+    stat.count += 1
+}
+
+end_debug_statistic :: proc(stat: ^DebugStatistic) {
+    stat.avg = safe_ratio_0(stat.sum, cast(f32) stat.count)
+}
+
+ClockEntry :: struct {
+    element: ^DebugElement,
+    stats: DebugStatistic,
+}
+
+draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+    p := v2{rect.min.x, rect.max.y} - v2{0, debug_get_baseline(debug)}
+    
+    link_count: u32
+    for link := debug.profile_group.sentinel.next; link != &debug.profile_group.sentinel; link = link.next {
+        link_count += 1
     }
     
+    temp := begin_temporary_memory(&debug.arena)
+    defer end_temporary_memory(temp)
+    
+    sort_entries := push_slice(temp.arena, SortEntry, link_count, no_clear())
+    temp_space   := push_slice(temp.arena, SortEntry, link_count, no_clear())
+    entries      := push_slice(temp.arena, ClockEntry, link_count, no_clear())
+    
+    total_time: f32
+    entry_index: u32
+    for link := debug.profile_group.sentinel.next; link != &debug.profile_group.sentinel; link = link.next {
+        element := link.value.(^DebugElement)
+        
+        entry := &entries[entry_index]
+        
+        entry.element = element
+        
+        begin_debug_statistic(&entry.stats)
+        frame := &element.frames[debug.viewed_frame_ordinal]
+        for event := frame.events.last; event != nil; event = event.next {
+            accumulate_debug_statistic(&entry.stats, cast(f32) event.node.duration)
+        }
+        end_debug_statistic(&entry.stats)
+        
+        sort_entries[entry_index] = {
+            sort_key = -entry.stats.sum,
+            index = entry_index
+        }
+        total_time += entry.stats.sum
+        
+        entry_index += 1
+    }
+    
+    merge_sort(sort_entries, temp_space)
+    
+    for sort_entry in sort_entries {
+        entry := entries[sort_entry.index]
+        
+        text := fmt.tprintf(
+            "% 10vcy / % 6v : % 8.0vcy % 2.2v%% - %s", 
+            cast(u64) entry.stats.sum, 
+            cast(u64) entry.stats.count, 
+            entry.stats.avg,
+            entry.stats.sum * 100 / total_time, 
+            entry.element.guid.name,
+        )
+        
+        color_wheel := color_wheel
+        color := color_wheel[sort_entry.index % len(color_wheel)]
+        push_text(debug, text, p, color)
+        
+        p.y -= debug_get_line_advance(debug)
+        if p.y < rect.min.y do break
+    }
+}
+
+draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     debug.mouse_text_stack_y = 10
 
     dim := rectangle_get_dimension(rect)
@@ -514,13 +610,6 @@ draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, r
     frame := &root_element.frames[debug.viewed_frame_ordinal]
     total_clocks := get_total_clocks(frame)
     root_event := frame.events.first
-    
-    push_text(debug, fmt.tprintf("%s %v cycles", root_element.guid.name, total_clocks), {rect.min.x + 10, rect.max.y - debug_get_line_advance(debug)})
-    push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
-    if rectangle_contains(rect, mouse_p) {
-        id := DebugId{ value = {graph_root, root_element} }
-        debug.next_hot_interaction = set_value_interaction(id, graph_root, root_element.guid)
-    }
     
     next_x := rect.min.x
     relative_clock: i64
@@ -834,15 +923,12 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
             
             switch value in event.value {
               case FrameMarker, 
-                   FrameInfo, MemoryInfo,
-                   BitmapId, SoundId, FontId,
                    BeginTimedBlock, EndTimedBlock,
                    BeginDataBlock, EndDataBlock,
                    DebugEventGroup,
-                   Rectangle2, Rectangle3,
-                   ThreadProfileGraph, FrameBarsGraph,
-                   FrameSlider,
-                   u32, i32, v2, v3, v4:
+                   ThreadProfileGraph, FrameBarsGraph, TopClocksList,
+                   FrameSlider, FrameInfo, MemoryInfo,
+                   BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, v2, v3, v4:
                 debug.hot_interaction.kind = .NOP
               case b32:
                 debug.hot_interaction.kind = .ToggleValue
@@ -1075,6 +1161,16 @@ get_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^Debu
 
 ////////////////////////////////////////////////
 
+debug_get_baseline :: proc(debug: ^DebugState) -> (result: f32) {
+    result = get_baseline(debug.font_info) * debug.font_scale
+    return result
+}
+
+debug_get_line_advance :: proc(debug: ^DebugState) -> (result: f32) {
+    result = get_line_advance(debug.font_info) * debug.font_scale
+    return result
+}
+
 push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = 1) {
     if debug.font != nil && debug.font_info != nil {
         text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
@@ -1089,12 +1185,7 @@ measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
     return result
 }
 
-debug_get_line_advance :: proc(debug: ^DebugState) -> (result: f32) {
-    result = get_line_advance(debug.font_info) * debug.font_scale
-    return result
-}
-
-text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = 1) -> (result: Rectangle2) {
+text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = Jasmine) -> (result: Rectangle2) {
     result = inverted_infinity_rectangle(Rectangle2)
     // TODO(viktor): @Robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"

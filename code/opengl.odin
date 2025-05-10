@@ -295,12 +295,12 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     count := commands.push_buffer_element_count
     // :PointerArithmetic
     if count == 0 do return
-    sort_entries := (cast([^]TileSortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
+    sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
     
     for sort_entry, i in sort_entries {
-        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.push_buffer_offset]
+        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.index]
         //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.push_buffer_offset + size_of(RenderGroupEntryHeader)]
+        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderGroupEntryHeader)]
         
         switch header.type {
           case .RenderGroupEntryClear:

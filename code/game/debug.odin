@@ -180,15 +180,13 @@ DebugValue :: union {
     
     BitmapId, SoundId, FontId,
     
-    ThreadProfileGraph,
-    FrameBarsGraph,
-    
-    MemoryInfo, FrameInfo,
-    
     DebugEventLink,
     DebugEventGroup,
     
+    MemoryInfo, FrameInfo,
+    
     FrameSlider,
+    ThreadProfileGraph, FrameBarsGraph, TopClocksList,
 }
 
 FrameMarker :: struct {
@@ -203,9 +201,10 @@ EndDataBlock    :: struct {}
 FrameSlider :: struct {}
 MemoryInfo  :: struct {}
 FrameInfo   :: struct {}
+
+TopClocksList      :: struct {}
 ThreadProfileGraph :: struct {}
 FrameBarsGraph     :: struct {}
-Profile :: struct {}
 
 ////////////////////////////////////////////////
 
@@ -315,7 +314,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
                 procedure = #location(debug).procedure,
             }
         }
-        debug.profile_root = get_element_from_guid_by_parent(debug, root_event, parent = nil, create_hierarchy = false)
+        debug.profile_root = get_element_from_guid_by_parent(debug, root_event, nil, ElementOps{})
         
         // TODO(viktor): @Cleanup
         debug.root_group    = create_group(debug, "Root")
@@ -433,15 +432,12 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
             block.group = group
             
-          case ThreadProfileGraph, FrameBarsGraph,
+          case ThreadProfileGraph, FrameBarsGraph, TopClocksList,
             DebugEventLink, DebugEventGroup,
             FrameInfo, MemoryInfo, FrameSlider,
-            BitmapId, SoundId, FontId, 
-            b32, f32, u32, i32, 
-            v2, v3, v4, 
-            Rectangle2, Rectangle3:
+            BitmapId, SoundId, FontId, b32, f32, u32, i32, v2, v3, v4, Rectangle2, Rectangle3:
             
-            element := get_element_from_guid(debug, event, default_parent_group)
+            element := get_element_from_guid(debug, event, default_parent_group, ElementOps{ .AddToParent, .CreateHierarchy })
             store_event(debug, event, element)
             
           case EndDataBlock:
@@ -453,7 +449,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
           case BeginTimedBlock:
             collation_frame.profile_block_count += 1
             
-            element := get_element_from_guid(debug, event, parent = debug.profile_group, create_hierarchy = false)
+            element := get_element_from_guid(debug, event, debug.profile_group, ElementOps{ .AddToParent })
             
             parent_event := collation_frame.profile_root
             clock_basis := collation_frame.begin_clock
@@ -621,7 +617,9 @@ get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash
     
     return result
 }
-get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup = nil, create_hierarchy: b32 = true) -> (result: ^DebugElement) {
+ElementOp :: enum { CreateHierarchy, AddToParent }
+ElementOps :: bit_set[ElementOp]
+get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup, ops: ElementOps) -> (result: ^DebugElement) {
     if event.guid != {} {   
         hash_value := get_hash_from_guid(event.guid)
         
@@ -650,11 +648,14 @@ get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, p
             index := hash_value % len(debug.element_hash)
             list_push(&debug.element_hash[index], result)
             
-            if create_hierarchy {
+            if .CreateHierarchy in ops {
                 parent := parent
                 if parent == nil do parent = debug.root_group
                 
                 parent = get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
+            }
+            
+            if parent != nil && .AddToParent in ops {
                 add_element_to_group(debug, parent, result)
             }
         }
