@@ -18,13 +18,13 @@ import "core:fmt"
 
 // @Idea Memory Debugger with tracking allocator and maybe a 
 // tree graph to visualize the size of the allocated types and 
-// such in each arena?Maybe a table view of largest entries or 
+// such in each arena? Maybe a table view of largest entries or 
 // most entries of a type.
 
 GlobalDebugMemory: ^GameMemory
 GlobalDebugTable:  ^DebugTable
 
-DebugMaxEventCount :: 5_000_000 when DebugEnabled else 0
+DebugMaxEventCount :: 500_000 when DebugEnabled else 0
 MaxFrameCount :: 512
 
 ////////////////////////////////////////////////
@@ -51,8 +51,8 @@ DebugState :: struct {
     
     element_hash: [1024]^DebugElement,
     
-    root_group:    ^DebugEventGroup,
-    profile_group: ^DebugEventGroup,
+    root_group:    ^DebugEventLink,
+    profile_group: ^DebugEventLink,
     
     view_hash:     [4096]^DebugView,
     tree_sentinel: DebugTree,
@@ -125,19 +125,17 @@ DebugOpenBlock :: struct {
     
     event: ^DebugStoredEvent,
     
-    group: ^DebugEventGroup,
+    group: ^DebugEventLink,
 }
 
 ////////////////////////////////////////////////
 
-#assert(size_of(DebugEventLinkData) == 16)
-#assert(size_of(DebugEventLink) == 32)
-#assert(size_of(DebugEventGroup) == 48)
-#assert(size_of(DebugValue) == 56)
+#assert(size_of(DebugEventLink) == 56)
+#assert(size_of(DebugValue) == 64)
 #assert(size_of(DebugGUID) == 56)
-#assert(size_of(DebugEvent) == 128) // !!!! See below
+#assert(size_of(DebugEvent) == 136)
 #assert(size_of(DebugTable) == DebugTableSize)
-@common DebugTableSize :: 1_280_000_152
+@common DebugTableSize :: 136_000_160
 DebugTable :: struct {
     record_increment: u64,
     edit_event: DebugEvent,
@@ -181,7 +179,6 @@ DebugValue :: union {
     BitmapId, SoundId, FontId,
     
     DebugEventLink,
-    DebugEventGroup,
     
     MemoryInfo, FrameInfo,
     
@@ -277,6 +274,12 @@ DebugExecutingProcess :: struct {
 
 ////////////////////////////////////////////////
 
+DebugStatistic :: struct {
+    sum, avg, min, max: f32, count: u32,
+}
+
+////////////////////////////////////////////////
+
 @export
 debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
@@ -318,8 +321,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.profile_root = get_element_from_guid_by_parent(debug, root_event, nil, ElementOps{})
         
         // TODO(viktor): @Cleanup
-        debug.root_group    = create_group(debug, "Root")
-        debug.profile_group = create_group(debug, "Profiles")
+        debug.root_group    = create_link(debug, "Root")
+        debug.profile_group = create_link(debug, "Profiles")
         
         debug.font_scale = 0.6
         
@@ -434,7 +437,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             block.group = group
             
           case ThreadProfileGraph, FrameBarsGraph, TopClocksList,
-            DebugEventLink, DebugEventGroup,
+            DebugEventLink,
             FrameInfo, MemoryInfo, FrameSlider,
             BitmapId, SoundId, FontId, b32, f32, u32, i32, v2, v3, v4, Rectangle2, Rectangle3:
             
@@ -624,9 +627,11 @@ get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash
     
     return result
 }
+
 ElementOp :: enum { CreateHierarchy, AddToParent }
 ElementOps :: bit_set[ElementOp]
-get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventGroup, ops: ElementOps) -> (result: ^DebugElement) {
+
+get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventLink, ops: ElementOps) -> (result: ^DebugElement) {
     if event.guid != {} {   
         hash_value := get_hash_from_guid(event.guid)
         
@@ -698,4 +703,24 @@ free_open_block :: proc(thread: ^DebugThread, first_open_block: ^^DebugOpenBlock
     
     free_block.next_free    = thread.first_free_block
     thread.first_free_block = free_block
+}
+
+////////////////////////////////////////////////
+
+begin_debug_statistic :: proc(stat: ^DebugStatistic) {
+    stat ^= {
+        min = max(f32),
+        max = min(f32),
+    }
+}
+
+accumulate_debug_statistic :: proc(stat: ^DebugStatistic, value: f32) {
+    stat.sum += value
+    stat.min = min(stat.min, value)
+    stat.max = max(stat.max, value)
+    stat.count += 1
+}
+
+end_debug_statistic :: proc(stat: ^DebugStatistic) {
+    stat.avg = safe_ratio_0(stat.sum, cast(f32) stat.count)
 }

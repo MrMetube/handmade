@@ -3,30 +3,34 @@ package game
 import "core:fmt"
 import "base:runtime"
 
-DebugEventGroup :: struct {
+DebugEventLink :: struct {
+    next, prev: ^DebugEventLink,
+    // @Volatile sentinel() abuses the fact that first_child and last_child could be viewed as prev and next
+    first_child, last_child: ^DebugEventLink,
+    
     name:     string,
-    sentinel: DebugEventLink,
+    element:  ^SingleLinkedList(DebugElementLink),
 }
 
-DebugEventLink :: #type LinkedList(DebugEventLinkData)
-DebugEventLinkData :: struct {
-    value: union {
-        ^DebugEventGroup,
-        ^DebugElement,
-    },
+sentinel :: proc(from: ^DebugEventLink) -> (result: ^DebugEventLink) {
+    result = cast(^DebugEventLink) &from.first_child
+    return result
+}
+has_children :: proc(link: ^DebugEventLink) -> (result: b32) {
+    result = sentinel(link) != link.first_child
+    return result
 }
 
 DebugTree :: #type LinkedList(DebugTreeData)
 DebugTreeData :: struct {
     p:    v2,
-    root: ^DebugEventGroup,
+    root: ^DebugEventLink,
 }
 
 DebugView :: #type SingleLinkedList(DebugViewData)
 DebugViewData :: struct {
     id:   DebugId,
     kind: union {
-        DebugViewVariable,
         DebugViewBlock,
         DebugViewProfileGraph,
         DebugViewCollapsible,
@@ -37,24 +41,17 @@ DebugId :: struct {
     value: [2]pmm,
 }
 
-DebugViewVariable :: struct {}
-
 DebugViewCollapsible :: struct {
-    expanded_always:   b32,
-    expanded_alt_view: b32, // @Cleanup
+    expanded:   b32,
 }
 
 DebugViewProfileGraph :: struct {
     block: DebugViewBlock,
     root:  DebugGUID,
 }
+
 DebugViewBlock :: struct {
     size: v2,
-}
-
-DebugEventInterator :: struct {
-    link:     ^DebugEventLink,
-    sentinel: ^DebugEventLink,
 }
 
 ////////////////////////////////////////////////
@@ -65,7 +62,7 @@ DebugInteraction :: struct {
     
     // TODO(viktor): fix up the old usages and give this a proper type
     // Can we use only one tag for both target and value?
-    target_: pmm,
+    target: pmm,
     
     value: union {
         ^DebugTree,
@@ -151,117 +148,101 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     orthographic(&debug.render_group, {debug.render_group.commands.width, debug.render_group.commands.height}, 1)
     
     mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
-    draw_main_menu(debug, input, mouse_p)
+    draw_trees(debug, mouse_p)
     interact(debug, input, mouse_p)
 }
 
-draw_main_menu :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+draw_trees :: proc(debug: ^DebugState, mouse_p: v2) {
     timed_function()
     
     assert(debug.font_info != nil)
     
     frame_ordinal := debug.most_recent_frame_ordinal
     
-    stack: Stack([64]DebugEventInterator)
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
         layout := begin_layout(debug, tree.p, mouse_p)
         defer end_layout(&layout)
         
         group := tree.root
-        
-        if group != nil {
-            stack_push(&stack, DebugEventInterator{
-                link     = group.sentinel.next,
-                sentinel = &group.sentinel,
-            })
-            
-            for stack.depth > 0 {
-                iter := stack_peek(&stack)
-                if iter.link == iter.sentinel {
-                    stack.depth  -= 1
-                    layout.depth -= 1
-                } else {
-                    link := iter.link
-                    iter.link = link.next
-                    
-                    depth_delta: f32
-                    defer layout.depth += depth_delta
-                    
-                    switch &value in link.value {
-                      case ^DebugEventGroup:
-                        id := id_from_link(tree, link)
-                        view := get_view_for_variable(debug, id)
-                        if _, ok := view.kind.(DebugViewCollapsible); !ok {
-                            view.kind = DebugViewCollapsible{}
-                        }
-                        collapsible := &view.kind.(DebugViewCollapsible)
-                        
-                        expanded: b32
-                        if collapsible.expanded_always {
-                            expanded = true
-                            stack_push(&stack, DebugEventInterator{
-                                link     = value.sentinel.next,
-                                sentinel = &value.sentinel,
-                            })
-                            depth_delta = 1
-                        }
-                        
-                        last_slash: u32
-                        #reverse for r, index in value.name {
-                            if r == '/' {
-                                last_slash = auto_cast index
-                                break
-                            }
-                        }
-                        
-                        view_name := last_slash != 0 ? value.name[last_slash+1:] : value.name
-                        text := fmt.tprint(expanded ? "-" : "+", view_name)
-                        text_bounds := measure_text(debug, text)
-                        
-                        size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
-                        
-                        interaction := set_value_interaction(id, &collapsible.expanded_always, !collapsible.expanded_always)
-                        if debug.alt_ui {
-                            interaction.kind = .Tear
-                            interaction.target_ = link
-                        }
-                        
-                        element := begin_ui_element_rectangle(&layout, &size)
-                        set_ui_element_default_interaction(&element, interaction)
-                        end_ui_element(&element, false)
-                        
-                        color := interaction_is_hot(debug, interaction) ? Isabelline : Jasmine
-                        push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
-                        
-                      case ^DebugElement:
-                        id := id_from_link(tree, link)
-                        draw_event(&layout, id, value)
-                    }
-                }
-            }
-            
-            move_interaction := DebugInteraction{
-                kind   = .Move,
-                target_ = nil,
-                value = &tree.p,
-                id = id_from_link(tree, &group.sentinel),
-            }
-            
-            move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
-            color := interaction_is_hot(debug, move_interaction) ? Isabelline : Jasmine
-            push_rectangle(&debug.render_group, move_handle, debug.ui_transform, color)
-        
-            if rectangle_contains(move_handle, mouse_p) {
-                debug.next_hot_interaction = move_interaction
-            }
+        for link := group.first_child; link != sentinel(group); link = link.next {
+            draw_tree(&layout, mouse_p, tree, link)
         }
     }
 }
 
-draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* , stored_event: ^DebugStoredEvent, frame_ordinal: i32 */) {
+draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEventLink) {
+    group := tree.root
+    debug := layout.debug
+    
+    if has_children(link) {
+        last_slash: u32
+        #reverse for r, index in link.name {
+            if r == '/' {
+                last_slash = auto_cast index
+                break
+            }
+        }
+        view_name := last_slash != 0 ? link.name[last_slash+1:] : link.name
+        
+        id := id_from_link(tree, link)
+        view := get_view_for_variable(debug, id)
+        if _, ok := view.kind.(DebugViewCollapsible); !ok {
+            view.kind = DebugViewCollapsible{}
+        }
+        collapsible := &view.kind.(DebugViewCollapsible)
+        
+        expanded := collapsible.expanded
+        text := fmt.tprint(expanded ? "-" : "+", view_name)
+        text_bounds := measure_text(debug, text)
+                
+        size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+        element := begin_ui_element_rectangle(layout, &size)
+        
+        interaction: DebugInteraction
+        if !debug.alt_ui {
+            interaction = set_value_interaction(id, &collapsible.expanded, !collapsible.expanded)
+        } else {
+            interaction = { id = id, kind = .Tear, target = link }
+        }
+        
+        set_ui_element_default_interaction(&element, interaction)
+        end_ui_element(&element, false)
+        
+        color := interaction_is_hot(debug, interaction) ? Isabelline : Jasmine
+        push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
+        
+        if expanded {
+            layout.depth += 1
+            defer layout.depth -= 1
+            
+            for child := link.first_child; child != sentinel(link); child = child.next {
+                draw_tree(layout, mouse_p, tree, child)
+            }
+        }
+    } else {
+        draw_element(layout, id_from_link(tree, link), link.element)
+    }
+    
+    move_interaction := DebugInteraction{ id = id_from_link(tree, group), kind = .Move, value = &tree.p }
+    
+    move_handle := rectangle_min_dimension(tree.p, v2{8, 8})
+    color := interaction_is_hot(debug, move_interaction) ? Isabelline : Jasmine
+    push_rectangle(&debug.render_group, move_handle, debug.ui_transform, color)
+    
+    if rectangle_contains(move_handle, mouse_p) {
+        debug.next_hot_interaction = move_interaction
+    }
+}
+
+draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement) {
     view := get_view_for_variable(debug, id)
     
+    if element == nil {
+        basic_text_element(layout, "element was nil")
+        return
+    }
     oldest_stored_event := element.frames[debug.viewed_frame_ordinal].events.last
+    
     
     switch type in element.type {
       case SoundId, FontId, 
@@ -299,7 +280,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
             }
         }
     
-      case DebugEventLink, DebugEventGroup, b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
+      case DebugEventLink, b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
         null_event := DebugEvent {
             guid = element.guid,
             value = element.type
@@ -309,12 +290,12 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         value := event.value
         
         text: string
-        if _, ok := &event.value.(DebugEventGroup); ok {
+        if _, ok := &event.value.(DebugEventLink); ok {
             if _, okc := &view.kind.(DebugViewCollapsible); !okc {
                 view.kind = DebugViewCollapsible{}
             }
             collapsible := &view.kind.(DebugViewCollapsible)
-            text = fmt.tprintf("%s %v", collapsible.expanded_always ? "-" : "+", event.guid.name)
+            text = fmt.tprintf("%s %v", collapsible.expanded ? "-" : "+", event.guid.name)
         } else {
             last_slash: u32
             #reverse for r, index in event.guid.name {
@@ -326,7 +307,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
             text = fmt.tprintf("%s %v", last_slash != 0 ? event.guid.name[last_slash+1:] : event.guid.name, value)
         }
         
-        autodetect_interaction := DebugInteraction{ id = id, kind = .AutoDetect, target_ = element }
+        autodetect_interaction := DebugInteraction{ id = id, kind = .AutoDetect, target = element }
         basic_text_element(layout, text, autodetect_interaction)
         
       case MemoryInfo:
@@ -463,28 +444,6 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
     }
 }
 
-DebugStatistic :: struct {
-    sum, avg, min, max: f32, count: u32,
-}
-
-begin_debug_statistic :: proc(stat: ^DebugStatistic) {
-    stat ^= {
-        min = max(f32),
-        max = min(f32),
-    }
-}
-
-accumulate_debug_statistic :: proc(stat: ^DebugStatistic, value: f32) {
-    stat.sum += value
-    stat.min = min(stat.min, value)
-    stat.max = max(stat.max, value)
-    stat.count += 1
-}
-
-end_debug_statistic :: proc(stat: ^DebugStatistic) {
-    stat.avg = safe_ratio_0(stat.sum, cast(f32) stat.count)
-}
-
 ClockEntry :: struct {
     element: ^DebugElement,
     stats: DebugStatistic,
@@ -492,7 +451,8 @@ ClockEntry :: struct {
 
 draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     link_count: u32
-    for link := debug.profile_group.sentinel.next; link != &debug.profile_group.sentinel; link = link.next {
+    group := debug.profile_group
+    for link := group.first_child; link != sentinel(group); link = link.next {
         link_count += 1
     }
     
@@ -505,8 +465,10 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     
     total_time: f32
     entry_index: u32
-    for link := debug.profile_group.sentinel.next; link != &debug.profile_group.sentinel; link = link.next {
-        element := link.value.(^DebugElement)
+    for link := group.first_child; link != sentinel(group); link = link.next {
+        element := link.element
+        assert(element != nil)
+        assert(!has_children(link))
         
         entry := &entries[entry_index]
         defer entry_index += 1
@@ -792,7 +754,7 @@ action_button :: proc(layout: ^Layout, label: string, interaction: DebugInteract
 }
 
 boolean_button :: proc(layout: ^Layout, label: string, highlighted: $bool,  interaction: DebugInteraction) {
-    basic_text_element(layout, label, interaction, highlighted ? Isabelline : Jasmine, padding = 5, backdrop_color = DarkGreen)
+    basic_text_element(layout, label, interaction, highlighted ? Green : Jasmine, padding = 5, backdrop_color = DarkGreen)
 }
 
 end_ui_row :: proc(layout: ^Layout) {
@@ -826,7 +788,7 @@ basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInte
 set_value_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
     result.id = id
     result.kind = .SetValue
-    result.target_ = target
+    result.target = target
     result.value = value
     
     return result
@@ -866,7 +828,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             select(debug, interaction.id)
             
           case .DragValue:
-            element := cast(^DebugElement) interaction.target_
+            element := cast(^DebugElement) interaction.target
             event: ^DebugEvent
             if element != nil {
                 event = &element.frames[frame_ordinal].events.first.event
@@ -877,7 +839,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             GlobalDebugTable.edit_event = event^
             
           case .Resize:
-            element := cast(^DebugElement) interaction.target_
+            element := cast(^DebugElement) interaction.target
             event: ^DebugEvent
             if element != nil {
                 event = &element.frames[frame_ordinal].events.first.event
@@ -897,7 +859,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             value := interaction.value.(^v2)
             value^ += mouse_dp
             
-            event := cast(^DebugEvent) interaction.target_
+            event := cast(^DebugEvent) interaction.target
             if event != nil do GlobalDebugTable.edit_event = event^
         }
         
@@ -930,14 +892,13 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
     if debug.hot_interaction.kind != .None {
         // Detect Auto Interaction
         if debug.hot_interaction.kind == .AutoDetect {
-            target := cast(^DebugElement) debug.hot_interaction.target_
+            target := cast(^DebugElement) debug.hot_interaction.target
             event := &target.frames[frame_ordinal].events.first.event
             
             switch value in event.value {
               case FrameMarker, 
                    BeginTimedBlock, EndTimedBlock,
                    BeginDataBlock, EndDataBlock,
-                   DebugEventGroup,
                    ThreadProfileGraph, FrameBarsGraph, TopClocksList,
                    FrameSlider, FrameInfo, MemoryInfo,
                    BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, v2, v3, v4:
@@ -952,7 +913,7 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
         }
         
         if debug.hot_interaction.kind == .Tear {
-            target := cast(^DebugEventLink) debug.hot_interaction.target_
+            target := cast(^DebugEventLink) debug.hot_interaction.target
             group := clone_group(debug, target)
             
             tree := add_tree(debug, group, {0,0})
@@ -980,7 +941,7 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         // NOTE(viktor): nothing
       
       case .SetValue:
-        target := interaction.target_
+        target := interaction.target
         assert(target != nil)
         switch value in interaction.value {
           case DebugValue: 
@@ -1014,7 +975,7 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         }
         
       case .ToggleValue:
-        element := cast(^DebugElement) interaction.target_
+        element := cast(^DebugElement) interaction.target
         event := &element.frames[frame_ordinal].events.first.event
         
         #partial switch &value in event.value {
@@ -1027,7 +988,7 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
 
 ////////////////////////////////////////////////
 
-add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (result: ^DebugTree) {
+add_tree :: proc(debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^DebugTree) {
     result = push(&debug.arena, DebugTree, no_clear())
     result^ = {
         root = root,
@@ -1039,7 +1000,7 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugEventGroup, p: v2) -> (result: 
     return result
 }
 
-get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: string, create_terminal: b32) -> (result: ^DebugEventGroup) {
+get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: b32) -> (result: ^DebugEventLink) {
     assert(parent != nil)
     result = parent
     
@@ -1065,74 +1026,65 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventGr
     return result
 }
 
-get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventGroup, name: string) -> (result: ^DebugEventGroup) {
-    for link := parent.sentinel.next; link != &parent.sentinel; link = link.next {
-        if group, ok := link.value.(^DebugEventGroup); ok && group != nil && group.name == name {
-            result = group
+get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventLink, name: string) -> (result: ^DebugEventLink) {
+    if has_children(parent) {
+        for link := parent.first_child; link != sentinel(parent); link = link.next {
+            if link != nil && link.name == name {
+                result = link
+            }
         }
     }
     
     if result == nil {
-        result = create_group(debug, name)
-        add_group_to_group(debug, parent, result)
+        result = create_link(debug, name)
+        add_link_to_group(debug, parent, result)
     }
     
     return result
 }
 
-create_group :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEventGroup) {
-    result = push(&debug.arena, DebugEventGroup)
+create_link :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEventLink) {
+    result = push(&debug.arena, DebugEventLink)
     result.name = copy_string(&debug.arena, name)
-    list_init_sentinel(&result.sentinel)
+    
+    result.last_child  = sentinel(result)
+    result.first_child = sentinel(result)
     
     return result
 }
 
-clone_group :: proc (debug: ^DebugState, source: ^DebugEventLink) -> (result: ^DebugEventGroup) {
-    result = create_group(debug, copy_string(&debug.arena, "Cloned"))
-    clone_event_link(debug, result, source)
-    return result
-}
-
-clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventGroup, source: ^DebugEventLink) -> (result: ^DebugEventLink) {
-    if group, ok := source.value.(^DebugEventGroup); ok {
-        result = add_group_to_group(debug, parent, group)
-    } else {
-        result = add_element_to_group(debug, parent, source.value.(^DebugElement))
+add_element_to_group :: proc(debug: ^DebugState, parent: ^DebugEventLink, element: ^DebugElement) -> (result: ^DebugEventLink) {
+    result = create_link(debug, "")
+    
+    if parent != nil {
+        add_link_to_group(debug, parent, result)
     }
+    result.element = element
     
-    group, ok := source.value.(^DebugEventGroup)
-    if ok && group.sentinel.next != nil {
-        sub_group := push(&debug.arena, DebugEventGroup)
-        sub_group.name = group.name
-        list_init_sentinel(&sub_group.sentinel)
-        
-        for child := group.sentinel.next; child != &group.sentinel; child = child.next {
-            clone_event_link(debug, sub_group, child)
-        }
+    return result
+}
+
+add_link_to_group :: proc(debug: ^DebugState, parent: ^DebugEventLink, link: ^DebugEventLink) {
+    list, element := sentinel(parent), link
+    element.prev = list.prev
+    element.next = list
+    
+    element.next.prev = element
+    element.prev.next = element
+}
+
+clone_group :: proc (debug: ^DebugState, source: ^DebugEventLink) -> (result: ^DebugEventLink) {
+    result = clone_event_link(debug, nil, source)
+    return result
+}
+
+clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^DebugEventLink) -> (result: ^DebugEventLink) {
+    result = add_element_to_group(debug, parent, source.element)
+    result.name = source.name
+    
+    for child := source.first_child; child != sentinel(source); child = child.next {
+        clone_event_link(debug, result, child)
     }
-    
-    return result
-}
-
-add_element_to_group :: proc(debug: ^DebugState, parent: ^DebugEventGroup, element: ^DebugElement) -> (result: ^DebugEventLink) {
-    result = push(&debug.arena, DebugEventLink)
-    assert(element != nil)
-    assert(parent != nil)
-    
-    list_insert_after(&parent.sentinel, result)
-    result.value = element
-    
-    return result
-}
-
-add_group_to_group :: proc(debug: ^DebugState, parent: ^DebugEventGroup, child: ^DebugEventGroup) -> (result: ^DebugEventLink) {
-    result = push(&debug.arena, DebugEventLink)
-    assert(child != nil)
-    assert(parent != nil)
-    
-    list_insert_after(&parent.sentinel, result)
-    result.value = child
     
     return result
 }
@@ -1220,7 +1172,7 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         }
         height := cast(f32) info.dimension.y * font_scale
         switch operation {
-            case .Draw: 
+          case .Draw: 
             if codepoint != ' ' {
                 push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, 0), color)
                 push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, 0) + {2,-2,0}, {0,0,0,1})

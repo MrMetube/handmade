@@ -14,14 +14,13 @@ INTERNAL :: #config(INTERNAL, false)
     
     - Debug code
         - Diagramming
-        - (a little gui) switches / sliders / etc
         - Draw tile chunks so we can verify that things are aligned / in the chunks we want them to be in / etc
-        - Thread visualization 
     
     - Audio
         - Fix clicking Bug at the end of samples
     
     - Rendering
+        - Whats the deal with 18000 DrawRectangle calls?!
         - Real projections with solid concept of project/unproject
         - Straighten out all coordinate systems!
             - Screen

@@ -48,8 +48,8 @@ deque_remove_from_end :: proc(deque: ^Deque($L)) -> (result: ^L) {
 // [Sentinel] -> <- [..] ->
 //  -> <- [..] -> ...    <-
 LinkedList :: struct($T: typeid) {
-    using data: T,
     prev, next: ^LinkedList(T),
+    using data: T,
 }
 
 list_init_sentinel :: proc(sentinel: ^LinkedList($T)) {
