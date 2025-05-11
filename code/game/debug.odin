@@ -239,6 +239,7 @@ DebugProfileNode :: struct {
     
     parent_relative_clock: i64,
     duration:              i64,
+    duration_of_children:  i64,
     
     thread_index: u16,
     core_index:   u16,
@@ -486,7 +487,13 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
                 
                 node := &matching_block.event.node
                 node.duration = event.clock - matching_block.begin_clock
+                
                 free_open_block(thread, &thread.first_open_timed_block)
+                
+                if thread.first_open_timed_block != nil {
+                    parent_node := &thread.first_open_timed_block.event.node
+                    parent_node.duration_of_children += node.duration
+                }
             }
         }
     }

@@ -132,8 +132,11 @@ safe_truncate_i64 :: proc(value: i64) -> i32 {
     return cast(i32) value
 }
 
+rec_cast :: proc { rcast_2 }
+@(require_results) rcast_2 :: proc($T: typeid, rec: $R/Rectangle([2]$E)) -> Rectangle([2]T) where T != E {
+    return { vec_cast(T, rec.min), vec_cast(T, rec.max)}
+}
 vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
-
 @(require_results) vcast_2 :: proc($T: typeid, x, y: $E) -> [2]T where T != E {
     return {cast(T) x, cast(T) y}
 }

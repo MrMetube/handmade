@@ -259,8 +259,11 @@ main :: proc() {
     MaxPossibleOverlap :: 8 * size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     
+    // TODO(viktor): @Cleanup
     current_sort_memory_size : umm = 1 * Megabyte
+    current_clip_memory_size : umm = 256 * Kilobyte
     sort_memory := allocate_memory(current_sort_memory_size)
+    clip_memory := allocate_memory(current_clip_memory_size)
     
     // TODO(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
@@ -681,9 +684,16 @@ main :: proc() {
                 current_sort_memory_size = needed_sort_memory_size
                 sort_memory = allocate_memory(needed_sort_memory_size)
             }
+            // @Copypasta
+            needed_clip_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(RenderEntryClip) )
+            if needed_clip_memory_size > current_clip_memory_size {
+                deallocate_memory(clip_memory)
+                current_clip_memory_size = needed_clip_memory_size
+                clip_memory = allocate_memory(needed_clip_memory_size)
+            }
             
             render := game.begin_timed_block("render")
-            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_memory)
+            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_memory, clip_memory)
             game.end_timed_block(render)
             
             win.ReleaseDC(window, device_context)
@@ -703,9 +713,9 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_memory: pmm) {
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_memory, clip_memory: pmm) {
     sort_render_elements(commands, sort_memory)
-    
+    linearize_clip_rects(commands, clip_memory)
     /* 
         if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
             render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)

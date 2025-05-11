@@ -55,8 +55,6 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
     
     if gl_context != nil {
         if win.wglMakeCurrent(dc, gl_context) {
-            
-            // OpenGLInit
             gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
             
             extensions := opengl_get_extensions(context_is_modern)
@@ -226,6 +224,8 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
 }
 
 display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: win.HDC) {
+    gl.Disable(gl.SCISSOR_TEST)
+    
     gl.Viewport(0, 0, width, height)
     
     gl_set_screenspace(width, height)
@@ -288,6 +288,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     gl.Viewport(0, 0, commands.width, commands.height)
     gl_set_screenspace(window_width, window_height)
     
+    gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.TEXTURE_2D)
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
@@ -297,30 +298,48 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     if count == 0 do return
     sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
     
+    clip_rect_index := max(u16)
     for sort_entry, i in sort_entries {
-        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.index]
+        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry.index]
         //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderGroupEntryHeader)]
+        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderEntryHeader)]
+        
+        if clip_rect_index != header.clip_rect_index {
+            clip_rect_index = header.clip_rect_index
+            assert(clip_rect_index < commands.clip_rect_count)
+            
+            rect := commands.clip_rects[clip_rect_index].rect
+            gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
+        }
         
         switch header.type {
-          case .RenderGroupEntryClear:
-            entry := cast(^RenderGroupEntryClear) entry_data
+          case .RenderEntryClear:
+            entry := cast(^RenderEntryClear) entry_data
             
             color := entry.color
+            color.rgb *= color.a
+            color.r = square(color.r)
+            color.g = square(color.g)
+            color.b = square(color.b)
+            
             gl.ClearColor(color.r, color.g, color.b, color.a)
             gl.Clear(gl.COLOR_BUFFER_BIT)
             
-          case .RenderGroupEntryRectangle:
-            entry := cast(^RenderGroupEntryRectangle) entry_data
+          case .RenderEntryRectangle:
+            entry := cast(^RenderEntryRectangle) entry_data
             
-            // TODO(viktor): Why are these colors not correct?
             color := entry.color
+            color.rgb *= color.a
+            color.r = square(color.r)
+            color.g = square(color.g)
+            color.b = square(color.b)
+            
             gl.Disable(gl.TEXTURE_2D)
             gl_rectangle(entry.rect.min, entry.rect.max, color)
             gl.Enable(gl.TEXTURE_2D)
             
-          case .RenderGroupEntryBitmap:
-            entry := cast(^RenderGroupEntryBitmap) entry_data
+          case .RenderEntryBitmap:
+            entry := cast(^RenderEntryBitmap) entry_data
             
             bitmap := entry.bitmap
             assert(bitmap.texture_handle != 0)
@@ -336,10 +355,20 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
                 
                 min_uv := v2{0+texel_x, 0+texel_y}
                 max_uv := v2{1-texel_x, 1-texel_y}
-                gl_rectangle(min, max, entry.color, min_uv, max_uv)
+                
+                color := entry.color
+                color.rgb *= color.a
+                color.r = square(color.r)
+                color.g = square(color.g)
+                color.b = square(color.b)
+                
+                gl_rectangle(min, max, color, min_uv, max_uv)
             }
             
-          case .RenderGroupEntryCoordinateSystem:
+          case .RenderEntryClip:
+            entry := cast(^RenderEntryBitmap) entry_data
+
+          case .RenderEntryCoordinateSystem:
           case:
             panic("Unhandled Entry")
         }

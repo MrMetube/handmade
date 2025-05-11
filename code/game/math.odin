@@ -345,7 +345,11 @@ linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
 @(require_results) rectangle_min_max  :: proc(min, max: $T) -> Rectangle(T) {
     return { min, max }
 }
-@(require_results) rectangle_min_dimension  :: proc(min, dimension: $T) -> Rectangle(T) {
+rectangle_min_dimension  :: proc { rectangle_min_dimension_2, rectangle_min_dimension_v }
+@(require_results) rectangle_min_dimension_2  :: proc(x, y, w, h: $E) -> Rectangle([2]E) {
+    return rectangle_min_dimension_v([2]E{x, y}, [2]E{w, h})
+}
+@(require_results) rectangle_min_dimension_v  :: proc(min, dimension: $T) -> Rectangle(T) {
     return { min, min + dimension }
 }
 @(require_results) rectangle_center_dimension :: proc(center, dimension: $T) -> Rectangle(T) {
@@ -369,7 +373,7 @@ linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
 @(require_results) rectangle_get_max       :: proc(rect: Rectangle($T)) -> (result: T) { return rect.max }
 @(require_results) rectangle_get_min       :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min }
 @(require_results) rectangle_get_dimension :: proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
-@(require_results) rectangle_get_center    :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min + 0.5 * (rect.max - rect.min) }
+@(require_results) rectangle_get_center    :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min + (rect.max - rect.min) / 2 }
 
 @(require_results) rectangle_add_radius :: proc(rect: $R/Rectangle($T), radius: T) -> (result: R) {
     result = rect

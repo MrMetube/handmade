@@ -132,6 +132,7 @@ LayoutElementFlags :: bit_set[LayoutElementFlag]
 LayoutElementFlag :: enum {
     Resizable, 
     HasInteraction,
+    HasBorder,
 }
 
 ////////////////////////////////////////////////
@@ -285,7 +286,7 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
             }
             
             ui_element := begin_ui_element_rectangle(layout, &block.size)
-            make_ui_element_resizable(&ui_element)
+            ui_element.flags += {.Resizable}
             // set_ui_element_default_interaction(&ui_element, { kind = .Move, id = id, target_ = element})
             end_ui_element(&ui_element, true)
             
@@ -340,14 +341,15 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         
       case FrameSlider:
         begin_ui_row(layout)
-            boolean_button(layout, "< Back",      false, set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
-            boolean_button(layout, "Pause",       debug.paused,                                                                   set_value_interaction(id, &debug.paused, !debug.paused))
-            boolean_button(layout, "Forward >",      false, set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount))
-            boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal,                  set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
+            boolean_button(layout, "< Back",      false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
+            boolean_button(layout, "Pause",       debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
+            boolean_button(layout, "Forward >",   false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount))
+            boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
         end_ui_row(layout)
         
         size := v2{1000, 32}
         ui_element := begin_ui_element_rectangle(layout, &size)
+        ui_element.flags += {.HasBorder}
         end_ui_element(&ui_element, false)
         draw_frame_slider(debug, mouse_p, ui_element.bounds, element)
         
@@ -378,11 +380,17 @@ draw_event :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement/* 
         end_ui_row(layout)
         
         ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
-        make_ui_element_resizable(&ui_element)
+        ui_element.flags += {.Resizable}
         end_ui_element(&ui_element, true)
                 
         rect := ui_element.bounds
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
+        
+        old_clip_rect := debug.render_group.current_clip_rect_index
+        clip_rect := rect
+        debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, clip_rect, debug.backing_transform)
+        defer debug.render_group.current_clip_rect_index = old_clip_rect
+        
         if rectangle_contains(rect, mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
         }
@@ -421,7 +429,7 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
             v2{at_x + bar_width, rect.max.y},
         )
         
-        color := v4{.05, .05, .05, 0.4}
+        color := v4{0,0,0,0}
         
         if frame_ordinal == debug.most_recent_frame_ordinal {
             color = Emerald
@@ -448,7 +456,9 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
             push_text(debug, fmt.tprintf("%v frames ago", frame_delta), mouse_p + {5, -5})
         }
         
-        push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
+        if color.a != 0 {
+            push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
+        }
         at_x += bar_width
     }
 }
@@ -481,8 +491,6 @@ ClockEntry :: struct {
 }
 
 draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
-    p := v2{rect.min.x, rect.max.y} - v2{0, debug_get_baseline(debug)}
-    
     link_count: u32
     for link := debug.profile_group.sentinel.next; link != &debug.profile_group.sentinel; link = link.next {
         link_count += 1
@@ -501,14 +509,18 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         element := link.value.(^DebugElement)
         
         entry := &entries[entry_index]
+        defer entry_index += 1
         
         entry.element = element
-        
         begin_debug_statistic(&entry.stats)
+        
         frame := &element.frames[debug.viewed_frame_ordinal]
         for event := frame.events.last; event != nil; event = event.next {
-            accumulate_debug_statistic(&entry.stats, cast(f32) event.node.duration)
+            duration_with_children := cast(f32) event.node.duration
+            duration_without_children := cast(f32) (event.node.duration - event.node.duration_of_children)
+            accumulate_debug_statistic(&entry.stats, duration_without_children)
         }
+     
         end_debug_statistic(&entry.stats)
         
         sort_entries[entry_index] = {
@@ -516,17 +528,16 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             index = entry_index
         }
         total_time += entry.stats.sum
-        
-        entry_index += 1
     }
     
     merge_sort(sort_entries, temp_space)
     
+    p := v2{rect.min.x, rect.max.y} - v2{0, debug_get_baseline(debug)}
     for sort_entry in sort_entries {
         entry := entries[sort_entry.index]
         
         text := fmt.tprintf(
-            "% 10vcy / % 6v : % 8.0vcy % 2.2v%% - %s", 
+            "% 10vcy / % 4v : % 8.0fcy % 2.5v%% - %s", 
             cast(u64) entry.stats.sum, 
             cast(u64) entry.stats.count, 
             entry.stats.avg,
@@ -538,8 +549,11 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         color := color_wheel[sort_entry.index % len(color_wheel)]
         push_text(debug, text, p, color)
         
-        p.y -= debug_get_line_advance(debug)
-        if p.y < rect.min.y do break
+        if p.y < rect.min.y {
+            break
+        } else {
+            p.y -= debug_get_line_advance(debug)
+        }
     }
 }
 
@@ -703,10 +717,6 @@ begin_ui_element_rectangle :: proc(layout: ^Layout, size: ^v2) -> (result: Layou
     return result
 }
 
-make_ui_element_resizable :: proc(element: ^LayoutElement) {
-    element.flags += {.Resizable}
-}
-
 set_ui_element_default_interaction :: proc(element: ^LayoutElement, interaction: DebugInteraction) {
     element.flags += {.HasInteraction}
     element.interaction = interaction
@@ -719,37 +729,39 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
         layout.next_line_dy = 0
     }
     
+    border: v2
     SizeHandlePixels :: 4
-    frame: v2
-    if .Resizable in element.flags {
-        frame = SizeHandlePixels / 2
+    if .Resizable in element.flags || .HasBorder in element.flags {
+        border = SizeHandlePixels / 2
     }
-    total_size := element.size^ + frame * 2
+    total_size := element.size^ + border * 2
     
     total_min    := layout.p + {0, -total_size.y}
-    interior_min := total_min + frame
+    interior_min := total_min + border
     
-    total_bounds := rectangle_min_dimension(total_min, total_size)
+    total_bounds  := rectangle_min_dimension(total_min, total_size)
     element.bounds = rectangle_min_dimension(interior_min, element.size^)
 
     was_resized: b32
-    if .Resizable in element.flags {
+    if border != 0 {
         debug := element.layout.debug
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min,                                   v2{total_size.x, frame.y}),             debug.shadow_transform, Black)
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, frame.y},                    v2{frame.x, total_size.y - frame.y*2}), debug.shadow_transform, Black)
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {total_size.x-frame.x, frame.y}, v2{frame.x, total_size.y - frame.y*2}), debug.shadow_transform, Black)
-        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - frame.y},     v2{total_size.x, frame.y}),             debug.shadow_transform, Black)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min,                                     v2{total_size.x, border.y}),              debug.shadow_transform, DarkGreen)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, border.y},                     v2{border.x, total_size.y - border.y*2}), debug.shadow_transform, DarkGreen)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {total_size.x-border.x, border.y}, v2{border.x, total_size.y - border.y*2}), debug.shadow_transform, DarkGreen)
+        push_rectangle(&layout.debug.render_group, rectangle_min_dimension(total_min + {0, total_size.y - border.y},      v2{total_size.x, border.y}),              debug.shadow_transform, DarkGreen)
         
-        resize_box := rectangle_min_dimension(v2{element.bounds.max.x, total_min.y}, frame * 3)
-        push_rectangle(&layout.debug.render_group, resize_box, debug.text_transform, Emerald)
-        
-        resize_interaction := DebugInteraction {
-            kind   = .Resize,
-            value = element.size,
-        }
-        if rectangle_contains(resize_box, layout.mouse_p) {
-            was_resized = true
-            layout.debug.next_hot_interaction = resize_interaction
+        if .Resizable in element.flags {
+            resize_box := rectangle_min_dimension(v2{element.bounds.max.x, total_min.y}, border * 3)
+            push_rectangle(&layout.debug.render_group, resize_box, debug.text_transform, Isabelline)
+            
+            resize_interaction := DebugInteraction {
+                kind   = .Resize,
+                value = element.size,
+            }
+            if rectangle_contains(resize_box, layout.mouse_p) {
+                was_resized = true
+                layout.debug.next_hot_interaction = resize_interaction
+            }
         }
     }
     
@@ -1202,6 +1214,10 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         bitmap_id := get_bitmap_for_glyph(font, font_info, codepoint)
         info := get_bitmap_info(group.assets, bitmap_id)
         
+        if info == nil {
+            info = info
+            break
+        }
         height := cast(f32) info.dimension.y * font_scale
         switch operation {
             case .Draw: 

@@ -11,7 +11,7 @@ TileRenderWork :: struct {
     commands: ^RenderCommands, 
     target:   Bitmap,
     
-    clip_rect: Rectangle2i, 
+    base_clip_rect: Rectangle2i, 
 }
 
 init_render_commands :: proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: pmm, width, height: i32) {
@@ -22,6 +22,16 @@ init_render_commands :: proc(commands: ^RenderCommands, max_push_buffer_size: u3
         push_buffer = (cast([^]u8) push_buffer)[:max_push_buffer_size],
         sort_entry_at = max_push_buffer_size,
     }
+}
+
+linearize_clip_rects :: proc(commands: ^RenderCommands, temp_memory: pmm) {
+    out := cast([^]RenderEntryClip) temp_memory
+    out_index: u32
+    for rect := commands.rects.last; rect != nil; rect = rect.next {
+        out[out_index] = rect^
+        out_index += 1
+    }
+    commands.clip_rects = out
 }
 
 sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
@@ -66,18 +76,18 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
             work^ = {
                 commands  = commands,
                 target = target,
-                clip_rect = {
+                base_clip_rect = {
                     min = tile_size * {x, y},
                 },
             }
             
-            work.clip_rect.max = work.clip_rect.min + tile_size
+            work.base_clip_rect.max = work.base_clip_rect.min + tile_size
             
             if x == tile_count.x-1 {
-                work.clip_rect.max.x = target.width 
+                work.base_clip_rect.max.x = target.width 
             }
             if y == tile_count.y-1 {
-                work.clip_rect.max.y = target.height
+                work.base_clip_rect.max.y = target.height
             }
             
             if Global_Rendering_RenderSingleThreaded {
@@ -101,32 +111,44 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     
     // :PointerArithmetic
     sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:commands.push_buffer_element_count]
-        
-    for sort_entry in sort_entries {
-        header := cast(^RenderGroupEntryHeader) &commands.push_buffer[sort_entry.index]
+    
+    clip_rect := base_clip_rect
+    clip_rect_index := max(u16)
+    for sort_entry, i in sort_entries {
+        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry.index]
         //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderGroupEntryHeader)]
+        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderEntryHeader)]
+        
+        if clip_rect_index != header.clip_rect_index {
+            clip_rect_index = header.clip_rect_index
+            assert(clip_rect_index < commands.clip_rect_count)
+            
+            rect := commands.clip_rects[clip_rect_index].rect
+            clip_rect = rectangle_intersection(clip_rect, rect)
+        }
         
         switch header.type {
-          case .RenderGroupEntryClear:
-            entry := cast(^RenderGroupEntryClear) entry_data
-            
+          case .RenderEntryClear:
+            entry := cast(^RenderEntryClear) entry_data
             draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.color, clip_rect)
             
-          case .RenderGroupEntryRectangle:
-            entry := cast(^RenderGroupEntryRectangle) entry_data
+          case .RenderEntryClip:
+            // TODO(viktor): 
+            
+          case .RenderEntryRectangle:
+            entry := cast(^RenderEntryRectangle) entry_data
             draw_rectangle(target, entry.rect, entry.color, clip_rect)
             
-          case .RenderGroupEntryBitmap:
-            entry := cast(^RenderGroupEntryBitmap) entry_data
+          case .RenderEntryBitmap:
+            entry := cast(^RenderEntryBitmap) entry_data
             draw_rectangle_quickly(target,
                 entry.p, {entry.size.x, 0}, {0, entry.size.y},
                 entry.bitmap^, entry.color,
                 clip_rect,
             )
             
-          case .RenderGroupEntryCoordinateSystem:
-            entry := cast(^RenderGroupEntryCoordinateSystem) entry_data
+          case .RenderEntryCoordinateSystem:
+            entry := cast(^RenderEntryCoordinateSystem) entry_data
             draw_rectangle_quickly(target,
                 entry.origin, entry.x_axis, entry.y_axis,
                 entry.texture, /* entry.normal, */ entry.color,
@@ -142,7 +164,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             // draw_rectangle(target, rectangle_center_dimension(p, size), Red, clip_rect)
             // draw_rectangle(target, rectangle_center_dimension(x, size), Red * 0.7, clip_rect)
             // draw_rectangle(target, rectangle_center_dimension(y, size), Red * 0.7, clip_rect)
-            
           case:
             panic("Unhandled Entry")
         }
@@ -154,9 +175,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
 
 @(enable_target_feature="sse,sse2")
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, clip_rect: Rectangle2i) {
-    block := game.begin_timed_block(#procedure)
-    defer game.end_timed_block(block)
-    
     // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
     if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&
         (auto_cast len(texture.memory) == texture.height * texture.width) &&
