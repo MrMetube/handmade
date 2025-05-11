@@ -389,10 +389,10 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
 }
 
 push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
-push_rectangle_outline2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: f32 = 0.1) {
+push_rectangle_outline2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: v2 = 0.1) {
     push_rectangle_outline(group, Rect3(rec, 0, 0), transform, color, thickness)
 }
-push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: v2 = 0.1) {
     // TODO(viktor): there are rounding issues with draw_rectangle
     // @Cleanup offset and size
     
@@ -400,12 +400,12 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     size   := rectangle_get_dimension(rec)
     
     // Top and Bottom
-    push_rectangle(group, rectangle_center_dimension(offset - {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), transform, color)
-    push_rectangle(group, rectangle_center_dimension(offset + {0, size.y*0.5, 0}, v3{size.x+thickness, thickness, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset - {0, size.y*0.5, 0}, v3{size.x+thickness.x, thickness.y, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset + {0, size.y*0.5, 0}, v3{size.x+thickness.x, thickness.y, size.z}), transform, color)
 
     // Left and Right
-    push_rectangle(group, rectangle_center_dimension(offset - {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
-    push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness, size.y-thickness, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset - {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
 }
 
 coordinate_system :: proc(group: ^RenderGroup, transform: Transform, color:= v4{1,1,1,1}) -> (result: ^RenderEntryCoordinateSystem) {

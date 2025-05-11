@@ -127,8 +127,9 @@ LayoutElement :: struct {
 
 LayoutElementFlags :: bit_set[LayoutElementFlag]
 LayoutElementFlag :: enum {
-    Resizable, 
     HasInteraction,
+    
+    Resizable, 
     HasBorder,
 }
 
@@ -147,8 +148,17 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
     orthographic(&debug.render_group, {debug.render_group.commands.width, debug.render_group.commands.height}, 1)
     
+    debug.default_clip_rect = debug.render_group.current_clip_rect_index
+
     mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
+    
+    debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p)
     draw_trees(debug, mouse_p)
+    end_layout(&debug.mouse_text_layout)
+    
+    most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
+    debug.root_group.name = fmt.bprintf(debug.root_info, "%5.4f ms, %d events, %d data blocks, %d profile_blocks", most_recent_frame.seconds_elapsed*1000, most_recent_frame.stored_event_count, most_recent_frame.data_block_count, most_recent_frame.profile_block_count)
+    
     interact(debug, input, mouse_p)
 }
 
@@ -163,10 +173,7 @@ draw_trees :: proc(debug: ^DebugState, mouse_p: v2) {
         layout := begin_layout(debug, tree.p, mouse_p)
         defer end_layout(&layout)
         
-        group := tree.root
-        for link := group.first_child; link != sentinel(group); link = link.next {
-            draw_tree(&layout, mouse_p, tree, link)
-        }
+        draw_tree(&layout, mouse_p, tree, tree.root)
     }
 }
 
@@ -175,6 +182,8 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
     debug := layout.debug
     
     if has_children(link) {
+        timed_block("draw event group")
+        
         last_slash: u32
         #reverse for r, index in link.name {
             if r == '/' {
@@ -235,6 +244,8 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
 }
 
 draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement) {
+    timed_function()
+    
     view := get_view_for_variable(debug, id)
     
     if element == nil {
@@ -321,16 +332,24 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         basic_text_element(layout, text)
         
       case FrameSlider:
+        graph, ok := &view.kind.(DebugViewProfileGraph)
+        if !ok {
+            view.kind = DebugViewProfileGraph{}
+            graph = &view.kind.(DebugViewProfileGraph)
+            graph.block.size = v2{1000, 32}
+        }
+        
         begin_ui_row(layout)
-            boolean_button(layout, "< Back",      false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
             boolean_button(layout, "Pause",       debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
-            boolean_button(layout, "Forward >",   false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount))
-            boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
+            if debug.paused {
+                boolean_button(layout, "< Back",      false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
+                boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
+                boolean_button(layout, "Forward >",   false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount))
+            }
         end_ui_row(layout)
         
-        size := v2{1000, 32}
-        ui_element := begin_ui_element_rectangle(layout, &size)
-        ui_element.flags += {.HasBorder}
+        ui_element := begin_ui_element_rectangle(layout,&graph.block.size)
+        ui_element.flags += {.HasBorder, .Resizable}
         end_ui_element(&ui_element, false)
         draw_frame_slider(debug, mouse_p, ui_element.bounds, element)
         
@@ -388,6 +407,25 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
     }
 }
 
+add_tooltip :: proc(debug: ^DebugState, text: string) {
+    color := Isabelline
+    
+    layout := &debug.mouse_text_layout
+    text_bounds := measure_text(debug, text)
+    size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+    
+    element := begin_ui_element_rectangle(layout, &size)
+    end_ui_element(&element, false)
+    
+    render_group := &debug.render_group
+    old_clip_rect := render_group.current_clip_rect_index
+    render_group.current_clip_rect_index = debug.default_clip_rect
+    defer render_group.current_clip_rect_index = old_clip_rect
+    
+    p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
+    push_text(debug, text, p, color, pz = 100000)
+}
+
 get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
     for event := frame.events.last; event != nil; event = event.next {
         result += event.node.duration
@@ -399,7 +437,7 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
     push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
     
     dim := rectangle_get_dimension(rect)
-    bar_width := dim.x / cast(f32) (MaxFrameCount-1)
+    bar_width := dim.x / cast(f32) (MaxFrameCount)
     
     at_x := rect.min.x
     scale := 1 / dim.y
@@ -410,43 +448,42 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
             v2{at_x + bar_width, rect.max.y},
         )
         
-        color := v4{0,0,0,0}
+        color: v4
+        text: string
         
-        if frame_ordinal == debug.most_recent_frame_ordinal {
+        switch frame_ordinal {
+          case debug.most_recent_frame_ordinal:
             color = Emerald
-        }
-        
-        if frame_ordinal == debug.oldest_frame_ordinal_that_is_already_freed {
+            text = "Most recent Frame"
+          case debug.oldest_frame_ordinal_that_is_already_freed:
             color = Red
-        }
-        
-        if frame_ordinal == debug.viewed_frame_ordinal {
+            text = "Oldest Frame"
+          case debug.viewed_frame_ordinal: 
             color = Green
-        }
-        
-        if rectangle_contains(region_rect, mouse_p) {
-            color = Blue
-            
-            id := DebugId{ value = {root_element, &frame} }
-            debug.next_hot_interaction = set_value_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
-            
+          case: 
             frame_delta := debug.most_recent_frame_ordinal - frame_ordinal
             if frame_delta < 0 {
                 frame_delta += MaxFrameCount
             }
-            push_text(debug, fmt.tprintf("%v frames ago", frame_delta), mouse_p + {5, -5})
+            text = fmt.tprint(frame_delta, "frames ago")
+        }
+        
+        if rectangle_contains(region_rect, mouse_p) {
+            if color == 0 do color = V4(Green.rgb, 0.7)
+            
+            id := DebugId{ value = {root_element, &frame} }
+            debug.next_hot_interaction = set_value_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
+            add_tooltip(debug, text)
         }
         
         if color.a != 0 {
-            push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
+            transform := debug.ui_transform
+            push_rectangle(&debug.render_group, region_rect, transform, color)
+            transform.sort_bias += 1000
+            push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2, .2, .2, 1}, {1, 0})
         }
         at_x += bar_width
     }
-}
-
-ClockEntry :: struct {
-    element: ^DebugElement,
-    stats: DebugStatistic,
 }
 
 draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
@@ -520,8 +557,6 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 }
 
 draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
-    debug.mouse_text_stack_y = 10
-
     dim := rectangle_get_dimension(rect)
     bar_width := dim.x / cast(f32) (MaxFrameCount-1)
     
@@ -537,7 +572,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     
     pixel_span := dim.y
     scale := safe_ratio_0(pixel_span, longest_frame_span)
-    for &frame in root_element.frames {
+    for &frame, frame_ordinal in root_element.frames {
         if frame.events.first == nil do continue
         
         root_node := &frame.events.first.node
@@ -558,12 +593,24 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             color_wheel := color_wheel
             color_index := cast(umm) element % len(color_wheel)
             color := color_wheel[color_index]
-            push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
+            
+            if bar_width >= 1 && y_max - y_min >= 1 {
+                transform := debug.ui_transform
+                fill_color := color
+                border_color := color * {.2,.2,.2, 1}
+                if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
+                    border_color = 1
+                    transform.sort_bias += 10
+                }
+                push_rectangle(&debug.render_group, region_rect, transform, color)
+                
+                transform.sort_bias += 10
+                push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
+            }
             
             if rectangle_contains(region_rect, mouse_p) {
-                text := fmt.tprintf("%s - %v cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
-                push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
-                debug.mouse_text_stack_y -= debug_get_line_advance(debug)
+                text := fmt.tprintf("%s - %v cycles", element.guid.name, node.duration)
+                add_tooltip(debug, text)
                 
                 // @Copypasta with draw_profile
                 if node.first_child != nil {
@@ -578,8 +625,6 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 }
 
 draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
-    debug.mouse_text_stack_y = 10
-    
     lane_count := cast(f32) debug.max_thread_count
     lane_height := safe_ratio_n(rectangle_get_dimension(rect).y, lane_count, rectangle_get_dimension(rect).y)
     
@@ -631,14 +676,18 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         color_index := cast(umm) element % len(color_wheel)
         color := color_wheel[color_index]
         
-        transform := debug.ui_transform
-        transform.sort_bias += 1000/lane_height
-        push_rectangle(&debug.render_group, region_rect, transform, color)
+        if x_max - x_min >= 1 {
+            transform := debug.ui_transform
+            transform.sort_bias += 1000/lane_height
+            push_rectangle(&debug.render_group, region_rect, transform, color)
+            
+            transform.sort_bias += 10
+            push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2,.2,.2, 1}, 1)
+        }
         
         if rectangle_contains(region_rect, mouse_p) {
-            text := fmt.tprintf("%s - %d cycles [%s:% 4d]", element.guid.name, node.duration, element.guid.file_path, element.guid.line)
-            push_text(debug, text, mouse_p + {0, debug.mouse_text_stack_y})
-            debug.mouse_text_stack_y -= debug_get_line_advance(debug)
+            text := fmt.tprintf("%s - %d cycles", element.guid.name, node.duration)
+            add_tooltip(debug, text)
             
             if node.first_child != nil {
                 id := DebugId { value = { graph_root, &element } }
@@ -1135,9 +1184,9 @@ debug_get_line_advance :: proc(debug: ^DebugState) -> (result: f32) {
     return result
 }
 
-push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = 1) {
+push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine, pz:f32=0) {
     if debug.font != nil && debug.font_info != nil {
-        text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color)
+        text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color, pz)
     }
 }
 
@@ -1149,7 +1198,7 @@ measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
     return result
 }
 
-text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p:v2, font_scale: f32, color: v4 = Jasmine) -> (result: Rectangle2) {
+text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p: v2, font_scale: f32, color: v4 = Jasmine, pz:f32= 0) -> (result: Rectangle2) {
     result = inverted_infinity_rectangle(Rectangle2)
     // TODO(viktor): @Robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
@@ -1174,13 +1223,13 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         switch operation {
           case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, 0), color)
-                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, 0) + {2,-2,0}, {0,0,0,1})
+                push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
+                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,0}, {0,0,0,1})
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)
             if bitmap != nil {
-                dim := get_used_bitmap_dim(group, bitmap^, default_flat_transform(), height, V3(p, 0))
+                dim := get_used_bitmap_dim(group, bitmap^, default_flat_transform(), height, V3(p, pz))
                 glyph_rect := rectangle_min_dimension(dim.p.xy, dim.size)
                 result = rectangle_union(result, glyph_rect)
             }

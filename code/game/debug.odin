@@ -25,7 +25,7 @@ GlobalDebugMemory: ^GameMemory
 GlobalDebugTable:  ^DebugTable
 
 DebugMaxEventCount :: 500_000 when DebugEnabled else 0
-MaxFrameCount :: 512
+MaxFrameCount :: 256
 
 ////////////////////////////////////////////////
 
@@ -66,14 +66,11 @@ DebugState :: struct {
     hot_interaction:      DebugInteraction,
     next_hot_interaction: DebugInteraction,
     
-    menu_p:       v2,
-    profile_on:   b32,
-    framerate_on: b32,
-    
-    mouse_text_stack_y: f32,
+    mouse_text_layout: Layout,
     
     // Overlay rendering
     render_group: RenderGroup,
+    default_clip_rect: u16,
     
     text_transform:    Transform,
     shadow_transform:  Transform,
@@ -86,6 +83,8 @@ DebugState :: struct {
     font_id:   FontId,
     font:      ^Font,
     font_info: ^FontInfo,
+    
+    root_info: []u8,
     
     // Per-frame storage management
     per_frame_arena:         Arena,
@@ -278,6 +277,11 @@ DebugStatistic :: struct {
     sum, avg, min, max: f32, count: u32,
 }
 
+ClockEntry :: struct {
+    element: ^DebugElement,
+    stats: DebugStatistic,
+}
+
 ////////////////////////////////////////////////
 
 @export
@@ -308,21 +312,12 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.most_recent_frame_ordinal = 0
         debug.oldest_frame_ordinal_that_is_already_freed = 0
         
-        
-        root_event := DebugEvent{ 
-            guid = {
-                name      = "ProfileRoot",
-                file_path = #location(debug).file_path,
-                line      = auto_cast #location(debug).line,
-                column    = auto_cast #location(debug).column,
-                procedure = #location(debug).procedure,
-            }
-        }
+        root_event := DebugEvent{ guid = { name = "ProfileRoot" } }
         debug.profile_root = get_element_from_guid_by_parent(debug, root_event, nil, ElementOps{})
-        
-        // TODO(viktor): @Cleanup
+        debug.root_info = push_slice(&debug.arena, u8, 512)
         debug.root_group    = create_link(debug, "Root")
         debug.profile_group = create_link(debug, "Profiles")
+        debug.root_group.name = cast(string) debug.root_info
         
         debug.font_scale = 0.6
         
@@ -332,16 +327,16 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         
         list_init_sentinel(&debug.tree_sentinel)
         debug_tree := add_tree(debug, debug.root_group, { left_edge, top_edge })
-        debug_tree.p = { left_edge + 60, top_edge - 50 }
+        debug_tree.p = { left_edge, top_edge-10 }
         
         debug.backing_transform = default_flat_transform()
         debug.ui_transform      = default_flat_transform()
         debug.shadow_transform  = default_flat_transform()
         debug.text_transform    = default_flat_transform()
-        debug.backing_transform.sort_bias = 100_000
-        debug.ui_transform.sort_bias      = 200_000
-        debug.shadow_transform.sort_bias  = 400_000
-        debug.text_transform.sort_bias    = 800_000
+        debug.backing_transform.sort_bias = 10_000
+        debug.ui_transform.sort_bias      = 20_000
+        debug.shadow_transform.sort_bias  = 40_000
+        debug.text_transform.sort_bias    = 80_000
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
@@ -360,7 +355,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     collate_events(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
     overlay_debug_info(debug, input)
     
-    debug.next_hot_interaction  = {}
+    debug.next_hot_interaction = {}
     if debug.hot_interaction == {} do GlobalDebugTable.edit_event = {}
     debug.alt_ui = input.alt_down
     

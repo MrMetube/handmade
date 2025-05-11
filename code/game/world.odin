@@ -404,10 +404,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     }
     
     camera_p := world_difference(world, world.camera_p, sim_origin)
-        
+    
+    update_block := begin_timed_block("update and render entity")
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
-            timed_block("update and render entity")
             dt := input.delta_time;
 
             // TODO(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
@@ -602,20 +602,21 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         }
                     }
                     
-                    // TODO(viktor): Fix this with if for selected and such.
-                    when false do if debug_requested(debug_id) { 
+                    if debug_requested(debug_id) { 
                         debug_data_block("Entity/HotEntity/")
-                        debug_record_value(cast(u32) entity.storage_index, name = "storage_index")
-                        debug_record_value(entity.updatable)
-                        debug_record_value(entity.p)
-                        debug_record_value(entity.dp)
-                        debug_record_value(first_bitmap_from(tran_state.assets, .Body), name = "bitmap")
-                        debug_record_value(entity.distance_limit)
+                        debug_record_value(cast(^u32) &entity.storage_index, name = "storage_index")
+                        debug_record_value(&entity.updatable)
+                        debug_record_value(&entity.p)
+                        debug_record_value(&entity.dp)
+                        id := first_bitmap_from(tran_state.assets, .Body)
+                        debug_record_value(&id, name = "bitmap")
+                        debug_record_value(&entity.distance_limit)
                     }
                 }
             }
         }
     }
+    end_timed_block(update_block)
     
     when false do if EnvironmentTest { 
         ////////////////////////////////////////////////
