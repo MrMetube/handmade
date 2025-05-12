@@ -65,8 +65,8 @@ build_game :: proc() {
         os.close(lock)
         os.remove(lock_path)
     }
-    
     fmt.fprint(lock, "WAITING FOR PDB")
+    
     pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
     run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, commoner, optimizations, (pedantic when PedanticGame else ""))
 }

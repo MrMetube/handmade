@@ -1,5 +1,7 @@
 package game
 
+import "core:fmt"
+
 World :: struct {
     arena: Arena,
     
@@ -376,27 +378,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                                     make_entity_spatial(arrow, entity.p, dp)
                                 }
                             }
-                        } else {
-                            // @Copypasta
-                            closest_p := entity.p
-                            closest_point_dsq :f32= 1000
-                            for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
-                                for point_index in 0..<test.collision.traversable_count {
-                                    point := get_sim_space_traversable(&test, point_index )
-                                    // TODO(viktor): check that they have the same z
-                                    dsq := length_squared(point.p - entity.p)
-                                    if dsq < closest_point_dsq {
-                                        closest_p = point.p
-                                        closest_point_dsq = dsq
-                                    }
-                                }
-                            }
-                            
-                            ddp = lerp(entity.p, closest_p, 0.99) - entity.p
-                            
-                            move_spec.normalize_accelaration = true
-                            move_spec.drag = 50
-                            move_spec.speed = 250
                         }
                         break
                     }
@@ -425,6 +406,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     
                     body_delta := closest_p - entity.p
                     body_distance_sq := length_squared(body_delta)
+                    entity.t_bob = 0
+                    entity.facing_direction = head.facing_direction
                     
                     switch entity.movement_mode {
                       case .Planted:
@@ -432,31 +415,53 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             entity.movement_mode = .Hopping
                             entity.movement_from = entity.p
                             entity.movement_to = closest_p
+                            entity.t_movement = 0
                         }
                         
                       case .Hopping:
-                        hop_duration :: 0.200
-                        entity.t_movement += dt * (1 / hop_duration)
-                        
-                        entity.p = lerp(entity.movement_from, entity.movement_to, entity.t_movement)
-                        entity.dp = 0
-                        
-                        pf := entity.movement_from
                         pt := entity.movement_to
+
+                        t_jump :: 0.2
+                        t_land :: 0.8
+                        t_mid :: t_land
                         
-                        // :ZHandling
-                        height := v3{0, 0.5, 0.5}
+                        if entity.t_movement < t_jump {
+                            t := clamp_01_to_range(0, entity.t_movement, t_jump)
+                            entity.t_bob = -sin(t * Pi) * 0.25
+                        } 
                         
-                        t := entity.t_movement
-                        c := pf
-                        a := -4 * height
-                        b := pt - pf - a
-                        entity.p = a * square(t) + b * t + c
+                        if t_jump <= entity.t_movement && entity.t_movement < t_land {
+                            t := clamp_01_to_range(t_jump, entity.t_movement, t_land)
+                            entity.t_bob = sin(t * Pi) * 0.1
+                            entity.p = lerp(entity.movement_from, entity.movement_to, entity.t_movement)
+                            entity.dp = 0
+                            
+                            pf := entity.movement_from
+                            
+                            // :ZHandling
+                            height := v3{0, 0.5, 0.5}
+                            
+                            c := pf
+                            a := -4 * height
+                            b := pt - pf - a
+                            entity.p = a * square(t) + b * t + c
+                        }
+                        
+                        if entity.t_movement >= t_mid {
+                            t := clamp_01_to_range(t_mid, entity.t_movement, 1)
+                            entity.t_bob = -sin(t * Tau) * 0.05
+                        }
                         
                         if entity.t_movement >= 1 {
-                            entity.t_movement = 0
                             entity.movement_mode = .Planted
                             entity.p = pt
+                        }
+                        
+                        hop_duration :f32: 0.5
+                        entity.t_movement += dt * (1 / hop_duration)
+                        
+                        if entity.t_movement >= 1 {
+                            entity.t_movement = 1
                         }
                     }
                     
@@ -515,15 +520,17 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             shadow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Shadow)
             
             transform := default_upright_transform()
-            shadow_transform := default_flat_transform()
-            
             transform.offset = get_entity_ground_point(&entity)
+            
+            shadow_transform := default_flat_transform()
             shadow_transform.offset = get_entity_ground_point(&entity)
+            shadow_transform.offset.y -= 0.5
             
             hero_height :f32= 1.6
             switch entity.type {
               case .Nil: // NOTE(viktor): nothing
               case .HeroHead:
+                transform.sort_bias += 1
                 push_bitmap(render_group, head_id,  transform, hero_height)
                 if debug_requested(debug_id) { 
                     debug_record_value(&head_id)
@@ -531,20 +538,24 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 
               case .HeroBody:
                 cape_id  := best_match_bitmap_from(tran_state.assets, .Cape,  facing_match, facing_weights)
-                sword_id := best_match_bitmap_from(tran_state.assets, .Sword, facing_match, facing_weights)
                 body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
                 
-                push_bitmap(render_group, sword_id, transform, hero_height)
-                push_bitmap(render_group, body_id,  transform, hero_height)
-                push_bitmap(render_group, cape_id,  transform, hero_height)
+                before := transform.offset
+                    transform.offset.y += -0.3
+                    push_bitmap(render_group, cape_id,  transform, hero_height*1.3)
+                transform.offset = before
+                    transform.offset.y += entity.t_bob
+                    transform.sort_bias += 1
+                    push_bitmap(render_group, body_id,  transform, hero_height)
+                transform.offset = before
+                
                 push_hitpoints(render_group, &entity, 1, transform)
                 
                 if debug_requested(debug_id) { 
                     debug_record_value(&shadow_id)
                     debug_record_value(&cape_id)
                     debug_record_value(&body_id)
-                    debug_record_value(&sword_id)
                 }
                 
               case .Arrow:
