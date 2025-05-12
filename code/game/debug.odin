@@ -25,7 +25,7 @@ GlobalDebugMemory: ^GameMemory
 GlobalDebugTable:  ^DebugTable
 
 DebugMaxEventCount :: 500_000 when DebugEnabled else 0
-MaxFrameCount :: 256
+MaxFrameCount :: 512
 
 ////////////////////////////////////////////////
 
@@ -179,10 +179,12 @@ DebugValue :: union {
     
     DebugEventLink,
     
-    MemoryInfo, FrameInfo,
+    FrameInfo,
     
     FrameSlider,
     ThreadProfileGraph, FrameBarsGraph, TopClocksList,
+    
+    ArenaOccupancy,
 }
 
 FrameMarker :: struct {
@@ -201,6 +203,8 @@ FrameInfo   :: struct {}
 TopClocksList      :: struct {}
 ThreadProfileGraph :: struct {}
 FrameBarsGraph     :: struct {}
+
+ArenaOccupancy :: struct { arena: ^Arena }
 
 ////////////////////////////////////////////////
 
@@ -333,10 +337,11 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.ui_transform      = default_flat_transform()
         debug.shadow_transform  = default_flat_transform()
         debug.text_transform    = default_flat_transform()
-        debug.backing_transform.sort_bias = 10_000
+        
+        debug.backing_transform.sort_bias = 16_000
         debug.ui_transform.sort_bias      = 20_000
-        debug.shadow_transform.sort_bias  = 40_000
-        debug.text_transform.sort_bias    = 80_000
+        debug.shadow_transform.sort_bias  = 24_000
+        debug.text_transform.sort_bias    = 28_000
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
@@ -348,9 +353,13 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.font_info = get_font_info(assets, debug.font_id)
         debug.ascent = get_baseline(debug.font_info)
     }
-
     GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
+    
+    { debug_data_block("Profile")   
+        debug_ui_element(ArenaOccupancy{ &debug.arena }, "Debug Arena")
+        debug_ui_element(ArenaOccupancy{ &debug.per_frame_arena }, "Debug Per Frame Arena")
+    }
     
     collate_events(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
     overlay_debug_info(debug, input)
@@ -431,9 +440,10 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             group := get_group_by_hierarchical_name(debug, default_parent_group, event.guid.name, true)
             block.group = group
             
-          case ThreadProfileGraph, FrameBarsGraph, TopClocksList,
-            DebugEventLink,
-            FrameInfo, MemoryInfo, FrameSlider,
+          case DebugEventLink,
+            ThreadProfileGraph, FrameBarsGraph, TopClocksList,
+            FrameInfo, FrameSlider, 
+            ArenaOccupancy,
             BitmapId, SoundId, FontId, b32, f32, u32, i32, v2, v3, v4, Rectangle2, Rectangle3:
             
             element := get_element_from_guid(debug, event, default_parent_group, ElementOps{ .AddToParent, .CreateHierarchy })

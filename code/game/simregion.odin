@@ -35,6 +35,13 @@ EntityCollisionVolumeGroup :: struct {
     // that the length can be 0 if the total_volume should be used as the only
     // collision volume for the entity.
     volumes: []Rectangle3,
+    
+    traversable_count: u32, // @StaticArray
+    traversables:      []TraversablePoint,
+}
+
+TraversablePoint :: struct {
+    p: v3
 }
 
 EntityReference :: struct #raw_union {
@@ -202,6 +209,7 @@ add_entity_raw :: proc(region: ^SimRegion, storage_index: StorageIndex, source: 
     assert(storage_index != 0)
     
     entry := get_hash_from_index(region, storage_index)
+    assert(entry != nil)
     if entry.ptr == nil {
         entity = &region.entities[region.entity_count]
         region.entity_count += 1
@@ -276,10 +284,6 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
     drag := -move_spec.drag * entity.dp
     drag.z = 0
     ddp += drag
-    if .Grounded not_in entity.flags {
-        Gravity :: -9.8
-        ddp.z += Gravity
-    }
     
     entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
     entity.dp = ddp * dt + entity.dp
@@ -293,7 +297,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
     }
     
     for _ in 0..<4 {
-        t_min, t_max: f32 = 1, 0
+        t_min, t_max: f32 = 1, 1
         wall_normal_min, wall_normal_max: v2
         hit_min, hit_max: ^Entity
         
@@ -312,9 +316,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
                     
                     // TODO(viktor): Robustness!
                     OverlapEpsilon :: 0.001
-                    if .Traversable in test_entity.flags && entities_overlap(entity, &test_entity, OverlapEpsilon) ||
-                    
-                    can_collide(region.world, entity, &test_entity) {
+                    if can_collide(region.world, entity, &test_entity) {
                         for volume in entity.collision.volumes {
                             for test_volume in test_entity.collision.volumes {
                                 minkowski_diameter := rectangle_get_dimension(volume) + rectangle_get_dimension(test_volume)
@@ -339,69 +341,37 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
                                     
                                     TEpsilon :: 0.0001
                                     #assert(TEpsilon < OverlapEpsilon)
-                                    if .Traversable in test_entity.flags {
-                                        test_t := t_max
-                                        test_wall_normal: v2
-                                        test_hit: b32
-                                        
-                                        for wall in walls {
-                                            collided: b32
-                                            if wall.delta_x != 0 {
-                                                t_result := (wall.x - wall.rel_x) / wall.delta_x
-                                                y        := wall.rel_y + t_result * wall.delta_y
-                                                
-                                                if t_result >= 0 && test_t < t_result {
-                                                    if wall.min_y < y && y <= wall.max_y {
-                                                        test_t = max(0, t_result-TEpsilon)
-                                                        collided = true
-                                                    }
+                                    test_hit: b32
+                                    test_wall_normal: v2
+                                    test_t := t_min
+                                    
+                                    for wall in walls {
+                                        collided: b32
+                                        if wall.delta_x != 0 {
+                                            t_result := (wall.x - wall.rel_x) / wall.delta_x
+                                            y        := wall.rel_y + t_result * wall.delta_y
+                                            
+                                            if t_result >= 0 && test_t > t_result {
+                                                if wall.min_y < y && y <= wall.max_y {
+                                                    test_t = max(0, t_result-TEpsilon)
+                                                    collided = true
                                                 }
                                             }
-                                            
-                                            if collided {
-                                                test_wall_normal = wall.normal
-                                                test_hit = true
-                                            }
                                         }
                                         
-                                        if test_hit {
-                                            t_max = test_t
-                                            wall_normal_max = test_wall_normal
-                                            hit_max = &test_entity
+                                        if collided {
+                                            test_wall_normal = wall.normal
+                                            test_hit = true
                                         }
-                                    } else {
-                                        test_hit: b32
-                                        test_wall_normal: v2
-                                        test_t := t_min
+                                    }
+                                    
+                                    if test_hit {
+                                        test_p := entity.p + entity_delta * test_t
                                         
-                                        for wall in walls {
-                                            collided: b32
-                                            if wall.delta_x != 0 {
-                                                t_result := (wall.x - wall.rel_x) / wall.delta_x
-                                                y        := wall.rel_y + t_result * wall.delta_y
-                                                
-                                                if t_result >= 0 && test_t > t_result {
-                                                    if wall.min_y < y && y <= wall.max_y {
-                                                        test_t = max(0, t_result-TEpsilon)
-                                                        collided = true
-                                                    }
-                                                }
-                                            }
-                                            
-                                            if collided {
-                                                test_wall_normal = wall.normal
-                                                test_hit = true
-                                            }
-                                        }
-                                        
-                                        if test_hit {
-                                            test_p := entity.p + entity_delta * test_t
-                                            
-                                            if speculative_collide(entity, &test_entity, test_p) {
-                                                t_min = test_t
-                                                wall_normal_min = test_wall_normal
-                                                hit_min = &test_entity
-                                            }
+                                        if speculative_collide(entity, &test_entity, test_p) {
+                                            t_min = test_t
+                                            wall_normal_min = test_wall_normal
+                                            hit_min = &test_entity
                                         }
                                     }
                                 }
@@ -443,27 +413,6 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
         } else {
             break
         }
-    }
-    
-    ground: f32
-    { // NOTE(viktor): handle events based on area overlapping
-        // TODO(viktor): handle collision percisly by moving it into the collision loop
-        // TODO(viktor): spatial partition here
-        for &test_entity in region.entities[:region.entity_count] {
-            if can_overlap(entity, &test_entity) && entities_overlap(entity, &test_entity) {
-                handle_overlap(entity, &test_entity, dt, &ground)
-            }
-        }
-    }
-    
-    ground += entity.p.z - get_entity_ground_point(entity).z
-    // TODO(viktor): this has to become real height handling, ground collision, etc.
-    if (entity.p.z <= ground) || (.Grounded in entity.flags && entity.dp.z == 0) {
-        entity.p.z = ground;
-        entity.dp.z = 0;
-        entity.flags += { .Grounded }
-    } else {
-        entity.flags -= { .Grounded }
     }
     
     if entity.distance_limit != 0 {
@@ -525,12 +474,6 @@ get_stair_ground :: proc(region: ^Entity, at_ground_point: v3) -> (result: f32) 
     result = region.p.z + region.walkable_height * bary.y
     
     return result
-}
-
-handle_overlap :: proc(mover, region: ^Entity, dt: f32, ground: ^f32) {
-    if region.type == .Stairwell {
-        ground^ = get_stair_ground(region, get_entity_ground_point(mover))
-    }
 }
 
 speculative_collide :: proc(mover, region: ^Entity, test_p: v3) -> (result: b32 = true) {

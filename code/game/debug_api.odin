@@ -13,10 +13,10 @@ package game
 }
 
 @export
-debug_record_b32 :: proc(value: ^b32, name: string = #caller_expression(value), loc := #caller_location) { debug_record_value(value, name, loc) }
-debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(value), loc := #caller_location) { 
+debug_record_b32 :: proc(value: ^b32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
+debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(value)) { 
     if GlobalDebugTable == nil do return
-    guid := DebugGUID{name, loc.file_path, loc.procedure, cast(u32) loc.line, cast(u32) loc.column}
+    guid := DebugGUID{ name = name }
     
     event := debug_record_event(nil, guid)
     if GlobalDebugTable.edit_event.guid == guid {
@@ -69,7 +69,7 @@ debug_requested :: proc(id: DebugId) -> (result: b32) {
     
     debug := get_debug_state()
 
-    if debug.hot_interaction.id == id || is_selected(debug, id) {
+    if is_selected(debug, id) {
         result = true
     }
         
@@ -101,8 +101,8 @@ is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
 ////////////////////////////////////////////////
 // Record Insertion
 
-debug_ui_element :: proc(kind: DebugValue, loc := #caller_location) {
-    debug_record_event(kind, loc.procedure, loc)
+debug_ui_element :: proc(kind: DebugValue, name:= #caller_expression(kind), loc := #caller_location) {
+    debug_record_event(kind, name, loc)
 }
 
 @(deferred_none=debug_end_data_block)

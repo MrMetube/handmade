@@ -34,6 +34,7 @@ DebugViewData :: struct {
         DebugViewBlock,
         DebugViewProfileGraph,
         DebugViewCollapsible,
+        DebugViewArenaGraph,
     },
 }
 
@@ -43,6 +44,11 @@ DebugId :: struct {
 
 DebugViewCollapsible :: struct {
     expanded:   b32,
+}
+
+DebugViewArenaGraph :: struct {
+    block: DebugViewBlock,
+    arena: ^Arena,
 }
 
 DebugViewProfileGraph :: struct {
@@ -157,7 +163,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     end_layout(&debug.mouse_text_layout)
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
-    debug.root_group.name = fmt.bprintf(debug.root_info, "%5.4f ms, %d events, %d data blocks, %d profile_blocks", most_recent_frame.seconds_elapsed*1000, most_recent_frame.stored_event_count, most_recent_frame.data_block_count, most_recent_frame.profile_block_count)
+    debug.root_group.name = fmt.bprintf(debug.root_info, "%5.4f ms", most_recent_frame.seconds_elapsed*1000)
     
     interact(debug, input, mouse_p)
 }
@@ -181,7 +187,9 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
     group := tree.root
     debug := layout.debug
     
-    if has_children(link) {
+    if !has_children(link) {
+        draw_element(layout, id_from_link(tree, link), link.element)
+    } else {
         timed_block("draw event group")
         
         last_slash: u32
@@ -228,8 +236,6 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
                 draw_tree(layout, mouse_p, tree, child)
             }
         }
-    } else {
-        draw_element(layout, id_from_link(tree, link), link.element)
     }
     
     move_interaction := DebugInteraction{ id = id_from_link(tree, group), kind = .Move, value = &tree.p }
@@ -268,6 +274,8 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             value := event.value.(BitmapId)
             if _, ok := &view.kind.(DebugViewBlock); !ok {
                 view.kind = DebugViewBlock{}
+                block := &view.kind.(DebugViewBlock)
+                block.size = 100
             }
             block := &view.kind.(DebugViewBlock)
             
@@ -279,7 +287,6 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             
             ui_element := begin_ui_element_rectangle(layout, &block.size)
             ui_element.flags += {.Resizable}
-            // set_ui_element_default_interaction(&ui_element, { kind = .Move, id = id, target_ = element})
             end_ui_element(&ui_element, true)
             
             bitmap_height := block.size.y
@@ -306,30 +313,60 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
                 view.kind = DebugViewCollapsible{}
             }
             collapsible := &view.kind.(DebugViewCollapsible)
-            text = fmt.tprintf("%s %v", collapsible.expanded ? "-" : "+", event.guid.name)
+            text = fmt.tprintf("%s %v", collapsible.expanded ? "-" : "+", element.guid.name)
         } else {
             last_slash: u32
-            #reverse for r, index in event.guid.name {
+            #reverse for r, index in element.guid.name {
                 if r == '/' {
                     last_slash = auto_cast index
                     break
                 }
             }
-            text = fmt.tprintf("%s %v", last_slash != 0 ? event.guid.name[last_slash+1:] : event.guid.name, value)
+            text = fmt.tprintf("%s %v", last_slash != 0 ? element.guid.name[last_slash+1:] : element.guid.name, value)
         }
         
         autodetect_interaction := DebugInteraction{ id = id, kind = .AutoDetect, target = element }
         basic_text_element(layout, text, autodetect_interaction)
-        
-      case MemoryInfo:
-        text := fmt.tprintf("Remaining Frame memory: %m", cast(u64) len(debug.per_frame_arena.storage) - debug.per_frame_arena.used)
-        basic_text_element(layout, text)
         
       case FrameInfo:
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
         
         text := fmt.tprintf("Viewed Frame: %5.4f ms, %d events, %d data blocks, %d profile_blocks", viewed_frame.seconds_elapsed*1000, viewed_frame.stored_event_count, viewed_frame.data_block_count, viewed_frame.profile_block_count)
         basic_text_element(layout, text)
+        
+      case ArenaOccupancy:
+        event :^DebugEvent= oldest_stored_event != nil ? &oldest_stored_event.event : nil
+        if event != nil {
+            graph, ok := &view.kind.(DebugViewArenaGraph)
+            if !ok {
+                view.kind = DebugViewArenaGraph{}
+                graph = &view.kind.(DebugViewArenaGraph)
+                graph.block.size = v2{400, 16}
+                
+                value := event.value.(ArenaOccupancy)
+                graph.arena = value.arena
+            }
+            
+            _, is_occupancy    := element.type.(ArenaOccupancy)
+            begin_ui_row(layout)
+                boolean_button(layout, "Occupancy", is_occupancy, set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}))
+                arena := graph.arena
+                action_button(layout, fmt.tprintf("%s %m/%m", element.guid.name, arena.used, len(arena.storage)), {}, backdrop_color = {})
+            end_ui_row(layout)
+            
+            
+            ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
+            ui_element.flags += {.HasBorder, .Resizable}
+            end_ui_element(&ui_element, false)
+            
+            rect := ui_element.bounds
+            
+            #partial switch value in element.type {
+              case ArenaOccupancy:
+                draw_arena_occupancy(debug, arena, mouse_p, rect)
+              case: unreachable()
+            }
+        }
         
       case FrameSlider:
         graph, ok := &view.kind.(DebugViewProfileGraph)
@@ -376,7 +413,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             boolean_button(layout, "Frames", is_frame_bars, set_value_interaction(id, &element.type, cast(DebugValue) FrameBarsGraph{}))
             boolean_button(layout, "Clocks", is_top_clocks, set_value_interaction(id, &element.type, cast(DebugValue) TopClocksList{}))
             action_button(layout,  "Root", set_value_interaction(id, &graph.root, DebugGUID{} ))
-            basic_text_element(layout, fmt.tprint("Viewing:", viewed_element.guid.name), padding = 5)
+            action_button(layout, fmt.tprint("Viewing:", viewed_element.guid.name), {}, backdrop_color = {})
         end_ui_row(layout)
         
         ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
@@ -405,6 +442,18 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
           case: unreachable()
         }
     }
+}
+            
+draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rect: Rectangle2) {
+    push_rectangle(&debug.render_group, rect, debug.backing_transform, DarkGreen)
+    
+    scale := cast(f32) (cast(f64) arena.used / cast(f64) len(arena.storage))
+    
+    split_point := lerp(rect.min.x, rect.max.x, scale)
+    filled := rectangle_min_max(rect.min, v2{split_point, rect.max.y})
+    unused := rectangle_min_max(v2{split_point, rect.min.y}, rect.max)
+    push_rectangle(&debug.render_group, unused, debug.backing_transform, {0,0,0,0.7})
+    push_rectangle(&debug.render_group, filled, debug.ui_transform, Green)
 }
 
 add_tooltip :: proc(debug: ^DebugState, text: string) {
@@ -798,8 +847,8 @@ begin_ui_row :: proc(layout: ^Layout) {
     layout.no_line_feed += 1
 }
 
-action_button :: proc(layout: ^Layout, label: string, interaction: DebugInteraction) {
-    basic_text_element(layout, label, interaction, padding = 5, backdrop_color = DarkGreen)
+action_button :: proc(layout: ^Layout, label: string, interaction: DebugInteraction, backdrop_color :v4= DarkGreen) {
+    basic_text_element(layout, label, interaction, padding = 5, backdrop_color = backdrop_color)
 }
 
 boolean_button :: proc(layout: ^Layout, label: string, highlighted: $bool,  interaction: DebugInteraction) {
@@ -887,7 +936,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             value^ += 0.1 * mouse_dp.x
             GlobalDebugTable.edit_event = event^
             
-          case .Resize:
+          case .Resize: // TODO(viktor): Better clamping
             element := cast(^DebugElement) interaction.target
             event: ^DebugEvent
             if element != nil {
@@ -896,8 +945,8 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             
             value := interaction.value.(^v2)
             value^ += mouse_dp * {1,-1}
-            value.x = max(value.x, 80)
-            value.y = max(value.y, 60)
+            value.x = max(value.x, 10)
+            value.y = max(value.y, 10)
             if event != nil do GlobalDebugTable.edit_event = event^
             
           case .Tear:
@@ -949,7 +998,8 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
                    BeginTimedBlock, EndTimedBlock,
                    BeginDataBlock, EndDataBlock,
                    ThreadProfileGraph, FrameBarsGraph, TopClocksList,
-                   FrameSlider, FrameInfo, MemoryInfo,
+                   FrameSlider, FrameInfo,
+                   ArenaOccupancy,
                    BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, v2, v3, v4:
                 debug.hot_interaction.kind = .NOP
               case b32:

@@ -5,8 +5,6 @@ EntityFlag :: enum {
     Collides,
     Nonspatial,
     Moveable,
-    Grounded,
-    Traversable,
 
     Simulated,
 }
@@ -15,14 +13,14 @@ EntityFlags :: bit_set[EntityFlag]
 EntityType :: enum u32 {
     Nil, 
     
-    Space,
+    Floor,
     
     Hero, Wall, Familiar, Monster, Arrow, Stairwell,
 }
 
 HitPointPartCount :: 4
 HitPoint :: struct {
-    flags: u8,
+    flags:         u8,
     filled_amount: u8,
 }
 
@@ -84,14 +82,15 @@ add_stored_entity :: proc(world: ^World, type: EntityType, p: WorldPosition) -> 
     index = world.stored_entity_count
     world.stored_entity_count += 1
     assert(world.stored_entity_count < len(world.stored_entities))
+    
     stored = &world.stored_entities[index]
     stored.sim = { type = type }
-
+    
     stored.sim.collision = world.null_collision
     stored.p = null_position()
-
+    
     change_entity_location(&world.arena, world, index, stored, p)
-
+    
     return index, stored
 }
 
@@ -164,12 +163,15 @@ add_familiar :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, e
     return index, entity
 }
 
-add_standart_room :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .Space, p, world.standart_room_collision)
-
-    entity.sim.flags += { .Traversable }
-
-    return index, entity
+add_standart_room :: proc(world: ^World, p: WorldPosition) {
+    width  :i32= 17
+    height :i32=  9
+    for offset_y in 0..=height {
+        for offset_x in 0..=width {
+            floor_p := chunk_position_from_tile_positon(world, p.chunk.x + offset_x, p.chunk.y + offset_y, p.chunk.z)
+            index, entity := add_grounded_entity(world, .Floor, floor_p, world.floor_collision)
+        }
+    }
 }
 
 init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
@@ -185,7 +187,7 @@ add_collision_rule :: proc(world:^World, a, b: StorageIndex, should_collide: b32
     timed_function()
     // TODO(viktor): collapse this with should_collide
     a, b := a, b
-    if a > b do a, b = b, a
+    if a > b do swap(&a, &b)
     // TODO(viktor): BETTER HASH FUNCTION!!!
     found: ^PairwiseCollsionRule
     hash_bucket := a & (len(world.collision_rule_hash) - 1)

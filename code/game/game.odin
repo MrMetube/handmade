@@ -91,13 +91,11 @@ INTERNAL :: #config(INTERNAL, false)
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
-HeroJumping:                   b32
 FamiliarFollowsHero:           b32
 FountainTest:                  b32
 ShowGrid:                      b32
 EnvironmentTest:               b32
 RenderSingleThreaded:          b32
-ShowSpaceBounds:               b32
 UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
 RenderGroundChunks:            b32
@@ -222,8 +220,6 @@ TransientState :: struct {
     test_diffuse: Bitmap,
     test_normal:  Bitmap,
     
-    ground_buffers: []GroundBuffer,
-    
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
     
@@ -261,7 +257,6 @@ ControlledHero :: struct {
     // NOTE(viktor): these are the controller requests for simulation
     ddp: v3,
     darrow: v2,
-    dz: f32,
 }
 
 // NOTE(viktor): Platform specific structs
@@ -289,7 +284,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         GlobalDebugTable = memory.debug_table
     }
     
-    ground_buffer_size :: 512
     
     ////////////////////////////////////////////////
 
@@ -301,7 +295,8 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         state.effects_entropy = seed_random_series(500)
         
         init_mixer(&state.mixer, &state.mode_arena)
-        init_world(&state.world, &state.mode_arena, ground_buffer_size)
+        
+        init_world(&state.world, &state.mode_arena)
         
         when DebugEnabled {
             debug_set_event_recording(true)
@@ -326,13 +321,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         tran_state.assets = make_assets(&tran_state.arena, 512 * Megabyte, tran_state)
         
         state.mixer.master_volume = 0.1
-        
-        // TODO(viktor): pick a real number here!
-        tran_state.ground_buffers = push(&state.world.arena, GroundBuffer, 256, no_clear())
-        for &ground_buffer in tran_state.ground_buffers {
-            ground_buffer.p = null_position()
-            ground_buffer.bitmap = make_empty_bitmap(&tran_state.arena, ground_buffer_size, false)
-        }
         
         test_size: [2]i32= 256
         tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
@@ -363,7 +351,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
         
         { debug_data_block("Entity")
-            debug_record_value(&HeroJumping)
             debug_record_value(&FamiliarFollowsHero)
         }
         
@@ -374,16 +361,17 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Profile")
+        debug_ui_element(ArenaOccupancy{ &state.mode_arena }, "Mode Arena")
+        debug_ui_element(ArenaOccupancy{ &state.world.arena }, "World Arena")
+        debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transitive State Arena")
         debug_ui_element(FrameSlider{})
         debug_ui_element(TopClocksList{})
         debug_ui_element(FrameInfo{})
-        debug_ui_element(MemoryInfo{})
     }
     
     { debug_data_block("Renderer")
         debug_record_value(&EnvironmentTest)
         debug_record_value(&RenderSingleThreaded)
-        debug_record_value(&ShowSpaceBounds)
         debug_record_value(&ShowRenderAndSimulationBounds)
         
         { debug_data_block("Camera")
@@ -395,16 +383,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             debug_record_value(&RenderGroundChunks)
             debug_record_value(&ShowGroundChunkBounds)
         }
-    }
-    
-    
-    if memory.reloaded_executable {
-        for &ground_buffer in tran_state.ground_buffers {
-            ground_buffer.p = null_position()
-        }
-        
-        make_sphere_normal_map(tran_state.test_normal, 0)
-        make_sphere_diffuse_map(tran_state.test_diffuse)
     }
     
     ////////////////////////////////////////////////
