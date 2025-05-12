@@ -403,9 +403,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                 
               case.HeroBody:
-                // TODO(viktor): make spatial queries easy for things
                 head := entity.head.ptr
                 if head != nil {
+                    // TODO(viktor): make spatial queries easy for things
                     desired_direction := entity.p - head.p
                     desired_direction = normalize_or_zero(desired_direction)
                     
@@ -423,7 +423,42 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         }
                     }
                     
-                    ddp = lerp(entity.p, closest_p, 0.99) - entity.p
+                    body_delta := closest_p - entity.p
+                    body_distance_sq := length_squared(body_delta)
+                    
+                    switch entity.movement_mode {
+                      case .Planted:
+                        if body_distance_sq > square(f32(0.01)) {
+                            entity.movement_mode = .Hopping
+                            entity.movement_from = entity.p
+                            entity.movement_to = closest_p
+                        }
+                        
+                      case .Hopping:
+                        hop_duration :: 0.200
+                        entity.t_movement += dt * (1 / hop_duration)
+                        
+                        entity.p = lerp(entity.movement_from, entity.movement_to, entity.t_movement)
+                        entity.dp = 0
+                        
+                        pf := entity.movement_from
+                        pt := entity.movement_to
+                        
+                        // :ZHandling
+                        height := v3{0, 0.5, 0.5}
+                        
+                        t := entity.t_movement
+                        c := pf
+                        a := -4 * height
+                        b := pt - pf - a
+                        entity.p = a * square(t) + b * t + c
+                        
+                        if entity.t_movement >= 1 {
+                            entity.t_movement = 0
+                            entity.movement_mode = .Planted
+                            entity.p = pt
+                        }
+                    }
                     
                     move_spec.normalize_accelaration = true
                     move_spec.drag = 50

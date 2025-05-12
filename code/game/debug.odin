@@ -404,7 +404,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
         
         frame_index := debug.total_frame_count
         default_parent_group := debug.root_group
-        if thread.first_open_data_block != nil {
+        if thread.first_open_data_block != nil && thread.first_open_data_block.group != nil {
             default_parent_group = thread.first_open_data_block.group
         }
         

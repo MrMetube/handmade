@@ -38,6 +38,11 @@ Entity :: struct {
     arrow: EntityReference,
     head: EntityReference,
     
+    movement_mode: MovementMode,
+    t_movement:      f32,
+    movement_from:   v3,
+    movement_to: v3,
+    
     facing_direction: f32,
     t_bob: f32,
     // TODO(viktor): generation index so we know how " to date" this entity is
@@ -45,6 +50,10 @@ Entity :: struct {
     // TODO(viktor): only for stairwells
     walkable_dim: v2,
     walkable_height: f32,
+}
+
+MovementMode :: enum {
+    Planted, Hopping,
 }
 
 EntityCollisionVolumeGroup :: struct {
