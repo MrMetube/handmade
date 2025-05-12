@@ -1,59 +1,5 @@
 package game
 
-Entity :: struct {
-    // NOTE(viktor): these are only for the sim region
-    storage_index: StorageIndex,
-    updatable: b32,
-    
-    type: EntityType,
-    flags: EntityFlags,
-    
-    p, dp: v3,
-    
-    collision: ^EntityCollisionVolumeGroup,
-    
-    distance_limit: f32,
-    
-    hit_point_max: u32,
-    hit_points: [16]HitPoint,
-    
-    arrow: EntityReference,
-    
-    facing_direction: f32,
-    t_bob: f32,
-    // TODO(viktor): generation index so we know how " to date" this entity is
-    
-    // TODO(viktor): only for stairwells
-    walkable_dim: v2,
-    walkable_height: f32,
-}
-
-EntityCollisionVolumeGroup :: struct {
-    total_volume: Rectangle3,
-    // TODO(viktor): volumes is always expected to be non-empty if the entity
-    // has any volume... in the future, this could be compressed if necessary
-    // that the length can be 0 if the total_volume should be used as the only
-    // collision volume for the entity.
-    volumes: []Rectangle3,
-    
-    traversable_count: u32, // @StaticArray
-    traversables:      []TraversablePoint,
-}
-
-TraversablePoint :: struct {
-    p: v3
-}
-
-EntityReference :: struct #raw_union {
-    ptr:   ^Entity,
-    index: StorageIndex,
-}
-
-SimEntityHash :: struct {
-    ptr:   ^Entity,
-    index: StorageIndex,
-}
-
 SimRegion :: struct {
     world: ^World,
     
@@ -72,6 +18,69 @@ SimRegion :: struct {
 // NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
+Entity :: struct {
+    // NOTE(viktor): these are only for the sim region
+    storage_index: StorageIndex,
+    updatable: b32,
+    
+    type: EntityType,
+    flags: EntityFlags,
+    
+    p, dp: v3,
+    
+    collision: ^EntityCollisionVolumeGroup,
+    
+    distance_limit: f32,
+    
+    hit_point_max: u32, // :StaticArray
+    hit_points: [16]HitPoint,
+    
+    arrow: EntityReference,
+    head: EntityReference,
+    
+    facing_direction: f32,
+    t_bob: f32,
+    // TODO(viktor): generation index so we know how " to date" this entity is
+    
+    // TODO(viktor): only for stairwells
+    walkable_dim: v2,
+    walkable_height: f32,
+}
+
+EntityCollisionVolumeGroup :: struct {
+    total_volume: Rectangle3,
+    // TODO(viktor): volumes is always expected to be non-empty if the entity
+    // has any volume... in the future, this could be compressed if necessary
+    // that the length can be 0 if the total_volume should be used as the only
+    // collision volume for the entity.
+    volumes: []Rectangle3,
+    
+    traversable_count: u32, // :StaticArray
+    traversables:      []TraversablePoint,
+}
+
+TraversablePoint :: struct {
+    p: v3
+}
+
+EntityReference :: struct #raw_union {
+    ptr:   ^Entity,
+    index: StorageIndex,
+}
+
+SimEntityHash :: struct {
+    ptr:   ^Entity,
+    index: StorageIndex,
+}
+
+MoveSpec :: struct {
+    normalize_accelaration: b32,
+    drag: f32,
+    speed: f32,
+}
+
+////////////////////////////////////////////////
+
 begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     timed_function()
     // TODO(viktor): make storedEntities part of world
@@ -84,7 +93,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     // entities larger than the max entity radius by adding them multiple 
     // times to the spatial partition?
     region.max_entity_radius   = 5
-    region.max_entity_velocity = 30
+    region.max_entity_velocity = 300
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
     UpdateSafetyMarginZ :: 1 // TODO(viktor): what should this be?
     
@@ -99,7 +108,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
-                chunk := get_chunk(nil, world, [3]i32{chunk_x, chunk_y, chunk_z})
+                chunk := get_chunk_3(nil, world, {chunk_x, chunk_y, chunk_z})
                 if chunk != nil {
                     for block := &chunk.first_block; block != nil; block = block.next {
                         for storage_index in block.indices[:block.entity_count] {
@@ -134,6 +143,7 @@ end_sim :: proc(region: ^SimRegion) {
         assert(.Simulated not_in stored.sim.flags)
         
         store_entity_reference(&stored.sim.arrow)
+        store_entity_reference(&stored.sim.head)
         // TODO(viktor): Save state back to stored entity, once high entities do state decompression
         
         new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(region.world, region.origin, entity.p)
@@ -143,7 +153,15 @@ end_sim :: proc(region: ^SimRegion) {
             new_camera_p: WorldPosition
             new_camera_p.chunk  = stored.p.chunk
             new_camera_p.offset = stored.p.offset
-            region.world.camera_p = new_camera_p
+            // @Volatile Room size
+            delta := world_difference(region.world, new_camera_p, region.world.camera_p)
+            offset: v3
+            if delta.x >  17 do offset.x += 17
+            if delta.x < -17 do offset.x -= 17
+            if delta.y >   9 do offset.y +=  9
+            if delta.y <  -9 do offset.y -=  9
+            
+            region.world.camera_p = map_into_worldspace(region.world, region.world.camera_p, offset)
         }
     }
 }
@@ -176,7 +194,9 @@ load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
         entry := get_hash_from_index(region, ref.index)
         if entry.ptr == nil {
             entry.index = ref.index
-            entity := get_low_entity(region.world, ref.index)
+            entity := get_stored_entity(region.world, ref.index)
+            assert(entity != nil)
+            
             p := get_sim_space_p(region, entity)
             entry.ptr = add_entity(region, ref.index, entity, &p)
         }
@@ -223,6 +243,7 @@ add_entity_raw :: proc(region: ^SimRegion, storage_index: StorageIndex, source: 
             entity^ = source.sim
             
             load_entity_reference(region, &entity.arrow)
+            load_entity_reference(region, &entity.head)
             
             assert(.Simulated not_in entity.flags)
             entity.flags += { .Simulated }
@@ -248,10 +269,10 @@ get_sim_space_p :: proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v
     return result
 }
 
-MoveSpec :: struct {
-    normalize_accelaration: b32,
-    drag: f32,
-    speed: f32,
+get_sim_space_traversable :: proc(entity: ^Entity, index: u32) -> (result: TraversablePoint) {
+    result = entity.collision.traversables[index]
+    result.p += entity.p
+    return result
 }
 
 default_move_spec :: proc() -> MoveSpec {
@@ -262,11 +283,6 @@ default_move_spec :: proc() -> MoveSpec {
 move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
     timed_function()
     assert(.Nonspatial not_in entity.flags)
-    
-    if entity.type == .Hero {
-        BreakHere :: 1
-        _ = BreakHere  
-    } 
     
     ddp := ddp
     

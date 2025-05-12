@@ -15,7 +15,10 @@ EntityType :: enum u32 {
     
     Floor,
     
-    Hero, Wall, Familiar, Monster, Arrow, Stairwell,
+    HeroHead, 
+    HeroBody, 
+    
+    Wall, Familiar, Monster, Arrow, Stairwell,
 }
 
 HitPointPartCount :: 4
@@ -70,7 +73,7 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-get_low_entity :: proc(world: ^World, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
+get_stored_entity :: proc(world: ^World, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
     if storage_index > 0 && storage_index <= world.stored_entity_count {
         entity = &world.stored_entities[storage_index]
     }
@@ -128,20 +131,24 @@ add_stairs :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, ent
     return index, entity
 }
 
-add_player :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .Hero, world.camera_p, world.player_collision)
-
+add_hero :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
+    index, entity = add_grounded_entity(world, .HeroHead, world.camera_p, world.hero_head_collision)
     entity.sim.flags += {.Collides, .Moveable}
-
-    init_hitpoints(entity, 3)
-
+    
+    _, body := add_grounded_entity(world, .HeroBody, world.camera_p, world.hero_body_collision)
+    body.sim.flags += {.Moveable}
+    body.sim.head.index = index
+    
+    
     arrow_index, _ := add_arrow(world)
     entity.sim.arrow.index = arrow_index
-
+    
+    init_hitpoints(entity, 3)
+    
     if world.camera_following_index == 0 {
         world.camera_following_index = index
     }
-
+    
     return index, entity
 }
 

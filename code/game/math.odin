@@ -300,6 +300,13 @@ V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
     result = vec / length(vec)
     return result
 }
+@(require_results) normalize_or_zero :: proc(vec: $V) -> (result: V) {
+    len_sq := length_squared(vec)
+    if len_sq > square(f32(0.0001)) {
+        result = vec / math.sqrt(len_sq)
+    }
+    return result
+}
 
 
 // NOTE(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2

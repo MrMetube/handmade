@@ -33,7 +33,8 @@ World :: struct {
     arrow_collision, 
     floor_collision,
     stairs_collision, 
-    player_collision, 
+    hero_body_collision, 
+    hero_head_collision, 
     monstar_collision, 
     familiar_collision: ^EntityCollisionVolumeGroup, 
     
@@ -104,17 +105,18 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     add_stored_entity(world, .Nil, null_position())
     
-    tiles_per_screen :: [2]i32{5,5}
+    tiles_per_screen :: [2]i32{17,9}
     
     tile_size_in_meters :: 1.5
     world.null_collision     = make_null_collision(world)
     
-    world.wall_collision     = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
-    world.arrow_collision    = make_simple_grounded_collision(world, {0.5, 1, 0.1})
-    world.stairs_collision   = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
-    world.player_collision   = make_simple_grounded_collision(world, {0.75, 0.4, 1})
-    world.monstar_collision  = make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
-    world.familiar_collision = make_simple_grounded_collision(world, {0.5, 0.5, 1})
+    world.wall_collision      = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
+    world.arrow_collision     = make_simple_grounded_collision(world, {0.5, 1, 0.1})
+    world.stairs_collision    = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
+    world.hero_body_collision = make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
+    world.hero_head_collision = make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
+    world.monstar_collision   = make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
+    world.familiar_collision  = make_simple_grounded_collision(world, {0.5, 0.5, 1})
     
     world.floor_collision    = make_simple_floor_collision(world, v3{tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
     
@@ -122,7 +124,6 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     // "World Gen"
     
     screen_base: [3]i32
-    
     
     new_camera_p := chunk_position_from_tile_positon(
         world,
@@ -231,16 +232,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
-
+        
         if con_hero.storage_index == 0 {
             if controller.start.ended_down {
-                player_index, _ := add_player(world)
+                player_index, _ := add_hero(world)
                 con_hero^ = { storage_index = player_index }
             }
         } else {
             con_hero.ddp    = {}
             con_hero.darrow = {}
-
+            
             if controller.is_analog {
                 // NOTE(viktor): Use analog movement tuning
                 con_hero.ddp.xy = controller.stick_average
@@ -325,7 +326,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
             dt := input.delta_time;
-
+            
             // TODO(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
             camera_relative_ground := get_entity_ground_point(&entity) - camera_p
             fade_top_end      :=  0.75 * world.typical_floor_height
@@ -340,7 +341,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
             }
             
-
+            
             // TODO(viktor): this is incorrect, should be computed after update
             shadow_alpha := 1 - 0.5 * entity.p.z;
             if shadow_alpha < 0 {
@@ -352,37 +353,88 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             ////////////////////////////////////////////////
             // Pre-physics entity work
-
+            
             switch entity.type {
               case .Nil, .Monster, .Wall, .Stairwell, .Floor:
-              case .Hero:
+                
+              case .HeroHead:
                 for &con_hero in world.controlled_heroes {
                     if con_hero.storage_index == entity.storage_index {
                         move_spec.normalize_accelaration = true
                         move_spec.drag = 8
                         move_spec.speed = 50
-                        ddp = con_hero.ddp
-
-                        if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
-                            arrow := entity.arrow.ptr
-                            if arrow != nil && .Nonspatial in arrow.flags {
-                                dp: v3
-                                dp.xy = 5 * con_hero.darrow
-                                arrow.distance_limit = 5
-                                add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
-                                make_entity_spatial(arrow, entity.p, dp)
+                        if con_hero.ddp != 0 {
+                            ddp = con_hero.ddp
+                            
+                            if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
+                                arrow := entity.arrow.ptr
+                                if arrow != nil && .Nonspatial in arrow.flags {
+                                    dp: v3
+                                    dp.xy = 5 * con_hero.darrow
+                                    arrow.distance_limit = 5
+                                    add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
+                                    make_entity_spatial(arrow, entity.p, dp)
+                                }
                             }
+                        } else {
+                            // @Copypasta
+                            closest_p := entity.p
+                            closest_point_dsq :f32= 1000
+                            for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
+                                for point_index in 0..<test.collision.traversable_count {
+                                    point := get_sim_space_traversable(&test, point_index )
+                                    // TODO(viktor): check that they have the same z
+                                    dsq := length_squared(point.p - entity.p)
+                                    if dsq < closest_point_dsq {
+                                        closest_p = point.p
+                                        closest_point_dsq = dsq
+                                    }
+                                }
+                            }
+                            
+                            ddp = lerp(entity.p, closest_p, 0.99) - entity.p
+                            
+                            move_spec.normalize_accelaration = true
+                            move_spec.drag = 50
+                            move_spec.speed = 250
                         }
-
                         break
                     }
                 }
-
+                
+              case.HeroBody:
+                // TODO(viktor): make spatial queries easy for things
+                head := entity.head.ptr
+                if head != nil {
+                    desired_direction := entity.p - head.p
+                    desired_direction = normalize_or_zero(desired_direction)
+                    
+                    closest_p := entity.p
+                    closest_point_dsq :f32= 1000
+                    for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
+                        for point_index in 0..<test.collision.traversable_count {
+                            point := get_sim_space_traversable(&test, point_index )
+                            // TODO(viktor): check that they have the same z
+                            dsq := length_squared(point.p - head.p)
+                            if dsq < closest_point_dsq {
+                                closest_p = point.p
+                                closest_point_dsq = dsq
+                            }
+                        }
+                    }
+                    
+                    ddp = lerp(entity.p, closest_p, 0.99) - entity.p
+                    
+                    move_spec.normalize_accelaration = true
+                    move_spec.drag = 50
+                    move_spec.speed = 250
+                }
+                
               case .Arrow:
                 move_spec.normalize_accelaration = false
                 move_spec.drag = 0
                 move_spec.speed = 0
-
+                
                 if entity.distance_limit == 0 {
                     clear_collision_rules(world, entity.storage_index)
                     make_entity_nonspatial(&entity)
@@ -391,10 +443,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
               case .Familiar: 
                 closest_hero: ^Entity
                 closest_hero_dsq := square(f32(10))
-
+                
                 // TODO(viktor): make spatial queries easy for things
                 for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
-                    if test.type == .Hero {
+                    if test.type == .HeroBody {
                         dsq := length_squared(test.p.xy - entity.p.xy)
                         if dsq < closest_hero_dsq {
                             closest_hero_dsq = dsq
@@ -405,25 +457,24 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 
                 if FamiliarFollowsHero {
                     if closest_hero != nil && closest_hero_dsq > 1 {
-                        mpss: f32 = 0.5
-                        ddp = mpss / square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
+                        ddp = square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
                     }
                 }
-
+                
                 move_spec.normalize_accelaration = true
                 move_spec.drag = 8
                 move_spec.speed = 50
             }
-
+            
             if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
                 move_entity(camera_sim_region, &entity, ddp, move_spec, input.delta_time)
             }
-
+            
             ////////////////////////////////////////////////
             // Post-physics entity work
-
+            
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
-            facing_weights := #partial AssetVector{.FacingDirection = 1 }
+            facing_weights := #partial AssetVector{ .FacingDirection = 1 }
             head_id   := best_match_bitmap_from(tran_state.assets, .Head,  facing_match, facing_weights)
             
             shadow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Shadow)
@@ -434,17 +485,22 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             transform.offset = get_entity_ground_point(&entity)
             shadow_transform.offset = get_entity_ground_point(&entity)
             
+            hero_height :f32= 1.6
             switch entity.type {
               case .Nil: // NOTE(viktor): nothing
-              case .Hero:
+              case .HeroHead:
+                push_bitmap(render_group, head_id,  transform, hero_height)
+                if debug_requested(debug_id) { 
+                    debug_record_value(&head_id)
+                }
+                
+              case .HeroBody:
                 cape_id  := best_match_bitmap_from(tran_state.assets, .Cape,  facing_match, facing_weights)
                 sword_id := best_match_bitmap_from(tran_state.assets, .Sword, facing_match, facing_weights)
                 body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
-
-                hero_height :f32= 1.6
+                
                 push_bitmap(render_group, sword_id, transform, hero_height)
-                push_bitmap(render_group, head_id,  transform, hero_height)
                 push_bitmap(render_group, body_id,  transform, hero_height)
                 push_bitmap(render_group, cape_id,  transform, hero_height)
                 push_hitpoints(render_group, &entity, 1, transform)
@@ -453,10 +509,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&shadow_id)
                     debug_record_value(&cape_id)
                     debug_record_value(&body_id)
-                    debug_record_value(&head_id)
                     debug_record_value(&sword_id)
                 }
-
+                
               case .Arrow:
                 arrow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Arrow)
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
@@ -466,7 +521,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&shadow_id)
                     debug_record_value(&head_id)
                 }
-
+                
               case .Familiar: 
                 entity.t_bob += dt
                 if entity.t_bob > Tau {
@@ -475,7 +530,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 hz :: 4
                 coeff := sin(entity.t_bob * hz)
                 z := (coeff) * 0.3 + 0.3
-
+                
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
                 push_bitmap(render_group, head_id, transform, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
                 
@@ -483,10 +538,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&shadow_id)
                     debug_record_value(&head_id)
                 }
-
+                
               case .Monster:
                 monster_id := best_match_bitmap_from(tran_state.assets, .Monster, facing_match, facing_weights)
-
+                
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.75, color = {1, 1, 1, shadow_alpha})
                 push_bitmap(render_group, monster_id, transform, 1.5)
                 push_hitpoints(render_group, &entity, 1.6, transform)
@@ -495,7 +550,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&shadow_id)
                     debug_record_value(&monster_id)
                 }
-            
+                
               case .Wall:
                 rock_id := first_bitmap_from(tran_state.assets, AssetTypeId.Rock)
                 
@@ -504,13 +559,13 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 if debug_requested(debug_id) { 
                     debug_record_value(&rock_id)
                 }
-    
+                
               case .Stairwell: 
                 transform.upright = false
                 push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue)
                 transform.offset.z += world.typical_floor_height
                 push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
-              
+                
               case .Floor: 
                 transform.upright = false
                 color := Green
@@ -521,7 +576,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     push_rectangle(render_group, rect, transform, Blue)
                 }
             }
-        
+            
             when DebugEnabled {
                 for volume in entity.collision.volumes {
                     local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
@@ -552,7 +607,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         ////////////////////////////////////////////////
         // NOTE(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
-    
+        
         for it, it_index in tran_state.envs {
             lod := it.LOD[0]
             checker_dim: [2]i32 = 32
@@ -599,7 +654,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             entry.middle = tran_state.envs[1]
             entry.bottom = tran_state.envs[0]
         }
-
+        
         for it, it_index in tran_state.envs {
             size := vec_cast(f32, it.LOD[0].width, it.LOD[0].height) / 2
             
@@ -612,7 +667,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 assert(it.LOD[0].memory != nil)
             }
         }
-
     }
     
     // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
@@ -642,11 +696,11 @@ make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGro
     return result
 }
 
-make_simple_grounded_collision :: proc(world: ^World, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
     // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result^ = {
-        total_volume = rectangle_center_dimension(v3{0, 0, 0.5*size.z}, size),
+        total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
         volumes = push(&world.arena, Rectangle3, 1),
     }
     result.volumes[0] = result.total_volume
@@ -747,13 +801,13 @@ change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_i
 map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
     result := center
     result.offset += offset
-
+    
     rounded_offset  := round(result.offset / world.chunk_dim_meters, i32)
     result.chunk  = result.chunk + rounded_offset
     result.offset -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
-
+    
     assert(is_canonical(world, result.offset))
-
+    
     return result
 }
 
@@ -776,7 +830,7 @@ is_canonical :: proc(world: ^World, offset: v3) -> b32 {
 are_in_same_chunk :: proc(world: ^World, a, b: WorldPosition) -> b32 {
     assert(is_canonical(world, a.offset))
     assert(is_canonical(world, b.offset))
-
+    
     return a.chunk == b.chunk
 }
 
@@ -821,7 +875,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chu
         if arena != nil && world_chunk.chunk.x == UninitializedChunk {
             world_chunk.chunk = chunk_p
             world_chunk.next = nil
-
+            
             break
         }
         

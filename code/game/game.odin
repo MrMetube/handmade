@@ -1,6 +1,7 @@
 package game
 
-@common 
+// @Cleanup
+@common
 INTERNAL :: #config(INTERNAL, false)
 
 /* TODO(viktor):
@@ -115,16 +116,16 @@ InputController :: struct {
     // TODO(viktor): allow outputing vibration
     is_connected: b32,
     is_analog:    b32,
-
+    
     stick_average: [2]f32,
-
+    
     using _buttons_array_and_enum : struct #raw_union {
         buttons: [18]InputButton,
         using _buttons_enum : struct {
             stick_up , stick_down , stick_left , stick_right ,
             button_up, button_down, button_left, button_right,
             dpad_up  , dpad_down  , dpad_left  , dpad_right  ,
-
+            
             start, back,
             shoulder_left, shoulder_right,
             thumb_left   , thumb_right:    InputButton,
@@ -137,7 +138,7 @@ InputController :: struct {
 @common 
 Input :: struct {
     delta_time: f32,
-
+    
     controllers: [5]InputController,
         
     // NOTE(viktor): this is for debugging only
@@ -216,7 +217,7 @@ TransientState :: struct {
     generation_id: AssetGenerationId,
     
     tasks: [4]TaskWithMemory,
-
+    
     test_diffuse: Bitmap,
     test_normal:  Bitmap,
     
@@ -253,7 +254,7 @@ TaskWithMemory :: struct {
 
 ControlledHero :: struct {
     storage_index: StorageIndex,
-
+    
     // NOTE(viktor): these are the controller requests for simulation
     ddp: v3,
     darrow: v2,
