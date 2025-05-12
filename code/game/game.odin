@@ -102,6 +102,7 @@ DebugCameraDistance:           f32 = 5
 RenderGroundChunks:            b32
 ShowGroundChunkBounds:         b32
 ShowRenderAndSimulationBounds: b32
+TimestepPercentage:            f32 = 100
 
 ////////////////////////////////////////////////
 
@@ -342,6 +343,9 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Game")
+        debug_record_value(&TimestepPercentage)
+        TimestepPercentage = clamp(TimestepPercentage, 0, 100)
+        
         { debug_data_block("Assets")
             debug_record_value(&LoadAssetsSingleThreaded)
         }

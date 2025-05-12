@@ -133,9 +133,11 @@ add_stairs :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, ent
 
 add_hero :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
     index, entity = add_grounded_entity(world, .HeroHead, world.camera_p, world.hero_head_collision)
-    entity.sim.flags += {.Collides, .Moveable}
+    body_index, body := add_grounded_entity(world, .HeroBody, world.camera_p, world.hero_body_collision)
     
-    _, body := add_grounded_entity(world, .HeroBody, world.camera_p, world.hero_body_collision)
+    entity.sim.flags += {.Collides, .Moveable}
+    entity.sim.head.index = body_index
+    
     body.sim.flags += {.Moveable}
     body.sim.head.index = index
     

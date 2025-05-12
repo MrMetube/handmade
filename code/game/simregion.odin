@@ -43,8 +43,9 @@ Entity :: struct {
     movement_from:   v3,
     movement_to: v3,
     
-    facing_direction: f32,
     t_bob: f32,
+    dt_bob: f32,
+    facing_direction: f32,
     // TODO(viktor): generation index so we know how " to date" this entity is
     
     // TODO(viktor): only for stairwells

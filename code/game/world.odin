@@ -230,6 +230,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
 }
 
 update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
+    dt := input.delta_time * TimestepPercentage/100.0
     timed_function()
     
     for controller, controller_index in input.controllers {
@@ -291,7 +292,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     focal_length, distance_above_ground : f32 = 0.6, 14
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
-    clear(render_group, Red)
+    clear(render_group, DarkBlue)
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := rectangle_min_max(
@@ -304,7 +305,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     // TODO(viktor): do we want to simulate upper floors, etc?
     sim_bounds := rectangle_add_radius(camera_bounds, v3{17, 17, 2})
     sim_origin := world.camera_p
-    camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, input.delta_time)
+    camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
     if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
@@ -327,8 +328,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         
         
         if entity.updatable { // TODO(viktor):  move this out into entity.odin
-            dt := input.delta_time;
-            
             // TODO(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
             camera_relative_ground := get_entity_ground_point(&entity) - camera_p
             fade_top_end      :=  0.75 * world.typical_floor_height
@@ -363,21 +362,33 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 for &con_hero in world.controlled_heroes {
                     if con_hero.storage_index == entity.storage_index {
                         move_spec.normalize_accelaration = true
-                        move_spec.drag = 8
-                        move_spec.speed = 50
-                        if con_hero.ddp != 0 {
-                            ddp = con_hero.ddp
-                            
-                            if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
-                                arrow := entity.arrow.ptr
-                                if arrow != nil && .Nonspatial in arrow.flags {
-                                    dp: v3
-                                    dp.xy = 5 * con_hero.darrow
-                                    arrow.distance_limit = 5
-                                    add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
-                                    make_entity_spatial(arrow, entity.p, dp)
+                        move_spec.drag = 5
+                        move_spec.speed = 30
+                        ddp = con_hero.ddp
+                        
+                        if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
+                            arrow := entity.arrow.ptr
+                            if arrow != nil && .Nonspatial in arrow.flags {
+                                dp: v3
+                                dp.xy = 5 * con_hero.darrow
+                                arrow.distance_limit = 5
+                                add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
+                                make_entity_spatial(arrow, entity.p, dp)
+                            }
+                        }
+                        
+                        body := entity.head.ptr
+                        if body != nil {
+                            ddp2: v3
+                            head := &entity
+                            for i in 0..<3 {
+                                if abs(ddp[i]) < 0.01 {
+                                    head_spring := 200 * (body.p[i] - head.p[i]) + 15 * (- head.dp[i])
+                                    ddp[i] += dt*head_spring
                                 }
                             }
+                            
+                            entity.dp += ddp2 * dt
                         }
                         break
                     }
@@ -406,8 +417,12 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     
                     body_delta := closest_p - entity.p
                     body_distance_sq := length_squared(body_delta)
-                    entity.t_bob = 0
                     entity.facing_direction = head.facing_direction
+                    ddt_bob :f32= 0
+                    head_distance := length(head.p - entity.p)
+                    max_head_distance :f32= 0.4
+                    t_head_distance := clamp_01_to_range(0, head_distance, max_head_distance)
+                    
                     
                     switch entity.movement_mode {
                       case .Planted:
@@ -417,21 +432,20 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             entity.movement_to = closest_p
                             entity.t_movement = 0
                         }
+                        ddt_bob = t_head_distance * -30
                         
                       case .Hopping:
                         pt := entity.movement_to
 
-                        t_jump :: 0.2
-                        t_land :: 0.8
-                        t_mid :: t_land
-                        
-                        if entity.t_movement < t_jump {
-                            t := clamp_01_to_range(0, entity.t_movement, t_jump)
-                            entity.t_bob = -sin(t * Pi) * 0.25
+                        t_jump :: 0.1
+                        t_thrust :: 0.8
+                        ddt_bob = t_head_distance * -30
+                        if entity.t_movement < t_thrust {
+                            ddt_bob -= 60
                         } 
                         
-                        if t_jump <= entity.t_movement && entity.t_movement < t_land {
-                            t := clamp_01_to_range(t_jump, entity.t_movement, t_land)
+                        if t_jump <= entity.t_movement {
+                            t := clamp_01_to_range(t_jump, entity.t_movement, 1)
                             entity.t_bob = sin(t * Pi) * 0.1
                             entity.p = lerp(entity.movement_from, entity.movement_to, entity.t_movement)
                             entity.dp = 0
@@ -439,7 +453,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             pf := entity.movement_from
                             
                             // :ZHandling
-                            height := v3{0, 0.5, 0.5}
+                            height := v3{0, 0.3, 0.3}
                             
                             c := pf
                             a := -4 * height
@@ -447,23 +461,25 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             entity.p = a * square(t) + b * t + c
                         }
                         
-                        if entity.t_movement >= t_mid {
-                            t := clamp_01_to_range(t_mid, entity.t_movement, 1)
-                            entity.t_bob = -sin(t * Tau) * 0.05
-                        }
                         
                         if entity.t_movement >= 1 {
                             entity.movement_mode = .Planted
+                            entity.dt_bob = -3
                             entity.p = pt
                         }
                         
-                        hop_duration :f32: 0.5
+                        hop_duration :f32: 0.25
                         entity.t_movement += dt * (1 / hop_duration)
                         
                         if entity.t_movement >= 1 {
                             entity.t_movement = 1
                         }
                     }
+                    
+                    ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
+                    
+                    entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
+                    entity.dt_bob += 0.5*ddt_bob*dt
                     
                     move_spec.normalize_accelaration = true
                     move_spec.drag = 50
@@ -507,7 +523,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
-                move_entity(camera_sim_region, &entity, ddp, move_spec, input.delta_time)
+                move_entity(camera_sim_region, &entity, ddp, move_spec, dt)
             }
             
             ////////////////////////////////////////////////
@@ -541,14 +557,15 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
                 
-                before := transform.offset
+                before := transform
+                    transform.sort_bias += 10
+                    push_bitmap(render_group, body_id,  transform, hero_height)
+                transform = before
+                    transform.offset.y += entity.t_bob
+                    transform.sort_bias -= 10
                     transform.offset.y += -0.3
                     push_bitmap(render_group, cape_id,  transform, hero_height*1.3)
-                transform.offset = before
-                    transform.offset.y += entity.t_bob
-                    transform.sort_bias += 1
-                    push_bitmap(render_group, body_id,  transform, hero_height)
-                transform.offset = before
+                transform = before
                 
                 push_hitpoints(render_group, &entity, 1, transform)
                 
