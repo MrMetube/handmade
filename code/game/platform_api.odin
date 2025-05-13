@@ -1,6 +1,6 @@
 package game
 
-@common 
+@(common) 
 PlatformAPI :: struct {
     enqueue_work:      PlatformEnqueueWork,
     complete_all_work: PlatformCompleteAllWork,
@@ -20,27 +20,27 @@ PlatformAPI :: struct {
     debug: DebugCode,
 }
 
-@common PlatformWorkQueueCallback :: #type proc(data: pmm)
-@common PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm)
-@common PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
+@(common) PlatformWorkQueueCallback :: #type proc(data: pmm)
+@(common) PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm)
+@(common) PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
 
-@common PlatformAllocateMemory   :: #type proc(size: u64) -> pmm
-@common PlatformDeallocateMemory :: #type proc(memory: pmm)
+@(common) PlatformAllocateMemory   :: #type proc(size: u64) -> pmm
+@(common) PlatformDeallocateMemory :: #type proc(memory: pmm)
 
-@common PlatformAllocateTexture   :: #type proc(width, height: i32, data: pmm) -> u32
-@common PlatformDeallocateTexture :: #type proc(texture: u32)
+@(common) PlatformAllocateTexture   :: #type proc(width, height: i32, data: pmm) -> u32
+@(common) PlatformDeallocateTexture :: #type proc(texture: u32)
 
-@common PlatformFileType   :: enum { AssetFile }
-@common PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }
-@common PlatformFileGroup  :: struct { file_count: u32, _platform: pmm }
+@(common) PlatformFileType   :: enum { AssetFile }
+@(common) PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }
+@(common) PlatformFileGroup  :: struct { file_count: u32, _platform: pmm }
 
-@common PlatformBeginProcessingAllFilesOfType :: #type proc(type: PlatformFileType) -> PlatformFileGroup
-@common PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: ^PlatformFileGroup)
-@common PlatformOpenNextFile                  :: #type proc(file_group: ^PlatformFileGroup) -> PlatformFileHandle
-@common PlatformReadDataFromFile              :: #type proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm)
-@common PlatformMarkFileError                 :: #type proc(handle: ^PlatformFileHandle, error_message: string)
+@(common) PlatformBeginProcessingAllFilesOfType :: #type proc(type: PlatformFileType) -> PlatformFileGroup
+@(common) PlatformEndProcessingAllFilesOfType   :: #type proc(file_group: ^PlatformFileGroup)
+@(common) PlatformOpenNextFile                  :: #type proc(file_group: ^PlatformFileGroup) -> PlatformFileHandle
+@(common) PlatformReadDataFromFile              :: #type proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm)
+@(common) PlatformMarkFileError                 :: #type proc(handle: ^PlatformFileHandle, error_message: string)
 
-@common
+@(common)
 Platform_no_file_errors :: proc(handle: ^PlatformFileHandle) -> b32 { 
     return handle.no_errors
 }

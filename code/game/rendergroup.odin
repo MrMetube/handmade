@@ -1,6 +1,6 @@
 package game
 
-/* NOTE(viktor):
+/* @note(viktor):
     1) Everywhere outside the renderer, Y _always_ goes upward, X to the right.
 
     2) All Bitmaps including the render target are assumed to be bottom-up
@@ -20,15 +20,15 @@ package game
     5) All color values specified to the renderer as v4s are in
         _NON-premulitplied_ alpha.
 
-    TODO(viktor): :ZHandling
+    @todo(viktor): :ZHandling
 */
 
-@common 
+@(common) 
 Color :: [4]u8
 
-@common 
+@(common) 
 Bitmap :: struct {
-    // TODO(viktor): the length of the slice and either width or height are redundant
+    // @todo(viktor): the length of the slice and either width or height are redundant
     memory: []Color,
     
     align_percentage:  [2]f32,
@@ -39,11 +39,11 @@ Bitmap :: struct {
     texture_handle: u32,
 }
 
-@common
+@(common)
 RenderCommands :: struct {
     width, height: i32,
     
-    // NOTE(viktor): Packed array of disjoint elements.
+    // @note(viktor): Packed array of disjoint elements.
     push_buffer:      []u8,
     push_buffer_size: u32,
     
@@ -95,15 +95,15 @@ TransformMode :: enum {
     None, Perspective, Orthographic,
 }
 
-@common
+@(common)
 EnvironmentMap :: struct {
     pz:  f32,
     LOD: [4]Bitmap,
 }
 
-// TODO(viktor): Why always prefix rendergroup?
-// NOTE(viktor): RenderGroupEntry is a "compact discriminated union"
-@common
+// @todo(viktor): Why always prefix rendergroup?
+// @note(viktor): RenderGroupEntry is a "compact discriminated union"
+@(common)
 RenderEntryType :: enum u8 {
     RenderEntryClear,
     RenderEntryBitmap,
@@ -111,41 +111,41 @@ RenderEntryType :: enum u8 {
     RenderEntryClip,
     RenderEntryCoordinateSystem,
 }
-@common
-RenderEntryHeader :: struct { // TODO(viktor): Don't store type here, store in sort index?
+@(common)
+RenderEntryHeader :: struct { // @todo(viktor): Don't store type here, store in sort index?
     clip_rect_index: u16,
     type: RenderEntryType,
 }
 
-@common
+@(common)
 RenderEntryClip :: struct {
     rect: Rectangle2i,
     next: ^RenderEntryClip,
 }
 
-@common
+@(common)
 RenderEntryClear :: struct {
     color:  v4,
 }
 
-@common
+@(common)
 RenderEntryBitmap :: struct {
     bitmap: ^Bitmap,
-    id:     u32, // BitmapId @Cleanup
+    id:     u32, // BitmapId @cleanup
     
     color:  v4,
     p:      v2,
     size:   v2,
 }
 
-@common
+@(common)
 RenderEntryRectangle :: struct {
     color: v4,
     rect:  Rectangle2,
 }
 
-// @Cleanup
-@common
+// @cleanup
+@(common)
 RenderEntryCoordinateSystem :: struct {
     color:  v4,
     origin, x_axis, y_axis: v2,
@@ -184,7 +184,7 @@ default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
 default_upright_transform :: proc() -> Transform { return { scale = 1, upright = true} }
 
 perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
-    // TODO(viktor): need to adjust this based on buffer size
+    // @todo(viktor): need to adjust this based on buffer size
     pixels_to_meters := 1.0 / meters_to_pixels
     pixel_size := vec_cast(f32, pixel_count)
     group.monitor_half_diameter_in_meters = 0.5 * pixel_size * pixels_to_meters
@@ -204,7 +204,7 @@ perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, 
 }
 
 orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels: f32) {
-    // TODO(viktor): need to adjust this based on buffer size
+    // @todo(viktor): need to adjust this based on buffer size
     pixel_size := vec_cast(f32, pixel_count)
     group.monitor_half_diameter_in_meters = 0.5 * meters_to_pixels
     
@@ -393,8 +393,8 @@ push_rectangle_outline2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform:
     push_rectangle_outline(group, Rect3(rec, 0, 0), transform, color, thickness)
 }
 push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: v2 = 0.1) {
-    // TODO(viktor): there are rounding issues with draw_rectangle
-    // @Cleanup offset and size
+    // @todo(viktor): there are rounding issues with draw_rectangle
+    // @cleanup offset and size
     
     offset := rectangle_get_center(rec)
     size   := rectangle_get_dimension(rec)
@@ -429,7 +429,7 @@ push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, tran
         for index in 0..<entity.hit_point_max {
             hit_point := entity.hit_points[index]
             color := hit_point.filled_amount == 0 ? Gray : Red
-            // @Cleanup rect
+            // @cleanup rect
             push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
             health_x += spacing_between
         }
@@ -464,7 +464,7 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
         }
         
         distance_to_p_z := distance_above_target - p.z
-        // TODO(viktor): transform.scale is unused
+        // @todo(viktor): transform.scale is unused
         if distance_to_p_z > near_clip_plane {
             raw := V3(p.xy, 1)
             projected := camera.focal_length * raw / distance_to_p_z

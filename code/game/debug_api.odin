@@ -1,10 +1,10 @@
 package game
 
-@common import "base:runtime"
+@(common) import "base:runtime"
 
-@common DebugEnabled :: true && INTERNAL
+@(common) DebugEnabled :: true && INTERNAL
 
-@common DebugGUID :: struct {
+@(common) DebugGUID :: struct {
     name:      string,
     file_path: string,
     procedure: string,
@@ -12,7 +12,7 @@ package game
     column: u32,
 }
 
-@export
+@(export)
 debug_record_b32 :: proc(value: ^b32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
 debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(value)) { 
     if GlobalDebugTable == nil do return
@@ -110,12 +110,12 @@ debug_data_block :: proc(name: string, loc := #caller_location) {
     debug_record_event(BeginDataBlock{}, name, loc)
 }
 
-@export
+@(export)
 debug_begin_data_block :: proc(name: string, loc := #caller_location) {
     debug_record_event(BeginDataBlock{}, name, loc)
 }
 
-@export
+@(export)
 debug_end_data_block :: proc() {
     debug_record_event(EndDataBlock{}, "EndDataBlock")
 }
@@ -123,13 +123,13 @@ debug_end_data_block :: proc() {
 ////////////////////////////////////////////////
 // Timed Blocks and Functions
 
-@common TimedBlockInfo :: struct {
+@(common) TimedBlockInfo :: struct {
     hit_count: i64, 
     name: string,
     loc: runtime.Source_Code_Location,
 }
 
-@export
+@(export)
 begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
     when !DebugEnabled do return result 
     
@@ -141,11 +141,11 @@ begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_co
     return result
 }
 
-@export
+@(export)
 end_timed_block :: proc(info: TimedBlockInfo) {
     when !DebugEnabled do return
     if info == {} do return
-    // TODO(viktor): record the hit count here
+    // @todo(viktor): record the hit count here
     debug_record_event(EndTimedBlock{}, info.name, info.loc)
 }
 
@@ -186,7 +186,7 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
 ////////////////////////////////////////////////
 // Only used by the platform layer
 
-@export
+@(export)
 debug_set_event_recording :: proc(active: b32, table:=GlobalDebugTable) {
     if !DebugEnabled do return
     if table == nil do return
@@ -194,7 +194,7 @@ debug_set_event_recording :: proc(active: b32, table:=GlobalDebugTable) {
     table.record_increment = active ? 1 : 0
 }
 
-@export
+@(export)
 frame_marker :: proc(seconds_elapsed: f32, loc := #caller_location) {
     if !DebugEnabled do return
     

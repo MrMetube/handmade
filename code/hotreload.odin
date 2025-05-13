@@ -14,7 +14,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
         assert(game == game_stubs, "game.dll has already been initialized")
     } else {
         if !win.FreeLibrary(game_lib) {
-            // @Logging 
+            // @logging 
             fmt.println("Failed to load game.dll")
         }
     }
@@ -29,7 +29,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
             
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil
         } else {
-            // @Logging 
+            // @logging 
             fmt.println("Failed to initialize game api")
             fmt.println(os.error_string(os.get_last_error()))
         }
@@ -45,7 +45,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
 unload_game_lib :: proc() {
     if game_lib != nil {
         if !win.FreeLibrary(game_lib) {
-            // @Logging 
+            // @logging 
         }
         game_lib = nil
     }

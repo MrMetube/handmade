@@ -4,7 +4,7 @@ MagicValue : u32 : 'h' << 0 | 'h' << 8 | 'a' << 16 | 'f' << 24
 Version    : u32 : 0
 
 // 
-// NOTE: Shared with the assets directly
+// @note(viktor): Shared with the assets directly
 // 
 
 BitmapId :: distinct u32
@@ -26,19 +26,19 @@ AssetType :: struct #packed {
 AssetTypeId :: enum u32 {
     None,
     
-    // NOTE(viktor): Bitmaps
+    // @note(viktor): Bitmaps
     Shadow, Wall, Arrow, Stair, 
     Rock, Grass,
 
     Cape, Head, Body, Sword,
     Monster,
     
-    // NOTE(viktor): Sounds
+    // @note(viktor): Sounds
     Blop, Drop, Woosh, Hit,
     
     Music,
     
-    // NOTE(viktor): Fonts
+    // @note(viktor): Fonts
     Font, FontGlyph,
 }
 
@@ -48,12 +48,12 @@ AssetFontType :: enum {
 }
 
 AssetTagId :: enum {
-    FacingDirection, // NOTE(viktor): angle in radians
-    FontType,        // NOTE(viktor): see AssetFontType
+    FacingDirection, // @note(viktor): angle in radians
+    FontType,        // @note(viktor): see AssetFontType
 }
 
 // 
-// NOTE: HHA specific
+// @note(viktor): HHA specific
 // 
 
 Header :: struct #packed {
@@ -86,7 +86,7 @@ AssetData :: struct #packed {
 BitmapInfo :: struct #packed {
     dimension:        [2]u32,
     align_percentage: [2]f32,
-    // NOTE(viktor): Data is:
+    // @note(viktor): Data is:
     //     pixels: [dimension[1]][dimension[2]] [4]u8
 }
 
@@ -94,7 +94,7 @@ SoundInfo :: struct #packed {
     sample_count:  u32,
     channel_count: u32,
     chain:         SoundChain,
-    // NOTE(viktor): Data is:
+    // @note(viktor): Data is:
     //     samples: [channel_count][sample_count] i16
 }
 
@@ -109,7 +109,7 @@ FontInfo :: struct #packed {
     
     one_past_highest_codepoint: rune,
     glyph_count: u32,
-    // NOTE(viktor): Data is:
+    // @note(viktor): Data is:
     //     glyphs:   [glyph_count] GlyphInfo,
     //     advances: [glyph_count][glyph_count] f32,
 }

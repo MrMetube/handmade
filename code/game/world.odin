@@ -9,7 +9,7 @@ World :: struct {
     // World specific    
     chunk_dim_meters: v3,
 
-    // TODO(viktor): chunk_hash should probably switch to pointers IF
+    // @todo(viktor): chunk_hash should probably switch to pointers IF
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
     chunk_hash: [4096]Chunk,
     first_free: ^WorldEntityBlock,
@@ -18,10 +18,10 @@ World :: struct {
     // General
     typical_floor_height: f32,
     
-    // TODO(viktor): Should we allow split-screen?
+    // @todo(viktor): Should we allow split-screen?
     camera_following_index: StorageIndex,
     camera_p :              WorldPosition,
-    // TODO(viktor): Should which players joined be part of the general state?
+    // @todo(viktor): Should which players joined be part of the general state?
     controlled_heroes: [len(Input{}.controllers)]ControlledHero,
     
     stored_entity_count: StorageIndex,
@@ -41,11 +41,11 @@ World :: struct {
     familiar_collision: ^EntityCollisionVolumeGroup, 
     
     
-    // NOTE(viktor): Only for testing, use Input.delta_time and your own t-values.
+    // @note(viktor): Only for testing, use Input.delta_time and your own t-values.
     time: f32,
 }
 
-// NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
+// @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(World{}.collision_rule_hash) & ( len(World{}.collision_rule_hash) - 1 ) == 0)
 
 Chunk :: #type SingleLinkedList(ChunkData)
@@ -55,7 +55,7 @@ ChunkData :: struct {
     first_block: WorldEntityBlock,
 }
 
-// TODO(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
+// @todo(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
 WorldEntityBlock :: #type SingleLinkedList(WorldEntityBlockData)
 WorldEntityBlockData :: struct {
     entity_count: StorageIndex,
@@ -63,7 +63,7 @@ WorldEntityBlockData :: struct {
 }
 
 WorldPosition :: struct {
-    // TODO(viktor): It seems like we have to store ChunkX/Y/Z with each
+    // @todo(viktor): It seems like we have to store ChunkX/Y/Z with each
     // entity because even though the sim region gather doesn't need it
     // at first, and we could get by without it, but entity references pull
     // in entities WITHOUT going through their world_chunk, and thus
@@ -73,7 +73,7 @@ WorldPosition :: struct {
 }
 
 chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
-    // @Volatile
+    // @volatile
     tile_size_in_meters  :: 1.5
     tile_depth_in_meters :: 3
     offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_x, tile_y, tile_z) + {0.5, 0.5, 0})
@@ -89,7 +89,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
     
     
-    // @Cleanup REMOVE THIS
+    // @cleanup REMOVE THIS
     ground_buffer_size :: 512
     pixels_to_meters :: 1.0 / 42.0
     chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
@@ -246,10 +246,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             con_hero.darrow = {}
             
             if controller.is_analog {
-                // NOTE(viktor): Use analog movement tuning
+                // @note(viktor): Use analog movement tuning
                 con_hero.ddp.xy = controller.stick_average
             } else {
-                // NOTE(viktor): Use digital movement tuning
+                // @note(viktor): Use digital movement tuning
                 if controller.stick_left.ended_down {
                     con_hero.ddp.x -= 1
                 }
@@ -279,7 +279,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             if con_hero.darrow != 0 {
-                // TODO(viktor): How do we want to handle this?
+                // @todo(viktor): How do we want to handle this?
                 // play_sound(&state.mixer, random_sound_from(tran_state.assets, .Hit, &state.effects_entropy), 0.2)
             }
         }
@@ -301,8 +301,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     )
     
     sim_memory := begin_temporary_memory(&tran_state.arena)
-    // TODO(viktor): by how much should we expand the sim region?
-    // TODO(viktor): do we want to simulate upper floors, etc?
+    // @todo(viktor): by how much should we expand the sim region?
+    // @todo(viktor): do we want to simulate upper floors, etc?
     sim_bounds := rectangle_add_radius(camera_bounds, v3{17, 17, 2})
     sim_origin := world.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
@@ -327,8 +327,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         }
         
         
-        if entity.updatable { // TODO(viktor):  move this out into entity.odin
-            // TODO(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
+        if entity.updatable { // @todo(viktor):  move this out into entity.odin
+            // @todo(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
             camera_relative_ground := get_entity_ground_point(&entity) - camera_p
             fade_top_end      :=  0.75 * world.typical_floor_height
             fade_top_start    :=  0.5  * world.typical_floor_height
@@ -343,7 +343,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             
-            // TODO(viktor): this is incorrect, should be computed after update
+            // @todo(viktor): this is incorrect, should be computed after update
             shadow_alpha := 1 - 0.5 * entity.p.z;
             if shadow_alpha < 0 {
                 shadow_alpha = 0.0;
@@ -397,7 +397,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
               case.HeroBody:
                 head := entity.head.ptr
                 if head != nil {
-                    // TODO(viktor): make spatial queries easy for things
+                    // @todo(viktor): make spatial queries easy for things
                     desired_direction := entity.p - head.p
                     desired_direction = normalize_or_zero(desired_direction)
                     
@@ -406,7 +406,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
                         for point_index in 0..<test.collision.traversable_count {
                             point := get_sim_space_traversable(&test, point_index )
-                            // TODO(viktor): check that they have the same z
+                            // @todo(viktor): check that they have the same z
                             dsq := length_squared(point.p - head.p)
                             if dsq < closest_point_dsq {
                                 closest_p = point.p
@@ -500,7 +500,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 closest_hero: ^Entity
                 closest_hero_dsq := square(f32(10))
                 
-                // TODO(viktor): make spatial queries easy for things
+                // @todo(viktor): make spatial queries easy for things
                 for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
                     if test.type == .HeroBody {
                         dsq := length_squared(test.p.xy - entity.p.xy)
@@ -544,7 +544,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             hero_height :f32= 1.6
             switch entity.type {
-              case .Nil: // NOTE(viktor): nothing
+              case .Nil: // @note(viktor): nothing
               case .HeroHead:
                 transform.sort_bias += 1
                 push_bitmap(render_group, head_id,  transform, hero_height)
@@ -668,7 +668,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     when false do if EnvironmentTest { 
         ////////////////////////////////////////////////
-        // NOTE(viktor): Coordinate System and Environment Map Test
+        // @note(viktor): Coordinate System and Environment Map Test
         map_color := [?]v4{Red, Green, Blue}
         
         for it, it_index in tran_state.envs {
@@ -732,7 +732,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         }
     }
     
-    // TODO(viktor): Make sure we hoist the camera update out to a place where the renderer
+    // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.       
     end_sim(camera_sim_region)
@@ -760,7 +760,7 @@ make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGro
 }
 
 make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
-    // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
+    // @todo(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result^ = {
         total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
@@ -772,7 +772,7 @@ make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) 
 }
 
 make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
-    // TODO(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
+    // @todo(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result^ = {
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
@@ -808,15 +808,15 @@ change_entity_location :: proc(arena: ^Arena = nil, world: ^World, index: Storag
 }
 
 change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
-    // TODO(viktor): if the entity moves into the camera bounds, shoulds this force the entity into the high set immediatly?
+    // @todo(viktor): if the entity moves into the camera bounds, shoulds this force the entity into the high set immediatly?
     assert((old_p == nil || is_valid(old_p^)))
     assert((new_p == nil || is_valid(new_p^)))
     
     if old_p != nil && new_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
-        // NOTE(viktor): leave entity where it is
+        // @note(viktor): leave entity where it is
     } else {
         if old_p != nil {
-            // NOTE(viktor): Pull the entity out of its old block
+            // @note(viktor): Pull the entity out of its old block
             chunk := get_chunk(nil, world, old_p^)
             assert(chunk != nil)
             if chunk != nil {
@@ -841,13 +841,13 @@ change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_i
         }
         
         if new_p != nil {
-            // NOTE(viktor): Insert the entity into its new block
+            // @note(viktor): Insert the entity into its new block
             chunk := get_chunk(arena, world, new_p^)
             assert(chunk != nil)
             
             block := &chunk.first_block
             if block.entity_count == len(block.indices) {
-                // NOTE(viktor): We're out of room, get a new block!
+                // @note(viktor): We're out of room, get a new block!
                 new_block := list_pop(&world.first_free) or_else push(arena, WorldEntityBlock)
                 
                 list_push_after_head(block, new_block)
@@ -916,7 +916,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chu
     assert(chunk_p.z > min(i32) + ChunkSafeMargin)
     assert(chunk_p.z < max(i32) - ChunkSafeMargin)
     
-    // TODO(viktor): BETTER HASH FUNCTION !!
+    // @todo(viktor): BETTER HASH FUNCTION !!
     hash_value := 19*chunk_p.x + 7*chunk_p.y + 3*chunk_p.z
     hash_slot := hash_value & (len(world.chunk_hash)-1)
     

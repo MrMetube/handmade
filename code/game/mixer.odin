@@ -3,12 +3,12 @@ package game
 import "core:simd/x86"
 
 
-@common 
+@(common) 
 Sample :: [2]i16
 
-@common 
+@(common) 
 GameSoundBuffer :: struct {
-    // NOTE(viktor): Samples length must be padded to a multiple of 4 samples.
+    // @note(viktor): Samples length must be padded to a multiple of 4 samples.
     samples:            []Sample,
     samples_per_second: u32,
 }
@@ -22,8 +22,8 @@ Mixer :: struct {
 }
 
 Sound :: struct {
-    // TODO(viktor): should channel_count be implicit, or does that make the underlying memory too messy?
-    // TODO(viktor): should sample_count be explicit, or does that make the underlying memory too messy?
+    // @todo(viktor): should channel_count be implicit, or does that make the underlying memory too messy?
+    // @todo(viktor): should sample_count be explicit, or does that make the underlying memory too messy?
     channel_count: u8,
     channels: [2][]i16, // 1 or 2 channels of [sample_count]samples
 }
@@ -48,7 +48,7 @@ init_mixer :: proc(mixer: ^Mixer, parent_arena: ^Arena) {
 play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
     playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound, no_clear())
     
-    // TODO(viktor): should volume default to [0.5,0.5] to be centered?
+    // @todo(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound^ = {
         id = id,
         
@@ -91,17 +91,17 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
     assert((sample_count & 3) == 0)
     chunk_count := sample_count / 4
     
-    // TODO(viktor): Do we not just want to clear the channels here
+    // @todo(viktor): Do we not just want to clear the channels here
     real_channel_0 := push(temporary_arena, f32x4, chunk_count, align_no_clear(16))
     real_channel_1 := push(temporary_arena, f32x4, chunk_count, align_no_clear(16))
     
-    // NOTE(viktor): clear out the summation channels
+    // @note(viktor): clear out the summation channels
     #no_bounds_check for i in 0..<len(real_channel_0) {
         real_channel_0[i] = 0
         real_channel_1[i] = 0
     }
 
-    // NOTE(viktor): Sum all sounds
+    // @note(viktor): Sum all sounds
     for playing_sound_pointer := &mixer.first_playing_sound; playing_sound_pointer^ != nil;  {
         playing_sound := playing_sound_pointer^
         
@@ -123,7 +123,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 volume   := playing_sound.current_volume
                 d_volume := seconds_per_sample * playing_sound.d_current_volume
                 d_volume_chunk := 4 * d_volume
-                // TODO(viktor): go to 8 wide simd
+                // @todo(viktor): go to 8 wide simd
                 master_volume_0 := cast(f32x4) mixer.master_volume[0]
                 master_volume_1 := cast(f32x4) mixer.master_volume[1]
                 
@@ -141,7 +141,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 }
                 
                 chunks_to_mix := total_chunks_to_mix
-                // TODO(viktor): IMPORTANT(viktor): Fix the alignment of sounds
+                // @important @todo(viktor): Fix the alignment of sounds
                 // assert(len(sound.channels[0]) & 3 == 0) 
                 samples_in_sound := cast(i32) len(sound.channels[0])
                 
@@ -163,13 +163,13 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                     }
                 }
                 
-                // TODO(viktor): handle stereo
+                // @todo(viktor): handle stereo
                 begin_sample_p := playing_sound.samples_played
                 end_sample_p := begin_sample_p + d_sample_chunk * cast(f32) chunks_to_mix
                 sample_offset := d_sample * f32x4 { 0, 1, 2, 3 }
                 for loop_index in 0..<chunks_to_mix {
                     sample_p := begin_sample_p + d_sample_chunk * cast(f32) loop_index
-                    // TODO(viktor): actually handle the bounds
+                    // @todo(viktor): actually handle the bounds
                     #no_bounds_check when true {
                         sample_p_offset := sample_p + sample_offset
                         sample_index    := cast(i32x4) sample_p_offset
@@ -255,8 +255,8 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         }
     }
     
-    { // NOTE(viktor): convert to 16bit and write into output sound buffer
-        // TODO(viktor): maybe no pointer-arithmetic/looping
+    { // @note(viktor): convert to 16bit and write into output sound buffer
+        // @todo(viktor): maybe no pointer-arithmetic/looping
         source_0 := raw_data(real_channel_0)
         source_1 := raw_data(real_channel_1)
         

@@ -89,7 +89,7 @@ SingleLinkedList :: struct($T: typeid) {
     next:       ^SingleLinkedList(T),
 }
 
-// TODO(viktor): codefy removal from the list whilst iterating over it
+// @todo(viktor): codefy removal from the list whilst iterating over it
 // maybe a procedure is enough, please no iterator objects
 
 list_push_after_head :: proc(head: ^SingleLinkedList($T), element: ^SingleLinkedList(T)) {

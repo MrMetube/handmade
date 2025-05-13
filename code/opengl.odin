@@ -59,7 +59,7 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
             
             extensions := opengl_get_extensions(context_is_modern)
             
-            // NOTE(viktor): If we believe we can do full sRGB on the texture side
+            // @note(viktor): If we believe we can do full sRGB on the texture side
             // and the framebuffer side, then we can enable it, otherwise it is
             // safer for us to pass it straight through.
             if extensions.GL_EXT_texture_sRGB && framebuffer_supports_srgb {
@@ -198,7 +198,7 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
         }
         
         if !framebuffer_supports_srgb {
-            int_attribs[10] = 0 // @Volatile Coupled to the ordering of the attribs itself
+            int_attribs[10] = 0 // @volatile Coupled to the ordering of the attribs itself
         }
         
         win.wglChoosePixelFormatARB(dc, raw_data(int_attribs[:]), nil, 1, &suggested_pixel_format_index, &extended_pick)
@@ -259,7 +259,7 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
     
     P :f32= 1
     
-    // NOTE(viktor): Lower triangle
+    // @note(viktor): Lower triangle
     glTexCoord2f(0.0, 0.0)
     glVertex2f(-P, -P)
     
@@ -269,7 +269,7 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
     glTexCoord2f(1.0, 1.0)
     glVertex2f(P, P)
     
-    // NOTE(viktor): Upper triangle
+    // @note(viktor): Upper triangle
     glTexCoord2f(0.0, 0.0)
     glVertex2f(-P, -P)
     
@@ -380,7 +380,7 @@ gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,
     
     glColor4f(color.r, color.g, color.b, color.a)
     
-    // NOTE(viktor): Lower triangle
+    // @note(viktor): Lower triangle
     glTexCoord2f(min_uv.x, min_uv.y)
     glVertex2f(min.x, min.y)
 
@@ -390,7 +390,7 @@ gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,
     glTexCoord2f(max_uv.x, max_uv.y)
     glVertex2f(max.x, max.y)
 
-    // NOTE(viktor): Upper triangle
+    // @note(viktor): Upper triangle
     glTexCoord2f(min_uv.x, min_uv.y)
     glVertex2f(min.x, min.y)
 

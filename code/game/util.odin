@@ -11,7 +11,6 @@ was_pressed :: proc(button: InputButton) -> (result:b32) {
     return result
 }
 
-		
 // ------- Low Contrast
 // #C1B28B gray
 
@@ -78,7 +77,7 @@ umm :: uintptr
 ////////////////////////////////////////////////
 // Atomics
 
-// TODO(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
+// @todo(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
 atomic_compare_exchange :: proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
     ok_: bool
     was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
@@ -179,7 +178,7 @@ swap :: proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 @(disabled=ODIN_DISABLE_ASSERT)
 assert :: proc(condition: $B, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(B) {
     if !condition {
-        // TODO(viktor): We are not a console application
+        // @todo(viktor): We are not a console application
         fmt.print(loc, prefix)
         if len(message) > 0 {
             fmt.println(":", message)

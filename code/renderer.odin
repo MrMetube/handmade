@@ -37,7 +37,7 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, temp_memory: pmm) {
 sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
     block := game.begin_timed_block(#procedure)
     defer game.end_timed_block(block)
-    // TODO(viktor): This is not the best way to sort.
+    // @todo(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := commands.push_buffer_element_count
     if count != 0 {
@@ -54,7 +54,7 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
 software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {
     assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
 
-    /* TODO(viktor):
+    /* @todo(viktor):
         - Make sure the tiles are all cache-aligned
         - How big should the tiles be for performance?
         - Actually ballpark the memory bandwidth for our DrawRectangleQuickly
@@ -116,7 +116,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     clip_rect_index := max(u16)
     for sort_entry, i in sort_entries {
         header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry.index]
-        //:PointerArithmetic
+        // :PointerArithmetic
         entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderEntryHeader)]
         
         if clip_rect_index != header.clip_rect_index {
@@ -133,7 +133,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.color, clip_rect)
             
           case .RenderEntryClip:
-            // TODO(viktor): 
+            // @todo(viktor): 
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -175,14 +175,14 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
 
 @(enable_target_feature="sse,sse2")
 draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, clip_rect: Rectangle2i) {
-    // IMPORTANT TODO(viktor): @Robustness, these should be asserts. They only ever fail on hotreloading
+    // @important @todo(viktor): @robustness, these should be asserts. They only ever fail on hotreloading
     if !((texture.memory != nil) && (texture.width  >= 0) && (texture.height >= 0) &&
         (auto_cast len(texture.memory) == texture.height * texture.width) &&
         (texture.width_over_height >  0)) {
         return
     }
     
-    // NOTE(viktor): premultiply color
+    // @note(viktor): premultiply color
     color := color
     color.rgb *= color.a
     /* 
@@ -190,7 +190,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         length_y_axis := length(y_axis)
         normal_x_axis := (length_y_axis / length_x_axis) * x_axis
         normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-        // NOTE(viktor): normal_z_scale could be a parameter if we want people
+        // @note(viktor): normal_z_scale could be a parameter if we want people
         // to have control over the amount of scaling in the z direction that
         // the normals appear to have
         normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
@@ -274,7 +274,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
-            // NOTE(viktor): iterative calculations will lead to arithmetic errors,
+            // @note(viktor): iterative calculations will lead to arithmetic errors,
             // so we calculate always based of the index.
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
@@ -305,7 +305,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 u = clamp_01(u)
                 v = clamp_01(v)
 
-                // NOTE(viktor): Bias texture coordinates to start on the 
+                // @note(viktor): Bias texture coordinates to start on the 
                 // boundary between the 0,0 and 1,1 pixels
                 tx := u * texture_width_x8  + 0.5
                 ty := v * texture_height_x8 + 0.5
@@ -316,7 +316,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 fx := tx - cast(f32x8) sx
                 fy := ty - cast(f32x8) sy
 
-                // NOTE(viktor): bilinear sample
+                // @note(viktor): bilinear sample
                 fetch := cast(ummx8) (sy * texture_width + sx)
                 
                 ummx8 :: #simd [8]umm
@@ -356,7 +356,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 pixel_b := cast(f32x8) (0xff & simd.shr(original_pixel,  16))
                 pixel_a := cast(f32x8) (0xff & simd.shr(original_pixel,  24))
                 
-                // NOTE(viktor): srgb to linear
+                // @note(viktor): srgb to linear
                 ta_r = square(ta_r)
                 ta_g = square(ta_g)
                 ta_b = square(ta_b)
@@ -377,7 +377,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 pixel_g = square(pixel_g)
                 pixel_b = square(pixel_b)
                 
-                // NOTE(viktor): bilinear blend
+                // @note(viktor): bilinear blend
                 ifx := 1 - fx
                 ify := 1 - fy
                 l0  := ify * ifx
@@ -399,7 +399,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 texel_g = clamp(texel_g, 0, max_color_value)
                 texel_b = clamp(texel_b, 0, max_color_value)
 
-                // NOTE(viktor): blend with target pixel
+                // @note(viktor): blend with target pixel
                 inv_texel_a := (1 - (inv_255 * texel_a))
 
                 blended_r := inv_texel_a * pixel_r + texel_r
@@ -407,7 +407,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
                 blended_b := inv_texel_a * pixel_b + texel_b
                 blended_a := inv_texel_a * pixel_a + texel_a
 
-                // NOTE(viktor): linear to srgb
+                // @note(viktor): linear to srgb
                 blended_r  = square_root(blended_r)
                 blended_g  = square_root(blended_g)
                 blended_b  = square_root(blended_b)
@@ -431,7 +431,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     
     assert(texture.memory != nil)
 
-    // NOTE(viktor): premultiply color
+    // @note(viktor): premultiply color
     color := color
     color.rgb *= color.a
 
@@ -439,7 +439,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
     normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-    // NOTE(viktor): normal_z_scale could be a parameter if we want people
+    // @note(viktor): normal_z_scale could be a parameter if we want people
     // to have control over the amount of scaling in the z direction that
     // the normals appear to have
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
@@ -462,7 +462,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     inv_width_max  := 1 / cast(f32) width_max
     inv_height_max := 1 / cast(f32) height_max
 
-    // TODO(viktor): this will need to be specified separately
+    // @todo(viktor): this will need to be specified separately
     origin_z: f32 = 0.5
     origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
     fixed_cast_y := inv_height_max * origin_y
@@ -492,12 +492,12 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                 u := dot(delta, x_axis) * inv_x_len_squared
                 v := dot(delta, y_axis) * inv_y_len_squared
 
-                // TODO(viktor): this epsilon should not exists
+                // @todo(viktor): this epsilon should not exists
                 EPSILON :: 0.000001
                 assert(u + EPSILON >= 0 && u - EPSILON <= 1)
                 assert(v + EPSILON >= 0 && v - EPSILON <= 1)
 
-                // TODO(viktor): formalize texture boundaries
+                // @todo(viktor): formalize texture boundaries
                 t := v2{u,v} * vec_cast(f32, texture.width-2, texture.height-2)
                 s := floor(t, i32)
                 f := t - vec_cast(f32, s)
@@ -521,11 +521,11 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                     normal.z *= normal_z_scale
                     normal = normalize(normal)
 
-                    // NOTE(viktor): the eye-vector is always assumed to be [0, 0, 1]
+                    // @note(viktor): the eye-vector is always assumed to be [0, 0, 1]
                     // This is just a simplified version of the reflection -e + 2 * dot(e, n) * n
                     bounce_direction := 2 * normal.z * normal.xyz
                     bounce_direction.z -= 2
-                    // TODO(viktor): eventually we need to support two mappings
+                    // @todo(viktor): eventually we need to support two mappings
                     // one for top-down view(which we do not do now) and one
                     // for sideways, which is happening here.
                     bounce_direction.z = -bounce_direction.z
@@ -543,7 +543,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                     }
                     t_far_map = square(t_far_map)
 
-                    light_color := v3{} // TODO(viktor): how do we sample from the middle environment m?ap
+                    light_color := v3{} // @todo(viktor): how do we sample from the middle environment m?ap
                     if t_far_map > 0 {
                         distance_from_map_in_z := far_map.pz - pz
                         far_map_color := sample_environment_map(screen_space_uv, bounce_direction, normal.w, far_map, distance_from_map_in_z)
@@ -552,7 +552,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 
                     texel.rgb += texel.a * light_color.rgb
                     if Global_Rendering_Environment_ShowLightingBounceDirection {
-                        // NOTE(viktor): draws the bounce direction
+                        // @note(viktor): draws the bounce direction
                         texel.rgb = 0.5 + 0.5 * bounce_direction
                         texel.rgb *= texel.a
                     }
@@ -653,7 +653,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
         
-        // NOTE(viktor): premultiply color alpha
+        // @note(viktor): premultiply color alpha
         color := color
         color.rgb *= color.a
         
@@ -663,7 +663,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         color_b := cast(f32x8) color.b
         color_a := cast(f32x8) color.a
         
-        // NOTE(viktor): srgb to linear
+        // @note(viktor): srgb to linear
         color_r = square(color_r)
         color_g = square(color_g)
         color_b = square(color_b)
@@ -675,7 +675,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         inv_color_a := (1 - (inv_255 * color_a))
         
         for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
-            // NOTE(viktor): Iterative calculations will lead to arithmetic errors,
+            // @note(viktor): Iterative calculations will lead to arithmetic errors,
             // so we always calculate based of the index.
             // u := dot(delta, n_x_axis)
             // v := dot(delta, n_y_axis)
@@ -708,19 +708,19 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
                 pixel_b := cast(f32x8) (0xff & simd.shr(original_pixel,  16))
                 pixel_a := cast(f32x8) (0xff & simd.shr(original_pixel,  24))
                 
-                // NOTE(viktor): srgb to linear
+                // @note(viktor): srgb to linear
                 pixel_r = square(pixel_r)
                 pixel_g = square(pixel_g)
                 pixel_b = square(pixel_b)
-                // TODO(viktor): Maybe we should blend the edges to mitigate aliasing for rotated rectangles
+                // @todo(viktor): Maybe we should blend the edges to mitigate aliasing for rotated rectangles
                 
-                // NOTE(viktor): blend with target pixel
+                // @note(viktor): blend with target pixel
                 blended_r := inv_color_a * pixel_r + color_r
                 blended_g := inv_color_a * pixel_g + color_g
                 blended_b := inv_color_a * pixel_b + color_b
                 blended_a := inv_color_a * pixel_a + color_a
                 
-                // NOTE(viktor): linear to srgb
+                // @note(viktor): linear to srgb
                 blended_r = square_root(blended_r)
                 blended_g = square_root(blended_g)
                 blended_b = square_root(blended_b)
@@ -738,7 +738,7 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
     }
 }
 
-// TODO(viktor): should sample return a pointer instead?
+// @todo(viktor): should sample return a pointer instead?
 sample :: proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
     texel := texture.memory[ p.y * texture.width +  p.x]
     result = vec_cast(f32, texel)
@@ -756,7 +756,7 @@ sample_bilinear :: proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) 
 }
 
 /*
-    NOTE(viktor):
+    @note(viktor):
 
     screen_space_uv tells us where the ray is being cast _from_ in
     normalized screen coordinates.
@@ -772,22 +772,22 @@ sample_bilinear :: proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) 
 sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
     assert(environment_map.LOD[0].memory != nil)
 
-    // NOTE(viktor): pick which LOD to sample from
+    // @note(viktor): pick which LOD to sample from
     lod_index := round(roughness * cast(f32) (len(environment_map.LOD)-1), i32)
     lod := environment_map.LOD[lod_index]
     lod_size := vec_cast(f32, lod.width, lod.height)
 
-    // NOTE(viktor): compute the distance to the map and the
+    // @note(viktor): compute the distance to the map and the
     // scaling factor for meters-to-UVs
-    uvs_per_meter: f32 = 0.1 // TODO(viktor): parameterize
+    uvs_per_meter: f32 = 0.1 // @todo(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
     offset := c * sample_direction.xz
 
-    // NOTE(viktor): Find the intersection point
+    // @note(viktor): Find the intersection point
     uv := screen_space_uv + offset
     uv = clamp_01(uv)
 
-    // NOTE(viktor): bilinear sample
+    // @note(viktor): bilinear sample
     t        := uv * (lod_size - 2)
     index    := vec_cast(i32, t)
     fraction := t - vec_cast(f32, index)
@@ -805,7 +805,7 @@ sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughn
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
 
     if Global_Rendering_Environment_ShowLightingSampling {
-        // NOTE(viktor): Turn this on to see where in the map you're sampling!
+        // @note(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[index.y * lod.width + index.x]
         texel^ = 255
     }

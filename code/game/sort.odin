@@ -88,7 +88,7 @@ merge_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) {
         // Merge as and bs
         InPlace :: false
         when InPlace {
-            // NOTE(viktor): We need to block-copy a lot of elements.
+            // @note(viktor): We need to block-copy a lot of elements.
             // We swap them one-by-one in a chain to their destination
             // and then swap what was their to its destination.
             // This is neither cache friendly nor efficient.
@@ -152,7 +152,7 @@ merge_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) {
                 bs = to_merge[len(bs):]
             }
         } else {
-            // TODO(viktor): This can probably be done with less memory, by being smarter 
+            // @todo(viktor): This can probably be done with less memory, by being smarter 
             // about where we copy from and to.
             ai, bi, ci: int
             for ai < len(as) && bi < len(bs) {

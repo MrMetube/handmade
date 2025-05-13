@@ -1,10 +1,10 @@
 package game
 
-// @Cleanup
-@common
+// @cleanup
+@(common)
 INTERNAL :: #config(INTERNAL, false)
 
-/* TODO(viktor):
+/* @todo(viktor):
     - Since the correction to unproject_with_transform the sim region bounds are too small
     - Font Rendering Robustness
         - Kerning
@@ -87,7 +87,7 @@ INTERNAL :: #config(INTERNAL, false)
 */
 
 ////////////////////////////////////////////////
-// TODO(viktor): Find a better place for these configurations
+// @todo(viktor): Find a better place for these configurations
 
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
@@ -106,15 +106,15 @@ TimestepPercentage:            f32 = 100
 
 ////////////////////////////////////////////////
 
-@common 
+@(common) 
 InputButton :: struct {
     half_transition_count: u32,
     ended_down:            b32,
 }
 
-@common 
+@(common) 
 InputController :: struct {
-    // TODO(viktor): allow outputing vibration
+    // @todo(viktor): allow outputing vibration
     is_connected: b32,
     is_analog:    b32,
     
@@ -136,13 +136,13 @@ InputController :: struct {
 }
 #assert(size_of(InputController{}._buttons_array_and_enum.buttons) == size_of(InputController{}._buttons_array_and_enum._buttons_enum))
 
-@common 
+@(common) 
 Input :: struct {
     delta_time: f32,
     
     controllers: [5]InputController,
         
-    // NOTE(viktor): this is for debugging only
+    // @note(viktor): this is for debugging only
     mouse: struct {
         using _buttons_array_and_enum : struct #raw_union {
             buttons: [5]InputButton,
@@ -164,10 +164,10 @@ Input :: struct {
 }
 #assert(size_of(Input{}.mouse._buttons_array_and_enum.buttons) == size_of(Input{}.mouse._buttons_array_and_enum._buttons_enum))
 
-@common 
+@(common) 
 GameMemory :: struct {
     reloaded_executable: b32,
-    // NOTE: REQUIRED to be cleared to zero at startup
+    // @note(viktor): REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
     
@@ -180,7 +180,7 @@ GameMemory :: struct {
     Platform_api: PlatformAPI,
 } when INTERNAL else struct {
     reloaded_executable: b32,
-    // NOTE: REQUIRED to be cleared to zero at startup
+    // @note(viktor): REQUIRED to be cleared to zero at startup
     permanent_storage: []u8,
     transient_storage: []u8,
     
@@ -199,12 +199,12 @@ State :: struct {
     
     world: World,
     
-    effects_entropy: RandomSeries, // NOTE(viktor): this is randomness that does NOT effect the gameplay
+    effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
     
-    // NOTE(viktor): This is for testing the changing of volume and pitch and should not persist.
+    // @note(viktor): This is for testing the changing of volume and pitch and should not persist.
     music: ^PlayingSound,
     
-    // NOTE(viktor): Particle System tests
+    // @note(viktor): Particle System tests
     next_particle: u32,
     particles:     [256]Particle,
     cells:         [ParticleCellSize][ParticleCellSize]ParticleCell,
@@ -256,12 +256,12 @@ TaskWithMemory :: struct {
 ControlledHero :: struct {
     storage_index: StorageIndex,
     
-    // NOTE(viktor): these are the controller requests for simulation
+    // @note(viktor): these are the controller requests for simulation
     ddp: v3,
     darrow: v2,
 }
 
-// NOTE(viktor): Platform specific structs
+// @note(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
 
@@ -275,7 +275,7 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
     return assets, generation_id
 }
 
-@export
+@(export)
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     Platform = memory.Platform_api
     
@@ -394,7 +394,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     // Input
 
     if SoundPanningWithMouse {
-        // NOTE(viktor): test sound panning with the mouse 
+        // @note(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
@@ -406,7 +406,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     if SoundPitchingWithMouse {
-        // NOTE(viktor): test sound panning with the mouse 
+        // @note(viktor): test sound panning with the mouse 
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
                 play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
@@ -432,7 +432,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     if FountainTest { 
         ////////////////////////////////////////////////
-        // NOTE(viktor): Particle system test
+        // @note(viktor): Particle system test
         font_id := first_font_from(tran_state.assets, .Font)
         font := get_font(tran_state.assets, font_id, render_group.generation_id)
         if font == nil {
@@ -512,11 +512,11 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                 dispersion += dc * (cell.density - cell_u.density) * v3{ 0, 1, 0}
                 
                 particle_ddp := particle.ddp + dispersion
-                // NOTE(viktor): simulate particle forward in time
+                // @note(viktor): simulate particle forward in time
                 particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
                 particle.dp    += particle_ddp * input.delta_time
                 particle.color += particle.dcolor * input.delta_time
-                // TODO(viktor): should we just clamp colors in the renderer?
+                // @todo(viktor): should we just clamp colors in the renderer?
                 color := clamp_01(particle.color)
                 if color.a > 0.9 {
                     color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
@@ -529,30 +529,30 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                     particle.dp.y *= -coefficient_of_restitution
                     particle.dp.x *= coefficient_of_friction
                 }
-                // NOTE(viktor): render the particle
+                // @note(viktor): render the particle
                 push_bitmap(&render_group, particle.bitmap_id, default_flat_transform(), 0.4, particle.p, color)
             }
         }             
     }
     
-    // TODO(viktor): We should probably pull the generation stuff, because
+    // @todo(viktor): We should probably pull the generation stuff, because
     // if we don't do ground chunks its a huge waste of effort
     if tran_state.generation_id != 0 {
         end_generation(tran_state.assets, tran_state.generation_id)
     }
     tran_state.generation_id = begin_generation(tran_state.assets)
     
-    // TODO(viktor): :CutsceneEpisodes quit requested
+    // @todo(viktor): :CutsceneEpisodes quit requested
     
     check_arena(&state.mode_arena)
     check_arena(&tran_state.arena)
 }
 
-// NOTE: at the moment this has to be a really fast function. It shall not be slower than a
+// @note(viktor): at the moment this has to be a really fast function. It shall not be slower than a
 // millisecond or so.
-// TODO(viktor): reduce the pressure on the performance of this function by measuring
-// TODO(viktor): Allow sample offsets here for more robust platform options
-@export 
+// @todo(viktor): reduce the pressure on the performance of this function by measuring
+// @todo(viktor): Allow sample offsets here for more robust platform options
+@(export) 
 output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer) {
     state      := cast(^State)          raw_data(memory.permanent_storage)
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)

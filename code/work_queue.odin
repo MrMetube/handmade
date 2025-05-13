@@ -40,7 +40,7 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
         
         created_thread_count += 1
         
-        // NOTE(viktor): When I use the windows call i can at most create 4 threads at once,
+        // @note(viktor): When I use the windows call i can at most create 4 threads at once,
         // any more calls to create thread in this call of the init function fail silently
         // A further call for the low_priority_queue then is able to create 4 more threads.
         //     result := win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)

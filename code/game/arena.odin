@@ -36,7 +36,7 @@ init_arena :: proc(arena: ^Arena, storage: []u8) {
 }
 
 push :: proc { push_slice, push_struct, push_size, copy_string }
-@require_results
+@(require_results)
 push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
     size := size_of(Element) * count
     data := cast([^]Element) push_size(arena, size, params)
@@ -45,14 +45,14 @@ push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params 
     return result
 }
 
-@require_results
+@(require_results)
 push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
     result = cast(^T) push_size(arena, size_of(T), params)
     
     return result
 }
 
-@require_results
+@(require_results)
 push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: pmm) {
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
@@ -72,9 +72,9 @@ push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushP
     return result
 }
 
-// NOTE(viktor): This is generally not for production use, this is probably
+// @note(viktor): This is generally not for production use, this is probably
 // only really something we need during testing, but who knows
-@require_results
+@(require_results)
 copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
     buffer := push_slice(arena, u8, len(s), no_clear())
     bytes  := transmute([]u8) s
@@ -88,12 +88,12 @@ copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
 
 
 arena_has_room :: proc { arena_has_room_slice, arena_has_room_struct, arena_has_room_size }
-@require_results
+@(require_results)
 arena_has_room_slice :: proc(arena: ^Arena, $Element: typeid, #any_int len: u64, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
     return arena_has_room_size(arena, size_of(Element) * len, alignment)
 }
 
-@require_results
+@(require_results)
 arena_has_room_struct :: proc(arena: ^Arena, $T: typeid, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
     return arena_has_room_size(arena, size_of(T), alignment)
 }

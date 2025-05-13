@@ -5,7 +5,7 @@ import "base:runtime"
 
 DebugEventLink :: struct {
     next, prev: ^DebugEventLink,
-    // @Volatile sentinel() abuses the fact that first_child and last_child could be viewed as prev and next
+    // @volatile sentinel() abuses the fact that first_child and last_child could be viewed as prev and next
     first_child, last_child: ^DebugEventLink,
     
     name:     string,
@@ -66,7 +66,7 @@ DebugInteraction :: struct {
     id:   DebugId,
     kind: DebugInteractionKind,
     
-    // TODO(viktor): fix up the old usages and give this a proper type
+    // @todo(viktor): fix up the old usages and give this a proper type
     // Can we use only one tag for both target and value?
     target: pmm,
     
@@ -266,7 +266,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         BeginTimedBlock, EndTimedBlock,
         BeginDataBlock, EndDataBlock,
         FrameMarker:
-        // NOTE(viktor): nothing
+        // @note(viktor): nothing
         
       case BitmapId:
         event := oldest_stored_event != nil ? &oldest_stored_event.event : nil
@@ -661,7 +661,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
                 text := fmt.tprintf("%s - %v cycles", element.guid.name, node.duration)
                 add_tooltip(debug, text)
                 
-                // @Copypasta with draw_profile
+                // @copypasta with draw_profile
                 if node.first_child != nil {
                     id := DebugId { value = { graph_root, &element } }
                     debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
@@ -909,7 +909,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     
     interaction := &debug.interaction
     if interaction.kind != .None {
-        // NOTE(viktor): Continous Interactions
+        // @note(viktor): Continous Interactions
         // Mouse move interaction
         
         switch interaction.kind {
@@ -936,7 +936,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
             value^ += 0.1 * mouse_dp.x
             GlobalDebugTable.edit_event = event^
             
-          case .Resize: // TODO(viktor): Better clamping
+          case .Resize: // @todo(viktor): Better clamping
             element := cast(^DebugElement) interaction.target
             event: ^DebugEvent
             if element != nil {
@@ -1031,13 +1031,13 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
     
     frame_ordinal := debug.most_recent_frame_ordinal
     
-    // NOTE(viktor): Discrete Interactions
+    // @note(viktor): Discrete Interactions
     switch interaction.kind {
       case .None: 
         unreachable()
       
       case .NOP, .Move, .Resize, .Select, .AutoDetect, .DragValue, .Tear:
-        // NOTE(viktor): nothing
+        // @note(viktor): nothing
       
       case .SetValue:
         target := interaction.target
@@ -1202,7 +1202,7 @@ id_from_guid :: proc(guid: ^DebugGUID) -> (result: DebugId) {
 
 get_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
     timed_function()
-    // TODO(viktor): BETTER HASH FUNCTION
+    // @todo(viktor): BETTER HASH FUNCTION
     hash_index := ((cast(umm) id.value[0] >> 2) + (cast(umm) id.value[1] >> 2)) % len(debug.view_hash)
     slot := &debug.view_hash[hash_index]
 
@@ -1250,7 +1250,7 @@ measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
 
 text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p: v2, font_scale: f32, color: v4 = Jasmine, pz:f32= 0) -> (result: Rectangle2) {
     result = inverted_infinity_rectangle(Rectangle2)
-    // TODO(viktor): @Robustness kerning and unicode test lines
+    // @todo(viktor): @robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
     // 贺佳樱我爱你
     // 0123456789°

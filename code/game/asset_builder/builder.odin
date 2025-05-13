@@ -145,7 +145,7 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/stair.bmp")
     end_asset_type(hha)
 
-    // TODO(viktor): alignment percentages for these
+    // @todo(viktor): alignment percentages for these
     begin_asset_type(hha, .Rock)
     add_bitmap_asset(hha, "../assets/rocks1.bmp")
     add_bitmap_asset(hha, "../assets/rocks2.bmp")
@@ -162,7 +162,7 @@ write_non_hero :: proc () {
     // add_bitmap_asset(result, "../assets/rocks8b.bmp")
     // add_bitmap_asset(result, "../assets/rocks8c.bmp")
         
-    // TODO(viktor): alignment percentages for these
+    // @todo(viktor): alignment percentages for these
     begin_asset_type(hha, .Grass)
     add_bitmap_asset(hha, "../assets/grass11.bmp")
     add_bitmap_asset(hha, "../assets/grass12.bmp")
@@ -262,7 +262,7 @@ write_sounds :: proc() {
 }
 
 output_hha_file :: proc(file_name: string, hha: ^HHA) {
-    // TODO(viktor): don't use libc
+    // @todo(viktor): don't use libc
     out := libc.fopen(strings.clone_to_cstring(file_name), "wb")
     if out == nil {
         fmt.eprintln("could not open asset file:", file_name)
@@ -473,11 +473,11 @@ load_font :: proc(pixels: f32, path_to_font: string) -> (result: ^SourceFont) {
     result.glyph_index_from_codepoint = make([]u32, MaxCodepoint)
     result.one_past_highest_codepoint = 0
     
-    // NOTE(viktor): 4k characters should be more than enough for _anybody_
+    // @note(viktor): 4k characters should be more than enough for _anybody_
     result.max_glyph_count = 4 * 1024
     result.glyphs = make([]GlyphInfo, result.max_glyph_count)
     
-    // NOTE(viktor): reserve space for the null glyph
+    // @note(viktor): reserve space for the null glyph
     result.glyph_count = 1
     result.glyphs[0]   = {}
 
@@ -514,13 +514,13 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
     }
     
     w, h, xoff, yoff: i32
-    // TODO(viktor): works after odin dev-225-01
+    // @todo(viktor): works after odin dev-225-01
     // mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale_factor, codepoint, &w, &h, &xoff, &yoff)[:w*h]
     _mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale, codepoint, &w, &h, &xoff, &yoff)
     mono_bitmap := _mono_bitmap[:w*h]
     defer tt.FreeBitmap(raw_data(mono_bitmap), nil)
     
-    // NOTE(viktor): add an apron for bilinear blending
+    // @note(viktor): add an apron for bilinear blending
     result.width  = w+2
     result.height = h+2
     result.memory = make([][4]u8, result.width*result.height)
@@ -577,12 +577,12 @@ load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
         blue_mask: u32,
     }
 
-    // NOTE: If you are using this generically for some reason,
+    // @note(viktor): If you are using this generically for some reason,
     // please remember that BMP files CAN GO IN EITHER DIRECTION and
     // the height will be negative for top-down.
     // (Also, there can be compression, etc., etc ... DON'T think this
     // a complete implementation)
-    // NOTE: pixels listed bottom up
+    // @note(viktor): pixels listed bottom up
     if len(contents) > 0 {
         header := cast(^BMPHeader) &contents[0]
 
@@ -783,7 +783,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         }
         
         if section_first_sample_index + section_sample_count == sample_count {
-            // TODO(viktor): IMPORTANT(viktor): all sounds have to be padded with their subsequent sound
+            // @important @todo(viktor): all sounds have to be padded with their subsequent sound
             // out to 8 samples past their end
 
             // for &channel in result.channels {
@@ -849,7 +849,7 @@ cast_vec_v4 :: proc($T: typeid, v:[4]$E) -> [4]T where T != E {
 
 @(require_results)
 srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
-    // NOTE(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
+    // @note(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
     @(require_results)
     srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
         @(require_results) square :: proc(x: f32) -> f32 { return x * x}

@@ -14,7 +14,7 @@ import win "core:sys/windows"
 
 flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
 debug    :: " -debug "
-internal :: " -define:INTERNAL=true " // TODO(viktor): get rid of this
+internal :: " -define:INTERNAL=true " // @todo(viktor): get rid of this
 pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 commoner :: " -custom-attribute:common "
 
@@ -57,7 +57,7 @@ build_game :: proc() {
     out := `.\game.dll`
     delete_all_like(`.\game*.pdb`)
     
-    // NOTE(viktor): the platform checks for this lock file when hot-reloading
+    // @note(viktor): the platform checks for this lock file when hot-reloading
     lock_path := `.\lock.tmp` 
     lock, err := os.open(lock_path, mode = os.O_CREATE)
     if err != nil do log.error(os.error_string(err))

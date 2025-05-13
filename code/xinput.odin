@@ -10,11 +10,11 @@ init_xInput :: proc() {
 
     xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
     if xInput_lib == nil {
-        // @Logging 
+        // @logging 
         xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("XInput9_1_0.dll"))
     }
     if xInput_lib == nil {
-        // @Logging 
+        // @logging 
         xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))
     }
     
@@ -22,7 +22,7 @@ init_xInput :: proc() {
         XInputGetState = cast(ProcXInputGetState) win.GetProcAddress(xInput_lib, "XInputGetState")
         XInputSetState = cast(ProcXInputSetState) win.GetProcAddress(xInput_lib, "XInputSetState")
     } else {
-        // @Logging 
+        // @logging 
     }
 }
 

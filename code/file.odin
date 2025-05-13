@@ -28,7 +28,7 @@ begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : pro
         pattern[i+2] = cast(u16) r
     }
     
-    // TODO(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
+    // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
     group, err := new(FileGroup)
     if err == nil {
         group.find_handle = win.FindFirstFileW(&pattern[0], &group.data)
@@ -53,7 +53,7 @@ open_next_file : PlatformOpenNextFile : proc(group: ^PlatformFileGroup) -> (resu
     file_group := cast(^FileGroup) group._platform
     
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
-        // TODO(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
+        // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
         file_handle, err := new(FileHandle)
 
         if err == nil {
@@ -86,7 +86,7 @@ read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandl
         bytes_read: u32
         amount_32 := safe_truncate(amount)
         if win.ReadFile(file_handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount {
-            // NOTE(viktor): File read succeded
+            // @note(viktor): File read succeded
         } else {
             mark_file_error(handle, "Read file failed")
         }

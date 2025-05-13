@@ -2,7 +2,7 @@ package game
 
 import "base:intrinsics"
 
-// TODO(viktor): random floating point numbers 
+// @todo(viktor): random floating point numbers 
 
 RandomSeries :: struct {
     index: u32,
@@ -13,7 +13,7 @@ seed_random_series :: proc(#any_int seed: u32) -> (result: RandomSeries) {
     return result
 }
 
-// TODO(viktor): maybe make type a parameter?
+// @todo(viktor): maybe make type a parameter?
 next_random_u32 :: proc(series: ^RandomSeries) -> (result: u32) {
     timed_function()
     result = random_number_table[series.index]

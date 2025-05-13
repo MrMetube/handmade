@@ -14,9 +14,9 @@ import "core:fmt"
     ////////////////////////////////////////////////
 */
 
-// TODO(viktor): "Mark Loop Point" for input recording(currently on 'L' key) as debug action
+// @todo(viktor): "Mark Loop Point" for input recording(currently on 'L' key) as debug action
 
-// @Idea Memory Debugger with tracking allocator and maybe a 
+// @idea Memory Debugger with tracking allocator and maybe a 
 // tree graph to visualize the size of the allocated types and 
 // such in each arena? Maybe a table view of largest entries or 
 // most entries of a type.
@@ -134,11 +134,11 @@ DebugOpenBlock :: struct {
 #assert(size_of(DebugGUID) == 56)
 #assert(size_of(DebugEvent) == 136)
 #assert(size_of(DebugTable) == DebugTableSize)
-@common DebugTableSize :: 136_000_160
+@(common) DebugTableSize :: 136_000_160
 DebugTable :: struct {
     record_increment: u64,
     edit_event: DebugEvent,
-    // @Correctness No attempt is currently made to ensure that the final
+    // @correctness No attempt is currently made to ensure that the final
     // debug records being written to the event array actually complete
     // their output prior to the swap of the event array index.
     current_events_index: u32,
@@ -146,15 +146,15 @@ DebugTable :: struct {
     events:         [2][DebugMaxEventCount]DebugEvent,
 }
 
-// TODO(viktor): we now only need 1 bit to know the debugtable events array index
+// @todo(viktor): we now only need 1 bit to know the debugtable events array index
 DebugEventsState :: bit_field u64 {
-    // @Volatile Later on we transmute this to a u64 to 
+    // @volatile Later on we transmute this to a u64 to 
     // atomically increment the events_index
     events_index: u32 | 32,
     array_index:  u32 | 32,
 }
 
-// IMPORTANT TODO(viktor): @Size Compact this, we have a lot of them
+// @important @todo(viktor): @size Compact this, we have a lot of them
 DebugEvent :: struct {
     guid: DebugGUID,
     
@@ -228,7 +228,7 @@ DebugStoredEvent :: struct {
     },
 
     frame_index: i32,
-    // TODO(viktor): Store call attribution data here?
+    // @todo(viktor): Store call attribution data here?
 }
 
 DebugProfileNode :: struct {
@@ -246,9 +246,9 @@ DebugProfileNode :: struct {
 }
 
 ////////////////////////////////////////////////
-// @Cleanup what here is even used anymore?
+// @cleanup what here is even used anymore?
 
-@common 
+@(common) 
 DebugCode :: struct {
     read_entire_file:       DebugReadEntireFile,
     write_entire_file:      DebugWriteEntireFile,
@@ -257,23 +257,23 @@ DebugCode :: struct {
     get_process_state:      DebugGetProcessState,
 }
 
-@common 
+@(common) 
 DebugProcessState :: struct {
     started_successfully: b32,
     is_running:           b32,
     return_code:          i32,
 }
 
-@common
+@(common)
 DebugExecutingProcess :: struct {
     os_handle: umm,
 }
 
-@common DebugReadEntireFile       :: #type proc(filename: string) -> (result: []u8)
-@common DebugWriteEntireFile      :: #type proc(filename: string, memory: []u8) -> b32
-@common DebugFreeFileMemory       :: #type proc(memory: []u8)
-@common DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
-@common DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
+@(common) DebugReadEntireFile       :: #type proc(filename: string) -> (result: []u8)
+@(common) DebugWriteEntireFile      :: #type proc(filename: string, memory: []u8) -> b32
+@(common) DebugFreeFileMemory       :: #type proc(memory: []u8)
+@(common) DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
+@(common) DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
 
 ////////////////////////////////////////////////
 
@@ -288,7 +288,7 @@ ClockEntry :: struct {
 
 ////////////////////////////////////////////////
 
-@export
+@(export)
 debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
     
@@ -308,7 +308,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         when true {
             sub_arena(&debug.per_frame_arena, &debug.arena, 3 * len(total_memory) / 4)
         } else { 
-            // NOTE(viktor): use this to test the handling of deallocation and freeing of frames
+            // @note(viktor): use this to test the handling of deallocation and freeing of frames
             sub_arena(&debug.per_frame_arena, &debug.arena, 200 * Kilobyte)
         }
         
@@ -515,7 +515,7 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
     
     ok: b32
     for result == nil {
-        { // NOTE(viktor): inlined list_pop because polymorphic types kinda suck
+        { // @note(viktor): inlined list_pop because polymorphic types kinda suck
             head := &debug.first_free_stored_event
             if head^ != nil {
                 result = head^
@@ -574,7 +574,7 @@ free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
             for frame.events.last != nil {
                 free_event := deque_remove_from_end(&frame.events)
                 freed_count += 1
-                { // NOTE(viktor): inlined list_push(&debug.first_free_stored_event, free_event) because ...
+                { // @note(viktor): inlined list_push(&debug.first_free_stored_event, free_event) because ...
                     head    := &debug.first_free_stored_event
                     element := free_event
                     
@@ -593,7 +593,7 @@ free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
 }
 
 get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {
-    // TODO(viktor): BETTER HASH FUNCTION
+    // @todo(viktor): BETTER HASH FUNCTION
     for i in 0..<len(guid.name)      do result = result * 65599 + cast(u32) guid.name[i]
     for i in 0..<len(guid.file_path) do result = result * 65599 + cast(u32) guid.file_path[i]
     for i in 0..<len(guid.procedure) do result = result * 65599 + cast(u32) guid.procedure[i]
@@ -651,7 +651,7 @@ get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, p
                 file_path = copy_string(&debug.arena, event.guid.file_path),
                 procedure = copy_string(&debug.arena, event.guid.procedure),
             }
-            // TODO(viktor): There should be a better way of copying just the tag.
+            // @todo(viktor): There should be a better way of copying just the tag.
             raw_union :: struct{
                 data: [size_of(DebugValue)-size_of(u64)]u8,
                 tag: u64,

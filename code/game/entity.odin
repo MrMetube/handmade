@@ -1,7 +1,7 @@
 package game
 
 EntityFlag :: enum {
-    // TODO(viktor): Collides and Grounded probably can be removed now/soon
+    // @todo(viktor): Collides and Grounded probably can be removed now/soon
     Collides,
     Nonspatial,
     Moveable,
@@ -31,7 +31,7 @@ EntityIndex :: u32
 StorageIndex :: distinct EntityIndex
 
 StoredEntity :: struct {
-    // TODO(viktor): its kind of busted that ps can be invalid  here
+    // @todo(viktor): its kind of busted that ps can be invalid  here
     // AND we stored whether they would be invalid in the flags field...
     // Can we do something better here?
     sim: Entity,
@@ -194,10 +194,10 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
 
 add_collision_rule :: proc(world:^World, a, b: StorageIndex, should_collide: b32) {
     timed_function()
-    // TODO(viktor): collapse this with should_collide
+    // @todo(viktor): collapse this with should_collide
     a, b := a, b
     if a > b do swap(&a, &b)
-    // TODO(viktor): BETTER HASH FUNCTION!!!
+    // @todo(viktor): BETTER HASH FUNCTION!!!
     found: ^PairwiseCollsionRule
     hash_bucket := a & (len(world.collision_rule_hash) - 1)
     for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
@@ -221,9 +221,9 @@ add_collision_rule :: proc(world:^World, a, b: StorageIndex, should_collide: b32
 
 clear_collision_rules :: proc(world: ^World, storage_index: StorageIndex) {
     timed_function()
-    // TODO(viktor): need to make a better data structute that allows for
+    // @todo(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
-    // NOTE(viktor): One way to make removal easy would be to always
+    // @note(viktor): One way to make removal easy would be to always
     // add _both_ orders of the pairs of storage indices to the
     // hash table, so no matter which position the entity is in,
     // you can always find it. Then, when you do your first pass

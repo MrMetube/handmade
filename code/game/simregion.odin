@@ -12,14 +12,14 @@ SimRegion :: struct {
     entity_count: EntityIndex,
     entities: []Entity,
     
-    // TODO(viktor): Do I really want a hash for this?
+    // @todo(viktor): Do I really want a hash for this?
     sim_entity_hash: [4096]SimEntityHash,
 }
-// NOTE(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
+// @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
 Entity :: struct {
-    // NOTE(viktor): these are only for the sim region
+    // @note(viktor): these are only for the sim region
     storage_index: StorageIndex,
     updatable: b32,
     
@@ -46,9 +46,9 @@ Entity :: struct {
     t_bob: f32,
     dt_bob: f32,
     facing_direction: f32,
-    // TODO(viktor): generation index so we know how " to date" this entity is
+    // @todo(viktor): generation index so we know how " to date" this entity is
     
-    // TODO(viktor): only for stairwells
+    // @todo(viktor): only for stairwells
     walkable_dim: v2,
     walkable_height: f32,
 }
@@ -59,7 +59,7 @@ MovementMode :: enum {
 
 EntityCollisionVolumeGroup :: struct {
     total_volume: Rectangle3,
-    // TODO(viktor): volumes is always expected to be non-empty if the entity
+    // @todo(viktor): volumes is always expected to be non-empty if the entity
     // has any volume... in the future, this could be compressed if necessary
     // that the length can be 0 if the total_volume should be used as the only
     // collision volume for the entity.
@@ -93,19 +93,19 @@ MoveSpec :: struct {
 
 begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     timed_function()
-    // TODO(viktor): make storedEntities part of world
+    // @todo(viktor): make storedEntities part of world
     region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
     region.entities = push(sim_arena, Entity, MaxEntityCount)
     
-    // TODO(viktor): Try to make these get enforced more rigorously
-    // TODO(viktor): Perhaps try using a dual system here where we support 
+    // @todo(viktor): Try to make these get enforced more rigorously
+    // @todo(viktor): Perhaps try using a dual system here where we support 
     // entities larger than the max entity radius by adding them multiple 
     // times to the spatial partition?
     region.max_entity_radius   = 5
     region.max_entity_velocity = 300
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
-    UpdateSafetyMarginZ :: 1 // TODO(viktor): what should this be?
+    UpdateSafetyMarginZ :: 1 // @todo(viktor): what should this be?
     
     region.world = world
     region.origin = origin
@@ -114,7 +114,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(world, region.origin, region.bounds.max)
-    // TODO(viktor): @Speed this needs to be accelarated, but man, this CPU is crazy fast
+    // @todo(viktor): @speed this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
@@ -126,7 +126,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             if .Nonspatial not_in stored.sim.flags {
                                 sim_space_p := get_sim_space_p(region, stored)
                                 if entity_overlaps_rectangle(region.bounds, sim_space_p, stored.sim.collision.total_volume) {
-                                    // TODO(viktor): check a seconds rectangle to set the entity to be "moveable" or not
+                                    // @todo(viktor): check a seconds rectangle to set the entity to be "moveable" or not
                                     add_entity(region, storage_index, stored, &sim_space_p)
                                 }
                             }
@@ -154,7 +154,7 @@ end_sim :: proc(region: ^SimRegion) {
         
         store_entity_reference(&stored.sim.arrow)
         store_entity_reference(&stored.sim.head)
-        // TODO(viktor): Save state back to stored entity, once high entities do state decompression
+        // @todo(viktor): Save state back to stored entity, once high entities do state decompression
         
         new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(region.world, region.origin, entity.p)
         change_entity_location(&region.world.arena, region.world, entity.storage_index, stored, new_p)
@@ -163,7 +163,7 @@ end_sim :: proc(region: ^SimRegion) {
             new_camera_p: WorldPosition
             new_camera_p.chunk  = stored.p.chunk
             new_camera_p.offset = stored.p.offset
-            // @Volatile Room size
+            // @volatile Room size
             delta := world_difference(region.world, new_camera_p, region.world.camera_p)
             offset: v3
             if delta.x >  17 do offset.x += 17
@@ -249,7 +249,7 @@ add_entity_raw :: proc(region: ^SimRegion, storage_index: StorageIndex, source: 
         entry.ptr = entity
         
         if source != nil {
-            // TODO(viktor): this should really be a decompression not a copy
+            // @todo(viktor): this should really be a decompression not a copy
             entity^ = source.sim
             
             load_entity_reference(region, &entity.arrow)
@@ -269,7 +269,7 @@ add_entity_raw :: proc(region: ^SimRegion, storage_index: StorageIndex, source: 
 InvalidP :: v3{100_000, 100_000, 100_000}
 
 get_sim_space_p :: proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v3) {
-    // TODO(viktor): Do we want to set this to signaling NAN in 
+    // @todo(viktor): Do we want to set this to signaling NAN in 
     // debug mode to make sure nobody ever uses the position of
     // a nonspatial entity?
     result = InvalidP
@@ -306,19 +306,19 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
     
     ddp *= move_spec.speed
     
-    // TODO(viktor): ODE here
+    // @todo(viktor): ODE here
     drag := -move_spec.drag * entity.dp
     drag.z = 0
     ddp += drag
     
     entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
     entity.dp = ddp * dt + entity.dp
-    // TODO(viktor): upgrade physical motion routines to handle capping the maximum velocity?
+    // @todo(viktor): upgrade physical motion routines to handle capping the maximum velocity?
     assert(length_squared(entity.dp) <= square(region.max_entity_velocity))
     
     distance_remaining := entity.distance_limit
     if distance_remaining == 0 {
-        // TODO(viktor): Do we want to formalize this number?
+        // @todo(viktor): Do we want to formalize this number?
         distance_remaining = 1_000_000
     }
     
@@ -328,7 +328,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
         hit_min, hit_max: ^Entity
         
         entity_delta_length := length(entity_delta)
-        // TODO(viktor): What do we want to do for epsilons here?
+        // @todo(viktor): What do we want to do for epsilons here?
         if entity_delta_length > 0 {
             if entity_delta_length > distance_remaining {
                 t_min = distance_remaining / entity_delta_length
@@ -337,10 +337,10 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
             desired_p := entity.p + entity_delta
             
             if .Nonspatial not_in entity.flags {
-                // TODO(viktor): spatial partition here
+                // @todo(viktor): spatial partition here
                 for &test_entity in region.entities[:region.entity_count] {
                     
-                    // TODO(viktor): Robustness!
+                    // @todo(viktor): Robustness!
                     OverlapEpsilon :: 0.001
                     if can_collide(region.world, entity, &test_entity) {
                         for volume in entity.collision.volumes {
@@ -351,7 +351,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
                                 
                                 rel := (entity.p + rectangle_get_center(volume)) - (test_entity.p + rectangle_get_center(test_volume))
                                 
-                                // TODO(viktor): do we want an close inclusion on the max_corner?
+                                // @todo(viktor): do we want an close inclusion on the max_corner?
                                 if rel.z >= min_corner.z && rel.z < max_corner.z {
                                     Wall :: struct {
                                         x: f32, delta_x, delta_y, rel_x, rel_y, min_y, max_y: f32, 
@@ -448,7 +448,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
     if entity.dp.x != 0  {
         entity.facing_direction = atan2(entity.dp.y, entity.dp.x)
     } else {
-        // NOTE(viktor): leave the facing direction what it was
+        // @note(viktor): leave the facing direction what it was
     }
 }
 
@@ -475,11 +475,11 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
         
         if .Collides in a.flags && .Collides in b.flags {
             if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
-                // TODO(viktor): property-based logic goes here
+                // @todo(viktor): property-based logic goes here
                 result = true
             }
             
-            // TODO(viktor): BETTER HASH FUNCTION!!!
+            // @todo(viktor): BETTER HASH FUNCTION!!!
             hash_bucket := a.storage_index & (len(world.collision_rule_hash) - 1)
             for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
                 if rule.index_a == a.storage_index && rule.index_b == b.storage_index {

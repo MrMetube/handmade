@@ -50,7 +50,7 @@ Header ::
 `#+no-instrumentation
 package %v
 ///////////////////////////////////////////////
-//////////////////IMPORTANT////////////////////
+//////////////////@important///////////////////
 ///////////////////////////////////////////////
 ////                                       ////
 ////  THIS CODE IS GENERATED. DO NOT EDIT  ////
@@ -112,7 +112,7 @@ load_game_api :: proc(game_lib: win.HMODULE) {`)
     
     for key, it in exports {
         fmt.fprintf(out, `
-// @Copypasta Exported from %s(%d:%d)
+// @copypasta Exported from %s(%d:%d)
 %s :: #type %s`, it.location.file, it.location.line, it.location.column, strings.to_pascal_case(key), it.content)
     }
     
@@ -132,13 +132,13 @@ extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_f
     
     for key, it in imports {
         if common_files[it.location.file] != true {
-            fmt.fprintfln(out, "// @Copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
+            fmt.fprintfln(out, "// @copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
         }
     }
     
     for key, it in declarations {
         if common_files[it.location.file] != true {
-            fmt.fprintfln(out, "// @Copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
+            fmt.fprintfln(out, "// @copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
         }
     }
     
@@ -155,7 +155,7 @@ extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_f
     }
 }
 
-// TODO(viktor): maybe compress the exports with the common as there is a lot of shared code
+// @todo(viktor): maybe compress the exports with the common as there is a lot of shared code
 visit_and_extract_exports :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
     using my := cast(^ExtractContext) context.user_ptr
     

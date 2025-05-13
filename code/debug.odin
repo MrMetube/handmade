@@ -4,7 +4,7 @@ import win "core:sys/windows"
 
 when INTERNAL {
 
-    /* IMPORTANT:
+    /* @important:
         These are not for doing anything in the shipping game
         they are blocking and the write doesnt protect against lost data!
     */
@@ -13,25 +13,25 @@ when INTERNAL {
         defer win.CloseHandle(handle)
 
         if handle == win.INVALID_HANDLE {
-            return nil // @Logging
+            return nil // @logging
         }
 
         file_size : win.LARGE_INTEGER
         if !win.GetFileSizeEx(handle, &file_size) {
-            return nil // @Logging
+            return nil // @logging
         }
         
         file_size_32 := safe_truncate_u64(cast(u64) file_size)
         result_ptr := cast([^]u8) win.VirtualAlloc(nil, cast(uint) file_size_32, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         if result_ptr == nil {
-            return nil // @Logging
+            return nil // @logging
         }
         result = result_ptr[:file_size_32]
 
         bytes_read: win.DWORD
         if !win.ReadFile(handle, result_ptr, file_size_32, &bytes_read, nil) || file_size_32 != bytes_read {
             DEBUG_free_file_memory(result)
-            return nil // @Logging
+            return nil // @logging
         }
         
         return result_ptr[:file_size_32]
@@ -42,12 +42,12 @@ when INTERNAL {
         defer win.CloseHandle(handle)
 
         if handle == win.INVALID_HANDLE {
-            return false // @Logging
+            return false // @logging
         }
 
         bytes_written: win.DWORD
         if !win.WriteFile(handle, raw_data(memory), cast(u32) len(memory), &bytes_written, nil) {
-            return false // @Logging
+            return false // @logging
         }
 
         return true

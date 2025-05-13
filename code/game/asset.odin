@@ -83,7 +83,7 @@ AssetVector :: [AssetTagId]f32
 
 AssetFile :: struct {
     handle: PlatformFileHandle,
-    // TODO(viktor): if we ever do thread stacks, 
+    // @todo(viktor): if we ever do thread stacks, 
     // then asset_type_array doesnt actually need to be kept here probably.
     header: hha.Header,
     asset_type_array: []hha.AssetType,
@@ -123,13 +123,13 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         Platform.read_data_from_file(handle, position, len(destination) * size_of(E), raw_data(destination))
     }
     
-    // NOTE(viktor): count the null tag and null asset only once and not per HHA file
+    // @note(viktor): count the null tag and null asset only once and not per HHA file
     total_tag_count:   u32 = 1
     total_asset_count: u32 = 1
     {
         file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
         
-        // TODO(viktor): which arena?
+        // @todo(viktor): which arena?
         assets.files = push(arena, AssetFile, file_group.file_count)
         for &file in assets.files {
             file.handle = Platform.open_next_file(&file_group)
@@ -150,32 +150,32 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
             }
             
             if Platform_no_file_errors(&file.handle) {
-                // NOTE(viktor): The first slot in every HHA is a null asset/ null tag
+                // @note(viktor): The first slot in every HHA is a null asset/ null tag
                 // so we don't count it as something we will need space for!
                 total_asset_count += (file.header.asset_count - 1)
                 total_tag_count   += (file.header.tag_count - 1)
             } else {
-                unreachable() // TODO(viktor): Eventually, have some way of notifying users of bogus amogus files?
+                unreachable() // @todo(viktor): Eventually, have some way of notifying users of bogus amogus files?
             }
         }
         
         Platform.end_processing_all_files_of_type(&file_group)
     }
     
-    // NOTE(viktor): Allocate all metadata space
+    // @note(viktor): Allocate all metadata space
     assets.assets = push(arena, Asset,    total_asset_count)
     assets.tags   = push(arena, AssetTag, total_tag_count)
     
-    // NOTE(viktor): Load tags
+    // @note(viktor): Load tags
     for &file in assets.files {
-        // NOTE(viktor): skip the null tag
+        // @note(viktor): skip the null tag
         offset := file.header.tags + size_of(hha.AssetTag)
         file_tag_count := file.header.tag_count-1
         read_data_from_file_into_slice(&file.handle, offset, assets.tags[file.tag_base:][:file_tag_count])
     }
     
     asset_count: u32 = 1
-    // NOTE(viktor): reserve and zero out the null tag / null asset
+    // @note(viktor): reserve and zero out the null tag / null asset
     assets.tags[0]   = {}
     assets.assets[0] = {}
     
@@ -256,12 +256,12 @@ get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) ->
     return result
 }
 
-// TODO(viktor): optional ok?
+// @todo(viktor): optional ok?
 get_bitmap :: proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         if _, ok := header.value.(Bitmap); ok {
-            // TODO(viktor): When Hotreloading this type assertion fails when the debug system draws text
+            // @todo(viktor): When Hotreloading this type assertion fails when the debug system draws text
             result = &header.value.(Bitmap)
         }
     }
@@ -345,7 +345,7 @@ get_bitmap_for_glyph :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (
     glyph := get_glyph_from_codepoint(font, info, codepoint)
     entry := font.glyphs[glyph]
     
-    // TODO(viktor): why is this not handled by the null glyph1?!
+    // @todo(viktor): why is this not handled by the null glyph1?!
     if(entry.codepoint == codepoint) {
         result = font.bitmap_id_offset + entry.bitmap
     }
@@ -526,7 +526,7 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
             if(block.size - (alignment - auto_cast alignment_offset) >= size) {
                 remaining_size := block.size - size
                 
-                BlockSplitThreshhold :: 4 * Kilobyte // TODO(viktor): set this based on the smallest asset size
+                BlockSplitThreshhold :: 4 * Kilobyte // @todo(viktor): set this based on the smallest asset size
                 
                 if remaining_size >= BlockSplitThreshhold {
                     block.size -= remaining_size
@@ -591,8 +591,8 @@ insert_block :: proc(previous: ^AssetMemoryBlock, memory: pmm, size: u64) -> (re
 }
 
 find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemoryBlock) {
-    // TODO(viktor): find best matched block
-    // TODO(viktor): this will probably need to be accelarated in the 
+    // @todo(viktor): find best matched block
+    // @todo(viktor): this will probably need to be accelarated in the 
     // future as the resident asset count grows.
     for it := assets.memory_sentinel.next; it != &assets.memory_sentinel; it = it.next {
         if .Used not_in it.flags {
@@ -661,7 +661,7 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
     
     if Platform_no_file_errors(work.handle) {
         switch work.kind {
-          case .Sound: // NOTE(viktor): nothing to do
+          case .Sound: // @note(viktor): nothing to do
           case .Bitmap:
             bitmap := &work.asset.header.value.(Bitmap)
             bitmap.texture_handle = Platform.allocate_texture(bitmap.width, bitmap.height, raw_data(bitmap.memory))
@@ -747,7 +747,7 @@ allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32,
         divider_reserve(&divider, hha.GlyphInfo, cast(u64) info.glyph_count)
         divider_reserve(&divider, f32, cast(u64) (info.glyph_count * info.glyph_count))
         memory_size = divider.total
-        // NOTE(viktor): the unicode_map is generate at runtime
+        // @note(viktor): the unicode_map is generate at runtime
         divider_reserve(&divider, u16, info.one_past_highest_codepoint)
       case .Bitmap: // [Header][pixels]
         info := asset.data.info.bitmap
@@ -858,7 +858,7 @@ divider_designate :: proc(divider: ^Divider, slice: ^[]$E) {
 }
 
 divider_hand_over :: proc(divider: ^Divider) {
-    // NOTE(viktor): all the memory after the header should have been divvied up
+    // @note(viktor): all the memory after the header should have been divvied up
     assert(divider.slice_count == divider.size_count)
     for entry in divider.entries[:divider.slice_count] {
         #no_bounds_check {

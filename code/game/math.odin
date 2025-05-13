@@ -309,7 +309,7 @@ V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
 }
 
 
-// NOTE(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
+// @note(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
 @(require_results)
 srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
     result.r = square(srgb.r)
