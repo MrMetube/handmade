@@ -26,7 +26,9 @@ glLoadIdentity: proc()
 glLoadMatrixf: proc(_:[^]f32)
 glTexCoord2f: proc(_,_:f32)
 glVertex2f: proc(_,_:f32)
+glVertex2fv: proc(_:[^]f32)
 glColor4f: proc(_,_,_,_:f32)
+glColor4fv: proc(_:[^]f32)
 glTexEnvi: proc(target: u32, pname: u32, param: u32)
 
 OpenGlInfo :: struct {
@@ -139,9 +141,11 @@ load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glLoadIdentity, "glLoadIdentity")
             win.gl_set_proc_address(&glLoadMatrixf, "glLoadMatrixf")
             win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
-            win.gl_set_proc_address(&glVertex2f, "glVertex2f")
             win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
+            win.gl_set_proc_address(&glVertex2f, "glVertex2f")
+            win.gl_set_proc_address(&glVertex2fv, "glVertex2fv")
             win.gl_set_proc_address(&glColor4f, "glColor4f")
+            win.gl_set_proc_address(&glColor4fv, "glColor4fv")
         }
     }
     
@@ -347,9 +351,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
             if bitmap.width != 0 && bitmap.height != 0 {
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
-                min := entry.p
-                max := min + entry.size
-                
                 texel_x := 1 / cast(f32) bitmap.width
                 texel_y := 1 / cast(f32) bitmap.height
                 
@@ -362,7 +363,36 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
                 color.g = square(color.g)
                 color.b = square(color.b)
                 
-                gl_rectangle(min, max, color, min_uv, max_uv)
+                
+                min_x_min_y := entry.p
+                max_x_min_y := entry.p + entry.x_axis
+                min_x_max_y := entry.p + entry.y_axis
+                max_x_max_y := entry.p + entry.x_axis + entry.y_axis
+                
+                glBegin(gl.TRIANGLES)
+                
+                    glColor4fv(&entry.color[0])
+                    // @note(viktor): Lower triangle
+                    glTexCoord2f(min_uv.x, min_uv.y)
+                    glVertex2fv(&min_x_min_y[0])
+
+                    glTexCoord2f(max_uv.x, min_uv.y)
+                    glVertex2fv(&max_x_min_y[0])
+
+                    glTexCoord2f(max_uv.x, max_uv.y)
+                    glVertex2fv(&max_x_max_y[0])
+
+                    // @note(viktor): Upper triangle
+                    glTexCoord2f(min_uv.x, min_uv.y)
+                    glVertex2fv(&min_x_min_y[0])
+
+                    glTexCoord2f(max_uv.x, max_uv.y)
+                    glVertex2fv(&max_x_max_y[0])
+
+                    glTexCoord2f(min_uv.x, max_uv.y)
+                    glVertex2fv(&min_x_max_y[0])
+                
+                glEnd()
             }
             
           case .RenderEntryClip:

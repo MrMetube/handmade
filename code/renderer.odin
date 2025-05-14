@@ -141,8 +141,9 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
+            
             draw_rectangle_quickly(target,
-                entry.p, {entry.size.x, 0}, {0, entry.size.y},
+                entry.p, entry.x_axis, entry.y_axis,
                 entry.bitmap^, entry.color,
                 clip_rect,
             )

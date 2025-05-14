@@ -44,13 +44,13 @@ RenderCommands :: struct {
     width, height: i32,
     
     // @note(viktor): Packed array of disjoint elements.
-    push_buffer:      []u8,
+    push_buffer:      []u8, // :StaticArray
     push_buffer_size: u32,
     
     sort_entry_at:             u32,
     push_buffer_element_count: u32,
     
-    clip_rect_count: u16,
+    clip_rect_count: u16, // :StaticArray
     clip_rects:      [^]RenderEntryClip,
     
     rects: Deque(RenderEntryClip),
@@ -101,8 +101,6 @@ EnvironmentMap :: struct {
     LOD: [4]Bitmap,
 }
 
-// @todo(viktor): Why always prefix rendergroup?
-// @note(viktor): RenderGroupEntry is a "compact discriminated union"
 @(common)
 RenderEntryType :: enum u8 {
     RenderEntryClear,
@@ -135,7 +133,9 @@ RenderEntryBitmap :: struct {
     
     color:  v4,
     p:      v2,
-    size:   v2,
+    // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
+    x_axis: v2,
+    y_axis: v2,
 }
 
 @(common)
@@ -315,7 +315,10 @@ push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, tra
     return result
 }
 
-push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true) {
+push_bitmap :: proc(
+    group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, 
+    offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true, x_axis := v2{1,0}, y_axis := v2{0,1},
+) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     if group.renders_in_background && bitmap == nil {
         load_bitmap(group.assets, id, true)
@@ -325,7 +328,7 @@ push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, hei
     
     if bitmap != nil {
         assert(bitmap.texture_handle != 0)
-        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment)
+        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment, x_axis, y_axis)
     } else {
         assert(!group.renders_in_background)
         load_bitmap(group.assets, id, false)
@@ -333,20 +336,13 @@ push_bitmap :: proc(group: ^RenderGroup, id: BitmapId, transform: Transform, hei
     }
 }
 
-get_used_bitmap_dim :: proc(group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, use_alignment: b32 = true) -> (result: UsedBitmapDim) {
-    result.size  = v2{bitmap.width_over_height, 1} * height
-    result.align = use_alignment ? bitmap.align_percentage * result.size : 0
-    result.p     = offset - V3(result.align, 0)
-
-    result.basis = project_with_transform(group.camera, transform, result.p)
-
-    return result
-}
-
-push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true) {
+push_bitmap_raw :: proc(
+    group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, 
+    offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
+) {
     assert(bitmap.width_over_height != 0)
     
-    used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment)
+    used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis, y_axis)
     if used_dim.basis.valid {
         assert(bitmap.texture_handle != 0)
         element := push_render_element(group, RenderEntryBitmap, used_dim.basis.sort_key)
@@ -359,9 +355,26 @@ push_bitmap_raw :: proc(group: ^RenderGroup, bitmap: ^Bitmap, transform: Transfo
             
             element.color  = color * alpha
             element.p      = used_dim.basis.p
-            element.size   = used_dim.basis.scale * used_dim.size
+            
+            size := used_dim.basis.scale * used_dim.size
+            element.x_axis = size.x * x_axis
+            element.y_axis = size.y * y_axis
         }
     }
+}
+
+get_used_bitmap_dim :: proc(
+    group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
+    offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
+) -> (result: UsedBitmapDim) {
+    result.size  = v2{bitmap.width_over_height, 1} * height
+    result.align = use_alignment ? bitmap.align_percentage * result.size : 0
+    result.p.z   = offset.z
+    result.p.xy  = offset.xy - result.align * x_axis - result.align * y_axis
+    
+    result.basis = project_with_transform(group.camera, transform, result.p)
+    
+    return result
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }

@@ -325,7 +325,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         defer if debug_requested(debug_id) {
             debug_end_data_block()
         }
-        
+        // @todo(viktor): set this at contruction
+        entity.x_axis = {1,0}
+        entity.y_axis = {0,1}
         
         if entity.updatable { // @todo(viktor):  move this out into entity.odin
             // @todo(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
@@ -366,29 +368,36 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         move_spec.speed = 30
                         ddp = con_hero.ddp
                         
-                        if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
-                            arrow := entity.arrow.ptr
-                            if arrow != nil && .Nonspatial in arrow.flags {
-                                dp: v3
-                                dp.xy = 5 * con_hero.darrow
-                                arrow.distance_limit = 5
-                                add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
-                                make_entity_spatial(arrow, entity.p, dp)
+                        if con_hero.darrow.x != 0  {
+                            entity.facing_direction = atan2(con_hero.darrow.y, con_hero.darrow.x)
+                        } else {
+                            // @note(viktor): leave the facing direction what it was
+                        }
+                        
+                        when false {
+                            if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
+                                arrow := entity.arrow.ptr
+                                if arrow != nil && .Nonspatial in arrow.flags {
+                                    dp: v3
+                                    dp.xy = 5 * con_hero.darrow
+                                    arrow.distance_limit = 5
+                                    add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
+                                    make_entity_spatial(arrow, entity.p, dp)
+                                }
                             }
                         }
                         
+                        closest_p := get_closest_traversable(camera_sim_region, entity.p) or_else entity.p
+                        
                         body := entity.head.ptr
                         if body != nil {
-                            ddp2: v3
-                            head := &entity
-                            for i in 0..<3 {
-                                if abs(ddp[i]) < 0.01 {
-                                    head_spring := 200 * (body.p[i] - head.p[i]) + 15 * (- head.dp[i])
+                            spring_active := length_squared(ddp) == 0
+                            if spring_active {
+                                for i in 0..<3 {
+                                    head_spring := 400 * (closest_p[i] - entity.p[i]) + 20 * (- entity.dp[i])
                                     ddp[i] += dt*head_spring
                                 }
                             }
-                            
-                            entity.dp += ddp2 * dt
                         }
                         break
                     }
@@ -401,28 +410,19 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     desired_direction := entity.p - head.p
                     desired_direction = normalize_or_zero(desired_direction)
                     
-                    closest_p := entity.p
-                    closest_point_dsq :f32= 1000
-                    for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
-                        for point_index in 0..<test.collision.traversable_count {
-                            point := get_sim_space_traversable(&test, point_index )
-                            // @todo(viktor): check that they have the same z
-                            dsq := length_squared(point.p - head.p)
-                            if dsq < closest_point_dsq {
-                                closest_p = point.p
-                                closest_point_dsq = dsq
-                            }
-                        }
-                    }
+                    closest_p := get_closest_traversable(camera_sim_region, head.p) or_else entity.p
+                    
+                    head_delta := head.p - entity.p
                     
                     body_delta := closest_p - entity.p
                     body_distance_sq := length_squared(body_delta)
+                    
                     entity.facing_direction = head.facing_direction
-                    ddt_bob :f32= 0
+                    
+                    ddt_bob: f32
                     head_distance := length(head.p - entity.p)
                     max_head_distance :f32= 0.4
                     t_head_distance := clamp_01_to_range(0, head_distance, max_head_distance)
-                    
                     
                     switch entity.movement_mode {
                       case .Planted:
@@ -476,6 +476,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         }
                     }
                     
+                    entity.y_axis = v2{0,1} + 1 * head_delta.xy
+                    // entity.x_axis = perpendicular(entity.y_axis)
+                    
                     ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
                     
                     entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
@@ -500,7 +503,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 closest_hero: ^Entity
                 closest_hero_dsq := square(f32(10))
                 
-                // @todo(viktor): make spatial queries easy for things
+                // @cleanup get_closest_traversable
                 for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
                     if test.type == .HeroBody {
                         dsq := length_squared(test.p.xy - entity.p.xy)
@@ -555,16 +558,18 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
               case .HeroBody:
                 cape_id  := best_match_bitmap_from(tran_state.assets, .Cape,  facing_match, facing_weights)
                 body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
+                
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
                 
+                x_axis, y_axis := entity.x_axis, entity.y_axis
                 before := transform
                     transform.sort_bias += 10
-                    push_bitmap(render_group, body_id,  transform, hero_height)
+                    push_bitmap(render_group, body_id,  transform, hero_height, x_axis = x_axis, y_axis = y_axis)
                 transform = before
                     transform.offset.y += entity.t_bob
                     transform.sort_bias -= 10
                     transform.offset.y += -0.3
-                    push_bitmap(render_group, cape_id,  transform, hero_height*1.3)
+                    push_bitmap(render_group, cape_id,  transform, hero_height*1.3, x_axis = x_axis, y_axis = y_axis)
                 transform = before
                 
                 push_hitpoints(render_group, &entity, 1, transform)
@@ -743,7 +748,26 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
 ////////////////////////////////////////////////
 
-null_position :: proc() -> (result:WorldPosition) {
+get_closest_traversable :: proc(region: ^SimRegion, from_p: v3) -> (result: v3, ok: b32) {
+    // @todo(viktor): make spatial queries easy for things
+    closest_point_dsq :f32= 1000
+    for &test in region.entities[:region.entity_count] {
+        for point_index in 0..<test.collision.traversable_count {
+            point := get_sim_space_traversable(&test, point_index )
+            // @todo(viktor): check that they have the same z
+            dsq := length_squared(point.p - from_p)
+            if dsq < closest_point_dsq {
+                result = point.p
+                closest_point_dsq = dsq
+                ok = true
+            }
+        }
+    }
+    
+    return result, ok
+}
+
+null_position :: proc() -> (result: WorldPosition) {
     result.chunk.x = UninitializedChunk
     return result
 }

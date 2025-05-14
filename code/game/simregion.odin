@@ -51,6 +51,8 @@ Entity :: struct {
     // @todo(viktor): only for stairwells
     walkable_dim: v2,
     walkable_height: f32,
+    
+    x_axis, y_axis: v2,
 }
 
 MovementMode :: enum {
@@ -443,12 +445,6 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
     
     if entity.distance_limit != 0 {
         entity.distance_limit = distance_remaining
-    }
-    
-    if entity.dp.x != 0  {
-        entity.facing_direction = atan2(entity.dp.y, entity.dp.x)
-    } else {
-        // @note(viktor): leave the facing direction what it was
     }
 }
 
