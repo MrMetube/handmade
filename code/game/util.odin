@@ -6,9 +6,12 @@ import "base:runtime"
 import "core:fmt"
 import "core:simd/x86"
 
-was_pressed :: proc(button: InputButton) -> (result:b32) {
-    result = button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
-    return result
+was_pressed :: proc(button: InputButton) -> b32 {
+    return button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
+}
+
+is_down :: proc(button: InputButton) -> b32 {
+    return button.ended_down
 }
 
 // ------- Low Contrast

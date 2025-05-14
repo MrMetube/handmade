@@ -242,7 +242,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 con_hero^ = { storage_index = player_index }
             }
         } else {
-            con_hero.ddp    = {}
             con_hero.darrow = {}
             
             if controller.is_analog {
@@ -250,17 +249,32 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 con_hero.ddp.xy = controller.stick_average
             } else {
                 // @note(viktor): Use digital movement tuning
-                if controller.stick_left.ended_down {
+                if was_pressed(controller.stick_left) {
+                    con_hero.ddp.y  = 0
                     con_hero.ddp.x -= 1
                 }
-                if controller.stick_right.ended_down {
+                if was_pressed(controller.stick_right) {
+                    con_hero.ddp.y  = 0
                     con_hero.ddp.x += 1
                 }
-                if controller.stick_up.ended_down {
+                if was_pressed(controller.stick_up) {
+                    con_hero.ddp.x  = 0
                     con_hero.ddp.y += 1
                 }
-                if controller.stick_down.ended_down {
+                if was_pressed(controller.stick_down) {
+                    con_hero.ddp.x  = 0
                     con_hero.ddp.y -= 1
+                }
+                
+                if !is_down(controller.stick_left) && !is_down(controller.stick_right) {
+                    con_hero.ddp.x = 0
+                    if is_down(controller.stick_up)   do con_hero.ddp.y =  1
+                    if is_down(controller.stick_down) do con_hero.ddp.y = -1
+                }
+                if !is_down(controller.stick_up) && !is_down(controller.stick_down) {
+                    con_hero.ddp.y = 0
+                    if is_down(controller.stick_left)  do con_hero.ddp.x = -1
+                    if is_down(controller.stick_right) do con_hero.ddp.x =  1
                 }
             }
             
@@ -468,7 +482,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             entity.p = pt
                         }
                         
-                        hop_duration :f32: 0.25
+                        hop_duration :f32: 0.2
                         entity.t_movement += dt * (1 / hop_duration)
                         
                         if entity.t_movement >= 1 {
@@ -476,7 +490,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         }
                     }
                     
-                    entity.y_axis = v2{0,1} + 1 * head_delta.xy
+                    entity.y_axis = v2{0, 1} + 1 * head_delta.xy
                     // entity.x_axis = perpendicular(entity.y_axis)
                     
                     ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
@@ -545,12 +559,15 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             shadow_transform.offset = get_entity_ground_point(&entity)
             shadow_transform.offset.y -= 0.5
             
-            hero_height :f32= 1.6
+            hero_height :f32= 3.5
             switch entity.type {
               case .Nil: // @note(viktor): nothing
               case .HeroHead:
-                transform.sort_bias += 1
-                push_bitmap(render_group, head_id,  transform, hero_height)
+                before := transform
+                defer transform = before
+                transform.sort_bias += 10000
+                transform.offset.y -= 0.9 * hero_height
+                push_bitmap(render_group, head_id,  transform, hero_height * 1.4)
                 if debug_requested(debug_id) { 
                     debug_record_value(&head_id)
                 }
@@ -561,7 +578,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 
                 push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
                 
-                x_axis, y_axis := entity.x_axis, entity.y_axis
+                x_axis, y_axis := entity.x_axis, entity.y_axis * 0.4
                 before := transform
                     transform.sort_bias += 10
                     push_bitmap(render_group, body_id,  transform, hero_height, x_axis = x_axis, y_axis = y_axis)
