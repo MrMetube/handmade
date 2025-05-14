@@ -1,5 +1,7 @@
 package game
 
+EntityId :: distinct u32
+
 EntityFlag :: enum {
     // @todo(viktor): Collides and Grounded probably can be removed now/soon
     Collides,
@@ -18,7 +20,7 @@ EntityType :: enum u32 {
     HeroHead, 
     HeroBody, 
     
-    Wall, Familiar, Monster, Arrow, Stairwell,
+    Wall, Familiar, Monster, Stairwell,
 }
 
 HitPointPartCount :: 4
@@ -26,9 +28,6 @@ HitPoint :: struct {
     flags:         u8,
     filled_amount: u8,
 }
-
-EntityIndex :: u32
-StorageIndex :: distinct EntityIndex
 
 StoredEntity :: struct {
     // @todo(viktor): its kind of busted that ps can be invalid  here
@@ -41,7 +40,7 @@ StoredEntity :: struct {
 PairwiseCollsionRule :: #type SingleLinkedList(PairwiseCollsionRuleData)
 PairwiseCollsionRuleData :: struct {
     can_collide: b32,
-    index_a, index_b: StorageIndex,
+    index_a, index_b: EntityId,
 }
 
 PairwiseCollsionRuleFlag :: enum {
@@ -63,7 +62,7 @@ make_entity_spatial :: proc(entity: ^Entity, p, dp: v3) {
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
 get_entity_ground_point_ :: proc(entity: ^Entity) -> (result: v3) {
     result = get_entity_ground_point(entity, entity.p)
-
+    
     return result
 }
 
@@ -73,103 +72,103 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-get_stored_entity :: proc(world: ^World, storage_index: StorageIndex) -> (entity: ^StoredEntity) #no_bounds_check {
-    if storage_index > 0 && storage_index <= world.stored_entity_count {
-        entity = &world.stored_entities[storage_index]
-    }
-
-    return entity
+begin_entity :: proc(world: ^World, type: EntityType, p: WorldPosition) -> (result: ^StoredEntity) {
+    assert(!world.creation_buffer_locked)
+    world.creation_buffer_locked = true
+    
+    result = &world.creation_buffer
+    // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
+    result ^= {}
+    
+    world.last_used_entity_id += 1
+    result.sim.entity_id = world.last_used_entity_id
+    result.sim.collision = world.null_collision
+    result.p = p
+    
+    return result
 }
 
-add_stored_entity :: proc(world: ^World, type: EntityType, p: WorldPosition) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    index = world.stored_entity_count
-    world.stored_entity_count += 1
-    assert(world.stored_entity_count < len(world.stored_entities))
+end_entity :: proc(world: ^World, entity: ^StoredEntity) {
+    assert(world.creation_buffer_locked)
+    world.creation_buffer_locked = false
     
-    stored = &world.stored_entities[index]
-    stored.sim = { type = type }
+    assert(entity.sim.entity_id == world.last_used_entity_id)
     
-    stored.sim.collision = world.null_collision
-    stored.p = null_position()
-    
-    change_entity_location(&world.arena, world, index, stored, p)
-    
-    return index, stored
+    pack_entity_into_chunk(world, entity)
 }
 
-add_grounded_entity :: proc(world: ^World, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (index: StorageIndex, stored: ^StoredEntity) #no_bounds_check {
-    index, stored = add_stored_entity(world, type, p)
+pack_entity_into_chunk :: proc(world: ^World, entity: ^StoredEntity) {
+    
+}
+
+begin_grounded_entity :: proc(world: ^World, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (stored: ^StoredEntity) {
+    stored = begin_entity(world, type, p)
     stored.sim.collision = collision
 
-    return index, stored
+    return stored
 }
 
-add_arrow :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_stored_entity(world, .Arrow, null_position())
-    
-    entity.sim.collision = world.arrow_collision
-    entity.sim.flags += {.Moveable}
-
-    return index, entity
-}
-
-add_wall :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .Wall, p, world.wall_collision)
+add_wall :: proc(world: ^World, p: WorldPosition) {
+    entity := begin_grounded_entity(world, .Wall, p, world.wall_collision)
 
     entity.sim.flags += {.Collides}
 
-    return index, entity
+    end_entity(world, entity)
 }
 
-add_stairs :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .Stairwell, p, world.stairs_collision)
+add_stairs :: proc(world: ^World, p: WorldPosition) {
+    entity := begin_grounded_entity(world, .Stairwell, p, world.stairs_collision)
 
     entity.sim.flags += {.Collides}
     entity.sim.walkable_height = world.typical_floor_height
     entity.sim.walkable_dim    = rectangle_get_dimension(entity.sim.collision.total_volume).xy
 
-    return index, entity
+    end_entity(world, entity)
 }
 
-add_hero :: proc(world: ^World) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .HeroHead, world.camera_p, world.hero_head_collision)
-    body_index, body := add_grounded_entity(world, .HeroBody, world.camera_p, world.hero_body_collision)
+add_hero :: proc(world: ^World) -> (result: EntityId) {
+    entity := begin_grounded_entity(world, .HeroHead, world.camera_p, world.hero_head_collision)
     
     entity.sim.flags += {.Collides, .Moveable}
-    entity.sim.head.index = body_index
+    result = entity.sim.entity_id
+    
+    init_hitpoints(entity, 3)
+    
+    if world.camera_following_id == 0 {
+        world.camera_following_id = result
+    }
+
+    end_entity(world, entity)
+    
+    body := begin_grounded_entity(world, .HeroBody, world.camera_p, world.hero_body_collision)
     
     body.sim.flags += {.Moveable}
-    body.sim.head.index = index
+    body.sim.head.id = result
+    body_id := body.sim.entity_id
     
+    end_entity(world, body)
     
-    arrow_index, _ := add_arrow(world)
-    entity.sim.arrow.index = arrow_index
+    entity.sim.head.id = body_id
     
-    init_hitpoints(entity, 3)
-    
-    if world.camera_following_index == 0 {
-        world.camera_following_index = index
-    }
-    
-    return index, entity
+    return result
 }
 
-add_monster :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .Monster, p, world.monstar_collision)
+add_monster :: proc(world: ^World, p: WorldPosition) {
+    entity := begin_grounded_entity(world, .Monster, p, world.monstar_collision)
 
     entity.sim.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
 
-    return index, entity
+    end_entity(world, entity)
 }
 
-add_familiar :: proc(world: ^World, p: WorldPosition) -> (index: StorageIndex, entity: ^StoredEntity) {
-    index, entity = add_grounded_entity(world, .Familiar, p, world.familiar_collision)
+add_familiar :: proc(world: ^World, p: WorldPosition) {
+    entity := begin_grounded_entity(world, .Familiar, p, world.familiar_collision)
 
     entity.sim.flags += {.Moveable}
-
-    return index, entity
+    
+    end_entity(world, entity)
 }
 
 add_standart_room :: proc(world: ^World, p: WorldPosition) {
@@ -178,7 +177,8 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) {
     for offset_y in 0..=height {
         for offset_x in 0..=width {
             floor_p := chunk_position_from_tile_positon(world, p.chunk.x + offset_x, p.chunk.y + offset_y, p.chunk.z)
-            index, entity := add_grounded_entity(world, .Floor, floor_p, world.floor_collision)
+            entity := begin_grounded_entity(world, .Floor, floor_p, world.floor_collision)
+            end_entity(world, entity)
         }
     }
 }
@@ -192,7 +192,7 @@ init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
     }
 }
 
-add_collision_rule :: proc(world:^World, a, b: StorageIndex, should_collide: b32) {
+add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
     timed_function()
     // @todo(viktor): collapse this with should_collide
     a, b := a, b
@@ -219,7 +219,7 @@ add_collision_rule :: proc(world:^World, a, b: StorageIndex, should_collide: b32
     }
 }
 
-clear_collision_rules :: proc(world: ^World, storage_index: StorageIndex) {
+clear_collision_rules :: proc(world: ^World, entity_id: EntityId) {
     timed_function()
     // @todo(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table
@@ -234,7 +234,7 @@ clear_collision_rules :: proc(world: ^World, storage_index: StorageIndex) {
     for hash_bucket in 0..<len(world.collision_rule_hash) {
         for rule_pointer := &world.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
             rule := rule_pointer^
-            if rule.index_a == storage_index || rule.index_b == storage_index {
+            if rule.index_a == entity_id || rule.index_b == entity_id {
                 // :ListEntryRemovalInLoop
                 list_push(&world.first_free_collision_rule, rule)
                 rule_pointer^ = rule.next

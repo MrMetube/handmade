@@ -11,7 +11,7 @@ World :: struct {
 
     // @todo(viktor): chunk_hash should probably switch to pointers IF
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
-    chunk_hash: [4096]Chunk,
+    chunk_hash: [4096]^Chunk,
     first_free: ^WorldEntityBlock,
     
     ////////////////////////////////////////////////
@@ -19,20 +19,16 @@ World :: struct {
     typical_floor_height: f32,
     
     // @todo(viktor): Should we allow split-screen?
-    camera_following_index: StorageIndex,
+    camera_following_id: EntityId,
     camera_p :              WorldPosition,
     // @todo(viktor): Should which players joined be part of the general state?
     controlled_heroes: [len(Input{}.controllers)]ControlledHero,
     
-    stored_entity_count: StorageIndex,
-    stored_entities:     [100_000]StoredEntity,
-
     collision_rule_hash:       [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
 
     null_collision, 
     wall_collision,    
-    arrow_collision, 
     floor_collision,
     stairs_collision, 
     hero_body_collision, 
@@ -40,9 +36,13 @@ World :: struct {
     monstar_collision, 
     familiar_collision: ^EntityCollisionVolumeGroup, 
     
-    
     // @note(viktor): Only for testing, use Input.delta_time and your own t-values.
     time: f32,
+    
+    // @todo(viktor): This should catch bugs, remove once satisfied.
+    creation_buffer_locked: b32,
+    creation_buffer:        StoredEntity,
+    last_used_entity_id: EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
 }
 
 // @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
@@ -58,8 +58,10 @@ ChunkData :: struct {
 // @todo(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
 WorldEntityBlock :: #type SingleLinkedList(WorldEntityBlockData)
 WorldEntityBlockData :: struct {
-    entity_count: StorageIndex,
-    indices:      [16]StorageIndex,
+    entity_count: EntityId,// :Array
+    indices:      [16]EntityId,
+    
+    entity_data: Array(1 << 14, u8),
 }
 
 WorldPosition :: struct {
@@ -88,7 +90,6 @@ chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: 
 init_world :: proc(world: ^World, parent_arena: ^Arena) {
     sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
     
-    
     // @cleanup REMOVE THIS
     ground_buffer_size :: 512
     pixels_to_meters :: 1.0 / 42.0
@@ -98,14 +99,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     world.chunk_dim_meters = v3{chunk_dim_in_meters, chunk_dim_in_meters, world.typical_floor_height}
     
     world.first_free = nil
-    for &chunk_block in world.chunk_hash {
-        chunk_block.chunk.x = UninitializedChunk
-        chunk_block.first_block.entity_count = 0
-    }
     
     ////////////////////////////////////////////////
-    
-    add_stored_entity(world, .Nil, null_position())
     
     tiles_per_screen :: [2]i32{17,9}
     
@@ -113,7 +108,6 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     world.null_collision     = make_null_collision(world)
     
     world.wall_collision      = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
-    world.arrow_collision     = make_simple_grounded_collision(world, {0.5, 1, 0.1})
     world.stairs_collision    = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
     world.hero_body_collision = make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
     world.hero_head_collision = make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
@@ -236,13 +230,12 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
         
-        if con_hero.storage_index == 0 {
+        if con_hero.entity_id == 0 {
             if controller.start.ended_down {
-                player_index, _ := add_hero(world)
-                con_hero^ = { storage_index = player_index }
+                con_hero^ = { entity_id = add_hero(world) }
             }
         } else {
-            con_hero.darrow = {}
+            con_hero.dfacing = {}
             
             if controller.is_analog {
                 // @note(viktor): Use analog movement tuning
@@ -278,23 +271,18 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
             
-            con_hero.darrow = {}
+            con_hero.dfacing = {}
             if controller.button_up.ended_down {
-                con_hero.darrow =  {0, 1}
+                con_hero.dfacing =  {0, 1}
             }
             if controller.button_down.ended_down {
-                con_hero.darrow = -{0, 1}
+                con_hero.dfacing = -{0, 1}
             }
             if controller.button_left.ended_down {
-                con_hero.darrow = -{1, 0}
+                con_hero.dfacing = -{1, 0}
             }
             if controller.button_right.ended_down {
-                con_hero.darrow =  {1, 0}
-            }
-            
-            if con_hero.darrow != 0 {
-                // @todo(viktor): How do we want to handle this?
-                // play_sound(&state.mixer, random_sound_from(tran_state.assets, .Hit, &state.effects_entropy), 0.2)
+                con_hero.dfacing =  {1, 0}
             }
         }
     }
@@ -332,7 +320,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     update_block := begin_timed_block("update and render entity")
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
-        debug_id := debug_pointer_id(&world.stored_entities[entity.storage_index])
+        // @todo(viktor): we dont really have a way to unique-ify these :(
+        debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.entity_id)
         if debug_requested(debug_id) { 
             debug_begin_data_block("Game/Entity")
         }
@@ -360,9 +349,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             
             // @todo(viktor): this is incorrect, should be computed after update
-            shadow_alpha := 1 - 0.5 * entity.p.z;
+            shadow_alpha := 1 - 0.5 * entity.p.z
             if shadow_alpha < 0 {
-                shadow_alpha = 0.0;
+                shadow_alpha = 0.0
             }
             
             ddp: v3
@@ -376,29 +365,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 
               case .HeroHead:
                 for &con_hero in world.controlled_heroes {
-                    if con_hero.storage_index == entity.storage_index {
+                    if con_hero.entity_id == entity.entity_id {
                         move_spec.normalize_accelaration = true
                         move_spec.drag = 5
                         move_spec.speed = 30
                         ddp = con_hero.ddp
                         
-                        if con_hero.darrow.x != 0  {
-                            entity.facing_direction = atan2(con_hero.darrow.y, con_hero.darrow.x)
+                        if con_hero.dfacing.x != 0  {
+                            entity.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
                         } else {
                             // @note(viktor): leave the facing direction what it was
-                        }
-                        
-                        when false {
-                            if con_hero.darrow.x != 0 || con_hero.darrow.y != 0 {
-                                arrow := entity.arrow.ptr
-                                if arrow != nil && .Nonspatial in arrow.flags {
-                                    dp: v3
-                                    dp.xy = 5 * con_hero.darrow
-                                    arrow.distance_limit = 5
-                                    add_collision_rule(world, entity.storage_index, arrow.storage_index, false)
-                                    make_entity_spatial(arrow, entity.p, dp)
-                                }
-                            }
                         }
                         
                         closest_p := get_closest_traversable(camera_sim_region, entity.p) or_else entity.p
@@ -503,16 +479,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     move_spec.speed = 250
                 }
                 
-              case .Arrow:
-                move_spec.normalize_accelaration = false
-                move_spec.drag = 0
-                move_spec.speed = 0
-                
-                if entity.distance_limit == 0 {
-                    clear_collision_rules(world, entity.storage_index)
-                    make_entity_nonspatial(&entity)
-                }
-                
               case .Familiar: 
                 closest_hero: ^Entity
                 closest_hero_dsq := square(f32(10))
@@ -597,16 +563,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&body_id)
                 }
                 
-              case .Arrow:
-                arrow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Arrow)
-                push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, arrow_id, transform, 0.1)
-                
-                if debug_requested(debug_id) { 
-                    debug_record_value(&shadow_id)
-                    debug_record_value(&head_id)
-                }
-                
               case .Familiar: 
                 entity.t_bob += dt
                 if entity.t_bob > Tau {
@@ -677,7 +633,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                 
                 if debug_requested(debug_id) { 
-                    debug_record_value(cast(^u32) &entity.storage_index, name = "storage_index")
+                    debug_record_value(cast(^u32) &entity.entity_id, name = "entity_id")
                     debug_record_value(&entity.p.x)
                     debug_record_value(&entity.p.y)
                     debug_record_value(&entity.p.y)
@@ -826,7 +782,7 @@ make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^Entity
 }
 
 
-change_entity_location :: proc(arena: ^Arena = nil, world: ^World, index: StorageIndex, stored: ^StoredEntity, new_p_init: WorldPosition) {
+change_entity_location :: proc(arena: ^Arena = nil, world: ^World, index: EntityId, stored: ^StoredEntity, new_p_init: WorldPosition) {
     timed_function()
     new_p, old_p : ^WorldPosition
     if is_valid(new_p_init) {
@@ -848,7 +804,7 @@ change_entity_location :: proc(arena: ^Arena = nil, world: ^World, index: Storag
     }
 }
 
-change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_index: StorageIndex, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
+change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, entity_id: EntityId, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
     // @todo(viktor): if the entity moves into the camera bounds, shoulds this force the entity into the high set immediatly?
     assert((old_p == nil || is_valid(old_p^)))
     assert((new_p == nil || is_valid(new_p^)))
@@ -864,7 +820,7 @@ change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_i
                 first_block := &chunk.first_block
                 outer: for block := first_block; block != nil; block = block.next {
                     for &block_index in block.indices[:block.entity_count] {
-                        if block_index == storage_index {
+                        if block_index == entity_id {
                             first_block.entity_count -= 1
                             block_index = first_block.indices[first_block.entity_count]
                             
@@ -896,7 +852,7 @@ change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, storage_i
             }
             assert(block.entity_count < len(block.indices))
             
-            block.indices[block.entity_count] = storage_index
+            block.indices[block.entity_count] = entity_id
             block.entity_count += 1
         }
     }
@@ -963,32 +919,30 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chu
     
     assert(hash_slot < len(world.chunk_hash))
     
-    world_chunk := &world.chunk_hash[hash_slot]
-    for {
+    world_chunk: ^Chunk
+    for world_chunk = world.chunk_hash[hash_slot]; world_chunk != nil; world_chunk = world_chunk.next {
         if chunk_p == world_chunk.chunk {
             break
         }
+    }
+    
+    if arena != nil && world_chunk == nil {
+        world_chunk = push(arena, Chunk, no_clear())
+        world_chunk.chunk = chunk_p
+    
+        clear_world_entity_block(&world_chunk.first_block)
         
-        if arena != nil && world_chunk.chunk.x != UninitializedChunk && world_chunk.next == nil {
-            world_chunk.next = push(arena, Chunk)
-            
-            world_chunk = world_chunk.next
-            world_chunk.chunk.x = UninitializedChunk
-        }
-        
-        if arena != nil && world_chunk.chunk.x == UninitializedChunk {
-            world_chunk.chunk = chunk_p
-            world_chunk.next = nil
-            
-            break
-        }
-        
-        world_chunk = world_chunk.next
-        if world_chunk == nil do break
+        world_chunk.next = world.chunk_hash[hash_slot]
+        world.chunk_hash[hash_slot] = world_chunk
     }
     
     return world_chunk
 }
 
-@(private="file")
+clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
+    block.entity_count = 0
+    block.entity_data.count = 0
+    block.next = nil
+}
+
 UninitializedChunk :: min(i32)

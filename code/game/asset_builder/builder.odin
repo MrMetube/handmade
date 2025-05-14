@@ -3,7 +3,6 @@ package hha
 
 import "base:intrinsics"
 
-import "core:c/libc"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -101,21 +100,21 @@ write_hero :: proc () {
     defer output_hha_file(`.\hero.hha`, hha)
         
     begin_asset_type(hha, .Head)
-    add_bitmap_asset(hha, "../assets/head_left_short.bmp",  {0.36, 0.01})
+    add_bitmap_asset(hha, "../assets/head_left.bmp",  {0.36, 0.01})
     add_tag(hha, .FacingDirection, Pi)
     add_bitmap_asset(hha, "../assets/head_right.bmp", {0.63, 0.01})
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
 
     begin_asset_type(hha, .Body)
-    add_bitmap_asset(hha, "../assets/body_left_short.bmp",  {0.36, 0.01})
+    add_bitmap_asset(hha, "../assets/body_left.bmp",  {0.36, 0.01})
     add_tag(hha, .FacingDirection, Pi)
     add_bitmap_asset(hha, "../assets/body_right.bmp", {0.63, 0.01})
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
     
     begin_asset_type(hha, .Cape)
-    add_bitmap_asset(hha, "../assets/cape_left_short.bmp",  {0.36, 0.01})
+    add_bitmap_asset(hha, "../assets/cape_left.bmp",  {0.36, 0.01})
     add_tag(hha, .FacingDirection, Pi)
     add_bitmap_asset(hha, "../assets/cape_right.bmp", {0.63, 0.01})
     add_tag(hha, .FacingDirection, 0)
@@ -137,10 +136,6 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/shadow.bmp", {0.5, -0.4})
     end_asset_type(hha)
         
-    begin_asset_type(hha, .Arrow)
-    add_bitmap_asset(hha, "../assets/arrow.bmp" )
-    end_asset_type(hha)
-    
     begin_asset_type(hha, .Stair)
     add_bitmap_asset(hha, "../assets/stair.bmp")
     end_asset_type(hha)
@@ -262,13 +257,12 @@ write_sounds :: proc() {
 }
 
 output_hha_file :: proc(file_name: string, hha: ^HHA) {
-    // @todo(viktor): don't use libc
-    out := libc.fopen(strings.clone_to_cstring(file_name), "wb")
-    if out == nil {
+    out, err := os.open(file_name, os.O_RDWR + os.O_CREATE)
+    if err != nil {
         fmt.eprintln("could not open asset file:", file_name)
         return
     }
-    defer libc.fclose(out)
+    defer os.close(out)
     
     header := Header {
         magic_value = MagicValue,
@@ -287,23 +281,21 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
     header.asset_types = header.tags        + cast(u64) tags_size
     header.assets      = header.asset_types + cast(u64) asset_types_size
     
+    at := cast(i64) (size_of(header))
+    os.write_ptr(out, &header, size_of(header))
+    write_slice(out, &at, hha.tags[:header.tag_count])
+    write_slice(out, &at, hha.types[:header.asset_type_count])
+
+    at += auto_cast assets_size
     
-    libc.fwrite(&header,                 size_of(header),             1, out)
-    libc.fwrite(raw_data(hha.tags[:]),   cast(uint) tags_size,        1, out)
-    libc.fwrite(raw_data(hha.types[:]),  cast(uint) asset_types_size, 1, out)
-    
-    libc.fseek(out, cast(i32) assets_size, .CUR)
     context.allocator = context.temp_allocator
     for index in 1..<hha.asset_count {
         src := &hha.sources[index]
         dst := &hha.data[index]
         
-        dst.data_offset = auto_cast libc.ftell(out)
-
-        write_slice :: proc(stream: ^libc.FILE, data: []$T) {
-            libc.fwrite(raw_data(data), len(data) * size_of(T), 1, stream)
-        }
-                
+        dst.data_offset = auto_cast at
+        assert(dst.data_offset == auto_cast at)
+        
         defer free_all(context.allocator)
         switch v in src {
           case SourceBitmapInfo:
@@ -311,13 +303,13 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
             bitmap := load_bmp(v.filename)
             
             info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
-            write_slice(out, bitmap.memory)
+            write_slice(out, &at, bitmap.memory)
           case SourceFontGlyphInfo:
             info := &dst.info.bitmap
             bitmap := load_glyph_bitmap(v.font, v.codepoint, info)
             
             info.dimension = vec_cast(u32, bitmap.width, bitmap.height)
-            write_slice(out, bitmap.memory)
+            write_slice(out, &at, bitmap.memory)
           case SourceFontInfo:
             finalize_font_kerning(v.font)
             
@@ -325,11 +317,11 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
             
             info := &dst.info.font
             info.one_past_highest_codepoint = v.font.one_past_highest_codepoint
-            write_slice(out, v.font.glyphs[:glyph_count])
+            write_slice(out, &at, v.font.glyphs[:glyph_count])
             
             for glyph_index in 0..<glyph_count {
                 start := glyph_index * v.font.max_glyph_count
-                write_slice(out, v.font.horizontal_advances[start:][:glyph_count])
+                write_slice(out, &at, v.font.horizontal_advances[start:][:glyph_count])
             }
           case SourceSoundInfo:
             info := &dst.info.sound
@@ -339,13 +331,19 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
             info.channel_count = wav.channel_count
             
             for channel in wav.channels[:wav.channel_count] {
-                write_slice(out, channel)
+                write_slice(out, &at, channel)
             }
         }
     }
     
-    libc.fseek(out, cast(i32) header.assets, .SET)
-    libc.fwrite(raw_data(hha.data[:]), cast(uint) assets_size, 1, out)
+    at = auto_cast header.assets
+    write_slice(out, &at, hha.data[:header.asset_count])
+}
+
+write_slice :: proc(out: os.Handle, at: ^i64, slice: []$T) {
+    size := len(slice) * size_of(T)
+    written, _ := os.write_at(out, (cast([^]u8) raw_data(slice))[:size], at^)
+    at^ += auto_cast written
 }
 
 begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId) {

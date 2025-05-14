@@ -254,11 +254,11 @@ TaskWithMemory :: struct {
 }
 
 ControlledHero :: struct {
-    storage_index: StorageIndex,
+    entity_id: EntityId,
     
     // @note(viktor): these are the controller requests for simulation
     ddp: v3,
-    darrow: v2,
+    dfacing: v2,
 }
 
 // @note(viktor): Platform specific structs

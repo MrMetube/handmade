@@ -1,5 +1,25 @@
 package game
 
+// :Array
+Array :: struct ($N: i32, $T: typeid) {
+    data:  [N]T,
+    count: i32,
+}
+
+array_len :: proc(a: Array($N, $T)) -> int {
+    return a.count
+}
+
+array_append :: proc(a: ^Array($N, $T), values: ..T) {
+    assert(cap(a) > len(a) + len(values))
+    for v in values {
+        a.data[a.count] = v
+        a.count += 1
+    }
+}
+
+////////////////////////////////////////////////
+
 @(common="file")
 // [First] <- [..] ... <- [..] <- [Last] 
 Deque :: struct($L: typeid) {

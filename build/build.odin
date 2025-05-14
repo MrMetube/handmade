@@ -1,3 +1,4 @@
+#+private
 package build
 
 import "base:intrinsics"
@@ -12,15 +13,37 @@ import "core:time"
 
 import win "core:sys/windows"
 
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -subsystem:windows `
+// @study(viktor): If the build does not change its faster to build/rebuild and execute the build.exe.
+// But if the amount of times the build changes increases, then it would be simpler to just odin run it directly.
+// Currently we the saved time is ~35% i.e. 0,52 seconds each time we build.
+
+/* @todo(viktor): The command line is a terrible user interface.
+
+    It sucks that the builder expects a command line,
+    It would be more pleasent if it were a GUI Programm
+    which just ran its code through the click of a button.
+    
+    The logic and parameters should stay in code as it is easier
+    to modify, as needs change.
+    
+    i just want a tiny window to click/press a key
+    - rebuild the game
+    - start / restart the game
+    
+    But how does this work with vscode? ughh...
+*/
+
+// @todo(viktor): once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
+
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon -subsystem:windows -ignore-vs-search `
 debug    :: " -debug "
 internal :: " -define:INTERNAL=true " // @todo(viktor): get rid of this
-pedantic :: " -vet-unused-imports -warnings-as-errors -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
+pedantic :: " -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
 commoner :: " -custom-attribute:common "
 
 optimizations    :: " -o:none " when true else " -o:speed "
 PedanticGame     :: false
-PedanticPlatform :: false
+PedanticPlatform :: false  
 
 src_path :: `.\build\`   
 exe_path :: `.\build\build.exe`

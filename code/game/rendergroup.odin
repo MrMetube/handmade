@@ -44,13 +44,13 @@ RenderCommands :: struct {
     width, height: i32,
     
     // @note(viktor): Packed array of disjoint elements.
-    push_buffer:      []u8, // :StaticArray
+    push_buffer:      []u8, // :Array
     push_buffer_size: u32,
     
     sort_entry_at:             u32,
     push_buffer_element_count: u32,
     
-    clip_rect_count: u16, // :StaticArray
+    clip_rect_count: u16, // :Array
     clip_rects:      [^]RenderEntryClip,
     
     rects: Deque(RenderEntryClip),
