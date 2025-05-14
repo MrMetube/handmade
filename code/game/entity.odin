@@ -29,14 +29,6 @@ HitPoint :: struct {
     filled_amount: u8,
 }
 
-StoredEntity :: struct {
-    // @todo(viktor): its kind of busted that ps can be invalid  here
-    // AND we stored whether they would be invalid in the flags field...
-    // Can we do something better here?
-    sim: Entity,
-    p: WorldPosition,
-}
-
 PairwiseCollsionRule :: #type SingleLinkedList(PairwiseCollsionRuleData)
 PairwiseCollsionRuleData :: struct {
     can_collide: b32,
@@ -72,103 +64,95 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-begin_entity :: proc(world: ^World, type: EntityType, p: WorldPosition) -> (result: ^StoredEntity) {
-    assert(!world.creation_buffer_locked)
-    world.creation_buffer_locked = true
+begin_entity :: proc(world: ^World, type: EntityType) -> (result: ^Entity) {
+    assert(world.creation_buffer_index < len(world.creation_buffer))
+    world.creation_buffer_index += 1
     
-    result = &world.creation_buffer
+    result = &world.creation_buffer[world.creation_buffer_index]
     // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
     result ^= {}
     
     world.last_used_entity_id += 1
-    result.sim.entity_id = world.last_used_entity_id
-    result.sim.collision = world.null_collision
-    result.p = p
+    result.id = world.last_used_entity_id
+    result.collision = world.null_collision
     
     return result
 }
 
-end_entity :: proc(world: ^World, entity: ^StoredEntity) {
-    assert(world.creation_buffer_locked)
-    world.creation_buffer_locked = false
+end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
+    assert(world.creation_buffer_index > 0)
+    world.creation_buffer_index -= 1
     
-    assert(entity.sim.entity_id == world.last_used_entity_id)
-    
-    pack_entity_into_chunk(world, entity)
+    pack_entity_into_world(world, entity, p)
 }
 
-pack_entity_into_chunk :: proc(world: ^World, entity: ^StoredEntity) {
-    
-}
+begin_grounded_entity :: proc(world: ^World, type: EntityType, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
+    result = begin_entity(world, type)
+    result.collision = collision
 
-begin_grounded_entity :: proc(world: ^World, type: EntityType, p: WorldPosition, collision: ^EntityCollisionVolumeGroup) -> (stored: ^StoredEntity) {
-    stored = begin_entity(world, type, p)
-    stored.sim.collision = collision
-
-    return stored
+    return result
 }
 
 add_wall :: proc(world: ^World, p: WorldPosition) {
-    entity := begin_grounded_entity(world, .Wall, p, world.wall_collision)
+    entity := begin_grounded_entity(world, .Wall, world.wall_collision)
 
-    entity.sim.flags += {.Collides}
+    entity.flags += {.Collides}
 
-    end_entity(world, entity)
+    end_entity(world, entity, p)
 }
 
 add_stairs :: proc(world: ^World, p: WorldPosition) {
-    entity := begin_grounded_entity(world, .Stairwell, p, world.stairs_collision)
+    entity := begin_grounded_entity(world, .Stairwell, world.stairs_collision)
 
-    entity.sim.flags += {.Collides}
-    entity.sim.walkable_height = world.typical_floor_height
-    entity.sim.walkable_dim    = rectangle_get_dimension(entity.sim.collision.total_volume).xy
+    entity.flags += {.Collides}
+    entity.walkable_height = world.typical_floor_height
+    entity.walkable_dim    = rectangle_get_dimension(entity.collision.total_volume).xy
 
-    end_entity(world, entity)
+    end_entity(world, entity, p)
 }
 
 add_hero :: proc(world: ^World) -> (result: EntityId) {
-    entity := begin_grounded_entity(world, .HeroHead, world.camera_p, world.hero_head_collision)
+    entity := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
     
-    entity.sim.flags += {.Collides, .Moveable}
-    result = entity.sim.entity_id
+        body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
+        
+        body.flags += {.Moveable}
+        body.head.id = result
+
+    entity.head.id = body.id
+        
+        end_entity(world, body, world.camera_p)
+        
+    entity.flags += {.Collides, .Moveable}
+    result = entity.id
     
     init_hitpoints(entity, 3)
     
     if world.camera_following_id == 0 {
         world.camera_following_id = result
     }
-
-    end_entity(world, entity)
-    
-    body := begin_grounded_entity(world, .HeroBody, world.camera_p, world.hero_body_collision)
-    
-    body.sim.flags += {.Moveable}
-    body.sim.head.id = result
-    body_id := body.sim.entity_id
-    
-    end_entity(world, body)
-    
-    entity.sim.head.id = body_id
+        
+    end_entity(world, entity, world.camera_p)
     
     return result
 }
 
 add_monster :: proc(world: ^World, p: WorldPosition) {
-    entity := begin_grounded_entity(world, .Monster, p, world.monstar_collision)
+    entity := begin_grounded_entity(world, .Monster, world.monstar_collision)
 
-    entity.sim.flags += {.Collides, .Moveable}
+    entity.flags += {.Collides, .Moveable}
 
     init_hitpoints(entity, 3)
 
-    end_entity(world, entity)
+    end_entity(world, entity, p)
 }
 
 add_familiar :: proc(world: ^World, p: WorldPosition) {
-    entity := begin_grounded_entity(world, .Familiar, p, world.familiar_collision)
+    entity := begin_grounded_entity(world, .Familiar, world.familiar_collision)
 
-    entity.sim.flags += {.Moveable}
+    entity.flags += {.Moveable}
     
-    end_entity(world, entity)
+    end_entity(world, entity, p)
 }
 
 add_standart_room :: proc(world: ^World, p: WorldPosition) {
@@ -177,17 +161,17 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) {
     for offset_y in 0..=height {
         for offset_x in 0..=width {
             floor_p := chunk_position_from_tile_positon(world, p.chunk.x + offset_x, p.chunk.y + offset_y, p.chunk.z)
-            entity := begin_grounded_entity(world, .Floor, floor_p, world.floor_collision)
-            end_entity(world, entity)
+            entity := begin_grounded_entity(world, .Floor, world.floor_collision)
+            end_entity(world, entity, floor_p)
         }
     }
 }
 
-init_hitpoints :: proc(entity: ^StoredEntity, count: u32) {
-    assert(count < len(entity.sim.hit_points))
+init_hitpoints :: proc(entity: ^Entity, count: u32) {
+    assert(count < len(entity.hit_points))
 
-    entity.sim.hit_point_max = count
-    for &hit_point in entity.sim.hit_points[:count] {
+    entity.hit_point_max = count
+    for &hit_point in entity.hit_points[:count] {
         hit_point = { filled_amount = HitPointPartCount }
     }
 }

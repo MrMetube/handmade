@@ -39,10 +39,15 @@ World :: struct {
     // @note(viktor): Only for testing, use Input.delta_time and your own t-values.
     time: f32,
     
+    // @todo(viktor): This could just be done in temporary memory.
     // @todo(viktor): This should catch bugs, remove once satisfied.
-    creation_buffer_locked: b32,
-    creation_buffer:        StoredEntity,
-    last_used_entity_id: EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
+    creation_buffer_index: u32,
+    creation_buffer:       [4]Entity,
+    last_used_entity_id:   EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
+    
+    
+    first_free_chunk: ^Chunk,
+    first_free_block: ^WorldEntityBlock,
 }
 
 // @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
@@ -52,7 +57,7 @@ Chunk :: #type SingleLinkedList(ChunkData)
 ChunkData :: struct {
     chunk: [3]i32,
 
-    first_block: WorldEntityBlock,
+    first_block: ^WorldEntityBlock,
 }
 
 // @todo(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
@@ -321,7 +326,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     update_block := begin_timed_block("update and render entity")
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
         // @todo(viktor): we dont really have a way to unique-ify these :(
-        debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.entity_id)
+        debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
         if debug_requested(debug_id) { 
             debug_begin_data_block("Game/Entity")
         }
@@ -365,7 +370,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 
               case .HeroHead:
                 for &con_hero in world.controlled_heroes {
-                    if con_hero.entity_id == entity.entity_id {
+                    if con_hero.entity_id == entity.id {
                         move_spec.normalize_accelaration = true
                         move_spec.drag = 5
                         move_spec.speed = 30
@@ -633,7 +638,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                 
                 if debug_requested(debug_id) { 
-                    debug_record_value(cast(^u32) &entity.entity_id, name = "entity_id")
+                    debug_record_value(cast(^u32) &entity.id, name = "entity_id")
                     debug_record_value(&entity.p.x)
                     debug_record_value(&entity.p.y)
                     debug_record_value(&entity.p.y)
@@ -782,82 +787,6 @@ make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^Entity
 }
 
 
-change_entity_location :: proc(arena: ^Arena = nil, world: ^World, index: EntityId, stored: ^StoredEntity, new_p_init: WorldPosition) {
-    timed_function()
-    new_p, old_p : ^WorldPosition
-    if is_valid(new_p_init) {
-        new_p_init := new_p_init
-        new_p = &new_p_init
-    }
-    if .Nonspatial not_in stored.sim.flags && is_valid(stored.p) {
-        old_p = &stored.p
-    }
-    
-    change_entity_location_raw(arena, world, index, new_p, old_p)
-    
-    if new_p != nil && is_valid(new_p^) {
-        stored.p = new_p^
-        stored.sim.flags -= { .Nonspatial }
-    } else {
-        stored.p = null_position()
-        stored.sim.flags += { .Nonspatial }
-    }
-}
-
-change_entity_location_raw :: proc(arena: ^Arena = nil, world: ^World, entity_id: EntityId, new_p: ^WorldPosition, old_p: ^WorldPosition = nil) {
-    // @todo(viktor): if the entity moves into the camera bounds, shoulds this force the entity into the high set immediatly?
-    assert((old_p == nil || is_valid(old_p^)))
-    assert((new_p == nil || is_valid(new_p^)))
-    
-    if old_p != nil && new_p != nil && are_in_same_chunk(world, old_p^, new_p^) {
-        // @note(viktor): leave entity where it is
-    } else {
-        if old_p != nil {
-            // @note(viktor): Pull the entity out of its old block
-            chunk := get_chunk(nil, world, old_p^)
-            assert(chunk != nil)
-            if chunk != nil {
-                first_block := &chunk.first_block
-                outer: for block := first_block; block != nil; block = block.next {
-                    for &block_index in block.indices[:block.entity_count] {
-                        if block_index == entity_id {
-                            first_block.entity_count -= 1
-                            block_index = first_block.indices[first_block.entity_count]
-                            
-                            if first_block.entity_count == 0 {
-                                if first_block.next != nil {
-                                    free_block := list_pop(&first_block)
-                                    list_push(&world.first_free, free_block)
-                                }
-                            }
-                            break outer
-                        }
-                    }
-                }
-            }
-        }
-        
-        if new_p != nil {
-            // @note(viktor): Insert the entity into its new block
-            chunk := get_chunk(arena, world, new_p^)
-            assert(chunk != nil)
-            
-            block := &chunk.first_block
-            if block.entity_count == len(block.indices) {
-                // @note(viktor): We're out of room, get a new block!
-                new_block := list_pop(&world.first_free) or_else push(arena, WorldEntityBlock)
-                
-                list_push_after_head(block, new_block)
-                block^ = {}
-            }
-            assert(block.entity_count < len(block.indices))
-            
-            block.indices[block.entity_count] = entity_id
-            block.entity_count += 1
-        }
-    }
-}
-
 map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
     result := center
     result.offset += offset
@@ -902,7 +831,7 @@ get_chunk :: proc {
 get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
     return get_chunk_3(arena, world, point.chunk)
 }
-get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chunk {
+get_chunk_3_internal :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^^Chunk) {
     timed_function()
     ChunkSafeMargin :: 256
     
@@ -919,24 +848,63 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> ^Chu
     
     assert(hash_slot < len(world.chunk_hash))
     
-    world_chunk: ^Chunk
-    for world_chunk = world.chunk_hash[hash_slot]; world_chunk != nil; world_chunk = world_chunk.next {
-        if chunk_p == world_chunk.chunk {
-            break
-        }
+    result = &world.chunk_hash[hash_slot]
+    for result^ != nil && chunk_p != (result^).chunk {
+        result = &(result^).next
     }
     
-    if arena != nil && world_chunk == nil {
-        world_chunk = push(arena, Chunk, no_clear())
-        world_chunk.chunk = chunk_p
-    
-        clear_world_entity_block(&world_chunk.first_block)
+    return result
+}
+get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
+    next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
+    result = next_pointer_of_the_chunks_previous_chunk^
         
-        world_chunk.next = world.chunk_hash[hash_slot]
-        world.chunk_hash[hash_slot] = world_chunk
+    if arena != nil && result == nil {
+        result = push(arena, Chunk)
+        result.chunk = chunk_p
+        
+        result.next = next_pointer_of_the_chunks_previous_chunk^
+        next_pointer_of_the_chunks_previous_chunk^ = result
     }
     
-    return world_chunk
+    return result
+}
+
+extract_chunk :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
+    next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
+    result = next_pointer_of_the_chunks_previous_chunk^
+    
+    if result != nil {
+        next_pointer_of_the_chunks_previous_chunk ^= result.next
+    }
+    
+    return result
+}
+
+pack_entity_into_world :: proc(world: ^World, source: ^Entity, p: WorldPosition) {
+    chunk := get_chunk(&world.arena, world, p)
+    assert(chunk != nil)
+    pack_entity_into_chunk(world, source, chunk)
+}
+
+pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
+    assert(chunk != nil)
+    
+    pack_size := cast(i32) size_of(Entity)
+    
+    if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
+        new_block := list_pop(&world.first_free_block) or_else push(&world.arena, WorldEntityBlock, no_clear())
+        clear_world_entity_block(new_block)
+        
+        list_push(&chunk.first_block, new_block)
+    }
+    assert(block_has_room(chunk.first_block, pack_size))
+    
+    block := chunk.first_block
+    dest := &block.entity_data.data[block.entity_data.count]
+    block.entity_data.count += pack_size
+    
+    (cast(^Entity) dest) ^= source^
 }
 
 clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
@@ -945,4 +913,9 @@ clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
     block.next = nil
 }
 
+block_has_room :: proc(block: ^WorldEntityBlock, size: i32) -> b32 {
+    return block.entity_data.count + size < len(block.entity_data.data)
+}
+
+// @cleanup
 UninitializedChunk :: min(i32)

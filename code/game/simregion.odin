@@ -19,8 +19,7 @@ SimRegion :: struct {
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
 Entity :: struct {
-    // @note(viktor): these are only for the sim region
-    entity_id: EntityId,
+    id: EntityId,
     updatable: b32,
     
     type: EntityType,
@@ -94,7 +93,7 @@ MoveSpec :: struct {
 
 begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     timed_function()
-    // @todo(viktor): make storedEntities part of world
+    
     region = push(sim_arena, SimRegion)
     MaxEntityCount :: 4096
     region.entities = push(sim_arena, Entity, MaxEntityCount)
@@ -119,21 +118,29 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
-                chunk := get_chunk_3(nil, world, {chunk_x, chunk_y, chunk_z})
+                
+                chunk :^Chunk= extract_chunk(world, {chunk_x, chunk_y, chunk_z})
                 if chunk != nil {
-                    for block := &chunk.first_block; block != nil; block = block.next {
+                    block := chunk.first_block
+                    for block != nil {
+                        
                         for entity_index in block.indices[:block.entity_count] {
-                            stored := &(cast([^]StoredEntity) &block.entity_data.data)[entity_index]
-                            
-                            if .Nonspatial not_in stored.sim.flags {
-                                sim_space_p := get_sim_space_p(region, stored)
-                                if entity_overlaps_rectangle(region.bounds, sim_space_p, stored.sim.collision.total_volume) {
+                            entity := &(cast([^]Entity) &block.entity_data.data)[entity_index]
+                            if .Nonspatial not_in entity.flags {
+                                sim_space_p := get_sim_space_p(region, entity)
+                                if entity_overlaps_rectangle(region.bounds, sim_space_p, entity.collision.total_volume) {
                                     // @todo(viktor): check a seconds rectangle to set the entity to be "moveable" or not
-                                    add_entity(region, stored.sim.entity_id, stored, &sim_space_p)
+                                    add_entity(region, entity.id, entity, &sim_space_p)
                                 }
                             }
                         }
+                        
+                        next_block := block.next
+                        list_push(&world.first_free_block, block)
+                        block = next_block
                     }
+                    
+                    list_push(&world.first_free_chunk, chunk)
                 }
             }
         }
@@ -144,38 +151,30 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
 
 end_sim :: proc(region: ^SimRegion) {
     timed_function()
-
-    when false {
-        for entity in region.entities[:region.entity_count] {
-            assert(entity.entity_id != 0)
-            stored := &region.world.stored_entities[entity.entity_id]
+    
+    for &entity in region.entities[:region.entity_count] {
+        assert(entity.id != 0)
+        
+        store_entity_reference(&entity.head)
+        
+        // @important @todo what did casey suggest here, we no longer have the chunk_p
+        when false do if entity.id == region.world.camera_following_id {
+            new_camera_p: WorldPosition
+            new_camera_p.chunk  = entity.chunk_p.chunk
+            new_camera_p.offset = entity.chunk_p.offset
+            // @volatile Room size
+            delta := world_difference(region.world, new_camera_p, region.world.camera_p)
+            offset: v3
+            if delta.x >  17 do offset.x += 17
+            if delta.x < -17 do offset.x -= 17
+            if delta.y >   9 do offset.y +=  9
+            if delta.y <  -9 do offset.y -=  9
             
-            assert(.Simulated in entity.flags)
-            stored.sim = entity
-            stored.sim.flags -= {.Simulated}
-            assert(.Simulated not_in stored.sim.flags)
-            
-            store_entity_reference(&stored.sim.head)
-            // @todo(viktor): Save state back to stored entity, once high entities do state decompression
-            
-            new_p := .Nonspatial in entity.flags ? null_position() : map_into_worldspace(region.world, region.origin, entity.p)
-            change_entity_location(&region.world.arena, region.world, entity.entity_id, stored, new_p)
-            
-            if entity.entity_id == region.world.camera_following_index {
-                new_camera_p: WorldPosition
-                new_camera_p.chunk  = stored.p.chunk
-                new_camera_p.offset = stored.p.offset
-                // @volatile Room size
-                delta := world_difference(region.world, new_camera_p, region.world.camera_p)
-                offset: v3
-                if delta.x >  17 do offset.x += 17
-                if delta.x < -17 do offset.x -= 17
-                if delta.y >   9 do offset.y +=  9
-                if delta.y <  -9 do offset.y -=  9
-                
-                region.world.camera_p = map_into_worldspace(region.world, region.world.camera_p, offset)
-            }
+            region.world.camera_p = map_into_worldspace(region.world, region.world.camera_p, offset)
         }
+        
+        chunk_p := map_into_worldspace(region.world, region.origin, entity.p)
+        pack_entity_into_world(region.world, &entity, chunk_p)
     }
 }
 
@@ -211,11 +210,11 @@ load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
 
 store_entity_reference :: proc(ref: ^EntityReference) {
     if ref.ptr != nil {
-        ref.id = ref.ptr.entity_id
+        ref.id = ref.ptr.id
     }
 }
 
-add_entity :: proc(region: ^SimRegion, entity_id: EntityId, source: ^StoredEntity, sim_p: ^v3) -> (dest: ^Entity) {
+add_entity :: proc(region: ^SimRegion, entity_id: EntityId, source: ^Entity, sim_p: ^v3) -> (dest: ^Entity) {
     dest = add_entity_raw(region, entity_id, source)
     
     if dest != nil {
@@ -223,14 +222,15 @@ add_entity :: proc(region: ^SimRegion, entity_id: EntityId, source: ^StoredEntit
             dest.p = sim_p^
             dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
         } else {
-            dest.p = get_sim_space_p(region, source)
+            unreachable()
+            // dest.p = get_sim_space_p(region, source)
         }
     }
     
     return dest
 }
 
-add_entity_raw :: proc(region: ^SimRegion, entity_id: EntityId, source: ^StoredEntity) -> (entity: ^Entity) {
+add_entity_raw :: proc(region: ^SimRegion, entity_id: EntityId, source: ^Entity) -> (entity: ^Entity) {
     assert(entity_id != 0)
     
     entry := get_hash_from_index(region, entity_id)
@@ -245,14 +245,14 @@ add_entity_raw :: proc(region: ^SimRegion, entity_id: EntityId, source: ^StoredE
         
         if source != nil {
             // @todo(viktor): this should really be a decompression not a copy
-            entity^ = source.sim
+            entity^ = source^
             
             load_entity_reference(region, &entity.head)
             
             assert(.Simulated not_in entity.flags)
             entity.flags += { .Simulated }
         }
-        entity.entity_id = entity_id
+        entity.id = entity_id
         entity.updatable = false
     }
     
@@ -262,13 +262,14 @@ add_entity_raw :: proc(region: ^SimRegion, entity_id: EntityId, source: ^StoredE
 
 InvalidP :: v3{100_000, 100_000, 100_000}
 
-get_sim_space_p :: proc(region: ^SimRegion, stored: ^StoredEntity) -> (result: v3) {
+get_sim_space_p :: proc(region: ^SimRegion, entity: ^Entity) -> (result: v3) {
     // @todo(viktor): Do we want to set this to signaling NAN in 
     // debug mode to make sure nobody ever uses the position of
     // a nonspatial entity?
     result = InvalidP
-    if .Nonspatial not_in stored.sim.flags {
-        result = world_difference(region.world, stored.p, region.origin)
+    if .Nonspatial not_in entity.flags {
+        unreachable()
+        // result = world_difference(region.world, entity.chunk_p, region.origin)
     }
     return result
 }
@@ -459,7 +460,7 @@ entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
 can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
-        if a.entity_id > b.entity_id do a, b = b, a
+        if a.id > b.id do a, b = b, a
         
         if .Collides in a.flags && .Collides in b.flags {
             if .Nonspatial not_in a.flags && .Nonspatial not_in b.flags {
@@ -468,9 +469,9 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
             }
             
             // @todo(viktor): BETTER HASH FUNCTION!!!
-            hash_bucket := a.entity_id & (len(world.collision_rule_hash) - 1)
+            hash_bucket := a.id & (len(world.collision_rule_hash) - 1)
             for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
-                if rule.index_a == a.entity_id && rule.index_b == b.entity_id {
+                if rule.index_a == a.id && rule.index_b == b.id {
                     result = rule.can_collide
                     break
                 }
