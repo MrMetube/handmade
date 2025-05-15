@@ -160,27 +160,27 @@ add_stairs :: proc(world: ^World, p: WorldPosition) {
 }
 
 add_hero :: proc(world: ^World) -> (result: EntityId) {
-    entity := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
+    head := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
         
-    entity.flags += {.Collides, .Moveable}
-    result = entity.id
+    head.flags += {.Collides, .Moveable}
+    result = head.id
     
         body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
         
         body.flags += {.Moveable}
         body.head.id = result
 
-    entity.head.id = body.id
+    head.head.id = body.id
         
         end_entity(world, body, world.camera_p)
     
-    init_hitpoints(entity, 3)
+    init_hitpoints(head, 3)
     
     if world.camera_following_id == 0 {
         world.camera_following_id = result
     }
         
-    end_entity(world, entity, world.camera_p)
+    end_entity(world, head, world.camera_p)
     
     return result
 }

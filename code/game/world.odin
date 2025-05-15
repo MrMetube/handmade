@@ -6,7 +6,7 @@ World :: struct {
     ////////////////////////////////////////////////
     // World specific    
     chunk_dim_meters: v3,
-
+    
     // @todo(viktor): chunk_hash should probably switch to pointers IF
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
     chunk_hash: [4096]^Chunk,
@@ -18,13 +18,14 @@ World :: struct {
     
     // @todo(viktor): Should we allow split-screen?
     camera_following_id: EntityId,
-    camera_p :              WorldPosition,
+    camera_p :           WorldPosition,
+    camera_offset:       v3,
     // @todo(viktor): Should which players joined be part of the general state?
     controlled_heroes: [len(Input{}.controllers)]ControlledHero,
     
     collision_rule_hash:       [256]^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
-
+    
     null_collision, 
     wall_collision,    
     floor_collision,
@@ -54,7 +55,7 @@ World :: struct {
 Chunk :: #type SingleLinkedList(ChunkData)
 ChunkData :: struct {
     chunk: [3]i32,
-
+    
     first_block: ^WorldEntityBlock,
 }
 
@@ -297,7 +298,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     buffer_size := [2]i32{render_group.commands.width, render_group.commands.height}
     meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
     
-    focal_length, distance_above_ground : f32 = 0.6, 14
+    focal_length, distance_above_ground : f32 = 0.6, 10
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     clear(render_group, DarkBlue)
@@ -315,14 +316,17 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_origin := world.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
+    camera_p := world.camera_offset + world_difference(world, world.camera_p, sim_origin)
+    
     if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
+        transform.offset -= camera_p
+        transform.sort_bias = 10000
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Orange,0.1)
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
     }
     
-    camera_p := world_difference(world, world.camera_p, sim_origin)
     
     update_block := begin_timed_block("update and render entity")
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
@@ -532,10 +536,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             shadow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Shadow)
             
             transform := default_upright_transform()
-            transform.offset = get_entity_ground_point(&entity)
+            transform.offset = get_entity_ground_point(&entity) - camera_p
             
             shadow_transform := default_flat_transform()
-            shadow_transform.offset = get_entity_ground_point(&entity)
+            shadow_transform.offset = get_entity_ground_point(&entity) - camera_p
             shadow_transform.offset.y -= 0.5
             
             hero_height :f32= 3.5

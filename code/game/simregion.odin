@@ -107,17 +107,49 @@ end_sim :: proc(region: ^SimRegion) {
         chunk_p  := entity_p
         chunk_p.offset = 0
         chunk_delta := -world_difference(region.world, chunk_p, region.origin)
-                
+        
         if entity.id == region.world.camera_following_id {
             // @volatile Room size
-            delta := world_difference(region.world, entity_p, region.world.camera_p)
+            room_delta := v3{25.5, 13.5, 0}
+            half_room_delta := room_delta*0.5
+            half_room_apron := half_room_delta - {1, 1, 0} * 0.7
+            height :f32= 0.5
+            region.world.camera_offset = 0
+
             offset: v3
-            if delta.x >  17 do offset.x += 17
-            if delta.x < -17 do offset.x -= 17
-            if delta.y >   9 do offset.y +=  9
-            if delta.y <  -9 do offset.y -=  9
+            delta := world_difference(region.world, entity_p, region.world.camera_p)
+                        
+            if delta.x >  half_room_delta.x do offset.x += room_delta.x
+            if delta.x < -half_room_delta.x do offset.x -= room_delta.x
+            if delta.y >  half_room_delta.y do offset.y += room_delta.y
+            if delta.y < -half_room_delta.y do offset.y -= room_delta.y
             
             region.world.camera_p = map_into_worldspace(region.world, region.world.camera_p, offset)
+            
+            delta -= offset
+            if delta.y >  half_room_apron.y {
+                t := clamp_01_to_range(half_room_apron.y, delta.y, half_room_delta.y)
+                region.world.camera_offset.y = t*half_room_delta.y
+                region.world.camera_offset.z = (-(t*t)+2*t)*height
+            }
+            
+            if delta.y < -half_room_apron.y {
+                t := clamp_01_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
+                region.world.camera_offset.y = t*-half_room_delta.y
+                region.world.camera_offset.z = (-(t*t)+2*t)*height
+            }
+            
+            if delta.x >  half_room_apron.x {
+                t := clamp_01_to_range(half_room_apron.x, delta.x, half_room_delta.x)
+                region.world.camera_offset.x = t*half_room_delta.x
+                region.world.camera_offset.z = (-(t*t)+2*t)*height
+            }
+            
+            if delta.x < -half_room_apron.x {
+                t := clamp_01_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
+                region.world.camera_offset.x = t*-half_room_delta.x
+                region.world.camera_offset.z = (-(t*t)+2*t)*height
+            }
         }
         
         entity.p             += chunk_delta
