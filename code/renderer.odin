@@ -148,23 +148,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
                 clip_rect,
             )
             
-          case .RenderEntryCoordinateSystem:
-            entry := cast(^RenderEntryCoordinateSystem) entry_data
-            draw_rectangle_quickly(target,
-                entry.origin, entry.x_axis, entry.y_axis,
-                entry.texture, /* entry.normal, */ entry.color,
-                /* entry.top, entry.middle, entry.bottom, */
-                clip_rect, 
-            )
-            
-            p := entry.origin
-            x := p + entry.x_axis
-            y := p + entry.y_axis
-            size := v2{10, 10}
-            
-            // draw_rectangle(target, rectangle_center_dimension(p, size), Red, clip_rect)
-            // draw_rectangle(target, rectangle_center_dimension(x, size), Red * 0.7, clip_rect)
-            // draw_rectangle(target, rectangle_center_dimension(y, size), Red * 0.7, clip_rect)
           case:
             panic("Unhandled Entry")
         }

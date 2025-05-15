@@ -107,8 +107,8 @@ RenderEntryType :: enum u8 {
     RenderEntryBitmap,
     RenderEntryRectangle,
     RenderEntryClip,
-    RenderEntryCoordinateSystem,
 }
+
 @(common)
 RenderEntryHeader :: struct { // @todo(viktor): Don't store type here, store in sort index?
     clip_rect_index: u16,
@@ -142,18 +142,6 @@ RenderEntryBitmap :: struct {
 RenderEntryRectangle :: struct {
     color: v4,
     rect:  Rectangle2,
-}
-
-// @cleanup
-@(common)
-RenderEntryCoordinateSystem :: struct {
-    color:  v4,
-    origin, x_axis, y_axis: v2,
-
-    pixels_to_meters: f32,
-    
-    texture, normal:        Bitmap,
-    top, middle, bottom:    EnvironmentMap,
 }
 
 UsedBitmapDim :: struct {
@@ -245,7 +233,6 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
           case RenderEntryBitmap:           header.type = .RenderEntryBitmap
           case RenderEntryRectangle:        header.type = .RenderEntryRectangle
           case RenderEntryClip:             header.type = .RenderEntryClip
-          case RenderEntryCoordinateSystem: header.type = .RenderEntryCoordinateSystem
         }
 
         result = cast(^T) &commands.push_buffer[offset + header_size]
@@ -290,7 +277,6 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2) -> (result:
         group.commands.clip_rect_count += 1
         group.current_clip_rect_index = result
         
-        dim := rectangle_get_dimension(rect)
         clip := RenderEntryClip { rect = rec_cast(i32, rect) }
         clip.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
         
@@ -419,18 +405,6 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     // Left and Right
     push_rectangle(group, rectangle_center_dimension(offset - {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
     push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
-}
-
-coordinate_system :: proc(group: ^RenderGroup, transform: Transform, color:= v4{1,1,1,1}) -> (result: ^RenderEntryCoordinateSystem) {
-    basis := project_with_transform(group.camera, transform, 0)
-    if basis.valid {
-        result = push_render_element(group, RenderEntryCoordinateSystem, basis.sort_key)
-        if result != nil {
-            result.color = color
-        }
-    }
-
-    return result
 }
 
 push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {

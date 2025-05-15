@@ -1,7 +1,5 @@
 package game
 
-import "core:fmt"
-
 /*
     ////////////////////////////////////////////////
     
@@ -326,7 +324,6 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.font_scale = 0.6
         
         left_edge  := -0.5 * cast(f32) render_commands.width
-        right_edge :=  0.5 * cast(f32) render_commands.width
         top_edge   :=  0.5 * cast(f32) render_commands.height   
         
         list_init_sentinel(&debug.tree_sentinel)

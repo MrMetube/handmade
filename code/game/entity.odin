@@ -1,14 +1,46 @@
 package game
 
+Entity :: struct {
+    id: EntityId,
+    updatable: b32,
+    
+    type:  EntityType,
+    flags: EntityFlags,
+    
+    p, dp: v3,
+    
+    collision: ^EntityCollisionVolumeGroup,
+    
+    distance_limit: f32,
+    
+    hit_point_max: u32, // :Array
+    hit_points: [16]HitPoint,
+    
+    head: EntityReference,
+    
+    movement_mode: MovementMode,
+    t_movement:      f32,
+    movement_from:   v3,
+    movement_to: v3,
+    
+    t_bob: f32,
+    dt_bob: f32,
+    facing_direction: f32,
+    // @todo(viktor): generation index so we know how " to date" this entity is
+    
+    // @todo(viktor): only for stairwells
+    walkable_dim: v2,
+    walkable_height: f32,
+    
+    x_axis, y_axis: v2,
+}
+
 EntityId :: distinct u32
 
 EntityFlag :: enum {
-    // @todo(viktor): Collides and Grounded probably can be removed now/soon
     Collides,
-    Nonspatial,
     Moveable,
-
-    Simulated,
+    Deleted,
 }
 EntityFlags :: bit_set[EntityFlag]
 
@@ -32,7 +64,7 @@ HitPoint :: struct {
 PairwiseCollsionRule :: #type SingleLinkedList(PairwiseCollsionRuleData)
 PairwiseCollsionRuleData :: struct {
     can_collide: b32,
-    index_a, index_b: EntityId,
+    id_a, id_b:  EntityId,
 }
 
 PairwiseCollsionRuleFlag :: enum {
@@ -40,15 +72,24 @@ PairwiseCollsionRuleFlag :: enum {
     Temporary,
 }
 
-make_entity_nonspatial :: proc(entity: ^Entity) {
-    entity.flags += {.Nonspatial}
-    entity.p = InvalidP
+MovementMode :: enum {
+    Planted, Hopping,
 }
 
-make_entity_spatial :: proc(entity: ^Entity, p, dp: v3) {
-    entity.flags -= {.Nonspatial}
-    entity.p = p
-    entity.dp = dp
+EntityCollisionVolumeGroup :: struct {
+    total_volume: Rectangle3,
+    // @todo(viktor): volumes is always expected to be non-empty if the entity
+    // has any volume... in the future, this could be compressed if necessary
+    // that the length can be 0 if the total_volume should be used as the only
+    // collision volume for the entity.
+    volumes: []Rectangle3,
+    
+    traversable_count: u32, // :Array
+    traversables:      []TraversablePoint,
+}
+
+TraversablePoint :: struct {
+    p: v3,
 }
 
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
@@ -75,7 +116,8 @@ begin_entity :: proc(world: ^World, type: EntityType) -> (result: ^Entity) {
     world.last_used_entity_id += 1
     result.id = world.last_used_entity_id
     result.collision = world.null_collision
-    
+    result.type = type
+        
     return result
 }
 
@@ -83,7 +125,13 @@ end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
     assert(world.creation_buffer_index > 0)
     world.creation_buffer_index -= 1
     
+    entity.p = p.offset
+
     pack_entity_into_world(world, entity, p)
+}
+
+delete_entity :: proc(entity: ^Entity) {
+    entity.flags += { .Deleted }
 }
 
 begin_grounded_entity :: proc(world: ^World, type: EntityType, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
@@ -113,6 +161,9 @@ add_stairs :: proc(world: ^World, p: WorldPosition) {
 
 add_hero :: proc(world: ^World) -> (result: EntityId) {
     entity := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
+        
+    entity.flags += {.Collides, .Moveable}
+    result = entity.id
     
         body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
         
@@ -122,9 +173,6 @@ add_hero :: proc(world: ^World) -> (result: EntityId) {
     entity.head.id = body.id
         
         end_entity(world, body, world.camera_p)
-        
-    entity.flags += {.Collides, .Moveable}
-    result = entity.id
     
     init_hitpoints(entity, 3)
     
@@ -176,6 +224,7 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
     }
 }
 
+// @cleanup
 add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
     timed_function()
     // @todo(viktor): collapse this with should_collide
@@ -185,7 +234,7 @@ add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
     found: ^PairwiseCollsionRule
     hash_bucket := a & (len(world.collision_rule_hash) - 1)
     for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
-        if rule.index_a == a && rule.index_b == b {
+        if rule.id_a == a && rule.id_b == b {
             found = rule
             break
         }
@@ -197,12 +246,13 @@ add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
     }
 
     if found != nil {
-        found.index_a = a
-        found.index_b = b
+        found.id_a = a
+        found.id_b = b
         found.can_collide = should_collide
     }
 }
 
+// @cleanup
 clear_collision_rules :: proc(world: ^World, entity_id: EntityId) {
     timed_function()
     // @todo(viktor): need to make a better data structute that allows for
@@ -218,7 +268,7 @@ clear_collision_rules :: proc(world: ^World, entity_id: EntityId) {
     for hash_bucket in 0..<len(world.collision_rule_hash) {
         for rule_pointer := &world.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
             rule := rule_pointer^
-            if rule.index_a == entity_id || rule.index_b == entity_id {
+            if rule.id_a == entity_id || rule.id_b == entity_id {
                 // :ListEntryRemovalInLoop
                 list_push(&world.first_free_collision_rule, rule)
                 rule_pointer^ = rule.next

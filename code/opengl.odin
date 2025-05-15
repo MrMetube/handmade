@@ -398,7 +398,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
           case .RenderEntryClip:
             entry := cast(^RenderEntryBitmap) entry_data
 
-          case .RenderEntryCoordinateSystem:
           case:
             panic("Unhandled Entry")
         }

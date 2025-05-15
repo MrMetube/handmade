@@ -6,10 +6,6 @@ Array :: struct ($N: i32, $T: typeid) {
     count: i32,
 }
 
-array_len :: proc(a: Array($N, $T)) -> int {
-    return a.count
-}
-
 array_append :: proc(a: ^Array($N, $T), values: ..T) {
     assert(N > a.count + len(values))
     for v in values {
@@ -112,14 +108,6 @@ SingleLinkedList :: struct($T: typeid) {
 // @todo(viktor): codefy removal from the list whilst iterating over it
 // maybe a procedure is enough, please no iterator objects
 
-
-// For when the head is inlined into a struct
-list_push_after_head :: proc(head: ^SingleLinkedList($T), element: ^SingleLinkedList(T)) {
-    element^, head^ = head^, element^
-    head.next = element
-}
-
-// For when the head is itself a pointer in a struct
 list_push :: proc(head: ^^SingleLinkedList($T), elements: ..^SingleLinkedList(T)) {
     for element in elements {
         element.next = head^

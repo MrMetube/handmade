@@ -6,7 +6,6 @@ import "base:intrinsics"
 import "core:fmt"
 import "core:math"
 import "core:os"
-import "core:strings"
 import win "core:sys/windows"
 
 import tt "vendor:stb/truetype"

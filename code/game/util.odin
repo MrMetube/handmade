@@ -94,6 +94,7 @@ atomic_add         :: intrinsics.atomic_add
 read_cycle_counter :: intrinsics.read_cycle_counter
 atomic_exchange    :: intrinsics.atomic_exchange
 
+// @todo(viktor): Is this correct? How can I validated this?
 @(enable_target_feature="sse2,sse")
 complete_previous_writes_before_future_writes :: proc "contextless" () {
     x86._mm_sfence()
@@ -107,16 +108,16 @@ complete_previous_reads_before_future_reads :: proc "contextless" () {
 ////////////////////////////////////////////////
 
 
-Kilobyte :: runtime.Kilobyte
-Megabyte :: runtime.Megabyte
-Gigabyte :: runtime.Gigabyte
-Terabyte :: runtime.Terabyte
+Byte     :: 1
+Kilobyte :: 1024 * Byte
+Megabyte :: 1024 * Kilobyte
+Gigabyte :: 1024 * Megabyte
+Terabyte :: 1024 * Gigabyte
+Petabyte :: 1024 * Terabyte
+Exabyte  :: 1024 * Petabyte
 
-align2     :: proc "contextless" (value: $T) -> T { return (value +  1) &~  1 }
-align4     :: proc "contextless" (value: $T) -> T { return (value +  3) &~  3 }
-align8     :: proc "contextless" (value: $T) -> T { return (value +  7) &~  7 }
-align16    :: proc "contextless" (value: $T) -> T { return (value + 15) &~ 15 }
-align32    :: proc "contextless" (value: $T) -> T { return (value + 31) &~ 31 }
+align8  :: proc "contextless" (value: $T) -> T { return (value + (8-1)) &~ (8-1) }
+align16 :: proc "contextless" (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
 align_pow2 :: proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
 
 
@@ -194,5 +195,3 @@ assert :: proc(condition: $B, message := #caller_expression(condition), loc := #
         }
     }
 }
-
-panic :: proc(message := "", loc := #caller_location) { assert(false, message, loc, prefix = "Panic") }

@@ -1,7 +1,6 @@
 package game
 
 import "core:fmt"
-import "base:runtime"
 
 DebugEventLink :: struct {
     next, prev: ^DebugEventLink,
@@ -173,8 +172,6 @@ draw_trees :: proc(debug: ^DebugState, mouse_p: v2) {
     
     assert(debug.font_info != nil)
     
-    frame_ordinal := debug.most_recent_frame_ordinal
-    
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
         layout := begin_layout(debug, tree.p, mouse_p)
         defer end_layout(&layout)
@@ -301,7 +298,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
       case DebugEventLink, b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
         null_event := DebugEvent {
             guid = element.guid,
-            value = element.type
+            value = element.type,
         }
         
         event := oldest_stored_event != nil ? &oldest_stored_event.event : &null_event
@@ -489,7 +486,6 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
     bar_width := dim.x / cast(f32) (MaxFrameCount)
     
     at_x := rect.min.x
-    scale := 1 / dim.y
     for &frame, frame_ordinal in root_element.frames {
         frame_ordinal := cast(i32) frame_ordinal
         region_rect := rectangle_min_max(
@@ -564,7 +560,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         
         frame := &element.frames[debug.viewed_frame_ordinal]
         for event := frame.events.last; event != nil; event = event.next {
-            duration_with_children := cast(f32) event.node.duration
+            // duration_with_children := cast(f32) event.node.duration
             duration_without_children := cast(f32) (event.node.duration - event.node.duration_of_children)
             accumulate_debug_statistic(&entry.stats, duration_without_children)
         }
@@ -573,7 +569,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         
         sort_entries[entry_index] = {
             sort_key = -entry.stats.sum,
-            index = entry_index
+            index = entry_index,
         }
         total_time += entry.stats.sum
     }
@@ -645,7 +641,6 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             
             if bar_width >= 1 && y_max - y_min >= 1 {
                 transform := debug.ui_transform
-                fill_color := color
                 border_color := color * {.2,.2,.2, 1}
                 if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
                     border_color = 1
@@ -679,7 +674,6 @@ draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, r
     
     frame := &root_element.frames[debug.viewed_frame_ordinal]
     total_clocks := get_total_clocks(frame)
-    root_event := frame.events.first
     
     next_x := rect.min.x
     relative_clock: i64

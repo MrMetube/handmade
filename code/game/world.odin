@@ -1,7 +1,5 @@
 package game
 
-import "core:fmt"
-
 World :: struct {
     arena: Arena,
     
@@ -64,7 +62,6 @@ ChunkData :: struct {
 WorldEntityBlock :: #type SingleLinkedList(WorldEntityBlockData)
 WorldEntityBlockData :: struct {
     entity_count: EntityId,// :Array
-    indices:      [16]EntityId,
     
     entity_data: Array(1 << 14, u8),
 }
@@ -150,9 +147,9 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for room in u32(0) ..< 1 {
-        when false {
-            choice := random_choice(&series, 3)
+    for room in u32(0) ..< 8 {
+        when true {
+            choice := random_choice(&series, 2)
         } else {
             choice := 0
         }
@@ -161,10 +158,10 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         switch(choice) {
         case 0: door_right  = true
         case 1: door_top    = true
-        case 2: stair_down  = true
-        case 3: stair_up    = true
-        case 4: door_left   = true
-        case 5: door_bottom = true
+        // case 2: stair_down  = true
+        // case 3: stair_up    = true
+        // case 4: door_left   = true
+        // case 5: door_bottom = true
         }
         
         created_stair = stair_down || stair_up
@@ -289,6 +286,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             if controller.button_right.ended_down {
                 con_hero.dfacing =  {1, 0}
             }
+            
+            if controller.back.ended_down {
+                con_hero.exited = true
+            }
         }
     }
     
@@ -371,29 +372,36 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
               case .HeroHead:
                 for &con_hero in world.controlled_heroes {
                     if con_hero.entity_id == entity.id {
-                        move_spec.normalize_accelaration = true
-                        move_spec.drag = 5
-                        move_spec.speed = 30
-                        ddp = con_hero.ddp
-                        
-                        if con_hero.dfacing.x != 0  {
-                            entity.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
-                        } else {
-                            // @note(viktor): leave the facing direction what it was
-                        }
-                        
-                        closest_p := get_closest_traversable(camera_sim_region, entity.p) or_else entity.p
-                        
                         body := entity.head.ptr
-                        if body != nil {
-                            spring_active := length_squared(ddp) == 0
-                            if spring_active {
-                                for i in 0..<3 {
-                                    head_spring := 400 * (closest_p[i] - entity.p[i]) + 20 * (- entity.dp[i])
-                                    ddp[i] += dt*head_spring
+                        if con_hero.exited {
+                            delete_entity(body)
+                            delete_entity(&entity)
+                            con_hero.entity_id = 0
+                        } else {
+                            move_spec.normalize_accelaration = true
+                            move_spec.drag = 5
+                            move_spec.speed = 30
+                            ddp = con_hero.ddp
+                            
+                            if con_hero.dfacing.x != 0  {
+                                entity.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
+                            } else {
+                                // @note(viktor): leave the facing direction what it was
+                            }
+                            
+                            closest_p := get_closest_traversable(camera_sim_region, entity.p) or_else entity.p
+                            
+                            if body != nil {
+                                spring_active := length_squared(ddp) == 0
+                                if spring_active {
+                                    for i in 0..<3 {
+                                        head_spring := 400 * (closest_p[i] - entity.p[i]) + 20 * (- entity.dp[i])
+                                        ddp[i] += dt*head_spring
+                                    }
                                 }
                             }
                         }
+                        
                         break
                     }
                 }
@@ -510,7 +518,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 move_spec.speed = 50
             }
             
-            if entity.flags & {.Nonspatial, .Moveable} == {.Moveable} {
+            if .Moveable in entity.flags {
                 move_entity(camera_sim_region, &entity, ddp, move_spec, dt)
             }
             
@@ -745,11 +753,13 @@ get_closest_traversable :: proc(region: ^SimRegion, from_p: v3) -> (result: v3, 
     return result, ok
 }
 
+// @cleanup
 null_position :: proc() -> (result: WorldPosition) {
     result.chunk.x = UninitializedChunk
     return result
 }
 
+// @cleanup
 is_valid :: proc(p: WorldPosition) -> b32 {
     return p.chunk.x != UninitializedChunk
 }
@@ -780,7 +790,7 @@ make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^Entity
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
         volumes = {},
         traversable_count = 1,
-        traversables = push_slice(&world.arena, TraversablePoint, 1)
+        traversables = push_slice(&world.arena, TraversablePoint, 1),
     }
     
     return result
@@ -884,7 +894,11 @@ extract_chunk :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
 pack_entity_into_world :: proc(world: ^World, source: ^Entity, p: WorldPosition) {
     chunk := get_chunk(&world.arena, world, p)
     assert(chunk != nil)
+    
+    source.p = p.offset
+
     pack_entity_into_chunk(world, source, chunk)
+    chunk = chunk
 }
 
 pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
@@ -903,6 +917,7 @@ pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
     block := chunk.first_block
     dest := &block.entity_data.data[block.entity_data.count]
     block.entity_data.count += pack_size
+    block.entity_count += 1
     
     (cast(^Entity) dest) ^= source^
 }

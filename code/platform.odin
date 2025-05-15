@@ -338,7 +338,7 @@ main :: proc() {
     }
     
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
-        panic()
+        assert(false)
         return // @logging 
     }
     
@@ -1073,20 +1073,18 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
             
             if was_down != is_down {
                 switch vk_code {
-                  case win.VK_W:     process_win_keyboard_message(&keyboard_controller.stick_up,       is_down)
-                  case win.VK_A:     process_win_keyboard_message(&keyboard_controller.stick_left,     is_down)
-                  case win.VK_S:     process_win_keyboard_message(&keyboard_controller.stick_down,     is_down)
-                  case win.VK_D:     process_win_keyboard_message(&keyboard_controller.stick_right,    is_down)
-                  case win.VK_Q:     process_win_keyboard_message(&keyboard_controller.shoulder_left,  is_down)
-                  case win.VK_E:     process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
-                  case win.VK_UP:    process_win_keyboard_message(&keyboard_controller.button_up,      is_down)
-                  case win.VK_DOWN:  process_win_keyboard_message(&keyboard_controller.button_down,    is_down)
-                  case win.VK_LEFT:  process_win_keyboard_message(&keyboard_controller.button_left,    is_down)
-                  case win.VK_RIGHT: process_win_keyboard_message(&keyboard_controller.button_right,   is_down)
-                  case win.VK_SPACE: process_win_keyboard_message(&keyboard_controller.start,          is_down)
-                  case win.VK_ESCAPE:
-                    GlobalRunning = false
-                    process_win_keyboard_message(&keyboard_controller.back, is_down)
+                  case win.VK_W:      process_win_keyboard_message(&keyboard_controller.stick_up,       is_down)
+                  case win.VK_A:      process_win_keyboard_message(&keyboard_controller.stick_left,     is_down)
+                  case win.VK_S:      process_win_keyboard_message(&keyboard_controller.stick_down,     is_down)
+                  case win.VK_D:      process_win_keyboard_message(&keyboard_controller.stick_right,    is_down)
+                  case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.shoulder_left,  is_down)
+                  case win.VK_E:      process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
+                  case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.button_up,      is_down)
+                  case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.button_down,    is_down)
+                  case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.button_left,    is_down)
+                  case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.button_right,   is_down)
+                  case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.start,          is_down)
+                  case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.back,           is_down)
                   case win.VK_L:
                     if is_down {
                         if state.input_replay_index != 0 {
