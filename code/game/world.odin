@@ -80,7 +80,8 @@ WorldPosition :: struct {
 chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
     // @volatile
     tile_size_in_meters  :: 1.5
-    tile_depth_in_meters :: 3
+    tile_depth_in_meters := world.typical_floor_height
+    
     offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_x, tile_y, tile_z) + {0.5, 0.5, 0})
     
     result = map_into_worldspace(world, result, offset + additional_offset)
@@ -93,10 +94,8 @@ chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: 
 init_world :: proc(world: ^World, parent_arena: ^Arena) {
     sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
     
-    // @cleanup REMOVE THIS
-    ground_buffer_size :: 512
     pixels_to_meters :: 1.0 / 42.0
-    chunk_dim_in_meters :f32= pixels_to_meters * ground_buffer_size
+    chunk_dim_in_meters :f32= pixels_to_meters * 256
     world.typical_floor_height = 3
     
     world.chunk_dim_meters = v3{chunk_dim_in_meters, chunk_dim_in_meters, world.typical_floor_height}
@@ -149,10 +148,10 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
     for room in u32(0) ..< 8 {
-        when true {
+        when !true {
             choice := random_choice(&series, 2)
         } else {
-            choice := 0
+            choice := 1
         }
         
         created_stair = false
@@ -168,13 +167,13 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         created_stair = stair_down || stair_up
         need_to_place_stair := created_stair
         
-        screen_tile_x := screen_col * tiles_per_screen.x
-        screen_tile_y := screen_row * tiles_per_screen.y
+        room_x := screen_col * tiles_per_screen.x
+        room_y := screen_row * tiles_per_screen.y
         
         for tile_y in 0..< tiles_per_screen.y {
             for tile_x in 0 ..< tiles_per_screen.x {
-                col := tile_x + screen_tile_x
-                row := tile_y + screen_tile_y
+                col := tile_x + room_x
+                row := tile_y + room_y
                 
                 should_be_wall: b32
                 if tile_x == 0                    && (!door_left  || tile_y != tiles_per_screen.y / 2) {
@@ -195,8 +194,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
                     add_wall(world, chunk_position_from_tile_positon(world, col, row, tile_z))
                 } else if need_to_place_stair {
                     add_stairs(world, chunk_position_from_tile_positon(world, 
-                        room % 2 == 0 ? 5 : 10 - screen_tile_x, 
-                        3                      - screen_tile_y, 
+                        room % 2 == 0 ? 5 : 10 - room_x, 
+                        3                      - room_y, 
                         stair_down ? tile_z-1 : tile_z,
                     ))
                     need_to_place_stair = false
@@ -205,7 +204,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
             }
         }
         
-        add_standart_room(world, chunk_position_from_tile_positon(world, screen_tile_x, screen_tile_y, tile_z)) 
+        p := chunk_position_from_tile_positon(world, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, tile_z)
+        add_standart_room(world, p) 
         
         door_left   = door_right
         door_bottom = door_top
@@ -312,7 +312,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // @todo(viktor): by how much should we expand the sim region?
     // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := rectangle_add_radius(camera_bounds, v3{17, 17, 2})
+    sim_bounds := rectangle_add_radius(camera_bounds, v3{15, 15, 15})
     sim_origin := world.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
@@ -628,7 +628,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 transform.upright = false
                 color := Green
                 color.rgb *= 0.4
-                push_rectangle(render_group, entity.collision.total_volume, transform, color)
+                push_rectangle_outline(render_group, entity.collision.total_volume, transform, color)
                 for traversable in entity.collision.traversables[:entity.collision.traversable_count] {
                     rect := rectangle_center_dimension(traversable.p, 0.1)
                     push_rectangle(render_group, rect, transform, Blue)
@@ -744,8 +744,12 @@ get_closest_traversable :: proc(region: ^SimRegion, from_p: v3) -> (result: v3, 
     for &test in region.entities[:region.entity_count] {
         for point_index in 0..<test.collision.traversable_count {
             point := get_sim_space_traversable(&test, point_index )
-            // @todo(viktor): check that they have the same z
-            dsq := length_squared(point.p - from_p)
+            
+            delta_p := point.p - from_p
+            // @todo(viktor): what should this value be
+            delta_p.z *= max(0, abs(delta_p.z) - 1.0)
+            
+            dsq := length_squared(delta_p)
             if dsq < closest_point_dsq {
                 result = point.p
                 closest_point_dsq = dsq

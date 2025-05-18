@@ -137,25 +137,25 @@ delete_entity :: proc(entity: ^Entity) {
 begin_grounded_entity :: proc(world: ^World, type: EntityType, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
     result = begin_entity(world, type)
     result.collision = collision
-
+    
     return result
 }
 
 add_wall :: proc(world: ^World, p: WorldPosition) {
     entity := begin_grounded_entity(world, .Wall, world.wall_collision)
-
+    
     entity.flags += {.Collides}
-
+    
     end_entity(world, entity, p)
 }
 
 add_stairs :: proc(world: ^World, p: WorldPosition) {
     entity := begin_grounded_entity(world, .Stairwell, world.stairs_collision)
-
+    
     entity.flags += {.Collides}
     entity.walkable_height = world.typical_floor_height
     entity.walkable_dim    = rectangle_get_dimension(entity.collision.total_volume).xy
-
+    
     end_entity(world, entity, p)
 }
 
@@ -169,7 +169,7 @@ add_hero :: proc(world: ^World) -> (result: EntityId) {
         
         body.flags += {.Moveable}
         body.head.id = result
-
+    
     head.head.id = body.id
         
         end_entity(world, body, world.camera_p)
@@ -179,7 +179,7 @@ add_hero :: proc(world: ^World) -> (result: EntityId) {
     if world.camera_following_id == 0 {
         world.camera_following_id = result
     }
-        
+    
     end_entity(world, head, world.camera_p)
     
     return result
@@ -187,11 +187,11 @@ add_hero :: proc(world: ^World) -> (result: EntityId) {
 
 add_monster :: proc(world: ^World, p: WorldPosition) {
     entity := begin_grounded_entity(world, .Monster, world.monstar_collision)
-
+    
     entity.flags += {.Collides, .Moveable}
-
+    
     init_hitpoints(entity, 3)
-
+    
     end_entity(world, entity, p)
 }
 
@@ -204,13 +204,21 @@ add_familiar :: proc(world: ^World, p: WorldPosition) {
 }
 
 add_standart_room :: proc(world: ^World, p: WorldPosition) {
-    width  :i32= 17
-    height :i32=  9
-    for offset_y in 0..=height {
-        for offset_x in 0..=width {
-            floor_p := chunk_position_from_tile_positon(world, p.chunk.x + offset_x, p.chunk.y + offset_y, p.chunk.z)
+    // @volatile
+    h_width  :i32= 17/2
+    h_height :i32=  9/2
+    tile_size_in_meters :: 1.5
+    
+    for offset_y in -h_height..=h_height {
+        for offset_x in -h_width..=h_width {
+            p := p
+            p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
+            p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
+            
+            p.offset.z = cast(f32) (offset_y + offset_x) * 0.2
+            
             entity := begin_grounded_entity(world, .Floor, world.floor_collision)
-            end_entity(world, entity, floor_p)
+            end_entity(world, entity, p)
         }
     }
 }

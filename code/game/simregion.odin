@@ -110,19 +110,19 @@ end_sim :: proc(region: ^SimRegion) {
         
         if entity.id == region.world.camera_following_id {
             // @volatile Room size
-            room_delta := v3{25.5, 13.5, 0}
+            room_delta := v3{25.5, 13.5, region.world.typical_floor_height}
             half_room_delta := room_delta*0.5
-            half_room_apron := half_room_delta - {1, 1, 0} * 0.7
+            half_room_apron := half_room_delta - {1, 1, 1} * 0.7
             height :f32= 0.5
             region.world.camera_offset = 0
 
             offset: v3
             delta := world_difference(region.world, entity_p, region.world.camera_p)
-                        
-            if delta.x >  half_room_delta.x do offset.x += room_delta.x
-            if delta.x < -half_room_delta.x do offset.x -= room_delta.x
-            if delta.y >  half_room_delta.y do offset.y += room_delta.y
-            if delta.y < -half_room_delta.y do offset.y -= room_delta.y
+            
+            for i in 0..<3 {
+                if delta[i] >  half_room_delta[i] do offset[i] += room_delta[i]
+                if delta[i] < -half_room_delta[i] do offset[i] -= room_delta[i]
+            }
             
             region.world.camera_p = map_into_worldspace(region.world, region.world.camera_p, offset)
             
@@ -149,6 +149,16 @@ end_sim :: proc(region: ^SimRegion) {
                 t := clamp_01_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
                 region.world.camera_offset.x = t*-half_room_delta.x
                 region.world.camera_offset.z = (-(t*t)+2*t)*height
+            }
+            
+            if delta.z >  half_room_apron.z {
+                t := clamp_01_to_range(half_room_apron.z, delta.z, half_room_delta.z)
+                region.world.camera_offset.z = t*half_room_delta.z
+            }
+            
+            if delta.z < -half_room_apron.z {
+                t := clamp_01_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
+                region.world.camera_offset.z = t*-half_room_delta.z
             }
         }
         

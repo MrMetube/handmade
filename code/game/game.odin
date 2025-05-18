@@ -99,8 +99,6 @@ EnvironmentTest:               b32
 RenderSingleThreaded:          b32
 UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
-RenderGroundChunks:            b32
-ShowGroundChunkBounds:         b32
 ShowRenderAndSimulationBounds: b32
 TimestepPercentage:            f32 = 100
 
@@ -383,11 +381,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         { debug_data_block("Camera")
             debug_record_value(&UseDebugCamera)
             debug_record_value(&DebugCameraDistance)
-        }
-        
-        { debug_data_block("GroundChunks")
-            debug_record_value(&RenderGroundChunks)
-            debug_record_value(&ShowGroundChunkBounds)
         }
     }
     
