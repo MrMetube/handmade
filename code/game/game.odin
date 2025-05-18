@@ -443,7 +443,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                 particle.p = {random_bilateral(&state.effects_entropy, f32)*0.1, 0, 0}
                 particle.dp = {random_bilateral(&state.effects_entropy, f32)*0, (random_unilateral(&state.effects_entropy, f32)*0.4)+7, 0}
                 particle.ddp = {0, -9.8, 0}
-                particle.color = V4(random_unilateral_3(&state.effects_entropy, f32), 1)
+                particle.color = V4(random_unilateral(&state.effects_entropy, v3), 1)
                 particle.dcolor = {0,0,0,-0.2}
                 
                 nothings := "Handmade"

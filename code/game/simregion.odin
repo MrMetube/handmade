@@ -20,7 +20,7 @@ SimRegion :: struct {
 
 EntityReference :: struct #raw_union {
     pointer: ^Entity,
-    id:  EntityId,
+    id:      EntityId,
 }
 
 TraversableReference :: struct {
@@ -72,7 +72,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                 chunk :^Chunk= extract_chunk(world, chunk_p)
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
-                    chunk_delta := world_difference(world, chunk_world_p, region.origin)
+                    chunk_delta := world_distance(world, chunk_world_p, region.origin)
                     block := chunk.first_block
                     for block != nil {
                         
@@ -111,7 +111,7 @@ end_sim :: proc(region: ^SimRegion) {
         entity_p := map_into_worldspace(region.world, region.origin, entity.p)
         chunk_p  := entity_p
         chunk_p.offset = 0
-        chunk_delta := -world_difference(region.world, chunk_p, region.origin)
+        chunk_delta := entity_p.offset - entity.p
         
         if entity.id == region.world.camera_following_id {
             // @volatile Room size
@@ -122,7 +122,7 @@ end_sim :: proc(region: ^SimRegion) {
             region.world.camera_offset = 0
 
             offset: v3
-            delta := world_difference(region.world, entity_p, region.world.camera_p)
+            delta := world_distance(region.world, entity_p, region.world.camera_p)
             
             for i in 0..<3 {
                 if delta[i] >  half_room_delta[i] do offset[i] += room_delta[i]
@@ -247,6 +247,7 @@ add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
 
 connect_entity_references :: proc(region: ^SimRegion) {
     for &entity in region.entities {
+        // @metaprogram should be able to generate the load und pack code
         load_entity_reference(region, &entity.head)
         load_traversable_reference(region, &entity.standing_on)
         load_traversable_reference(region, &entity.moving_to)

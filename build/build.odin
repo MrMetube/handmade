@@ -13,6 +13,11 @@ import "core:time"
 
 import win "core:sys/windows"
 
+/* @todo(viktor): A checker before build
+    Entity should always be used by pointer. 
+    In loops, function parameters and local variables.
+*/
+
 // @study(viktor): If the build does not change its faster to build/rebuild and execute the build.exe.
 // But if the amount of times the build changes increases, then it would be simpler to just odin run it directly.
 // Currently we the saved time is ~35% i.e. 0,52 seconds each time we build.
@@ -43,7 +48,7 @@ commoner :: " -custom-attribute:common "
 
 optimizations    :: " -o:none " when true else " -o:speed "
 PedanticGame     :: false
-PedanticPlatform :: false  
+PedanticPlatform :: false
 
 src_path :: `.\build\`   
 exe_path :: `.\build\build.exe`

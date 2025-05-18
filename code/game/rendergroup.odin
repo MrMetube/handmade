@@ -210,11 +210,6 @@ orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels:
     group.current_clip_rect_index = push_clip_rect(group, clip)
 }
 
-all_assets_valid :: proc(group: ^RenderGroup) -> (result: b32) {
-    result = group.missing_asset_count == 0
-    return result
-}
-
 push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
     assert(group.camera.mode != .None)
     

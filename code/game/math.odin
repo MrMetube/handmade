@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 @(common="file")
@@ -60,13 +61,7 @@ DegPerRad :: 360.0/Tau
 
 square_root :: simd.sqrt
 
-lerp :: proc { lerp_vf, lerp_t }
-@(require_results) lerp_t :: proc(from, to: $T, t: T) -> T {
-    result := (1-t) * from + t * to
-    
-    return result
-}
-@(require_results) lerp_vf :: proc(from, to: $V, t: f32) -> V where V != f32 {
+@(require_results) lerp :: proc(from: $T, to: T, t: f32) -> T {
     result := (1-t) * from + t * to
     
     return result
@@ -153,26 +148,26 @@ sign :: proc{ sign_i, sign_f }
 @(require_results) sign_i  :: proc(i: i32) -> i32 { return i >= 0 ? 1 : -1 }
 @(require_results) sign_f  :: proc(x: f32) -> f32 { return x >= 0 ? 1 : -1 }
 
-mod :: proc { mod_f, mod_vf, mod_v }
+modulus :: proc { mod_f, mod_vf, mod_v }
 @(require_results) mod_f :: proc(value: f32, divisor: f32) -> f32 {
     return math.mod(value, divisor)
 }
-@(require_results) mod_vf :: proc(value: [2]f32, divisor: f32) -> [2]f32 {
-    return {math.mod(value.x, divisor), math.mod(value.y, divisor)}
+@(require_results) mod_vf :: proc(value: [$N]f32, divisor: f32) -> (result: [N]f32) {
+    #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor) 
+    return result
 }
-@(require_results) mod_v :: proc(value: [2]f32, divisor: [2]f32) -> [2]f32 {
-    return {math.mod(value.x, divisor.x), math.mod(value.y, divisor.y)}
+@(require_results) mod_v :: proc(value: [$N]f32, divisor: [N]f32) -> (result: [N]f32) {
+    #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor[i]) 
+    return result
 }
 
 round :: proc { round_f, round_v }
 @(require_results) round_f :: proc(f: f32, $T: typeid) -> T {
-    if f < 0 do return cast(T) -math.round(-f)
-    return cast(T) math.round(f)
+    return  cast(T) (f < 0 ? -math.round(-f) : math.round(f))
 }
-@(require_results) round_v :: proc(fs: [$N]f32, $T: typeid) -> [N]T where N > 1 {
-    fs := fs
-    for &e in fs do e = math.round(e) 
-    return vec_cast(T, fs)
+@(require_results) round_v :: proc(v: [$N]f32, $T: typeid) -> (result: [N]T) {
+    #unroll for i in 0..<N do result[i] = cast(T) math.round(v[i]) 
+    return result
 }
 
 floor :: proc { floor_f, floor_v }
@@ -213,7 +208,6 @@ cos :: proc { cos_f }
 
 
 atan2 :: proc { atan2_f }
-
 @(require_results) atan2_f :: proc(y, x: f32) -> f32 {
     return math.atan2(y, x)
 }
@@ -377,8 +371,6 @@ rectangle_min_dimension  :: proc { rectangle_min_dimension_2, rectangle_min_dime
     return result
 }
 
-@(require_results) rectangle_get_max       :: proc(rect: Rectangle($T)) -> (result: T) { return rect.max }
-@(require_results) rectangle_get_min       :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min }
 @(require_results) rectangle_get_dimension :: proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
 @(require_results) rectangle_get_center    :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min + (rect.max - rect.min) / 2 }
 

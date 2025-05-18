@@ -252,7 +252,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_origin := world.camera_p
     camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
-    camera_p := world.camera_offset + world_difference(world, world.camera_p, sim_origin)
+    camera_p := world.camera_offset + world_distance(world, world.camera_p, sim_origin)
     
     if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
@@ -378,15 +378,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
               case .FloatyThingForNow:
                 entity.t_bob += dt
                 if entity.t_bob > Tau do entity.t_bob -= Tau
-                entity.p.z = sin(entity.t_bob) * 6 - 2
+                entity.p.z += 0.05 * cos(entity.t_bob)
                 
               case .HeroHead:
                 for &con_hero in world.controlled_heroes {
                     if con_hero.entity_id == entity.id {
-                        body := entity.head.pointer
+                        head := &entity
+                        body := head.head.pointer
                         if con_hero.exited {
                             delete_entity(body)
-                            delete_entity(&entity)
+                            delete_entity(head)
                             con_hero.entity_id = 0
                         } else {
                             move_spec.normalize_accelaration = true
@@ -395,25 +396,41 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             ddp = con_hero.ddp
                             
                             if con_hero.dfacing.x != 0  {
-                                entity.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
+                                head.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
                             } else {
                                 // @note(viktor): leave the facing direction what it was
                             }
                             
-                            traversable_reference, ok := get_closest_traversable(camera_sim_region, entity.p)
+                            traversable_reference, ok := get_closest_traversable(camera_sim_region, head.p)
                             if ok {
+                                if body != nil {
+                                    if body.movement_mode == .Planted {
+                                        if traversable_reference != body.standing_on {
+                                            body.movement_mode = .Hopping
+                                            body.moving_to     = traversable_reference
+                                            body.t_movement = 0
+                                        }
+                                    }
+                                } else {
+                                    
+                                }
+                                
                                 traversable := get_sim_space_traversable(traversable_reference)
                                 closest_p := traversable.p
-                                
+                                                                
                                 if body != nil {
                                     spring_active := length_squared(ddp) == 0
                                     if spring_active {
                                         for i in 0..<3 {
-                                            head_spring := 400 * (closest_p[i] - entity.p[i]) + 20 * (- entity.dp[i])
+                                            head_spring := 400 * (closest_p[i] - head.p[i]) + 20 * (- head.dp[i])
                                             ddp[i] += dt*head_spring
                                         }
                                     }
                                 }
+                            }
+                            
+                            if body != nil {
+                                body.facing_direction = head.facing_direction
                             }
                         }
                         
@@ -422,102 +439,84 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                 
               case.HeroBody:
-                head := entity.head.pointer
-                if head != nil {
-                    if entity.movement_mode == .Planted {
-                        entity.p = get_sim_space_traversable(entity.standing_on).p
-                    }
-                    
-                    // @todo(viktor): make spatial queries easy for things
-                    desired_direction := entity.p - head.p
-                    desired_direction = normalize_or_zero(desired_direction)
-                    
-                    closest_p := entity.p
-                    traversable_reference, ok := get_closest_traversable(camera_sim_region, head.p)
-                    if ok {
-                        traversable := get_sim_space_traversable(traversable_reference)
-                        closest_p = traversable.p
-                    }
-                    
-                    head_delta := head.p - entity.p
-                    
-                    body_delta := closest_p - entity.p
-                    body_distance_sq := length_squared(body_delta)
-                    
-                    entity.facing_direction = head.facing_direction
-                    
-                    ddt_bob: f32
-                    head_distance := length(head.p - entity.p)
-                    max_head_distance :f32= 0.4
-                    t_head_distance := clamp_01_to_range(0, head_distance, max_head_distance)
-                    
-                    switch entity.movement_mode {
-                      case .Planted:
-                        if body_distance_sq > square(f32(0.01)) {
-                            entity.movement_mode = .Hopping
-                            entity.moving_to     = traversable_reference
-                            entity.t_movement = 0
-                        }
-                        ddt_bob = t_head_distance * -30
-                        
-                      case .Hopping:
-                        moving_to   := get_sim_space_traversable(entity.moving_to).p
-                        standing_on := get_sim_space_traversable(entity.standing_on).p
-                        pt := moving_to
-
-                        t_jump :: 0.1
-                        t_thrust :: 0.8
-                        ddt_bob = t_head_distance * -30
-                        if entity.t_movement < t_thrust {
-                            ddt_bob -= 60
-                        } 
-                        
-                        if t_jump <= entity.t_movement {
-                            
-                            t := clamp_01_to_range(t_jump, entity.t_movement, 1)
-                            entity.t_bob = sin(t * Pi) * 0.1
-                            entity.p = lerp(standing_on, moving_to, entity.t_movement)
-                            entity.dp = 0
-                            
-                            pf := standing_on
-                            
-                            // :ZHandling
-                            height := v3{0, 0.3, 0.3}
-                            
-                            c := pf
-                            a := -4 * height
-                            b := pt - pf - a
-                            entity.p = a * square(t) + b * t + c
-                        }
-                        
-                        
-                        if entity.t_movement >= 1 {
-                            entity.movement_mode = .Planted
-                            entity.dt_bob = -3
-                            entity.p = pt
-                            entity.standing_on = entity.moving_to
-                        }
-                        
-                        hop_duration :f32: 0.2
-                        entity.t_movement += dt * (1 / hop_duration)
-                        
-                        if entity.t_movement >= 1 {
-                            entity.t_movement = 1
-                        }
-                    }
-                    
-                    entity.y_axis = v2{0, 1} + 1 * head_delta.xy
-                    // entity.x_axis = perpendicular(entity.y_axis)
-                    
-                    ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
-                    
-                    entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
-                    entity.dt_bob += 0.5*ddt_bob*dt
-                    
-                    move_spec.normalize_accelaration = true
-                    move_spec.drag = 50
-                    move_spec.speed = 250
+                body := &entity
+                head := body.head.pointer
+                
+                if entity.movement_mode == .Planted {
+                    entity.p = get_sim_space_traversable(entity.standing_on).p
                 }
+                
+                head_delta: v3
+                if head != nil {
+                    head_delta = head.p - body.p
+                }
+                body.y_axis = v2{0, 1} + 1 * head_delta.xy
+                // body.x_axis = perpendicular(body.y_axis)
+                
+                ddt_bob: f32
+                switch entity.movement_mode {
+                  case .Planted:
+                    if head != nil {
+                        head_distance := length(head_delta)
+                        max_head_distance :f32= 0.4
+                        t_head_distance := clamp_01_to_range(0, head_distance, max_head_distance)
+                        
+                        ddt_bob = t_head_distance * -30
+                    }
+
+                  case .Hopping:
+                    t_jump :: 0.1
+                    t_thrust :: 0.8
+                    
+                    moving_to   := get_sim_space_traversable(entity.moving_to).p
+                    standing_on := get_sim_space_traversable(entity.standing_on).p
+                    pt := moving_to
+                    
+                    if body.t_movement < t_thrust {
+                        ddt_bob -= 60
+                    }
+                    
+                    if t_jump <= entity.t_movement {
+                        
+                        t := clamp_01_to_range(t_jump, entity.t_movement, 1)
+                        entity.t_bob = sin(t * Pi) * 0.1
+                        entity.p = lerp(standing_on, moving_to, entity.t_movement)
+                        entity.dp = 0
+                        
+                        pf := standing_on
+                        
+                        // :ZHandling
+                        height := v3{0, 0.3, 0.3}
+                        
+                        c := pf
+                        a := -4 * height
+                        b := pt - pf - a
+                        entity.p = a * square(t) + b * t + c
+                    }
+                    
+                    if entity.t_movement >= 1 {
+                        entity.movement_mode = .Planted
+                        entity.dt_bob = -3
+                        entity.p = pt
+                        entity.standing_on = entity.moving_to
+                    }
+                    
+                    hop_duration :f32: 0.2
+                    entity.t_movement += dt * (1 / hop_duration)
+                    
+                    if entity.t_movement >= 1 {
+                        entity.t_movement = 1
+                    }
+                }
+                
+                
+                ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
+                entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
+                entity.dt_bob += 0.5*ddt_bob*dt
+                
+                move_spec.normalize_accelaration = true
+                move_spec.drag = 50
+                move_spec.speed = 250
                 
               case .Familiar: 
                 closest_hero: ^Entity
@@ -761,17 +760,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
 ////////////////////////////////////////////////
 
-// @cleanup
-null_position :: proc() -> (result: WorldPosition) {
-    result.chunk.x = UninitializedChunk
-    return result
-}
-
-// @cleanup
-is_valid :: proc(p: WorldPosition) -> b32 {
-    return p.chunk.x != UninitializedChunk
-}
-
 make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGroup) {
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result^ = {}
@@ -809,16 +797,16 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {
     result := center
     result.offset += offset
     
-    rounded_offset  := round(result.offset / world.chunk_dim_meters, i32)
-    result.chunk  = result.chunk + rounded_offset
-    result.offset -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
+    rounded_offset := round(result.offset / world.chunk_dim_meters, i32)
+    result.chunk   =  result.chunk + rounded_offset
+    result.offset  -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
     
     assert(is_canonical(world, result.offset))
     
     return result
 }
 
-world_difference :: proc(world: ^World, a, b: WorldPosition) -> (result: v3) {
+world_distance :: proc(world: ^World, a, b: WorldPosition) -> (result: v3) {
     chunk_delta  := vec_cast(f32, a.chunk) - vec_cast(f32, b.chunk)
     offset_delta := a.offset - b.offset
     result = chunk_delta * world.chunk_dim_meters
@@ -834,19 +822,7 @@ is_canonical :: proc(world: ^World, offset: v3) -> b32 {
            -half_size.z <= offset.z && offset.z <= half_size.z
 }
 
-are_in_same_chunk :: proc(world: ^World, a, b: WorldPosition) -> b32 {
-    assert(is_canonical(world, a.offset))
-    assert(is_canonical(world, b.offset))
-    
-    return a.chunk == b.chunk
-}
-
-get_chunk :: proc {
-    get_chunk_pos,
-    get_chunk_3,
-}
-
-get_chunk_pos :: proc(arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
+get_chunk :: proc (arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
     return get_chunk_3(arena, world, point.chunk)
 }
 get_chunk_3_internal :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^^Chunk) {
@@ -887,6 +863,8 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (res
     
     return result
 }
+
+////////////////////////////////////////////////
 
 extract_chunk :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
     next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
@@ -930,6 +908,7 @@ pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
     entity := (cast(^Entity) dest)
     entity ^= source^
     
+    // @metaprogram should be able to generate the load und pack code
     pack_entity_reference(&entity.head)
     pack_traversable_reference(&entity.moving_to)
     pack_traversable_reference(&entity.standing_on)
@@ -956,6 +935,3 @@ clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
 block_has_room :: proc(block: ^WorldEntityBlock, size: i32) -> b32 {
     return block.entity_data.count + size < len(block.entity_data.data)
 }
-
-// @cleanup
-UninitializedChunk :: min(i32)

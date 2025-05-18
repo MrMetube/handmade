@@ -24,11 +24,6 @@ next_random_u32 :: proc(series: ^RandomSeries) -> (result: u32) {
     return result
 }
 
-random_bool :: proc(series: ^RandomSeries) -> (result: b32) {
-    result = (next_random_u32(series) & 1) == 0
-    return result
-}
-
 random_choice :: proc { random_choice_integer_0_max, random_choice_integer_min_max, random_choice_data }
 random_choice_integer_0_max :: proc(series: ^RandomSeries, max: u32) -> (result: u32) {
     result = next_random_u32(series) % max
@@ -44,14 +39,13 @@ random_choice_data :: proc(series: ^RandomSeries, data:[]$T) -> (result: ^T) {
 }
 
 random_unilateral :: proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
-    result = cast(T) (cast(f64)(next_random_u32(series) - MinRandomValue) / (MaxRandomValue - MinRandomValue)) 
+    when intrinsics.type_is_array(T) {
+        E :: intrinsics.type_elem_type(T)
+        #unroll for i in 0..<len(T) do result[i] = cast(E) (cast(f64)(next_random_u32(series) - MinRandomValue) / (MaxRandomValue - MinRandomValue)) 
+    } else {
+        result = cast(T) (cast(f64)(next_random_u32(series) - MinRandomValue) / (MaxRandomValue - MinRandomValue)) 
+    }
     return result
-}
-random_unilateral_2 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
-    return {random_unilateral(series, T), random_unilateral(series, T)}
-}
-random_unilateral_3 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [3]T) {
-    return {random_unilateral(series, T), random_unilateral(series, T), random_unilateral(series, T)}
 }
 
 random_bilateral :: proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
@@ -59,23 +53,10 @@ random_bilateral :: proc(series: ^RandomSeries, $T: typeid) -> (result: T) {
     
     return result
 }
-random_bilateral_2 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [2]T) {
-    return {random_bilateral(series, T), random_bilateral(series, T)}
-}
-random_bilateral_3 :: proc(series: ^RandomSeries, $T: typeid) -> (result: [3]T) {
-    return {random_bilateral(series, T), random_bilateral(series, T), random_bilateral(series, T)}
-}
 
 random_between_i32 :: proc(series: ^RandomSeries, min, max: i32) -> (result: i32) {
     assert(min < max)
     result = min + cast(i32)(next_random_u32(series) % cast(u32)((max+1)-min))
-    
-    return result
-}
-random_between_f32 :: proc(series: ^RandomSeries, min, max: f32) -> (result: f32) {
-    assert(min < max)
-    val := next_random_u32(series)
-    result = min + mod(cast(f32)val, ((max+1)-min))
     
     return result
 }
@@ -87,12 +68,10 @@ random_between_u32 :: proc(series: ^RandomSeries, min, max: u32) -> (result: u32
     return result
 }
 
-@(private="file")
-MaxRandomValue :: 429389759
-@(private="file")
-MinRandomValue :: 141215
+@(private="file") MaxRandomValue :: 429389759
+@(private="file") MinRandomValue :: 141215
 
-@(private="file")
+@(private="file", rodata)
 random_number_table := [?]u32{
     0x0b128055,	0x12dc57af,	0x14996bd5,	0x085a021b,	0x06b9bfac,	0x05e842c7,	0x144c9efe,	0x022cc4bc,	0x0df37a2c,	0x1706325c,	0x10cd4a48,	0x10d43f6b,	0x07b8b8e9,	0x08cbd0c2,	0x0e4c677b,	0x145ad81c,	0x18c69c68,	0x065334eb,	0x168232d5,	0x110dd074,	0x169553a7,	0x06d38fc1,	0x0a6c3090,	0x0ea99b60,	0x08fd0a64,	0x0b3d25e0,	0x10e336b5,	0x02791d96,	0x16fbcdff,	0x0d33206e,	0x0ee71654, 0x0b654869,	
     0x02fd50e1,	0x16e5f97f,	0x0d7a4839,	0x17a935b3,	0x160c0447,	0x176bc53d,	0x06c49c98,	0x14cd66dc,	0x1318b066,	0x0e05ea3c,	0x04b91eb3,	0x00e36164,	0x047641e8,	0x040b7123,	0x06a6d361,	0x07090962,	0x12d0ffd5,	0x0aa2f1b8,	0x099fa4ab,	0x0ae0f14a,	0x124c1ab7,	0x0e92a829,	0x12fd7064,	0x13bb94a5,	0x0bab7ef8,	0x104a1bbd,	0x0bc882b2,	0x17771a1a,	0x06b0af58,	0x13b8cdda,	0x00bdb82f,	0x110b2947,

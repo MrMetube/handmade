@@ -985,23 +985,26 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
         // Detect Auto Interaction
         if debug.hot_interaction.kind == .AutoDetect {
             target := cast(^DebugElement) debug.hot_interaction.target
-            event := &target.frames[frame_ordinal].events.first.event
+            first_stored_event := target.frames[frame_ordinal].events.first
+            if first_stored_event != nil {
+                event := &first_stored_event.event
             
-            switch value in event.value {
-              case FrameMarker, 
-                   BeginTimedBlock, EndTimedBlock,
-                   BeginDataBlock, EndDataBlock,
-                   ThreadProfileGraph, FrameBarsGraph, TopClocksList,
-                   FrameSlider, FrameInfo,
-                   ArenaOccupancy,
-                   BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, v2, v3, v4:
-                debug.hot_interaction.kind = .NOP
-              case b32:
-                debug.hot_interaction.kind = .ToggleValue
-              case f32:
-                debug.hot_interaction.kind = .DragValue
-              case DebugEventLink:
-                debug.hot_interaction.kind = .ToggleValue
+                switch value in event.value {
+                  case FrameMarker, 
+                       BeginTimedBlock, EndTimedBlock,
+                       BeginDataBlock, EndDataBlock,
+                       ThreadProfileGraph, FrameBarsGraph, TopClocksList,
+                       FrameSlider, FrameInfo,
+                       ArenaOccupancy,
+                       BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, v2, v3, v4:
+                    debug.hot_interaction.kind = .NOP
+                  case b32:
+                    debug.hot_interaction.kind = .ToggleValue
+                  case f32:
+                    debug.hot_interaction.kind = .DragValue
+                  case DebugEventLink:
+                    debug.hot_interaction.kind = .ToggleValue
+                }
             }
         }
         
@@ -1185,12 +1188,6 @@ clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^
 id_from_link :: proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
     result.value[0] = tree
     result.value[1] = link
-    return result
-}
-
-id_from_guid :: proc(guid: ^DebugGUID) -> (result: DebugId) {
-    result.value[0] = guid
-    result.value[1] = nil
     return result
 }
 
