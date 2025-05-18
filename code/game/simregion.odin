@@ -19,12 +19,17 @@ SimRegion :: struct {
 #assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
 EntityReference :: struct #raw_union {
-    ptr: ^Entity,
+    pointer: ^Entity,
     id:  EntityId,
 }
 
+TraversableReference :: struct {
+    entity: EntityReference,
+    index:  u32,
+}
+
 SimEntityHash :: struct {
-    ptr: ^Entity,
+    pointer: ^Entity,
     id:  EntityId,
 }
 
@@ -162,14 +167,35 @@ end_sim :: proc(region: ^SimRegion) {
             }
         }
         
-        entity.p             += chunk_delta
-        entity.movement_from += chunk_delta
-        entity.movement_to   += chunk_delta
+        entity.p += chunk_delta
 
-        store_entity_reference(&entity.head)
-        
         pack_entity_into_world(region.world, &entity, entity_p)
     }
+}
+
+get_closest_traversable :: proc(region: ^SimRegion, from_p: v3) -> (result: TraversableReference, ok: b32) {
+    // @todo(viktor): make spatial queries easy for things
+    closest_point_dsq :f32= 1000
+    for &test in region.entities[:region.entity_count] {
+        for point_index in 0..<test.collision.traversable_count {
+            point := get_sim_space_traversable(&test, point_index )
+            
+            delta_p := point.p - from_p
+            // @todo(viktor): what should this value be
+            delta_p.z *= max(0, abs(delta_p.z) - 1.0)
+            
+            dsq := length_squared(delta_p)
+            if dsq < closest_point_dsq {
+                result.entity.pointer = &test
+                result.index = point_index
+                
+                closest_point_dsq = dsq
+                ok = true
+            }
+        }
+    }
+    
+    return result, ok
 }
 
 entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
@@ -202,22 +228,19 @@ add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
     entry := get_hash_from_index(region, source.id)
     assert(entry != nil)
     
-    assert(entry.ptr == nil)
+    assert(entry.pointer == nil)
     dest := &region.entities[region.entity_count]
     region.entity_count += 1
     
     assert(entry.id == 0 || entry.id == source.id)
     entry.id = source.id
-    entry.ptr = dest
+    entry.pointer = dest
     
     // @todo(viktor): this should really be a decompression not a copy
     dest^ = source^
     
     dest.id = source.id
-    
-    dest.p             += chunk_delta
-    dest.movement_from += chunk_delta
-    dest.movement_to   += chunk_delta
+    dest.p += chunk_delta
     
     dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
 }
@@ -225,23 +248,27 @@ add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
 connect_entity_references :: proc(region: ^SimRegion) {
     for &entity in region.entities {
         load_entity_reference(region, &entity.head)
+        load_traversable_reference(region, &entity.standing_on)
+        load_traversable_reference(region, &entity.moving_to)
     }
 }
 
 load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
     if ref.id != 0 {
         entry := get_hash_from_index(region, ref.id)
-        ref.ptr = entry == nil ? nil : entry.ptr 
+        ref.pointer = entry == nil ? nil : entry.pointer
     }
 }
 
-store_entity_reference :: proc(ref: ^EntityReference) {
-    if ref.ptr != nil {
-        ref.id = ref.ptr.id
-    }
+load_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReference) {
+    load_entity_reference(region, &ref.entity)
 }
 
-get_sim_space_traversable :: proc(entity: ^Entity, index: u32) -> (result: TraversablePoint) {
+get_sim_space_traversable :: proc { get_sim_space_traversable_ref, get_sim_space_traversable_raw }
+get_sim_space_traversable_ref :: proc(ref: TraversableReference) -> (result: TraversablePoint) {
+    return get_sim_space_traversable_raw(ref.entity.pointer, ref.index)
+}
+get_sim_space_traversable_raw :: proc(entity: ^Entity, index: u32) -> (result: TraversablePoint) {
     result = entity.collision.traversables[index]
     result.p += entity.p
     return result

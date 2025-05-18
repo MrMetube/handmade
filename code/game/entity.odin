@@ -19,11 +19,11 @@ Entity :: struct {
     head: EntityReference,
     
     movement_mode: MovementMode,
-    t_movement:      f32,
-    movement_from:   v3,
-    movement_to: v3,
+    t_movement:    f32,
+    standing_on: TraversableReference,
+    moving_to:   TraversableReference,
     
-    t_bob: f32,
+    t_bob:  f32,
     dt_bob: f32,
     facing_direction: f32,
     // @todo(viktor): generation index so we know how " to date" this entity is
@@ -44,8 +44,9 @@ EntityFlag :: enum {
 }
 EntityFlags :: bit_set[EntityFlag]
 
+// @cleanup
 EntityType :: enum u32 {
-    Nil, 
+    Nil,  
     
     Floor,
     
@@ -53,6 +54,8 @@ EntityType :: enum u32 {
     HeroBody, 
     
     Wall, Familiar, Monster, Stairwell,
+    
+    FloatyThingForNow,
 }
 
 HitPointPartCount :: 4
@@ -159,18 +162,20 @@ add_stairs :: proc(world: ^World, p: WorldPosition) {
     end_entity(world, entity, p)
 }
 
-add_hero :: proc(world: ^World) -> (result: EntityId) {
+add_hero :: proc(world: ^World, standing_on: TraversableReference) -> (result: EntityId) {
     head := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
-        
+    
     head.flags += {.Collides, .Moveable}
-    result = head.id
     
         body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
         
         body.flags += {.Moveable}
-        body.head.id = result
+        body.head.pointer = head
+        body.standing_on = standing_on
     
-    head.head.id = body.id
+    head.head.pointer = body
+    
+    result = head.id
         
         end_entity(world, body, world.camera_p)
     
@@ -215,10 +220,14 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) {
             p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
             
-            p.offset.z = cast(f32) (offset_y + offset_x) * 0.2
-            
-            entity := begin_grounded_entity(world, .Floor, world.floor_collision)
-            end_entity(world, entity, p)
+            if offset_x == 2 && offset_y == 2 {
+                entity := begin_grounded_entity(world, .FloatyThingForNow, world.floor_collision)
+                end_entity(world, entity, p)
+            } else {
+                p.offset.z = cast(f32) (offset_y + offset_x) * 0.2
+                entity := begin_grounded_entity(world, .Floor, world.floor_collision)
+                end_entity(world, entity, p)
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ INTERNAL :: #config(INTERNAL, false)
 
 /* @todo(viktor):
     - Since the correction to unproject_with_transform the sim region bounds are too small
+        - Still relevant?
     - Font Rendering Robustness
         - Kerning
     

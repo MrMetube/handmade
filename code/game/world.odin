@@ -230,12 +230,48 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     dt := input.delta_time * TimestepPercentage/100.0
     timed_function()
     
+    monitor_width_in_meters :: 0.635
+    buffer_size := [2]i32{render_group.commands.width, render_group.commands.height}
+    meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
+    
+    focal_length, distance_above_ground : f32 = 0.6, 10
+    perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
+    
+    clear(render_group, DarkBlue)
+    
+    screen_bounds := get_camera_rectangle_at_target(render_group)
+    camera_bounds := rectangle_min_max(
+        V3(screen_bounds.min, -0.5 * world.typical_floor_height), 
+        V3(screen_bounds.max, 4 * world.typical_floor_height),
+    )
+    
+    sim_memory := begin_temporary_memory(&tran_state.arena)
+    // @todo(viktor): by how much should we expand the sim region?
+    // @todo(viktor): do we want to simulate upper floors, etc?
+    sim_bounds := rectangle_add_radius(camera_bounds, v3{15, 15, 15})
+    sim_origin := world.camera_p
+    camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
+    
+    camera_p := world.camera_offset + world_difference(world, world.camera_p, sim_origin)
+    
+    if ShowRenderAndSimulationBounds {
+        transform := default_flat_transform()
+        transform.offset -= camera_p
+        transform.sort_bias = 10000
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Orange,0.1)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
+    }
+    
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
         
         if con_hero.entity_id == 0 {
             if controller.start.ended_down {
-                con_hero^ = { entity_id = add_hero(world) }
+                standing_on, ok := get_closest_traversable(camera_sim_region, camera_p)
+                assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
+                // maybe keep trying on subsequent frames?
+                con_hero^ = { entity_id = add_hero(world, standing_on) }
             }
         } else {
             con_hero.dfacing = {}
@@ -294,39 +330,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         }
     }
     
-    monitor_width_in_meters :: 0.635
-    buffer_size := [2]i32{render_group.commands.width, render_group.commands.height}
-    meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
-    
-    focal_length, distance_above_ground : f32 = 0.6, 10
-    perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
-    
-    clear(render_group, DarkBlue)
-    
-    screen_bounds := get_camera_rectangle_at_target(render_group)
-    camera_bounds := rectangle_min_max(
-        V3(screen_bounds.min, -0.5 * world.typical_floor_height), 
-        V3(screen_bounds.max, 4 * world.typical_floor_height),
-    )
-    
-    sim_memory := begin_temporary_memory(&tran_state.arena)
-    // @todo(viktor): by how much should we expand the sim region?
-    // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := rectangle_add_radius(camera_bounds, v3{15, 15, 15})
-    sim_origin := world.camera_p
-    camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
-    
-    camera_p := world.camera_offset + world_difference(world, world.camera_p, sim_origin)
-    
-    if ShowRenderAndSimulationBounds {
-        transform := default_flat_transform()
-        transform.offset -= camera_p
-        transform.sort_bias = 10000
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Orange,0.1)
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
-    }
-    
     
     update_block := begin_timed_block("update and render entity")
     for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
@@ -372,11 +375,15 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             switch entity.type {
               case .Nil, .Monster, .Wall, .Stairwell, .Floor:
+              case .FloatyThingForNow:
+                entity.t_bob += dt
+                if entity.t_bob > Tau do entity.t_bob -= Tau
+                entity.p.z = sin(entity.t_bob) * 6 - 2
                 
               case .HeroHead:
                 for &con_hero in world.controlled_heroes {
                     if con_hero.entity_id == entity.id {
-                        body := entity.head.ptr
+                        body := entity.head.pointer
                         if con_hero.exited {
                             delete_entity(body)
                             delete_entity(&entity)
@@ -393,14 +400,18 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                                 // @note(viktor): leave the facing direction what it was
                             }
                             
-                            closest_p := get_closest_traversable(camera_sim_region, entity.p) or_else entity.p
-                            
-                            if body != nil {
-                                spring_active := length_squared(ddp) == 0
-                                if spring_active {
-                                    for i in 0..<3 {
-                                        head_spring := 400 * (closest_p[i] - entity.p[i]) + 20 * (- entity.dp[i])
-                                        ddp[i] += dt*head_spring
+                            traversable_reference, ok := get_closest_traversable(camera_sim_region, entity.p)
+                            if ok {
+                                traversable := get_sim_space_traversable(traversable_reference)
+                                closest_p := traversable.p
+                                
+                                if body != nil {
+                                    spring_active := length_squared(ddp) == 0
+                                    if spring_active {
+                                        for i in 0..<3 {
+                                            head_spring := 400 * (closest_p[i] - entity.p[i]) + 20 * (- entity.dp[i])
+                                            ddp[i] += dt*head_spring
+                                        }
                                     }
                                 }
                             }
@@ -411,13 +422,22 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                 
               case.HeroBody:
-                head := entity.head.ptr
+                head := entity.head.pointer
                 if head != nil {
+                    if entity.movement_mode == .Planted {
+                        entity.p = get_sim_space_traversable(entity.standing_on).p
+                    }
+                    
                     // @todo(viktor): make spatial queries easy for things
                     desired_direction := entity.p - head.p
                     desired_direction = normalize_or_zero(desired_direction)
                     
-                    closest_p := get_closest_traversable(camera_sim_region, head.p) or_else entity.p
+                    closest_p := entity.p
+                    traversable_reference, ok := get_closest_traversable(camera_sim_region, head.p)
+                    if ok {
+                        traversable := get_sim_space_traversable(traversable_reference)
+                        closest_p = traversable.p
+                    }
                     
                     head_delta := head.p - entity.p
                     
@@ -435,14 +455,15 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                       case .Planted:
                         if body_distance_sq > square(f32(0.01)) {
                             entity.movement_mode = .Hopping
-                            entity.movement_from = entity.p
-                            entity.movement_to = closest_p
+                            entity.moving_to     = traversable_reference
                             entity.t_movement = 0
                         }
                         ddt_bob = t_head_distance * -30
                         
                       case .Hopping:
-                        pt := entity.movement_to
+                        moving_to   := get_sim_space_traversable(entity.moving_to).p
+                        standing_on := get_sim_space_traversable(entity.standing_on).p
+                        pt := moving_to
 
                         t_jump :: 0.1
                         t_thrust :: 0.8
@@ -452,12 +473,13 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         } 
                         
                         if t_jump <= entity.t_movement {
+                            
                             t := clamp_01_to_range(t_jump, entity.t_movement, 1)
                             entity.t_bob = sin(t * Pi) * 0.1
-                            entity.p = lerp(entity.movement_from, entity.movement_to, entity.t_movement)
+                            entity.p = lerp(standing_on, moving_to, entity.t_movement)
                             entity.dp = 0
                             
-                            pf := entity.movement_from
+                            pf := standing_on
                             
                             // :ZHandling
                             height := v3{0, 0.3, 0.3}
@@ -473,6 +495,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             entity.movement_mode = .Planted
                             entity.dt_bob = -3
                             entity.p = pt
+                            entity.standing_on = entity.moving_to
                         }
                         
                         hop_duration :f32: 0.2
@@ -624,7 +647,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 transform.offset.z += world.typical_floor_height
                 push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
                 
-              case .Floor: 
+              case .Floor, .FloatyThingForNow: 
                 transform.upright = false
                 color := Green
                 color.rgb *= 0.4
@@ -737,29 +760,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 }
 
 ////////////////////////////////////////////////
-
-get_closest_traversable :: proc(region: ^SimRegion, from_p: v3) -> (result: v3, ok: b32) {
-    // @todo(viktor): make spatial queries easy for things
-    closest_point_dsq :f32= 1000
-    for &test in region.entities[:region.entity_count] {
-        for point_index in 0..<test.collision.traversable_count {
-            point := get_sim_space_traversable(&test, point_index )
-            
-            delta_p := point.p - from_p
-            // @todo(viktor): what should this value be
-            delta_p.z *= max(0, abs(delta_p.z) - 1.0)
-            
-            dsq := length_squared(delta_p)
-            if dsq < closest_point_dsq {
-                result = point.p
-                closest_point_dsq = dsq
-                ok = true
-            }
-        }
-    }
-    
-    return result, ok
-}
 
 // @cleanup
 null_position :: proc() -> (result: WorldPosition) {
@@ -927,7 +927,24 @@ pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
     block.entity_data.count += pack_size
     block.entity_count += 1
     
-    (cast(^Entity) dest) ^= source^
+    entity := (cast(^Entity) dest)
+    entity ^= source^
+    
+    pack_entity_reference(&entity.head)
+    pack_traversable_reference(&entity.moving_to)
+    pack_traversable_reference(&entity.standing_on)
+
+}
+
+pack_entity_reference :: proc(ref: ^EntityReference) {
+    if ref.pointer != nil {
+        ref.id = ref.pointer.id
+    }
+}
+
+pack_traversable_reference :: proc(ref: ^TraversableReference) {
+    pack_entity_reference(&ref.entity)
+    
 }
 
 clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
