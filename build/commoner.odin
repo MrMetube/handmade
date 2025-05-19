@@ -294,7 +294,7 @@ collect_declarations :: proc(collect: ^map[string]Code, attributes: []^ast.Attri
 }
 
 
-read_pos :: proc(start, end: tokenizer.Pos) -> (result:string, ok:bool) {
+read_pos :: proc(start, end: tokenizer.Pos) -> (result: string, ok: bool) {
     using my := cast(^ExtractContext) context.user_ptr
     
     file: string

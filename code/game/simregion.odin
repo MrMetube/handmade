@@ -45,6 +45,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     timed_function()
     
     region = push(sim_arena, SimRegion)
+    
     MaxEntityCount :: 4096
     region.entities = push(sim_arena, Entity, MaxEntityCount)
     
@@ -248,7 +249,7 @@ add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
 connect_entity_references :: proc(region: ^SimRegion) {
     for &entity in region.entities {
         // @metaprogram should be able to generate the load und pack code
-        load_entity_reference(region, &entity.head)
+        load_entity_reference(region,      &entity.head)
         load_traversable_reference(region, &entity.standing_on)
         load_traversable_reference(region, &entity.moving_to)
     }
