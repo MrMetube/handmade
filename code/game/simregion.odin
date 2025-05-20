@@ -174,24 +174,31 @@ end_sim :: proc(region: ^SimRegion) {
     }
 }
 
-get_closest_traversable :: proc(region: ^SimRegion, from_p: v3) -> (result: TraversableReference, ok: b32) {
+get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
     // @todo(viktor): make spatial queries easy for things
     closest_point_dsq :f32= 1000
     for &test in region.entities[:region.entity_count] {
-        for point_index in 0..<test.collision.traversable_count {
-            point := get_sim_space_traversable(&test, point_index )
+        for point_index in 0..<test.traversable_count {
+            point := get_sim_space_traversable(&test, point_index)
             
-            delta_p := point.p - from_p
-            // @todo(viktor): what should this value be
-            delta_p.z *= max(0, abs(delta_p.z) - 1.0)
+            valid := true
+            if .Unoccupied in flags {
+                valid = point.occupant == nil
+            }
             
-            dsq := length_squared(delta_p)
-            if dsq < closest_point_dsq {
-                result.entity.pointer = &test
-                result.index = point_index
+            if valid {
+                delta_p := point.p - from_p
+                // @todo(viktor): what should this value be
+                delta_p.z *= max(0, abs(delta_p.z) - 1.0)
                 
-                closest_point_dsq = dsq
-                ok = true
+                dsq := length_squared(delta_p)
+                if dsq < closest_point_dsq {
+                    result.entity.pointer = &test
+                    result.index = point_index
+                    
+                    closest_point_dsq = dsq
+                    ok = true
+                }
             }
         }
     }
@@ -250,8 +257,11 @@ connect_entity_references :: proc(region: ^SimRegion) {
     for &entity in region.entities {
         // @metaprogram should be able to generate the load und pack code
         load_entity_reference(region,      &entity.head)
-        load_traversable_reference(region, &entity.standing_on)
-        load_traversable_reference(region, &entity.moving_to)
+        load_traversable_reference(region, &entity.came_from)
+        load_traversable_reference(region, &entity.occupying)
+        if entity.occupying.entity.pointer != nil {
+            entity.occupying.entity.pointer.traversables[entity.occupying.index].occupant = &entity
+        }
     }
 }
 
@@ -266,18 +276,51 @@ load_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReferenc
     load_entity_reference(region, &ref.entity)
 }
 
+get_traversable :: proc { get_traversable_ref, get_traversable_raw }
+get_traversable_ref :: proc(ref: TraversableReference) -> (result: ^TraversablePoint) {
+    return get_traversable_raw(ref.entity.pointer, ref.index)
+}
+get_traversable_raw :: proc(entity: ^Entity, index: u32) -> (result: ^TraversablePoint) {
+    if entity != nil {
+        result = &entity.traversables[index]
+    }
+    return result
+}
+
 get_sim_space_traversable :: proc { get_sim_space_traversable_ref, get_sim_space_traversable_raw }
 get_sim_space_traversable_ref :: proc(ref: TraversableReference) -> (result: TraversablePoint) {
     return get_sim_space_traversable_raw(ref.entity.pointer, ref.index)
 }
 get_sim_space_traversable_raw :: proc(entity: ^Entity, index: u32) -> (result: TraversablePoint) {
-    result = entity.collision.traversables[index]
-    result.p += entity.p
+    if entity != nil {
+        point := get_traversable(entity, index)
+        if point != nil {
+            result = point^
+        }
+        
+        result.p += entity.p
+    }
+    
     return result
 }
 
 default_move_spec :: proc() -> MoveSpec {
-    return { normalize_accelaration = false, drag = 1, speed = 0}
+    return { normalize_accelaration = false, drag = 1, speed = 0 }
+}
+
+transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, desired_ref: TraversableReference) -> (result: b32) {
+    desired := get_traversable(desired_ref)
+    if desired.occupant == nil {
+        dest := get_traversable(dest_ref^)
+        if dest != nil {
+            dest.occupant = nil
+        }
+        dest_ref^ = desired_ref
+        desired.occupant = entity
+        result = true
+    }
+    
+    return result
 }
 
 move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {

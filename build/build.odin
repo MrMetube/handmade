@@ -41,12 +41,12 @@ import win "core:sys/windows"
 // @todo(viktor): once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
 
 flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon -subsystem:windows -ignore-vs-search `
-debug    :: " -debug "
-internal :: " -define:INTERNAL=true " // @todo(viktor): get rid of this
-pedantic :: " -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures" 
-commoner :: " -custom-attribute:common "
+debug    :: ` -debug `
+internal :: ` -define:INTERNAL=true ` // @todo(viktor): get rid of this
+pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 
+commoner :: ` -custom-attribute:common `
 
-optimizations    :: " -o:none " when true else " -o:speed "
+optimizations    :: ` -o:none ` when true else ` -o:speed `
 PedanticGame     :: false
 PedanticPlatform :: false
 
@@ -57,6 +57,7 @@ build_dir :: `.\build\`
 data_dir  :: `.\data`
 
 main :: proc() {
+    context.allocator = context.temp_allocator
     context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
     context.logger.lowest_level = .Info
     
@@ -73,9 +74,9 @@ main :: proc() {
     } else {
         for arg in os.args[1:] {
             switch arg {
-                case "AssetBuilder": run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
-                case "Game":         build_game()
-                case "Platform":     build_platform()
+                case `AssetBuilder`: run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
+                case `Game`:         build_game()
+                case `Platform`:     build_platform()
             }
         }
     }
@@ -131,7 +132,9 @@ Error :: union { os2.Error, os.Error }
 go_rebuild_yourself :: proc() -> Error {
     log.Level_Headers = { 0..<50 = "" }
     
-    if strings.ends_with(os.get_current_directory(), "build") do os.set_current_directory("..")
+    if strings.ends_with(os.get_current_directory(), "build") {
+        os.set_current_directory("..") or_return
+    }
     
     gitignore := fmt.tprint(build_dir, `\.gitignore`, sep="")
     if !os.exists(gitignore) {
@@ -139,28 +142,30 @@ go_rebuild_yourself :: proc() -> Error {
         os.write_entire_file(gitignore, transmute([]u8) contents)
     }
     
-    src_dir  := os2.read_directory_by_path(src_path, -1, context.allocator) or_return
-    exe_time := os2.modification_time_by_path(exe_path) or_return
+    needs_rebuild := false
+    build_exe_info, err := os.stat(exe_path)
+    if err != nil {
+        needs_rebuild = true
+    }
     
-    needs_to_rebuild: b32
-    
-    for file in src_dir {
-        if file.type == .Regular {
-            if strings.ends_with(file.name, ".odin") {   
-                if time.diff(exe_time, file.modification_time) > 0 {
-                    needs_to_rebuild = true
+    if !needs_rebuild {
+        src_dir := os2.read_all_directory_by_path(src_path, context.allocator) or_return
+        for file in src_dir {
+            if strings.ends_with(file.name, ".odin") {
+                if time.diff(file.modification_time, build_exe_info.modification_time) < 0 {
+                    needs_rebuild = true
                     break
                 }
             }
         }
     }
     
-    if needs_to_rebuild {
+    if needs_rebuild {
         log.info("Rebuilding!")
         
-        pdb_path, _ := strings.replace(exe_path, ".exe", ".pdb", -1)
+        pdb_path, _ := strings.replace_all(exe_path, ".exe", ".pdb")
         remove_if_exists(pdb_path)
-         
+        
         old_path := fmt.tprintf("%s-old", exe_path)
         os.rename(exe_path, old_path) or_return
         
@@ -180,23 +185,6 @@ remove_if_exists :: proc(path: string) {
     if os.exists(path) do os.remove(path)
 }
 
-get_last_write_time_ :: proc(filename: string) -> (last_write_time: u64) {
-    FILE_ATTRIBUTE_DATA :: struct {
-        dwFileAttributes:  win.DWORD,
-        ftCreationTime:    win.FILETIME,
-        ftLastAccessTime:  win.FILETIME,
-        ftLastWriteTime:   win.FILETIME,
-        nFileSizeHigh:     win.DWORD,
-        nFileSizeLow:      win.DWORD,
-    }
-
-    file_information : FILE_ATTRIBUTE_DATA
-    if win.GetFileAttributesExW(win.utf8_to_wstring(filename), win.GetFileExInfoStandard, &file_information) {
-        last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)
-    }
-    return last_write_time
-}
-
 delete_all_like :: proc(pattern: string) {
     find_data := win.WIN32_FIND_DATAW{}
 
@@ -209,10 +197,7 @@ delete_all_like :: proc(pattern: string) {
         assert(err == nil)
         file_path := fmt.tprintf(`.\%v`, file_name)
         
-        if err := os.remove(file_path); err != nil && err != .FILE_NOT_FOUND {
-            log.errorf("Failed to delete file: %s because of error: %s", file_path, err)
-        }
-        
+        os.remove(file_path)
         if !win.FindNextFileW(handle, &find_data){
             break 
         }
@@ -290,10 +275,6 @@ make_directory_if_not_exists :: proc(path: string) -> (result: b32) {
     return result
 }
 
-random_number :: proc() ->(result: u32) {
-    bytes: [4]byte
-    _ = runtime.random_generator_read_bytes(runtime.default_random_generator(), bytes[:])
-    result = (cast(^u32) raw_data(bytes[:]))^ & 255
-    
-    return result
+random_number :: proc() -> (result: u32) {
+    return cast(u32) intrinsics.read_cycle_counter() % 255
 }

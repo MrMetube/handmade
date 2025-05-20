@@ -176,6 +176,7 @@ ControlledHero :: struct {
     // @note(viktor): these are the controller requests for simulation
     ddp: v3,
     dfacing: v2,
+    debug_spawn_hero: b32,
 }
 
 // @note(viktor): Platform specific structs

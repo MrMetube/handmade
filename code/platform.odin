@@ -29,7 +29,7 @@ Resolution :: [2]i32 {1920, 1080}
 // Resolution :: [2]i32 {1280, 720}
 // Resolution :: [2]i32 {640, 360}
 
-MonitorRefreshHz: u32 : 120
+MonitorRefreshHz :: 120
 
 HighPriorityThreads :: 10
 LowPriorityThreads  :: 0

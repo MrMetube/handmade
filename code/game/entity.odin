@@ -20,8 +20,8 @@ Entity :: struct {
     
     movement_mode: MovementMode,
     t_movement:    f32,
-    standing_on: TraversableReference,
-    moving_to:   TraversableReference,
+    occupying: TraversableReference,
+    came_from: TraversableReference,
     
     t_bob:  f32,
     dt_bob: f32,
@@ -33,6 +33,9 @@ Entity :: struct {
     walkable_height: f32,
     
     x_axis, y_axis: v2,
+    
+    traversable_count: u32, // :Array
+    traversables:      []TraversablePoint,
 }
 
 EntityId :: distinct u32
@@ -86,13 +89,11 @@ EntityCollisionVolumeGroup :: struct {
     // that the length can be 0 if the total_volume should be used as the only
     // collision volume for the entity.
     volumes: []Rectangle3,
-    
-    traversable_count: u32, // :Array
-    traversables:      []TraversablePoint,
 }
 
 TraversablePoint :: struct {
-    p: v3,
+    p:       v3,
+    occupant: ^Entity,
 }
 
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
@@ -120,16 +121,15 @@ begin_entity :: proc(world: ^World, type: EntityType) -> (result: ^Entity) {
     result.id = world.last_used_entity_id
     result.collision = world.null_collision
     result.type = type
-        
+    
     return result
 }
 
 end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
     assert(world.creation_buffer_index > 0)
     world.creation_buffer_index -= 1
-    
     entity.p = p.offset
-
+    
     pack_entity_into_world(world, entity, p)
 }
 
@@ -162,22 +162,25 @@ add_stairs :: proc(world: ^World, p: WorldPosition) {
     end_entity(world, entity, p)
 }
 
-add_hero :: proc(world: ^World, standing_on: TraversableReference) -> (result: EntityId) {
-    head := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
+add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference) -> (result: EntityId) {
+    p := map_into_worldspace(world, region.origin, get_sim_space_traversable(occupying).p)
     
+    head := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
     head.flags += {.Collides, .Moveable}
     
         body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
         
         body.flags += {.Moveable}
         body.head.pointer = head
-        body.standing_on = standing_on
+        // @todo(viktor): We will probably need a creation-time system for
+        // guaranteeing no overlapping occupation.
+        body.occupying = occupying
     
     head.head.pointer = body
     
     result = head.id
         
-        end_entity(world, body, world.camera_p)
+        end_entity(world, body, p)
     
     init_hitpoints(head, 3)
     
@@ -185,7 +188,7 @@ add_hero :: proc(world: ^World, standing_on: TraversableReference) -> (result: E
         world.camera_following_id = result
     }
     
-    end_entity(world, head, world.camera_p)
+    end_entity(world, head, p)
     
     return result
 }
@@ -220,14 +223,17 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) {
             p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
             
+            kind := EntityType.Floor
             if offset_x == 2 && offset_y == 2 {
-                entity := begin_grounded_entity(world, .FloatyThingForNow, world.floor_collision)
-                end_entity(world, entity, p)
-            } else {
-                p.offset.z = cast(f32) (offset_y + offset_x) * 0.2
-                entity := begin_grounded_entity(world, .Floor, world.floor_collision)
-                end_entity(world, entity, p)
+                kind =.FloatyThingForNow
             }
+            
+            entity := begin_grounded_entity(world, kind, world.floor_collision)
+            
+            entity.traversable_count = 1
+            entity.traversables = push_slice(&world.arena, TraversablePoint, 1)
+            
+            end_entity(world, entity, p)
         }
     }
 }

@@ -268,10 +268,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         
         if con_hero.entity_id == 0 {
             if controller.start.ended_down {
-                standing_on, ok := get_closest_traversable(camera_sim_region, camera_p)
+                standing_on, ok := get_closest_traversable(camera_sim_region, camera_p, {.Unoccupied} )
                 assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
                 // maybe keep trying on subsequent frames?
-                con_hero^ = { entity_id = add_hero(world, standing_on) }
+                con_hero^ = { entity_id = add_hero(world, camera_sim_region, standing_on) }
             }
         } else {
             con_hero.dfacing = {}
@@ -327,6 +327,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             if controller.back.ended_down {
                 con_hero.exited = true
             }
+            
+            if was_pressed(controller.start) {
+                con_hero.debug_spawn_hero = true
+            }
         }
     }
     
@@ -381,69 +385,81 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 entity.p.z += 0.05 * cos(entity.t_bob)
                 
               case .HeroHead:
-                for &con_hero in world.controlled_heroes {
-                    if con_hero.entity_id == entity.id {
-                        head := &entity
-                        body := head.head.pointer
-                        if con_hero.exited {
-                            delete_entity(body)
-                            delete_entity(head)
-                            con_hero.entity_id = 0
-                        } else {
-                            move_spec.normalize_accelaration = true
-                            move_spec.drag = 5
-                            move_spec.speed = 30
-                            ddp = con_hero.ddp
-                            
-                            if con_hero.dfacing.x != 0  {
-                                head.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
-                            } else {
-                                // @note(viktor): leave the facing direction what it was
-                            }
-                            
-                            traversable_reference, ok := get_closest_traversable(camera_sim_region, head.p)
-                            if ok {
-                                if body != nil {
-                                    if body.movement_mode == .Planted {
-                                        if traversable_reference != body.standing_on {
-                                            body.movement_mode = .Hopping
-                                            body.moving_to     = traversable_reference
-                                            body.t_movement = 0
-                                        }
-                                    }
-                                } else {
-                                    
-                                }
-                                
-                                traversable := get_sim_space_traversable(traversable_reference)
-                                closest_p := traversable.p
-                                                                
-                                if body != nil {
-                                    spring_active := length_squared(ddp) == 0
-                                    if spring_active {
-                                        for i in 0..<3 {
-                                            head_spring := 400 * (closest_p[i] - head.p[i]) + 20 * (- head.dp[i])
-                                            ddp[i] += dt*head_spring
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            if body != nil {
-                                body.facing_direction = head.facing_direction
-                            }
-                        }
-                        
+                dummy: ControlledHero
+                dummy.ddp.x = 1
+                con_hero := &dummy
+                for &test in world.controlled_heroes {
+                    if test.entity_id == entity.id {
+                        con_hero = &test
                         break
                     }
                 }
                 
+                if con_hero.debug_spawn_hero {
+                    con_hero.debug_spawn_hero = false
+                    standing_on, ok := get_closest_traversable(camera_sim_region, entity.p, {.Unoccupied} )
+                    if ok {
+                        add_hero(world, camera_sim_region, standing_on)
+                    }
+                }
+                
+                head := &entity
+                body := head.head.pointer
+                if con_hero.exited {
+                    delete_entity(body)
+                    delete_entity(head)
+                    con_hero.entity_id = 0
+                } else {
+                    move_spec.normalize_accelaration = true
+                    move_spec.drag = 5
+                    move_spec.speed = 30
+                    ddp = con_hero.ddp
+                    
+                    if con_hero.dfacing.x != 0  {
+                        head.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
+                    } else {
+                        // @note(viktor): leave the facing direction what it was
+                    }
+                    
+                    traversable_reference, ok := get_closest_traversable(camera_sim_region, head.p)
+                    if ok {
+                        if body != nil {
+                            if body.movement_mode == .Planted {
+                                if traversable_reference != body.occupying {
+                                    body.came_from = body.occupying
+                                    if transactional_occupy(body, &body.occupying, traversable_reference) {
+                                        body.movement_mode = .Hopping
+                                        body.t_movement = 0
+                                    }
+                                }
+                            }
+                        }
+                        
+                        traversable := get_sim_space_traversable(traversable_reference)
+                        closest_p := traversable.p
+                                                        
+                        if body != nil {
+                            spring_active := length_squared(ddp) == 0
+                            if spring_active {
+                                for i in 0..<3 {
+                                    head_spring := 400 * (closest_p[i] - head.p[i]) + 20 * (- head.dp[i])
+                                    ddp[i] += dt*head_spring
+                                }
+                            }
+                        }
+                    }
+                    
+                    if body != nil {
+                        body.facing_direction = head.facing_direction
+                    }
+                }
+                        
               case.HeroBody:
                 body := &entity
                 head := body.head.pointer
                 
-                if entity.movement_mode == .Planted {
-                    entity.p = get_sim_space_traversable(entity.standing_on).p
+                if body.movement_mode == .Planted {
+                    body.p = get_sim_space_traversable(body.occupying).p
                 }
                 
                 head_delta: v3
@@ -454,7 +470,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 // body.x_axis = perpendicular(body.y_axis)
                 
                 ddt_bob: f32
-                switch entity.movement_mode {
+                switch body.movement_mode {
                   case .Planted:
                     if head != nil {
                         head_distance := length(head_delta)
@@ -468,22 +484,22 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     t_jump :: 0.1
                     t_thrust :: 0.8
                     
-                    moving_to   := get_sim_space_traversable(entity.moving_to).p
-                    standing_on := get_sim_space_traversable(entity.standing_on).p
-                    pt := moving_to
+                    occupying := get_sim_space_traversable(body.occupying).p
+                    came_from := get_sim_space_traversable(body.came_from).p
+                    pt := occupying
                     
                     if body.t_movement < t_thrust {
                         ddt_bob -= 60
                     }
                     
-                    if t_jump <= entity.t_movement {
+                    if t_jump <= body.t_movement {
                         
-                        t := clamp_01_to_range(t_jump, entity.t_movement, 1)
-                        entity.t_bob = sin(t * Pi) * 0.1
-                        entity.p = lerp(standing_on, moving_to, entity.t_movement)
-                        entity.dp = 0
+                        t := clamp_01_to_range(t_jump, body.t_movement, 1)
+                        body.t_bob = sin(t * Pi) * 0.1
+                        body.p = lerp(came_from, occupying, body.t_movement)
+                        body.dp = 0
                         
-                        pf := standing_on
+                        pf := came_from
                         
                         // :ZHandling
                         height := v3{0, 0.3, 0.3}
@@ -491,28 +507,28 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                         c := pf
                         a := -4 * height
                         b := pt - pf - a
-                        entity.p = a * square(t) + b * t + c
+                        body.p = a * square(t) + b * t + c
                     }
                     
-                    if entity.t_movement >= 1 {
-                        entity.movement_mode = .Planted
-                        entity.dt_bob = -3
-                        entity.p = pt
-                        entity.standing_on = entity.moving_to
+                    if body.t_movement >= 1 {
+                        body.movement_mode = .Planted
+                        body.dt_bob = -3
+                        body.p = pt
+                        body.came_from = body.occupying
                     }
                     
                     hop_duration :f32: 0.2
-                    entity.t_movement += dt * (1 / hop_duration)
+                    body.t_movement += dt * (1 / hop_duration)
                     
-                    if entity.t_movement >= 1 {
-                        entity.t_movement = 1
+                    if body.t_movement >= 1 {
+                        body.t_movement = 1
                     }
                 }
                 
                 
-                ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
-                entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
-                entity.dt_bob += 0.5*ddt_bob*dt
+                ddt_bob += 100 * (0-body.t_bob) + 12 * (0-body.dt_bob)
+                body.t_bob += ddt_bob*square(dt) + body.dt_bob*dt
+                body.dt_bob += 0.5*ddt_bob*dt
                 
                 move_spec.normalize_accelaration = true
                 move_spec.drag = 50
@@ -651,9 +667,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 color := Green
                 color.rgb *= 0.4
                 push_rectangle_outline(render_group, entity.collision.total_volume, transform, color)
-                for traversable in entity.collision.traversables[:entity.collision.traversable_count] {
+                
+                for traversable in entity.traversables[:entity.traversable_count] {
                     rect := rectangle_center_dimension(traversable.p, 0.1)
-                    push_rectangle(render_group, rect, transform, Blue)
+                    push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Blue)
                 }
             }
             
@@ -785,8 +802,6 @@ make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^Entity
     result^ = {
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
         volumes = {},
-        traversable_count = 1,
-        traversables = push_slice(&world.arena, TraversablePoint, 1),
     }
     
     return result
@@ -910,9 +925,8 @@ pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
     
     // @metaprogram should be able to generate the load und pack code
     pack_entity_reference(&entity.head)
-    pack_traversable_reference(&entity.moving_to)
-    pack_traversable_reference(&entity.standing_on)
-
+    pack_traversable_reference(&entity.came_from)
+    pack_traversable_reference(&entity.occupying)
 }
 
 pack_entity_reference :: proc(ref: ^EntityReference) {

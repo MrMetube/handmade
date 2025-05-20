@@ -78,9 +78,11 @@ change_pitch :: proc(mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
 
 @(enable_target_feature="sse,sse2")
 output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
+    timed_function()
+    
     mixer_memory := begin_temporary_memory(temporary_arena)
     defer end_temporary_memory(mixer_memory)
-
+    
     generation_id := begin_generation(assets)
     defer end_generation(assets, generation_id)
     
@@ -100,7 +102,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         real_channel_0[i] = 0
         real_channel_1[i] = 0
     }
-
+    
     // @note(viktor): Sum all sounds
     for playing_sound_pointer := &mixer.first_playing_sound; playing_sound_pointer^ != nil;  {
         playing_sound := playing_sound_pointer^
@@ -227,7 +229,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 playing_sound.samples_played = end_sample_p
                 assert(total_chunks_to_mix >= chunks_to_mix)
                 total_chunks_to_mix -= chunks_to_mix
-
+                
                 if chunks_to_mix == chunks_remaining_in_sound {
                     if is_valid_asset(next_sound_in_chain) {
                         playing_sound.id = next_sound_in_chain
