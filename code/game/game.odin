@@ -170,12 +170,13 @@ TaskWithMemory :: struct {
 }
 
 ControlledHero :: struct {
-    entity_id: EntityId,
-    exited: b32,
+    brain_id: BrainId,
     
     // @note(viktor): these are the controller requests for simulation
     ddp: v3,
     dfacing: v2,
+    
+    exited: b32,
     debug_spawn_hero: b32,
 }
 

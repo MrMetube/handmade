@@ -6,11 +6,13 @@ Entity :: struct {
     
     ////////////////////////////////////////////////
     
-    paired_entities: Array(EntityReference),
-    
     ////////////////////////////////////////////////
     // @note(viktor): Everything below here is not worked out
     
+    brain_kind: BrainKind,
+    brain_slot: BrainSlot,
+    brain_id:   BrainId,
+        
     type:  EntityType,
     flags: EntityFlags,
     
@@ -22,8 +24,7 @@ Entity :: struct {
     
     hit_point_max: u32, // :Array
     hit_points: [16]HitPoint,
-    
-    
+
     movement_mode: MovementMode,
     t_movement:    f32,
     occupying: TraversableReference,
@@ -44,6 +45,7 @@ Entity :: struct {
 }
 
 EntityId :: distinct u32
+BrainId :: distinct EntityId
 
 EntityFlag :: enum {
     Collides,
@@ -88,6 +90,14 @@ MovementMode :: enum {
     Hopping,
 }
 
+BrainKind :: enum {
+    Hero, 
+    Snake, 
+}
+BrainSlot :: struct {
+    index: u32,
+}
+
 EntityCollisionVolumeGroup :: struct {
     total_volume: Rectangle3,
     // @todo(viktor): volumes is always expected to be non-empty if the entity
@@ -97,19 +107,9 @@ EntityCollisionVolumeGroup :: struct {
     volumes: []Rectangle3,
 }
 
-EntityRelationship :: enum u32 {
-    None,
-    Paired,
-}
-
-StoredEntityReference :: struct {
-    id:           EntityId,
-    relationship: EntityRelationship,
-}
-
 EntityReference :: struct {
     pointer: ^Entity,
-    stored:  StoredEntityReference,
+    id:           EntityId,
 }
 
 TraversablePoint :: struct {
@@ -135,6 +135,12 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
+add_brain :: proc(world: ^World) -> (result: BrainId) {
+    world.last_used_entity_id += 1
+    result = cast(BrainId) world.last_used_entity_id
+    return result
+}
+
 begin_entity :: proc(world: ^World, type: EntityType) -> (result: ^Entity) {
     assert(world.creation_buffer_index < len(world.creation_buffer))
     world.creation_buffer_index += 1
@@ -156,11 +162,13 @@ end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
     world.creation_buffer_index -= 1
     entity.p = p.offset
     
-    pack_entity_into_world(world, entity, p)
+    pack_entity_into_world(nil, world, entity, p)
 }
 
 delete_entity :: proc(entity: ^Entity) {
-    entity.flags += { .Deleted }
+    if entity != nil {
+        entity.flags += { .Deleted }
+    }
 }
 
 begin_grounded_entity :: proc(world: ^World, type: EntityType, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
@@ -188,7 +196,7 @@ add_stairs :: proc(world: ^World, p: WorldPosition) {
     end_entity(world, entity, p)
 }
 
-add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference) -> (result: EntityId) {
+add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference) -> (result: BrainId) {
     p := map_into_worldspace(world, region.origin, get_sim_space_traversable(occupying).p)
     
     head := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
@@ -197,23 +205,28 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
         
         body.flags += {.Moveable}
-        body.paired_entities = make_array(&world.arena, EntityReference, 1)
-        append(&body.paired_entities, EntityReference{pointer = head})
+        
+        brain := add_brain(world)
+        result = brain
+        
+        body.brain_id = brain
+        body.brain_kind = .Hero
+        body.brain_slot.index = 0
+    
+    head.brain_id = brain
+    head.brain_slot.index = 1
+    head.brain_kind = .Hero
+        
         // @todo(viktor): We will probably need a creation-time system for
         // guaranteeing no overlapping occupation.
         body.occupying = occupying
     
-    head.paired_entities = make_array(&world.arena, EntityReference, 1)
-    append(&head.paired_entities, EntityReference{pointer = body})
-    
-    result = head.id
-        
         end_entity(world, body, p)
     
     init_hitpoints(head, 3)
     
     if world.camera_following_id == 0 {
-        world.camera_following_id = result
+        world.camera_following_id = head.id
     }
     
     end_entity(world, head, p)

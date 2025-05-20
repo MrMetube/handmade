@@ -12,16 +12,22 @@ FixedArray :: struct ($N: i64, $T: typeid) {
     count: i64,
 }
 
-append :: proc { append_fixed_array, append_array }
-append_array :: proc(a: ^Array($T), value: T) -> (result: ^T) {
-    assert(len(a.data) >= auto_cast a.count + 1)
-    a.data[a.count] = value
+append :: proc { append_fixed_array, append_array, append_array_ }
+append_array_ :: proc(a: ^Array($T)) -> (result: ^T) {
+    result = &a.data[a.count]
     a.count += 1
+    return result
+}
+append_array :: proc(a: ^Array($T), value: T) -> (result: ^T) {
+    a.data[a.count] = value
+    result = append_array_(a)
+    return result
 }
 append_fixed_array :: proc(a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
-    assert(len(a.data) >= auto_cast a.count + 1)
     a.data[a.count] = value
+    result = &a.data[a.count]
     a.count += 1
+    return result
 }
 
 make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32) -> (result: Array(T)) {
@@ -29,11 +35,11 @@ make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32) -> (result: Arr
     return result
 }
 
-get_slice :: proc{ get_slice_fixed_array, get_slice_array }
-get_slice_fixed_array :: proc(array: FixedArray($N, $T)) -> []T {
+slice :: proc{ slice_fixed_array, slice_array }
+slice_fixed_array :: proc(array: FixedArray($N, $T)) -> []T {
     return array.data[:array.count]
 }
-get_slice_array :: proc(array: Array($T)) -> []T {
+slice_array :: proc(array: Array($T)) -> []T {
     return array.data[:array.count]
 }
 

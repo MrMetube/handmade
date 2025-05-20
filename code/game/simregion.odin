@@ -10,16 +10,26 @@ SimRegion :: struct {
     max_entity_velocity: f32,
     
     entities: Array(Entity),
+    brains:   Array(Brain),
     
     // @todo(viktor): Do I really want a hash for this?
-    sim_entity_hash: [4096]SimEntityHash,
+    entity_hash: [4096]EntityHash,
+    brain_hash:  [128]BrainHash,
 }
-// @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-#assert( len(SimRegion{}.sim_entity_hash) & ( len(SimRegion{}.sim_entity_hash) - 1 ) == 0)
 
-SimEntityHash :: struct {
+Brain :: struct {
+    id:   BrainId,
+    kind: BrainKind,
+}
+
+BrainHash :: struct {
+    pointer: ^Brain,
+    id:      BrainId, // @todo(viktor): Why are we storing these in the hash?
+}
+
+EntityHash :: struct {
     pointer: ^Entity,
-    id:      EntityId,
+    id:      EntityId, // @todo(viktor): Why are we storing these in the hash?
 }
 
 MoveSpec :: struct {
@@ -36,7 +46,9 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     region = push(sim_arena, SimRegion)
     
     MaxEntityCount :: 4096
+    MaxBrainCount  :: 128
     region.entities = make_array(sim_arena, Entity, MaxEntityCount)
+    region.brains   = make_array(sim_arena, Brain, MaxBrainCount)
     
     // @todo(viktor): Try to make these get enforced more rigorously
     // @todo(viktor): Perhaps try using a dual system here where we support 
@@ -95,7 +107,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
 end_sim :: proc(region: ^SimRegion) {
     timed_function()
     
-    for &entity in get_slice(region.entities) {
+    for &entity in slice(region.entities) {
         assert(entity.id != 0)
         if .Deleted in entity.flags do continue
         
@@ -160,14 +172,14 @@ end_sim :: proc(region: ^SimRegion) {
         
         entity.p += chunk_delta
 
-        pack_entity_into_world(region.world, &entity, entity_p)
+        pack_entity_into_world(region, region.world, &entity, entity_p)
     }
 }
 
 get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
     // @todo(viktor): make spatial queries easy for things
     closest_point_dsq :f32= 1000
-    for &test in get_slice(region.entities) {
+    for &test in slice(region.entities) {
         for point_index in 0..<test.traversables.count {
             point := get_sim_space_traversable(&test, point_index)
             
@@ -202,15 +214,14 @@ entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3)
     return result
 }
 
-get_hash_from_index :: proc(region: ^SimRegion, entity_id: EntityId) -> (result: ^SimEntityHash) {
+get_hash_from_id :: proc(region: ^SimRegion, entity_id: EntityId) -> (result: ^EntityHash) {
     assert(entity_id != 0)
     
     hash := cast(u32) entity_id
-    for offset in u32(0)..<len(region.sim_entity_hash) {
-        hash_mask: u32 = len(region.sim_entity_hash)-1
-        hash_index := (hash + offset) & hash_mask
+    for offset in u32(0)..<len(region.entity_hash) {
+        hash_index := (hash + offset) % len(region.entity_hash)
         
-        entry := &region.sim_entity_hash[hash_index]
+        entry := &region.entity_hash[hash_index]
         if entry.id == 0 || entry.id == entity_id {
             result = entry
             break
@@ -222,13 +233,12 @@ get_hash_from_index :: proc(region: ^SimRegion, entity_id: EntityId) -> (result:
 add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
     assert(source != nil)
     assert(source.id != 0)
-
-    entry := get_hash_from_index(region, source.id)
+    
+    entry := get_hash_from_id(region, source.id)
     assert(entry != nil)
     assert(entry.pointer == nil)
     
-    dest := &region.entities.data[region.entities.count]
-    region.entities.count += 1
+    dest := append(&region.entities)
     
     assert(entry.id == 0 || entry.id == source.id)
     entry.id = source.id
@@ -244,10 +254,10 @@ add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
 }
 
 connect_entity_references :: proc(region: ^SimRegion) {
-    for &entity in get_slice(region.entities) {
-        for &ref in get_slice(entity.paired_entities) {
-            load_entity_reference(region, &ref)
-        }
+    for &entity in slice(region.entities) {
+        // for &ref in slice(entity.paired_entities) {
+        //     load_entity_reference(region, &ref)
+        // }
         
         load_traversable_reference(region, &entity.came_from)
         load_traversable_reference(region, &entity.occupying)
@@ -258,11 +268,10 @@ connect_entity_references :: proc(region: ^SimRegion) {
 }
 
 load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
-    // @todo(viktor):  Load these!
-    // if ref.id != 0 {
-    //     entry := get_hash_from_index(region, ref.id)
-    //     ref.pointer = entry == nil ? nil : entry.pointer
-    // }
+    if ref.id != 0 {
+        entry := get_hash_from_id(region, ref.id)
+        ref.pointer = entry == nil ? nil : entry.pointer
+    }
 }
 
 load_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReference) {
@@ -362,7 +371,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
             desired_p := entity.p + entity_delta
             
             // @todo(viktor): spatial partition here
-            for &test_entity in get_slice(region.entities) {
+            for &test_entity in slice(region.entities) {
                     
                 // @todo(viktor): Robustness!
                 OverlapEpsilon :: 0.001
