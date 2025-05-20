@@ -171,13 +171,6 @@ TaskWithMemory :: struct {
 
 ControlledHero :: struct {
     brain_id: BrainId,
-    
-    // @note(viktor): these are the controller requests for simulation
-    ddp: v3,
-    dfacing: v2,
-    
-    exited: b32,
-    debug_spawn_hero: b32,
 }
 
 // @note(viktor): Platform specific structs

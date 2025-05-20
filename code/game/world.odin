@@ -93,6 +93,8 @@ chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: 
 
 init_world :: proc(world: ^World, parent_arena: ^Arena) {
     sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
+
+    world.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
     
     pixels_to_meters :: 1.0 / 42.0
     chunk_dim_in_meters :f32= pixels_to_meters * 256
@@ -263,116 +265,104 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
     }
     
+    ////////////////////////////////////////////////
+    // Look to see if any players are trying to join
+    
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
-        
         if con_hero.brain_id == 0 {
             if controller.start.ended_down {
                 standing_on, ok := get_closest_traversable(camera_sim_region, camera_p, {.Unoccupied} )
                 assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
                 // maybe keep trying on subsequent frames?
-                con_hero^ = { brain_id = add_hero(world, camera_sim_region, standing_on) }
-            }
-        } else {
-            con_hero.dfacing = {}
-            
-            if controller.is_analog {
-                // @note(viktor): Use analog movement tuning
-                con_hero.ddp.xy = controller.stick_average
-            } else {
-                // @note(viktor): Use digital movement tuning
-                if was_pressed(controller.stick_left) {
-                    con_hero.ddp.y  = 0
-                    con_hero.ddp.x -= 1
-                }
-                if was_pressed(controller.stick_right) {
-                    con_hero.ddp.y  = 0
-                    con_hero.ddp.x += 1
-                }
-                if was_pressed(controller.stick_up) {
-                    con_hero.ddp.x  = 0
-                    con_hero.ddp.y += 1
-                }
-                if was_pressed(controller.stick_down) {
-                    con_hero.ddp.x  = 0
-                    con_hero.ddp.y -= 1
-                }
-                
-                if !is_down(controller.stick_left) && !is_down(controller.stick_right) {
-                    con_hero.ddp.x = 0
-                    if is_down(controller.stick_up)   do con_hero.ddp.y =  1
-                    if is_down(controller.stick_down) do con_hero.ddp.y = -1
-                }
-                if !is_down(controller.stick_up) && !is_down(controller.stick_down) {
-                    con_hero.ddp.y = 0
-                    if is_down(controller.stick_left)  do con_hero.ddp.x = -1
-                    if is_down(controller.stick_right) do con_hero.ddp.x =  1
-                }
-            }
-            
-            con_hero.dfacing = {}
-            if controller.button_up.ended_down {
-                con_hero.dfacing =  {0, 1}
-            }
-            if controller.button_down.ended_down {
-                con_hero.dfacing = -{0, 1}
-            }
-            if controller.button_left.ended_down {
-                con_hero.dfacing = -{1, 0}
-            }
-            if controller.button_right.ended_down {
-                con_hero.dfacing =  {1, 0}
-            }
-            
-            if controller.back.ended_down {
-                con_hero.exited = true
-            }
-            
-            if was_pressed(controller.start) {
-                con_hero.debug_spawn_hero = true
+                brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
+                con_hero^ = { brain_id = brain_id }
+                add_hero(world, camera_sim_region, standing_on, brain_id)
             }
         }
     }
+
+    ////////////////////////////////////////////////
+    // Run all brains
     
     update_block := begin_timed_block("update and render entity")
     for &brain in slice(camera_sim_region.brains) {
-        ddp: v3
         switch brain.kind {
           case .Hero:
-            // @todo(viktor): Fill in these from brain
             // @todo(viktor): Check that they're not deleted what do we do?
-            head: ^Entity
-            body: ^Entity
+            head := brain.hero.head
+            body := brain.hero.body
             
-            dummy: ControlledHero
-            dummy.ddp.x = 1
-            con_hero := &dummy
-            for &test in world.controlled_heroes {
-                if test.brain_id == brain.id {
-                    con_hero = &test
-                    break
-                }
-            }
+            controller_index := brain.id-1 // @note(viktor): 0 is reserved for the null brain
+            controller := input.controllers[controller_index]
             
-            if head != nil {
-                if con_hero.debug_spawn_hero {
-                    con_hero.debug_spawn_hero = false
-                    standing_on, ok := get_closest_traversable(camera_sim_region, head.p, {.Unoccupied} )
-                    if ok {
-                        add_hero(world, camera_sim_region, standing_on)
-                    }
+            ddp: v3
+            if controller.is_analog {
+                // @note(viktor): Use analog movement tuning
+                ddp.xy = controller.stick_average
+            } else {
+                // @note(viktor): Use digital movement tuning
+                if was_pressed(controller.stick_left) {
+                    ddp.y  = 0
+                    ddp.x -= 1
                 }
-            }
+                if was_pressed(controller.stick_right) {
+                    ddp.y  = 0
+                    ddp.x += 1
+                }
+                if was_pressed(controller.stick_up) {
+                    ddp.x  = 0
+                    ddp.y += 1
+                }
+                if was_pressed(controller.stick_down) {
+                    ddp.x  = 0
+                    ddp.y -= 1
+                }
                 
-            if con_hero.exited {
+                if !is_down(controller.stick_left) && !is_down(controller.stick_right) {
+                    ddp.x = 0
+                    if is_down(controller.stick_up)   do ddp.y =  1
+                    if is_down(controller.stick_down) do ddp.y = -1
+                }
+                if !is_down(controller.stick_up) && !is_down(controller.stick_down) {
+                    ddp.y = 0
+                    if is_down(controller.stick_left)  do ddp.x = -1
+                    if is_down(controller.stick_right) do ddp.x =  1
+                }
+            }
+            
+            dfacing: v2
+            if controller.button_up.ended_down {
+                dfacing =  {0, 1}
+            }
+            if controller.button_down.ended_down {
+                dfacing = -{0, 1}
+            }
+            if controller.button_left.ended_down {
+                dfacing = -{1, 0}
+            }
+            if controller.button_right.ended_down {
+                dfacing =  {1, 0}
+            }
+            
+            exited: b32
+            if was_pressed(controller.back) {
+                exited = true
+            }
+            
+            when false do if was_pressed(controller.start) {
+                standing_on, ok := get_closest_traversable(camera_sim_region, head.p, {.Unoccupied} )
+                if ok {
+                    add_hero(world, camera_sim_region, standing_on)
+                }
+            }
+            
+            if exited {
                 delete_entity(body)
                 delete_entity(head)
-                con_hero.brain_id = 0
             } else {
-                ddp = con_hero.ddp
-                
-                if head != nil && con_hero.dfacing.x != 0  {
-                    head.facing_direction = atan2(con_hero.dfacing.y, con_hero.dfacing.x)
+                if head != nil && dfacing.x != 0  {
+                    head.facing_direction = atan2(dfacing.y, dfacing.x)
                 } else {
                     // @note(viktor): leave the facing direction what it was
                 }
@@ -405,6 +395,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                             }
                         }
                     }
+                    
+                    head.ddp = ddp
                 }
                 
                 if head != nil && body != nil {
@@ -462,7 +454,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 shadow_alpha = 0.0
             }
             
-            ddp: v3
+            ddp: v3 = entity.ddp
             move_spec := default_move_spec()
             
             ////////////////////////////////////////////////
@@ -964,7 +956,7 @@ pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
             ref.id = ref.pointer.id
         }
     } else if ref.id != 0 {
-        if region == nil || get_hash_from_id(region, ref.id) != nil {
+        if region == nil || get_entity_hash_from_id(region, ref.id) != nil {
             ref.id = 0
         }
     }

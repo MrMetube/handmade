@@ -17,6 +17,7 @@ Entity :: struct {
     flags: EntityFlags,
     
     p, dp: v3,
+    ddp: v3, // @note(viktor): Do not pack this @metaprogram
     
     collision: ^EntityCollisionVolumeGroup,
     
@@ -109,7 +110,7 @@ EntityCollisionVolumeGroup :: struct {
 
 EntityReference :: struct {
     pointer: ^Entity,
-    id:           EntityId,
+    id:      EntityId,
 }
 
 TraversablePoint :: struct {
@@ -132,12 +133,6 @@ get_entity_ground_point_ :: proc(entity: ^Entity) -> (result: v3) {
 get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (result: v3) {
     result = for_entity_p
 
-    return result
-}
-
-add_brain :: proc(world: ^World) -> (result: BrainId) {
-    world.last_used_entity_id += 1
-    result = cast(BrainId) world.last_used_entity_id
     return result
 }
 
@@ -196,7 +191,7 @@ add_stairs :: proc(world: ^World, p: WorldPosition) {
     end_entity(world, entity, p)
 }
 
-add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference) -> (result: BrainId) {
+add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
     p := map_into_worldspace(world, region.origin, get_sim_space_traversable(occupying).p)
     
     head := begin_grounded_entity(world, .HeroHead, world.hero_head_collision)
@@ -206,16 +201,18 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         
         body.flags += {.Moveable}
         
-        brain := add_brain(world)
-        result = brain
+        brain_slot_for :: proc($member : string) -> BrainSlot {
+            // @study(viktor): can this be done better by using enumerated arrays?
+            return { auto_cast offset_of_by_string(BrainHeroParts, member) / size_of(^Entity) }
+        }
         
-        body.brain_id = brain
+        body.brain_id = brain_id
         body.brain_kind = .Hero
-        body.brain_slot.index = 0
+        body.brain_slot = brain_slot_for("body")
     
-    head.brain_id = brain
-    head.brain_slot.index = 1
+    head.brain_id = brain_id
     head.brain_kind = .Hero
+    head.brain_slot = brain_slot_for("head")
         
         // @todo(viktor): We will probably need a creation-time system for
         // guaranteeing no overlapping occupation.
@@ -230,8 +227,6 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
     }
     
     end_entity(world, head, p)
-    
-    return result
 }
 
 add_monster :: proc(world: ^World, p: WorldPosition) {

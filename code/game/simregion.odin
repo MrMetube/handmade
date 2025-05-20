@@ -20,11 +20,27 @@ SimRegion :: struct {
 Brain :: struct {
     id:   BrainId,
     kind: BrainKind,
+    
+    using data : struct #raw_union {
+        parts : [16]^Entity,
+        hero: BrainHeroParts,
+    }
+}
+
+BrainHeroParts :: struct {
+    head, body: ^Entity
 }
 
 BrainHash :: struct {
     pointer: ^Brain,
     id:      BrainId, // @todo(viktor): Why are we storing these in the hash?
+}
+
+ReservedBrainId :: enum BrainId {
+    FirstHero = 1,
+    LastHero = FirstHero + len(Input{}.controllers)-1,
+    
+    FirstFree,
 }
 
 EntityHash :: struct {
@@ -80,11 +96,34 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                         
                         // :PointerArithmetic
                         entities := (cast([^]Entity) &block.entity_data.data)[:block.entity_count]
-                        for &entity in entities {
-                            sim_space_p := entity.p + chunk_delta
-                            if entity_overlaps_rectangle(region.bounds, sim_space_p, entity.collision.total_volume) {
-                                // @todo(viktor): check a seconds rectangle to set the entity to be "moveable" or not
-                                add_entity(region, &entity, chunk_delta)
+                        for &source in entities {
+                            sim_space_p := source.p + chunk_delta
+                            if entity_overlaps_rectangle(region.bounds, sim_space_p, source.collision.total_volume) {
+                                // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
+                                assert(source.id != 0)
+                                
+                                hash := get_entity_hash_from_id(region, source.id)
+                                assert(hash != nil)
+                                assert(hash.pointer == nil)
+                                
+                                dest := append(&region.entities)
+                                
+                                assert(hash.id == 0 || hash.id == source.id)
+                                hash.id = source.id
+                                hash.pointer = dest
+                                
+                                // @todo(viktor): this should really be a decompression not a copy
+                                dest^ = source
+                                
+                                dest.id = source.id
+                                dest.p += chunk_delta
+                                
+                                dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
+                                
+                                if dest.brain_id != 0 {
+                                    brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
+                                    brain.parts[dest.brain_slot.index] = dest
+                                }
                             }
                         }
                         
@@ -214,43 +253,53 @@ entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3)
     return result
 }
 
-get_hash_from_id :: proc(region: ^SimRegion, entity_id: EntityId) -> (result: ^EntityHash) {
-    assert(entity_id != 0)
+get_brain_hash_from_id :: proc(region: ^SimRegion, id: BrainId) -> (result: ^BrainHash) {
+    assert(id != 0)
     
-    hash := cast(u32) entity_id
-    for offset in u32(0)..<len(region.entity_hash) {
-        hash_index := (hash + offset) % len(region.entity_hash)
+    hash := cast(u32) id
+    for offset in u32(0)..<len(region.brain_hash) {
+        hash_index := (hash + offset) % len(region.brain_hash)
         
-        entry := &region.entity_hash[hash_index]
-        if entry.id == 0 || entry.id == entity_id {
+        entry := &region.brain_hash[hash_index]
+        if entry.id == 0 || entry.id == id {
             result = entry
             break
         }
     }
+    
     return result
 }
 
-add_entity :: proc(region: ^SimRegion, source: ^Entity, chunk_delta: v3) {
-    assert(source != nil)
-    assert(source.id != 0)
+get_entity_hash_from_id :: proc(region: ^SimRegion, id: EntityId) -> (result: ^EntityHash) {
+    assert(id != 0)
     
-    entry := get_hash_from_id(region, source.id)
-    assert(entry != nil)
-    assert(entry.pointer == nil)
+    hash := cast(u32) id
+    for offset in u32(0)..<len(region.entity_hash) {
+        hash_index := (hash + offset) % len(region.entity_hash)
+        
+        entry := &region.entity_hash[hash_index]
+        if entry.id == 0 || entry.id == id {
+            result = entry
+            break
+        }
+    }
+
+    return result
+}
+
+get_or_add_brain :: proc(region: ^SimRegion, id: BrainId, kind: BrainKind) -> (result: ^Brain) {
+    hash := get_brain_hash_from_id(region, id)
+    result = hash.pointer
     
-    dest := append(&region.entities)
+    if result == nil {
+        result = append(&region.brains)
+        result.id = id
+        result.kind = kind
+        
+        hash.pointer = result
+    }
     
-    assert(entry.id == 0 || entry.id == source.id)
-    entry.id = source.id
-    entry.pointer = dest
-    
-    // @todo(viktor): this should really be a decompression not a copy
-    dest^ = source^
-    
-    dest.id = source.id
-    dest.p += chunk_delta
-    
-    dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
+    return result
 }
 
 connect_entity_references :: proc(region: ^SimRegion) {
@@ -269,7 +318,7 @@ connect_entity_references :: proc(region: ^SimRegion) {
 
 load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
     if ref.id != 0 {
-        entry := get_hash_from_id(region, ref.id)
+        entry := get_entity_hash_from_id(region, ref.id)
         ref.pointer = entry == nil ? nil : entry.pointer
     }
 }
