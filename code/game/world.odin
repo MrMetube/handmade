@@ -62,9 +62,9 @@ ChunkData :: struct {
 // @todo(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
 WorldEntityBlock :: #type SingleLinkedList(WorldEntityBlockData)
 WorldEntityBlockData :: struct {
-    entity_count: EntityId,// :Array
-    
-    entity_data: Array(1 << 14, u8),
+    entity_count: u32,
+    // @note(viktor): entity_data'count =^= size_of(Entity) * entity_count  for now, because there is no compression
+    entity_data: FixedArray(1 << 14, u8), // :DisjointArray of Entity Data and inlined member arrays or specialized :Arena
 }
 
 WorldPosition :: struct {
@@ -73,7 +73,7 @@ WorldPosition :: struct {
     // at first, and we could get by without it, but entity references pull
     // in entities WITHOUT going through their world_chunk, and thus
     // still need to know the ChunkX/Y/Z
-    chunk: [3]i32,
+    chunk:  [3]i32,
     offset: v3,
 }
 
@@ -336,7 +336,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     
     update_block := begin_timed_block("update and render entity")
-    for &entity in camera_sim_region.entities[:camera_sim_region.entity_count] {
+    for &entity in get_slice(camera_sim_region.entities) {
         // @todo(viktor): we dont really have a way to unique-ify these :(
         debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
         if debug_requested(debug_id) { 
@@ -376,7 +376,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             ////////////////////////////////////////////////
             // Pre-physics entity work
-            
+            t_jump :: 0.1
+            t_thrust :: 0.8
+                    
             switch entity.type {
               case .Nil, .Monster, .Wall, .Stairwell, .Floor:
               case .FloatyThingForNow:
@@ -404,7 +406,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                 
                 head := &entity
-                body := head.head.pointer
+                body := head.paired_entities.data[0].pointer
                 if con_hero.exited {
                     delete_entity(body)
                     delete_entity(head)
@@ -455,81 +457,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
                         
               case.HeroBody:
-                body := &entity
-                head := body.head.pointer
-                
-                if body.movement_mode == .Planted {
-                    body.p = get_sim_space_traversable(body.occupying).p
-                }
-                
-                head_delta: v3
-                if head != nil {
-                    head_delta = head.p - body.p
-                }
-                body.y_axis = v2{0, 1} + 1 * head_delta.xy
-                // body.x_axis = perpendicular(body.y_axis)
-                
-                ddt_bob: f32
-                switch body.movement_mode {
-                  case .Planted:
-                    if head != nil {
-                        head_distance := length(head_delta)
-                        max_head_distance :f32= 0.4
-                        t_head_distance := clamp_01_to_range(0, head_distance, max_head_distance)
-                        
-                        ddt_bob = t_head_distance * -30
-                    }
-
-                  case .Hopping:
-                    t_jump :: 0.1
-                    t_thrust :: 0.8
-                    
-                    occupying := get_sim_space_traversable(body.occupying).p
-                    came_from := get_sim_space_traversable(body.came_from).p
-                    pt := occupying
-                    
-                    if body.t_movement < t_thrust {
-                        ddt_bob -= 60
-                    }
-                    
-                    if t_jump <= body.t_movement {
-                        
-                        t := clamp_01_to_range(t_jump, body.t_movement, 1)
-                        body.t_bob = sin(t * Pi) * 0.1
-                        body.p = lerp(came_from, occupying, body.t_movement)
-                        body.dp = 0
-                        
-                        pf := came_from
-                        
-                        // :ZHandling
-                        height := v3{0, 0.3, 0.3}
-                        
-                        c := pf
-                        a := -4 * height
-                        b := pt - pf - a
-                        body.p = a * square(t) + b * t + c
-                    }
-                    
-                    if body.t_movement >= 1 {
-                        body.movement_mode = .Planted
-                        body.dt_bob = -3
-                        body.p = pt
-                        body.came_from = body.occupying
-                    }
-                    
-                    hop_duration :f32: 0.2
-                    body.t_movement += dt * (1 / hop_duration)
-                    
-                    if body.t_movement >= 1 {
-                        body.t_movement = 1
-                    }
-                }
-                
-                
-                ddt_bob += 100 * (0-body.t_bob) + 12 * (0-body.dt_bob)
-                body.t_bob += ddt_bob*square(dt) + body.dt_bob*dt
-                body.dt_bob += 0.5*ddt_bob*dt
-                
                 move_spec.normalize_accelaration = true
                 move_spec.drag = 50
                 move_spec.speed = 250
@@ -539,7 +466,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 closest_hero_dsq := square(f32(10))
                 
                 // @cleanup get_closest_traversable
-                for &test in camera_sim_region.entities[:camera_sim_region.entity_count] {
+                for &test in get_slice(camera_sim_region.entities) {
                     if test.type == .HeroBody {
                         dsq := length_squared(test.p.xy - entity.p.xy)
                         if dsq < closest_hero_dsq {
@@ -559,6 +486,82 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 move_spec.drag = 8
                 move_spec.speed = 50
             }
+            
+            ////////////////////////////////////////////////
+            
+            // @note(viktor): handle the entities movement_mode
+            
+            if entity.movement_mode == .Planted {
+                if entity.occupying.entity.pointer != nil {
+                    entity.p = get_sim_space_traversable(entity.occupying).p
+                }
+            }
+            
+            ddt_bob: f32
+            switch entity.movement_mode {
+              case .Planted:
+                pair_distance: f32
+                for &pair in get_slice(entity.paired_entities) {
+                    if pair.pointer != nil {
+                        pair_delta := pair.pointer.p - entity.p
+                        pair_distance += length_squared(pair_delta)
+                    }
+                }
+                pair_distance = square_root(pair_distance)
+                
+                max_head_distance :f32= 0.4
+                t_head_distance := clamp_01_to_range(0, pair_distance, max_head_distance)
+                ddt_bob = t_head_distance * -30
+                
+              case .Hopping:
+                if entity.t_movement < t_thrust {
+                    ddt_bob -= 60
+                }
+                
+                occupying := get_sim_space_traversable(entity.occupying).p
+                came_from := get_sim_space_traversable(entity.came_from).p
+                pt := occupying
+                
+                if t_jump <= entity.t_movement {
+                    
+                    t := clamp_01_to_range(t_jump, entity.t_movement, 1)
+                    entity.t_bob = sin(t * Pi) * 0.1
+                    entity.p = lerp(came_from, occupying, entity.t_movement)
+                    entity.dp = 0
+                    
+                    pf := came_from
+                    
+                    // :ZHandling
+                    height := v3{0, 0.3, 0.3}
+                    
+                    c := pf
+                    a := -4 * height
+                    b := pt - pf - a
+                    entity.p = a * square(t) + b * t + c
+                }
+                
+                if entity.t_movement >= 1 {
+                    entity.movement_mode = .Planted
+                    entity.dt_bob = -3
+                    entity.p = pt
+                    entity.came_from = entity.occupying
+                }
+                
+                hop_duration :f32: 0.2
+                entity.t_movement += dt * (1 / hop_duration)
+                
+                if entity.t_movement >= 1 {
+                    entity.t_movement = 1
+                }
+            }
+            
+            // @todo(viktor): reenable this stretching?
+            // entity.y_axis = v2{0, 1} + 1 * head_delta.xy
+            // entity.x_axis = perpendicular(entity.y_axis)
+            
+            ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
+            entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
+            entity.dt_bob += 0.5*ddt_bob*dt
             
             if .Moveable in entity.flags {
                 move_entity(camera_sim_region, &entity, ddp, move_spec, dt)
@@ -668,7 +671,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 color.rgb *= 0.4
                 push_rectangle_outline(render_group, entity.collision.total_volume, transform, color)
                 
-                for traversable in entity.traversables[:entity.traversable_count] {
+                for traversable in get_slice(entity.traversables) {
                     rect := rectangle_center_dimension(traversable.p, 0.1)
                     push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Blue)
                 }
@@ -899,13 +902,14 @@ pack_entity_into_world :: proc(world: ^World, source: ^Entity, p: WorldPosition)
     source.p = p.offset
 
     pack_entity_into_chunk(world, source, chunk)
-    chunk = chunk
 }
 
 pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
     assert(chunk != nil)
     
-    pack_size := cast(i32) size_of(Entity)
+    // :PointerArithmetic
+    entity_reference_size := source.paired_entities.count * size_of(StoredEntityReference)
+    pack_size := size_of(Entity) + entity_reference_size
     
     if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
         new_block := list_pop(&world.first_free_block) or_else push(&world.arena, WorldEntityBlock, no_clear())
@@ -916,28 +920,48 @@ pack_entity_into_chunk :: proc(world: ^World, source: ^Entity, chunk: ^Chunk) {
     assert(block_has_room(chunk.first_block, pack_size))
     
     block := chunk.first_block
+    
+    // :PointerArithmetic
     dest := &block.entity_data.data[block.entity_data.count]
+    dest_references := &block.entity_data.data[block.entity_data.count + entity_reference_size]
     block.entity_data.count += pack_size
+    
     block.entity_count += 1
     
     entity := (cast(^Entity) dest)
     entity ^= source^
     
-    // @metaprogram should be able to generate the load und pack code
-    pack_entity_reference(&entity.head)
+    references := (cast([^]StoredEntityReference) dest_references)[:source.paired_entities.count]
+    
+    // @todo(viktor): Can we zip it?
+    pack_entity_reference_array(get_slice(entity.paired_entities), references)
     pack_traversable_reference(&entity.came_from)
     pack_traversable_reference(&entity.occupying)
 }
 
-pack_entity_reference :: proc(ref: ^EntityReference) {
-    if ref.pointer != nil {
-        ref.id = ref.pointer.id
+pack_entity_reference_array :: proc(sources: []EntityReference, destinations: []StoredEntityReference) {
+    index: u32
+    for &source in sources {
+        defer index += 1
+        
+        dest := &destinations[index]
+        dest.id = 0
+        dest.relationship = .None
+        
+        if source.pointer == nil {
+            // @todo(viktor): Need the hashtable to know if we should keep this!
+        }
+        
+        if source.pointer != nil {
+            dest.id = source.pointer.id
+            dest.relationship = source.stored.relationship
+        }
     }
 }
 
 pack_traversable_reference :: proc(ref: ^TraversableReference) {
-    pack_entity_reference(&ref.entity)
-    
+    // @todo(viktor): need to pack this
+    // pack_entity_reference(&ref.entity)
 }
 
 clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
@@ -946,6 +970,6 @@ clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
     block.next = nil
 }
 
-block_has_room :: proc(block: ^WorldEntityBlock, size: i32) -> b32 {
+block_has_room :: proc(block: ^WorldEntityBlock, size: i64) -> b32 {
     return block.entity_data.count + size < len(block.entity_data.data)
 }

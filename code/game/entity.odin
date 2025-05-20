@@ -4,6 +4,13 @@ Entity :: struct {
     id: EntityId,
     updatable: b32,
     
+    ////////////////////////////////////////////////
+    
+    paired_entities: Array(EntityReference),
+    
+    ////////////////////////////////////////////////
+    // @note(viktor): Everything below here is not worked out
+    
     type:  EntityType,
     flags: EntityFlags,
     
@@ -16,7 +23,6 @@ Entity :: struct {
     hit_point_max: u32, // :Array
     hit_points: [16]HitPoint,
     
-    head: EntityReference,
     
     movement_mode: MovementMode,
     t_movement:    f32,
@@ -29,13 +35,12 @@ Entity :: struct {
     // @todo(viktor): generation index so we know how " to date" this entity is
     
     // @todo(viktor): only for stairwells
-    walkable_dim: v2,
+    walkable_dim:    v2,
     walkable_height: f32,
     
     x_axis, y_axis: v2,
     
-    traversable_count: u32, // :Array
-    traversables:      []TraversablePoint,
+    traversables: Array(TraversablePoint),
 }
 
 EntityId :: distinct u32
@@ -79,7 +84,8 @@ PairwiseCollsionRuleFlag :: enum {
 }
 
 MovementMode :: enum {
-    Planted, Hopping,
+    Planted, 
+    Hopping,
 }
 
 EntityCollisionVolumeGroup :: struct {
@@ -91,9 +97,29 @@ EntityCollisionVolumeGroup :: struct {
     volumes: []Rectangle3,
 }
 
+EntityRelationship :: enum u32 {
+    None,
+    Paired,
+}
+
+StoredEntityReference :: struct {
+    id:           EntityId,
+    relationship: EntityRelationship,
+}
+
+EntityReference :: struct {
+    pointer: ^Entity,
+    stored:  StoredEntityReference,
+}
+
 TraversablePoint :: struct {
     p:       v3,
     occupant: ^Entity,
+}
+
+TraversableReference :: struct {
+    entity: EntityReference,
+    index:  i64,
 }
 
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
@@ -171,12 +197,14 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         body := begin_grounded_entity(world, .HeroBody, world.hero_body_collision)
         
         body.flags += {.Moveable}
-        body.head.pointer = head
+        body.paired_entities = make_array(&world.arena, EntityReference, 1)
+        append(&body.paired_entities, EntityReference{pointer = head})
         // @todo(viktor): We will probably need a creation-time system for
         // guaranteeing no overlapping occupation.
         body.occupying = occupying
     
-    head.head.pointer = body
+    head.paired_entities = make_array(&world.arena, EntityReference, 1)
+    append(&head.paired_entities, EntityReference{pointer = body})
     
     result = head.id
         
@@ -229,10 +257,8 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) {
             }
             
             entity := begin_grounded_entity(world, kind, world.floor_collision)
-            
-            entity.traversable_count = 1
-            entity.traversables = push_slice(&world.arena, TraversablePoint, 1)
-            
+            entity.traversables = make_array(&world.arena, TraversablePoint, 1)
+            append(&entity.traversables, TraversablePoint{})
             end_entity(world, entity, p)
         }
     }

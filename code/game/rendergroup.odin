@@ -44,7 +44,7 @@ RenderCommands :: struct {
     width, height: i32,
     
     // @note(viktor): Packed array of disjoint elements.
-    push_buffer:      []u8, // :Array
+    push_buffer:      []u8, // :DisjointArray
     push_buffer_size: u32,
     
     sort_entry_at:             u32,
@@ -55,8 +55,6 @@ RenderCommands :: struct {
     
     rects: Deque(RenderEntryClip),
 }
-
-
 
 RenderGroup :: struct {
     assets:                ^Assets,

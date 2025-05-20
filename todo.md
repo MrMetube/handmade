@@ -6,7 +6,7 @@
     
 - :CutsceneEpisodes
 - :PlatformArena
-- :Array
+- :DisjointArray
 - :PointerArithmetic
     - change the types to a less c-mindset
     - or if necessary make utilities to these operations

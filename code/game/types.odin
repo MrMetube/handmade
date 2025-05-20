@@ -1,23 +1,44 @@
 #+vet !unused-procedures
 package game
 
-// :Array
-Array :: struct ($N: i32, $T: typeid) {
+@(common="file")
+
+Array :: struct ($T: typeid) {
+    data:  []T,
+    count: i64,
+}
+FixedArray :: struct ($N: i64, $T: typeid) {
     data:  [N]T,
-    count: i32,
+    count: i64,
 }
 
-array_append :: proc(a: ^Array($N, $T), values: ..T) {
-    assert(N > a.count + len(values))
-    for v in values {
-        a.data[a.count] = v
-        a.count += 1
-    }
+append :: proc { append_fixed_array, append_array }
+append_array :: proc(a: ^Array($T), value: T) -> (result: ^T) {
+    assert(len(a.data) >= auto_cast a.count + 1)
+    a.data[a.count] = value
+    a.count += 1
+}
+append_fixed_array :: proc(a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
+    assert(len(a.data) >= auto_cast a.count + 1)
+    a.data[a.count] = value
+    a.count += 1
+}
+
+make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32) -> (result: Array(T)) {
+    result.data = push_slice(arena, T, len)
+    return result
+}
+
+get_slice :: proc{ get_slice_fixed_array, get_slice_array }
+get_slice_fixed_array :: proc(array: FixedArray($N, $T)) -> []T {
+    return array.data[:array.count]
+}
+get_slice_array :: proc(array: Array($T)) -> []T {
+    return array.data[:array.count]
 }
 
 ////////////////////////////////////////////////
 
-@(common="file")
 // [First] <- [..] ... <- [..] <- [Last] 
 Deque :: struct($L: typeid) {
     first, last: ^L,
