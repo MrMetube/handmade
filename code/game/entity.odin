@@ -18,6 +18,11 @@ Entity :: struct {
     
     p, dp: v3,
     ddp: v3, // @note(viktor): Do not pack this @metaprogram
+
+    t_bob, dt_bob: f32,
+    ddt_bob:  f32, // @note(viktor): Do not pack this @metaprogram
+    
+    move_spec: MoveSpec, // @note(viktor): Do not pack this @metaprogram
     
     collision: ^EntityCollisionVolumeGroup,
     
@@ -25,28 +30,33 @@ Entity :: struct {
     
     hit_point_max: u32, // :Array
     hit_points: [16]HitPoint,
-
+    
     movement_mode: MovementMode,
     t_movement:    f32,
     occupying: TraversableReference,
     came_from: TraversableReference,
     
-    t_bob:  f32,
-    dt_bob: f32,
     facing_direction: f32,
     // @todo(viktor): generation index so we know how " to date" this entity is
     
-    // @todo(viktor): only for stairwells
+    // @cleanup
     walkable_dim:    v2,
     walkable_height: f32,
     
     x_axis, y_axis: v2,
     
     traversables: Array(TraversablePoint),
+    
+    pieces: FixedArray(4, EntityVisiblePiece),
+}
+
+EntityVisiblePiece :: struct {
+    asset: AssetTypeId,
+    height: f32,
+    color: v4,
 }
 
 EntityId :: distinct u32
-BrainId :: distinct EntityId
 
 EntityFlag :: enum {
     Collides,
@@ -89,14 +99,6 @@ PairwiseCollsionRuleFlag :: enum {
 MovementMode :: enum {
     Planted, 
     Hopping,
-}
-
-BrainKind :: enum {
-    Hero, 
-    Snake, 
-}
-BrainSlot :: struct {
-    index: u32,
 }
 
 EntityCollisionVolumeGroup :: struct {
@@ -178,6 +180,12 @@ add_wall :: proc(world: ^World, p: WorldPosition) {
     
     entity.flags += {.Collides}
     
+    append(&entity.pieces, EntityVisiblePiece{
+        asset = .Rock,
+        height = 1.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
+        color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
+    })
+    
     end_entity(world, entity, p)
 }
 
@@ -201,18 +209,13 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         
         body.flags += {.Moveable}
         
-        brain_slot_for :: proc($member : string) -> BrainSlot {
-            // @study(viktor): can this be done better by using enumerated arrays?
-            return { auto_cast offset_of_by_string(BrainHeroParts, member) / size_of(^Entity) }
-        }
-        
         body.brain_id = brain_id
         body.brain_kind = .Hero
-        body.brain_slot = brain_slot_for("body")
+        body.brain_slot = brain_slot_for(BrainHeroParts, "body")
     
     head.brain_id = brain_id
     head.brain_kind = .Hero
-    head.brain_slot = brain_slot_for("head")
+    head.brain_slot = brain_slot_for(BrainHeroParts, "head")
         
         // @todo(viktor): We will probably need a creation-time system for
         // guaranteeing no overlapping occupation.
@@ -234,6 +237,18 @@ add_monster :: proc(world: ^World, p: WorldPosition) {
     
     entity.flags += {.Collides, .Moveable}
     
+    append(&entity.pieces, EntityVisiblePiece{
+        asset = .Monster,
+        height = 1.5,
+        color = 1,
+    })
+    
+    append(&entity.pieces, EntityVisiblePiece{
+        asset = .Shadow,
+        height = 0.75,
+        color = 1, // @todo(viktor): shadow alpha & shadow transform
+    })
+    
     init_hitpoints(entity, 3)
     
     end_entity(world, entity, p)
@@ -241,7 +256,16 @@ add_monster :: proc(world: ^World, p: WorldPosition) {
 
 add_familiar :: proc(world: ^World, p: WorldPosition) {
     entity := begin_grounded_entity(world, .Familiar, world.familiar_collision)
-
+    
+    world.last_used_entity_id += 1
+    for world.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
+        world.last_used_entity_id += 1
+    }
+    
+    entity.brain_kind = .Familiar
+    entity.brain_id = cast(BrainId) world.last_used_entity_id
+    entity.brain_slot = brain_slot_for(BrainFamiliarParts, "familiar")
+    
     entity.flags += {.Moveable}
     
     end_entity(world, entity, p)

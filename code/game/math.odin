@@ -152,7 +152,7 @@ modulus :: proc { mod_f, mod_vf, mod_v }
 @(require_results) mod_f :: proc(value: f32, divisor: f32) -> f32 {
     return math.mod(value, divisor)
 }
-@(require_results) mod_vf :: proc(value: [$N]f32, divisor: f32) -> (result: [N]f32) {
+@(require_results) mod_vf :: proc(value: [$N]f32, divisor: f32) -> (result: [N]f32) where N > 1 {
     #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor) 
     return result
 }

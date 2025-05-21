@@ -36,7 +36,7 @@ make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32) -> (result: Arr
 }
 
 slice :: proc{ slice_fixed_array, slice_array }
-slice_fixed_array :: proc(array: FixedArray($N, $T)) -> []T {
+slice_fixed_array :: proc(array: ^FixedArray($N, $T)) -> []T {
     return array.data[:array.count]
 }
 slice_array :: proc(array: Array($T)) -> []T {

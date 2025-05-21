@@ -60,6 +60,16 @@ random_between_i32 :: proc(series: ^RandomSeries, min, max: i32) -> (result: i32
     
     return result
 }
+random_between_f32 :: proc(series: ^RandomSeries, min, max: f32) -> (result: f32) {
+    assert(min < max)
+    value := random_unilateral(series, f32)
+    range := max - min
+    result = min + value * range
+    assert(result >= min)
+    assert(result <= max)
+    return result
+}
+
 random_between_u32 :: proc(series: ^RandomSeries, min, max: u32) -> (result: u32) {
     assert(min < max)
     result = min + (next_random_u32(series) % ((max+1)-min))

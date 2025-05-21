@@ -19,6 +19,7 @@ UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32
 TimestepPercentage:            f32 = 100
+RenderCollisionOutlineAndTraversablePoints: b32
 
 ////////////////////////////////////////////////
 
@@ -269,6 +270,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         
         { debug_data_block("Entity")
             debug_record_value(&FamiliarFollowsHero)
+            debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
         }
         
         { debug_data_block("Particles")

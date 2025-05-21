@@ -44,6 +44,7 @@ World :: struct {
     creation_buffer:       [4]Entity,
     last_used_entity_id:   EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
     
+    general_entropy: RandomSeries,
     
     first_free_chunk: ^Chunk,
     first_free_block: ^WorldEntityBlock,
@@ -95,6 +96,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
 
     world.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
+    
+    world.general_entropy = seed_random_series(123)
     
     pixels_to_meters :: 1.0 / 42.0
     chunk_dim_in_meters :f32= pixels_to_meters * 256
@@ -252,7 +255,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     // @todo(viktor): do we want to simulate upper floors, etc?
     sim_bounds := rectangle_add_radius(camera_bounds, v3{15, 15, 15})
     sim_origin := world.camera_p
-    camera_sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
+    sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
     camera_p := world.camera_offset + world_distance(world, world.camera_p, sim_origin)
     
@@ -261,8 +264,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         transform.offset -= camera_p
         transform.sort_bias = 10000
         push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Orange,0.1)
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.bounds).xy),           transform, Blue,  0.2)
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(camera_sim_region.updatable_bounds).xy), transform, Green, 0.2)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(sim_region.bounds).xy),           transform, Blue,  0.2)
+        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(sim_region.updatable_bounds).xy), transform, Green, 0.2)
     }
     
     ////////////////////////////////////////////////
@@ -271,13 +274,14 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
         if con_hero.brain_id == 0 {
-            if controller.start.ended_down {
-                standing_on, ok := get_closest_traversable(camera_sim_region, camera_p, {.Unoccupied} )
+            if was_pressed(controller.start) {
+                standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
                 assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
                 // maybe keep trying on subsequent frames?
+                
                 brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
                 con_hero^ = { brain_id = brain_id }
-                add_hero(world, camera_sim_region, standing_on, brain_id)
+                add_hero(world, sim_region, standing_on, brain_id)
             }
         }
     }
@@ -285,141 +289,14 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     ////////////////////////////////////////////////
     // Run all brains
     
-    update_block := begin_timed_block("update and render entity")
-    for &brain in slice(camera_sim_region.brains) {
-        switch brain.kind {
-          case .Hero:
-            // @todo(viktor): Check that they're not deleted what do we do?
-            head := brain.hero.head
-            body := brain.hero.body
-            
-            controller_index := brain.id-1 // @note(viktor): 0 is reserved for the null brain
-            controller := input.controllers[controller_index]
-            
-            ddp: v3
-            if controller.is_analog {
-                // @note(viktor): Use analog movement tuning
-                ddp.xy = controller.stick_average
-            } else {
-                // @note(viktor): Use digital movement tuning
-                if was_pressed(controller.stick_left) {
-                    ddp.y  = 0
-                    ddp.x -= 1
-                }
-                if was_pressed(controller.stick_right) {
-                    ddp.y  = 0
-                    ddp.x += 1
-                }
-                if was_pressed(controller.stick_up) {
-                    ddp.x  = 0
-                    ddp.y += 1
-                }
-                if was_pressed(controller.stick_down) {
-                    ddp.x  = 0
-                    ddp.y -= 1
-                }
-                
-                if !is_down(controller.stick_left) && !is_down(controller.stick_right) {
-                    ddp.x = 0
-                    if is_down(controller.stick_up)   do ddp.y =  1
-                    if is_down(controller.stick_down) do ddp.y = -1
-                }
-                if !is_down(controller.stick_up) && !is_down(controller.stick_down) {
-                    ddp.y = 0
-                    if is_down(controller.stick_left)  do ddp.x = -1
-                    if is_down(controller.stick_right) do ddp.x =  1
-                }
-            }
-            
-            dfacing: v2
-            if controller.button_up.ended_down {
-                dfacing =  {0, 1}
-            }
-            if controller.button_down.ended_down {
-                dfacing = -{0, 1}
-            }
-            if controller.button_left.ended_down {
-                dfacing = -{1, 0}
-            }
-            if controller.button_right.ended_down {
-                dfacing =  {1, 0}
-            }
-            
-            exited: b32
-            if was_pressed(controller.back) {
-                exited = true
-            }
-            
-            when false do if was_pressed(controller.start) {
-                standing_on, ok := get_closest_traversable(camera_sim_region, head.p, {.Unoccupied} )
-                if ok {
-                    add_hero(world, camera_sim_region, standing_on)
-                }
-            }
-            
-            if exited {
-                delete_entity(body)
-                delete_entity(head)
-            } else {
-                if head != nil && dfacing.x != 0  {
-                    head.facing_direction = atan2(dfacing.y, dfacing.x)
-                } else {
-                    // @note(viktor): leave the facing direction what it was
-                }
-                
-                if head != nil {
-                    traversable_reference, ok := get_closest_traversable(camera_sim_region, head.p)
-                    if ok {
-                        if body != nil {
-                            if body.movement_mode == .Planted {
-                                if traversable_reference != body.occupying {
-                                    body.came_from = body.occupying
-                                    if transactional_occupy(body, &body.occupying, traversable_reference) {
-                                        body.movement_mode = .Hopping
-                                        body.t_movement = 0
-                                    }
-                                }
-                            }
-                        }
-                        
-                        traversable := get_sim_space_traversable(traversable_reference)
-                        closest_p := traversable.p
-                        
-                        if body != nil {
-                            spring_active := length_squared(ddp) == 0
-                            if spring_active {
-                                for i in 0..<3 {
-                                    head_spring := 400 * (closest_p[i] - head.p[i]) + 20 * (- head.dp[i])
-                                    ddp[i] += dt*head_spring
-                                }
-                            }
-                        }
-                    }
-                    
-                    head.ddp = ddp
-                }
-                
-                if head != nil && body != nil {
-                    body.facing_direction = head.facing_direction
-                }
-            }
-            
-            if body != nil {
-                head_delta :v3
-                if head != nil {
-                    head_delta = head.p - body.p
-                }
-                // @todo(viktor): reenable this stretching?
-                body.y_axis = v2{0, 1} + 1 * head_delta.xy
-                // body.x_axis = perpendicular(body.y_axis)
-            }
-            
-          case .Snake:
-            
-        }
+    for &brain in slice(sim_region.brains) {
+        execute_brain(input, sim_region, &brain)
     }
     
-    for &entity in slice(camera_sim_region.entities) {
+    ////////////////////////////////////////////////
+    // Simulate all entities
+    
+    for &entity in slice(sim_region.entities) {
         // @todo(viktor): we dont really have a way to unique-ify these :(
         debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
         if debug_requested(debug_id) { 
@@ -428,84 +305,14 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         defer if debug_requested(debug_id) {
             debug_end_data_block()
         }
+        
         // @todo(viktor): set this at contruction
         entity.x_axis = {1,0}
         entity.y_axis = {0,1}
         
         if entity.updatable { // @todo(viktor):  move this out into entity.odin
-            // @todo(viktor): Probably indicates we want to separate update ann render for entities sometime soon?
-            camera_relative_ground := get_entity_ground_point(&entity) - camera_p
-            fade_top_end      :=  0.75 * world.typical_floor_height
-            fade_top_start    :=  0.5  * world.typical_floor_height
-            fade_bottom_start := -1    * world.typical_floor_height
-            fade_bottom_end   := -1.5  * world.typical_floor_height 
-            
-            render_group.global_alpha = 1
-            if camera_relative_ground.z > fade_top_start {
-                render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
-            } else if camera_relative_ground.z < fade_bottom_start {
-                render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
-            }
-            
-            
-            // @todo(viktor): this is incorrect, should be computed after update
-            shadow_alpha := 1 - 0.5 * entity.p.z
-            if shadow_alpha < 0 {
-                shadow_alpha = 0.0
-            }
-            
-            ddp: v3 = entity.ddp
-            move_spec := default_move_spec()
-            
             ////////////////////////////////////////////////
-            // Pre-physics entity work
-                    
-            switch entity.type {
-              case .Nil, .Monster, .Wall, .Stairwell, .Floor:
-              case .HeroHead:
-                move_spec.normalize_accelaration = true
-                move_spec.drag = 5
-                move_spec.speed = 30
-                
-              case .HeroBody:
-                move_spec.normalize_accelaration = true
-                move_spec.drag = 50
-                move_spec.speed = 250
-                
-              case .FloatyThingForNow:
-                entity.t_bob += dt
-                if entity.t_bob > Tau do entity.t_bob -= Tau
-                entity.p.z += 0.05 * cos(entity.t_bob)
-            
-              case .Familiar: 
-                closest_hero: ^Entity
-                closest_hero_dsq := square(f32(10))
-                
-                // @cleanup get_closest_traversable
-                for &test in slice(camera_sim_region.entities) {
-                    if test.type == .HeroBody {
-                        dsq := length_squared(test.p.xy - entity.p.xy)
-                        if dsq < closest_hero_dsq {
-                            closest_hero_dsq = dsq
-                            closest_hero = &test
-                        }
-                    }
-                }
-                
-                if FamiliarFollowsHero {
-                    if closest_hero != nil && closest_hero_dsq > 1 {
-                        ddp = square_root(closest_hero_dsq) * (closest_hero.p - entity.p)
-                    }
-                }
-                
-                move_spec.normalize_accelaration = true
-                move_spec.drag = 8
-                move_spec.speed = 50
-            }
-            
-            ////////////////////////////////////////////////
-            
-            // @note(viktor): handle the entities movement_mode
+            // Movement
             
             if entity.movement_mode == .Planted {
                 if entity.occupying.entity.pointer != nil {
@@ -513,27 +320,13 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
             
-            ddt_bob: f32
             switch entity.movement_mode {
-              case .Planted:
-                pair_distance: f32
-                // for &pair in slice(entity.paired_entities) {
-                //     if pair.pointer != nil {
-                //         pair_delta := pair.pointer.p - entity.p
-                //         pair_distance += length_squared(pair_delta)
-                //     }
-                // }
-                pair_distance = square_root(pair_distance)
-                
-                max_head_distance :f32= 0.4
-                t_head_distance := clamp_01_to_range(0, pair_distance, max_head_distance)
-                ddt_bob = t_head_distance * -30
-                
+              case .Planted: // Nothing
               case .Hopping:
                 t_jump :: 0.1
                 t_thrust :: 0.8
                 if entity.t_movement < t_thrust {
-                    ddt_bob -= 60
+                    entity.ddt_bob -= 60
                 }
                 
                 occupying := get_sim_space_traversable(entity.occupying).p
@@ -573,16 +366,35 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
             
-            ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
-            entity.t_bob += ddt_bob*square(dt) + entity.dt_bob*dt
-            entity.dt_bob += 0.5*ddt_bob*dt
+            entity.ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
+            entity.t_bob += entity.ddt_bob*square(dt) + entity.dt_bob*dt
+            entity.dt_bob += 0.5*entity.ddt_bob*dt
             
             if .Moveable in entity.flags {
-                move_entity(camera_sim_region, &entity, ddp, move_spec, dt)
+                move_entity(sim_region, &entity, entity.ddp, entity.move_spec, dt)
             }
             
             ////////////////////////////////////////////////
-            // Post-physics entity work
+            // Rendering
+            
+            camera_relative_ground := get_entity_ground_point(&entity) - camera_p
+            fade_top_end      :=  0.75 * world.typical_floor_height
+            fade_top_start    :=  0.5  * world.typical_floor_height
+            fade_bottom_start := -1    * world.typical_floor_height
+            fade_bottom_end   := -1.5  * world.typical_floor_height 
+            
+            render_group.global_alpha = 1
+            if camera_relative_ground.z > fade_top_start {
+                render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
+            } else if camera_relative_ground.z < fade_bottom_start {
+                render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
+            }
+            
+            // @todo(viktor): this is incorrect, should be computed after update
+            shadow_alpha := 1 - 0.5 * entity.p.z
+            if shadow_alpha < 0 {
+                shadow_alpha = 0.0
+            }
             
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
             facing_weights := #partial AssetVector{ .FacingDirection = 1 }
@@ -599,7 +411,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             hero_height :f32= 3.5
             switch entity.type {
-              case .Nil: // @note(viktor): nothing
+              case .Nil, .Floor, .FloatyThingForNow,
+                   .Stairwell, .Monster, .Wall:
+                // @note(viktor): nothing
+                
               case .HeroHead:
                 before := transform
                 defer transform = before
@@ -627,8 +442,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     push_bitmap(render_group, cape_id,  transform, hero_height*1.3, x_axis = x_axis, y_axis = y_axis)
                 transform = before
                 
-                push_hitpoints(render_group, &entity, 1, transform)
-                
                 if debug_requested(debug_id) { 
                     debug_record_value(&shadow_id)
                     debug_record_value(&cape_id)
@@ -652,34 +465,20 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&head_id)
                 }
                 
-              case .Monster:
-                monster_id := best_match_bitmap_from(tran_state.assets, .Monster, facing_match, facing_weights)
-                
-                push_bitmap(render_group, shadow_id, shadow_transform, 0.75, color = {1, 1, 1, shadow_alpha})
-                push_bitmap(render_group, monster_id, transform, 1.5)
-                push_hitpoints(render_group, &entity, 1.6, transform)
-                
-                if debug_requested(debug_id) { 
-                    debug_record_value(&shadow_id)
-                    debug_record_value(&monster_id)
-                }
-                
-              case .Wall:
-                rock_id := first_bitmap_from(tran_state.assets, AssetTypeId.Rock)
-                
-                push_bitmap(render_group, rock_id, transform, 1.5)
+            }
+            
+            for piece in slice(&entity.pieces) {
+                bitmap_id := best_match_bitmap_from(tran_state.assets, piece.asset, facing_match, facing_weights)
+                push_bitmap(render_group, bitmap_id, transform, piece.height, color = piece.color, x_axis = entity.x_axis, y_axis = entity.y_axis)
                 
                 if debug_requested(debug_id) { 
-                    debug_record_value(&rock_id)
+                    debug_record_value(&bitmap_id)
                 }
-                
-              case .Stairwell: 
-                transform.upright = false
-                push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue)
-                transform.offset.z += world.typical_floor_height
-                push_rectangle(render_group, rectangle_center_dimension(v2{0, 0}, entity.walkable_dim), transform, Blue * {1,1,1,0.5})
-                
-              case .Floor, .FloatyThingForNow: 
+            }
+            
+            draw_hitpoints(render_group, &entity, 0.5, transform)
+            
+            if RenderCollisionOutlineAndTraversablePoints {
                 transform.upright = false
                 color := Green
                 color.rgb *= 0.4
@@ -715,7 +514,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
         }
     }
-    end_timed_block(update_block)
     
     when false do if EnvironmentTest { 
         ////////////////////////////////////////////////
@@ -786,10 +584,19 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.       
-    end_sim(camera_sim_region)
+    end_sim(sim_region)
     end_temporary_memory(sim_memory)
     
     check_arena(&world.arena)
+    
+    // @todo(viktor): Should switch mode. Implemented in :CutsceneEpisodes
+    heroes_exist: b32
+    for con_hero in world.controlled_heroes {
+        if con_hero.brain_id != 0 {
+            heroes_exist = true
+            break
+        }
+    }
 }
 
 ////////////////////////////////////////////////
@@ -942,6 +749,10 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entit
     
     entity := (cast(^Entity) dest)
     entity ^= source^
+    
+    // @volatile see Entity definition @metaprogram
+    entity.ddp = 0
+    entity.ddt_bob = 0
     
     // pack_entity_reference(region, &entity.head)
     pack_traversable_reference(region, &entity.came_from)

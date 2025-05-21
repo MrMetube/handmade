@@ -17,30 +17,9 @@ SimRegion :: struct {
     brain_hash:  [128]BrainHash,
 }
 
-Brain :: struct {
-    id:   BrainId,
-    kind: BrainKind,
-    
-    using data : struct #raw_union {
-        parts : [16]^Entity,
-        hero: BrainHeroParts,
-    }
-}
-
-BrainHeroParts :: struct {
-    head, body: ^Entity
-}
-
 BrainHash :: struct {
     pointer: ^Brain,
     id:      BrainId, // @todo(viktor): Why are we storing these in the hash?
-}
-
-ReservedBrainId :: enum BrainId {
-    FirstHero = 1,
-    LastHero = FirstHero + len(Input{}.controllers)-1,
-    
-    FirstFree,
 }
 
 EntityHash :: struct {

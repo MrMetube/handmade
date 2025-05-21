@@ -400,7 +400,7 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
 }
 
-push_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
+draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
     if entity.hit_point_max > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
