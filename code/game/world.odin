@@ -198,11 +198,6 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
                 if should_be_wall {
                     add_wall(world, chunk_position_from_tile_positon(world, col, row, tile_z))
                 } else if need_to_place_stair {
-                    add_stairs(world, chunk_position_from_tile_positon(world, 
-                        room % 2 == 0 ? 5 : 10 - room_x, 
-                        3                      - room_y, 
-                        stair_down ? tile_z-1 : tile_z,
-                    ))
                     need_to_place_stair = false
                 }
                 
@@ -306,13 +301,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             debug_end_data_block()
         }
         
-        // @todo(viktor): set this at contruction
-        entity.x_axis = {1,0}
-        entity.y_axis = {0,1}
-        
+        // @cleanup is this still relevant
         if entity.updatable { // @todo(viktor):  move this out into entity.odin
             ////////////////////////////////////////////////
-            // Movement
+            // Physics
             
             if entity.movement_mode == .Planted {
                 if entity.occupying.entity.pointer != nil {
@@ -366,9 +358,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
             
-            entity.ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
-            entity.t_bob += entity.ddt_bob*square(dt) + entity.dt_bob*dt
-            entity.dt_bob += 0.5*entity.ddt_bob*dt
+            // entity.ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
+            // entity.t_bob += entity.ddt_bob*square(dt) + entity.dt_bob*dt
+            // entity.dt_bob += 0.5*entity.ddt_bob*dt
             
             if .Moveable in entity.flags {
                 move_entity(sim_region, &entity, entity.ddp, entity.move_spec, dt)
@@ -398,9 +390,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
             facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-            head_id   := best_match_bitmap_from(tran_state.assets, .Head,  facing_match, facing_weights)
-            
-            shadow_id := first_bitmap_from(tran_state.assets, AssetTypeId.Shadow)
             
             transform := default_upright_transform()
             transform.offset = get_entity_ground_point(&entity) - camera_p
@@ -409,67 +398,32 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             shadow_transform.offset = get_entity_ground_point(&entity) - camera_p
             shadow_transform.offset.y -= 0.5
             
-            hero_height :f32= 3.5
-            switch entity.type {
-              case .Nil, .Floor, .FloatyThingForNow,
-                   .Stairwell, .Monster, .Wall:
-                // @note(viktor): nothing
-                
-              case .HeroHead:
-                before := transform
-                defer transform = before
-                transform.sort_bias += 10000
-                transform.offset.y -= 0.9 * hero_height
-                push_bitmap(render_group, head_id,  transform, hero_height * 1.4)
-                if debug_requested(debug_id) { 
-                    debug_record_value(&head_id)
-                }
-                
-              case .HeroBody:
-                cape_id  := best_match_bitmap_from(tran_state.assets, .Cape,  facing_match, facing_weights)
-                body_id  := best_match_bitmap_from(tran_state.assets, .Body,  facing_match, facing_weights)
-                
-                push_bitmap(render_group, shadow_id, shadow_transform, 0.5, color = {1, 1, 1, shadow_alpha})
-                
-                x_axis, y_axis := entity.x_axis, entity.y_axis * 0.4
-                before := transform
-                    transform.sort_bias += 10
-                    push_bitmap(render_group, body_id,  transform, hero_height, x_axis = x_axis, y_axis = y_axis)
-                transform = before
-                    transform.offset.y += entity.t_bob
-                    transform.sort_bias -= 10
-                    transform.offset.y += -0.3
-                    push_bitmap(render_group, cape_id,  transform, hero_height*1.3, x_axis = x_axis, y_axis = y_axis)
-                transform = before
-                
-                if debug_requested(debug_id) { 
-                    debug_record_value(&shadow_id)
-                    debug_record_value(&cape_id)
-                    debug_record_value(&body_id)
-                }
-                
-              case .Familiar: 
-                entity.t_bob += dt
-                if entity.t_bob > Tau {
-                    entity.t_bob -= Tau
-                }
-                hz :: 4
-                coeff := sin(entity.t_bob * hz)
-                z := (coeff) * 0.3 + 0.3
-                
-                push_bitmap(render_group, shadow_id, shadow_transform, 0.3, color = {1, 1, 1, 1 - shadow_alpha/2 * (coeff+1)})
-                push_bitmap(render_group, head_id, transform, 1, offset = {0, 1+z, 0}, color = {1, 1, 1, 0.5})
-                
-                if debug_requested(debug_id) { 
-                    debug_record_value(&shadow_id)
-                    debug_record_value(&head_id)
-                }
-                
-            }
-            
             for piece in slice(&entity.pieces) {
+                offset := piece.offset
+                color := piece.color
+                x_axis := entity.x_axis
+                y_axis := entity.y_axis
+                
+                if .BobUpAndDown in piece.flags {
+                    // @todo(viktor): Reenable this floating animation
+                    entity.t_bob += dt
+                    if entity.t_bob > Tau {
+                        entity.t_bob -= Tau
+                    }
+                    hz :: 4
+                    coeff := sin(entity.t_bob * hz)
+                    z := (coeff) * 0.3 + 0.1
+                    
+                    offset += {0, z, 0}
+                    color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
+                }
+                
+                if .SquishAxis in piece.flags {
+                    y_axis *= 0.4
+                }
+                
                 bitmap_id := best_match_bitmap_from(tran_state.assets, piece.asset, facing_match, facing_weights)
-                push_bitmap(render_group, bitmap_id, transform, piece.height, color = piece.color, x_axis = entity.x_axis, y_axis = entity.y_axis)
+                push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
                 
                 if debug_requested(debug_id) { 
                     debug_record_value(&bitmap_id)
@@ -477,13 +431,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             draw_hitpoints(render_group, &entity, 0.5, transform)
+
+            
+            
+            
             
             if RenderCollisionOutlineAndTraversablePoints {
                 transform.upright = false
                 color := Green
                 color.rgb *= 0.4
                 push_rectangle_outline(render_group, entity.collision.total_volume, transform, color)
-                
                 for traversable in slice(entity.traversables) {
                     rect := rectangle_center_dimension(traversable.p, 0.1)
                     push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Blue)
@@ -761,7 +718,7 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entit
 
 pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
     if ref.pointer != nil {
-        if .Deleted in ref.pointer.flags {
+        if .MarkedForDeletion in ref.pointer.flags {
             ref.id = 0
         } else {
             ref.id = ref.pointer.id

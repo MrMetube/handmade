@@ -3,7 +3,8 @@ package game
 Brain :: struct {
     id:   BrainId,
     
-    kind: BrainKind, // Is this just a Discrimenated Union?
+    // @note(viktor): As the entity also needs to know its brain's kind, we cant fold the kind into the raw_union and make data a union 
+    kind: BrainKind,
     using data : struct #raw_union {
         parts :       [16]^Entity,
         hero:         BrainHeroParts,
@@ -30,14 +31,15 @@ ReservedBrainId :: enum BrainId {
 }
 
 BrainKind :: enum {
+    None,
     Hero, 
     
     Snake, 
     Monster,
     Familiar,
-    FloatyThingForNow,
 }
 
+// @todo(viktor): How can this be made fool-proof, so that you cannot assign brain_slot by a different type than the brain_kind
 BrainSlot :: struct {
     index: u32,
 }
@@ -51,6 +53,7 @@ execute_brain :: proc(input: Input, region: ^SimRegion, brain: ^Brain) {
     dt := input.delta_time
     
     switch brain.kind {
+      case .None: unreachable()
       case .Hero:
         // @todo(viktor): Check that they're not deleted what do we do?
         head := brain.hero.head
@@ -125,8 +128,8 @@ execute_brain :: proc(input: Input, region: ^SimRegion, brain: ^Brain) {
         }
         
         if exited {
-            delete_entity(body)
-            delete_entity(head)
+            mark_for_deletion(body)
+            mark_for_deletion(head)
         } else {
             if head != nil && dfacing.x != 0  {
                 head.facing_direction = atan2(dfacing.y, dfacing.x)
@@ -183,8 +186,8 @@ execute_brain :: proc(input: Input, region: ^SimRegion, brain: ^Brain) {
             if head != nil {
                 head_delta = head.p - body.p
             }
-            // @todo(viktor): reenable this stretching?
-            body.y_axis = v2{0, 1} + 1 * head_delta.xy
+            
+            body.y_axis = (v2{0, 1} + 1 * head_delta.xy)
             // body.x_axis = perpendicular(body.y_axis)
         }
         
@@ -198,7 +201,7 @@ execute_brain :: proc(input: Input, region: ^SimRegion, brain: ^Brain) {
             
             // @cleanup get_closest_traversable
             for &test in slice(region.entities) {
-                if test.type == .HeroBody {
+                if test.brain_kind == .Hero {
                     dsq := length_squared(test.p.xy - familiar.p.xy)
                     if dsq < closest_hero_dsq {
                         closest_hero_dsq = dsq
@@ -220,12 +223,6 @@ execute_brain :: proc(input: Input, region: ^SimRegion, brain: ^Brain) {
         familiar.move_spec.drag = 8
         familiar.move_spec.speed = 50
         
-      case .FloatyThingForNow:
-        floaty_thing := brain.floaty_thing
-        floaty_thing.t_bob += dt
-        if floaty_thing.t_bob > Tau do floaty_thing.t_bob -= Tau
-        floaty_thing.p.z += 0.05 * cos(floaty_thing.t_bob)
-      
       case .Monster:
         
       case .Snake:

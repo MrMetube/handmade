@@ -67,6 +67,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
                 chunk_p := [3]i32{chunk_x, chunk_y, chunk_z}
                 chunk :^Chunk= extract_chunk(world, chunk_p)
+                
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
                     chunk_delta := world_distance(world, chunk_world_p, region.origin)
@@ -76,33 +77,30 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                         // :PointerArithmetic
                         entities := (cast([^]Entity) &block.entity_data.data)[:block.entity_count]
                         for &source in entities {
-                            sim_space_p := source.p + chunk_delta
-                            if entity_overlaps_rectangle(region.bounds, sim_space_p, source.collision.total_volume) {
-                                // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
-                                assert(source.id != 0)
-                                
-                                hash := get_entity_hash_from_id(region, source.id)
-                                assert(hash != nil)
-                                assert(hash.pointer == nil)
-                                
-                                dest := append(&region.entities)
-                                
-                                assert(hash.id == 0 || hash.id == source.id)
-                                hash.id = source.id
-                                hash.pointer = dest
-                                
-                                // @todo(viktor): this should really be a decompression not a copy
-                                dest^ = source
-                                
-                                dest.id = source.id
-                                dest.p += chunk_delta
-                                
-                                dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
-                                
-                                if dest.brain_id != 0 {
-                                    brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
-                                    brain.parts[dest.brain_slot.index] = dest
-                                }
+                            // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
+                            assert(source.id != 0)
+                            
+                            hash := get_entity_hash_from_id(region, source.id)
+                            assert(hash != nil)
+                            assert(hash.pointer == nil)
+                            
+                            dest := append(&region.entities)
+                            
+                            assert(hash.id == 0 || hash.id == source.id)
+                            hash.id = source.id
+                            hash.pointer = dest
+                            
+                            // @todo(viktor): this should really be a decompression not a copy
+                            dest^ = source
+                            
+                            dest.id = source.id
+                            dest.p += chunk_delta
+                            
+                            dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
+                            
+                            if dest.brain_id != 0 {
+                                brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
+                                brain.parts[dest.brain_slot.index] = dest
                             }
                         }
                         
@@ -127,7 +125,7 @@ end_sim :: proc(region: ^SimRegion) {
     
     for &entity in slice(region.entities) {
         assert(entity.id != 0)
-        if .Deleted in entity.flags do continue
+        if .MarkedForDeletion in entity.flags do continue
         
         entity_p := map_into_worldspace(region.world, region.origin, entity.p)
         chunk_p  := entity_p
@@ -455,11 +453,9 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: Mov
                                 if test_hit {
                                     test_p := entity.p + entity_delta * test_t
                                     
-                                    if speculative_collide(entity, &test_entity, test_p) {
-                                        t_min = test_t
-                                        wall_normal_min = test_wall_normal
-                                        hit_min = &test_entity
-                                    }
+                                    t_min = test_t
+                                    wall_normal_min = test_wall_normal
+                                    hit_min = &test_entity
                                 }
                             }
                             
@@ -544,40 +540,26 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
     return result
 }
 
-get_stair_ground :: proc(region: ^Entity, at_ground_point: v3) -> (result: f32) {
-    assert(region.type == .Stairwell)
-    
-    region_rect := rectangle_center_dimension(region.p.xy, region.walkable_dim)
-    bary := clamp_01(rectangle_get_barycentric(region_rect, at_ground_point.xy))
-    result = region.p.z + region.walkable_height * bary.y
-    
-    return result
-}
-
-speculative_collide :: proc(mover, region: ^Entity, test_p: v3) -> (result: b32 = true) {
-    if region.type == .Stairwell {
-        mover_ground_point := get_entity_ground_point(mover, test_p)
-        ground := get_stair_ground(region, mover_ground_point)
-        step_height :: 0.1
-        result = (abs(mover_ground_point.z - ground) > step_height) //  || (bary.y > 0.1 && bary.y < 0.9)
-    }
-    
-    return result
-}
 
 handle_collision :: proc(world: ^World, a, b: ^Entity) -> (stops_on_collision: b32) {
     a, b := a, b
-    if a.type > b.type do a, b = b, a
     
-    stops_on_collision = true
-    
+    when false {
+        if a.type > b.type do a, b = b, a
+        
+        stops_on_collision = true
+    }
+        
     return stops_on_collision
 }
 
 can_overlap :: proc(mover, region: ^Entity) -> (result: b32) {
-    if mover != region {
-        if region.type == .Stairwell {
-            result = true
+    when false {
+        if mover != region {
+            
+            if region.type == .Stairwell {
+                result = true
+            }
         }
     }
     
