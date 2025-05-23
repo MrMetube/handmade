@@ -83,6 +83,7 @@ PairwiseCollsionRuleFlag :: enum {
 MovementMode :: enum {
     Planted, 
     Hopping,
+    Floating,
 }
 
 EntityCollisionVolumeGroup :: struct {
@@ -190,7 +191,7 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
     body := begin_grounded_entity(world, world.hero_body_collision)
         body.brain_id = brain_id
         body.brain_kind = .Hero
-        body.brain_slot = brain_slot_for(BrainHeroParts, "body")
+        body.brain_slot = brain_slot_for(BrainHero, "body")
         
         // @todo(viktor): We will probably need a creation-time system for
         // guaranteeing no overlapping occupation.
@@ -221,7 +222,8 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         head.flags += {.Collides}
         head.brain_id = brain_id
         head.brain_kind = .Hero
-        head.brain_slot = brain_slot_for(BrainHeroParts, "head")
+        head.brain_slot = brain_slot_for(BrainHero, "head")
+        head.movement_mode = .Floating
         
         hero_height :: 3.5
         // @todo(viktor): should render above the body
@@ -238,6 +240,34 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
             world.camera_following_id = head.id
         }
     end_entity(world, head, p)
+}
+
+add_snake_piece :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
+    entity := begin_grounded_entity(world, world.monstar_collision)
+    defer end_entity(world, entity, p)
+    
+    entity.flags += {.Collides}
+    
+    entity.brain_id = brain_id
+    entity.brain_kind = .Snake
+    entity.brain_slot = brain_slot_for(BrainSnake, "segments", segment_index)
+    entity.occupying = occupying
+    
+    height :: 0.5
+    append(&entity.pieces, VisiblePiece{
+        asset  = .Shadow,
+        height = height,
+        offset = {0, -height, 0},
+        color  = {1,1,1,0.5},
+    })
+    
+    append(&entity.pieces, VisiblePiece{
+        asset  = segment_index == 0 ? .Head : .Body,
+        height = 1,
+        color  = 1,
+    })
+    
+    init_hitpoints(entity, 3)
 }
 
 add_monster :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
@@ -268,13 +298,15 @@ add_monster :: proc(world: ^World, p: WorldPosition, occupying: TraversableRefer
     init_hitpoints(entity, 3)
 }
 
-add_familiar :: proc(world: ^World, p: WorldPosition) {
+add_familiar :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world, world.familiar_collision)
     defer end_entity(world, entity, p)
     
     entity.brain_id   = add_brain(world)
     entity.brain_kind = .Familiar
-    entity.brain_slot = brain_slot_for(BrainFamiliarParts, "familiar")
+    entity.brain_slot = brain_slot_for(BrainFamiliar, "familiar")
+    entity.occupying  = occupying
+    entity.movement_mode = .Floating
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Head,

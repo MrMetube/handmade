@@ -3,13 +3,17 @@
     - Still relevant?
 - Font Rendering Robustness
     - Kerning
-    
-- :CutsceneEpisodes
-- :PlatformArena
-- :DisjointArray
-- :PointerArithmetic
-    - change the types to a less c-mindset
-    - or if necessary make utilities to these operations
+- Types
+    - Whatever Brain.parts is supposed to be
+    - :CutsceneEpisodes
+    - :PlatformArena
+    - :DisjointArray
+    - :PointerArithmetic
+        - change the types to a less c-mindset
+        - or if necessary make utilities to these operations
+
+- Entity System
+    - What to do about geografical disperate entities that might only partially get streamed in to a sim region. but which need to move together as a unit?
 
 - Debug code
     - Diagramming
@@ -59,20 +63,17 @@
     - per-entity clocking
     - sim region merging?  for multiple players?
     - simple zoomed out view for testing
+- AI
+    - Pathfinding
+    - AI "storage"    
 
 ## Production
-
-- Entity system
 
 - Rudimentary worldgen (no quality just "what sorts of things" we do
     - Map displays
     - Placement of background things
     - Connectivity?
     - Non-overlapping?
-- AI
-    - Rudimentary monstar behaviour
-    - Pathfinding
-    - AI "storage"
  
 - Metagame / save game?
     - how do you enter a "save slot"?

@@ -5,11 +5,11 @@ Brain :: struct {
     
     // @note(viktor): As the entity also needs to know its brain's kind, we cant fold the kind into the raw_union and make data a union 
     kind: BrainKind,
-    using data : struct #raw_union {
-        parts:        [16]^Entity,
-        hero:         BrainHeroParts,
-        monster:      BrainMonster,
-        familiar:     BrainFamiliarParts,
+    using parts : struct #raw_union {
+        hero:     BrainHero,
+        snake:    BrainSnake,
+        monster:  BrainMonster,
+        familiar: BrainFamiliar,
     }
 }
 
@@ -38,21 +38,25 @@ BrainSlot :: struct {
 
 ////////////////////////////////////////////////
 
-BrainHeroParts :: struct {
+BrainHero :: struct {
     head, body: ^Entity
 }
 
-BrainFamiliarParts :: struct {
+BrainFamiliar :: struct {
     familiar, hero: ^Entity
+}
+
+BrainSnake :: struct {
+    segments: [16]^Entity,
 }
 
 BrainMonster :: struct {
     body: ^Entity,
 }
 
-brain_slot_for :: proc($base: typeid, $member : string) -> BrainSlot {
+brain_slot_for :: proc($base: typeid, $member: string, index: u32 = 0) -> BrainSlot {
     // @study(viktor): can this be done better by using enumerated arrays?
-    return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) }
+    return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) + index }
 }
 
 execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^Brain) {
@@ -81,22 +85,18 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
         } else {
             // @note(viktor): Use digital movement tuning
             if is_down(controller.stick_left) {
-                con_hero.recenter_t = 1
                 con_ddp.y  = 0
                 con_ddp.x -= 1
             }
             if is_down(controller.stick_right) {
-                con_hero.recenter_t = 1
                 con_ddp.y  = 0
                 con_ddp.x += 1
             }
             if is_down(controller.stick_up) {
-                con_hero.recenter_t = 1
                 con_ddp.x  = 0
                 con_ddp.y += 1
             }
             if is_down(controller.stick_down) {
-                con_hero.recenter_t = 1
                 con_ddp.x  = 0
                 con_ddp.y -= 1
             }
@@ -113,29 +113,24 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
             }
         }
         
-        dfacing: v2
-        if controller.button_up.ended_down {
-            dfacing =  {0, 1}
-        }
-        if controller.button_down.ended_down {
-            dfacing = -{0, 1}
-        }
-        if controller.button_left.ended_down {
-            dfacing = -{1, 0}
-        }
-        if controller.button_right.ended_down {
-            dfacing =  {1, 0}
+        if con_ddp != 0 {
+            con_hero.recenter_t = 1
         }
         
+        dfacing: v2
+        if controller.button_up.ended_down    do dfacing =  {0, 1}
+        if controller.button_down.ended_down  do dfacing = -{0, 1}
+        if controller.button_left.ended_down  do dfacing = -{1, 0}
+        if controller.button_right.ended_down do dfacing =  {1, 0}
+        
         if was_pressed(controller.start) {
-            standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied} )
+            standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied})
             if ok {
                 add_hero(world, region, standing_on, 0)
             }
         }
         
         if head != nil {
-            
             if dfacing.x != 0  {
                 head.facing_direction = atan2(dfacing.y, dfacing.x)
             }
@@ -211,11 +206,11 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
         
       case .Familiar:
         familiar := brain.familiar.familiar
-        hero     := brain.familiar.hero
+        hero     := &brain.familiar.hero
         
-        closest_hero_dsq := square(f32(10))
-        if hero == nil {
+        if hero^ == nil {
             closest_hero: ^Entity
+            closest_hero_dsq := square(f32(10))
             
             // @cleanup get_closest_traversable
             for &test in slice(region.entities) {
@@ -228,20 +223,46 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
                 }
             }
             
-            hero = closest_hero
+            hero^ = closest_hero
         }
         
         if FamiliarFollowsHero {
-            if hero != nil && closest_hero_dsq > 1 {
-                familiar.ddp = square_root(closest_hero_dsq) * (hero.p - familiar.p)
+            if hero^ != nil {
+                target_p := familiar.occupying.entity.pointer.p
+                
+                test, ok := get_closest_traversable(region, hero^.p, {.Unoccupied})
+                if ok {
+                    target_hero := hero^.p - target_p
+                    test_p := test.entity.pointer.p
+                    test_hero := hero^.p - test_p
+                    
+                    if length_squared(target_hero) > length_squared(test_hero) {
+                        if transactional_occupy(familiar, &familiar.occupying, test) {
+                            target_p = test_p
+                        }
+                    }
+                }
+                
+                target_delta: v3 = target_p - familiar.p
+                distance_squared := length_squared(target_delta)
+                if distance_squared > 0.001 {
+                    familiar.ddp = square_root(distance_squared) * target_delta
+                }
             }
         }
         
         normalize_accelaration := true
-        drag :v3= 8
-        speed :f32= 50
+        drag :v3= 80
+        speed :f32= 500
         
-        // @todo(viktor): the code to use this ex-move_spec is in the head code
+        // @copypasta from the head movement abover
+        ddp_length_squared := length_squared(familiar.ddp)
+        if ddp_length_squared > 1 {
+            familiar.ddp *= 1 / square_root(ddp_length_squared)
+        }
+        
+        familiar.ddp *= speed
+        familiar.ddp += -drag * familiar.dp
         
       case .Monster:
         body := brain.monster.body
@@ -272,5 +293,42 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
         
       case .Snake:
         
+        head_moved: b32
+        for segment, index in brain.snake.segments {
+            if segment == nil do break
+            
+            target_p: v3
+            if index == 0 {
+                delta := random_bilateral(&world.game_entropy, v3)
+                target_p = segment.p + delta
+            } else {
+                if !head_moved do break
+                prev := brain.snake.segments[index-1]
+                target_p = prev.p
+            }
+            
+            traversable, ok := get_closest_traversable(region, target_p, { .Unoccupied })
+            if ok {
+                if segment.movement_mode == .Planted {
+                    delta := target_p - segment.p
+                    distance := length(delta)
+                    
+                    if abs(distance) < 2 {
+                        max_distance :f32= 0.4
+                        t_distance := clamp_01_to_range(0, distance, max_distance)
+                        segment.ddt_bob = t_distance * -30
+                        
+                        if traversable != segment.occupying {
+                            segment.came_from = segment.occupying
+                            if transactional_occupy(segment, &segment.occupying, traversable) {
+                                segment.movement_mode = .Hopping
+                                segment.t_movement = 0
+                                if index == 0 do head_moved = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -660,6 +660,7 @@ main :: proc() {
                 
                 if test_seconds_elapsed < target_seconds_per_frame {
                     // @logging sleep missed
+                    fmt.println("Sleep missed")
                 }
                 for seconds_elapsed_for_frame < target_seconds_per_frame {
                     seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())

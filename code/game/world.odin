@@ -121,7 +121,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     tile_size_in_meters :f32= 1.5
     world.null_collision     = make_null_collision(world)
     
-    world.wall_collision      = world.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
+    world.wall_collision      = world.null_collision // make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
     world.stairs_collision    = world.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
     world.hero_body_collision = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
     world.hero_head_collision = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
@@ -200,10 +200,13 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
             }
         }
         
-        add_monster(world, room.p[3][4], room.ground[3][4])
-        for _ in 0..< 1 {
-            familiar_p := room.p[2][5]
-            add_familiar(world, familiar_p)
+        add_monster(world,  room.p[3][4], room.ground[3][4])
+        add_familiar(world, room.p[2][5], room.ground[2][5])
+        
+        snake_brain := add_brain(world)
+        for piece_index in u32(0)..<len(BrainSnake{}.segments) {
+            x := 1+piece_index
+            add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
         }
         
         door_left   = door_right
@@ -248,7 +251,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // @todo(viktor): by how much should we expand the sim region?
     // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := rectangle_add_radius(camera_bounds, v3{15, 15, 15})
+    sim_bounds := rectangle_add_radius(camera_bounds, v3{45, 45, 45})
     sim_origin := world.camera_p
     sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
@@ -323,7 +326,12 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             switch entity.movement_mode {
-              case .Planted: // Nothing
+              case .Floating: // nothing
+              case .Planted:
+                if entity.occupying.entity.pointer != nil {
+                    entity.p = entity.occupying.entity.pointer.p
+                }
+                
               case .Hopping:
                 t_jump :: 0.1
                 t_thrust :: 0.8
@@ -372,7 +380,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             // entity.t_bob += entity.ddt_bob*square(dt) + entity.dt_bob*dt
             // entity.dt_bob += 0.5*entity.ddt_bob*dt
             
-            if entity.ddp != 0 {
+            if entity.ddp != 0 || entity.dp != 0 {
                 move_entity(sim_region, &entity, dt)
             }
             

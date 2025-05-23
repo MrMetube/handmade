@@ -37,7 +37,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     MaxEntityCount :: 4096
     MaxBrainCount  :: 128
     region.entities = make_array(sim_arena, Entity, MaxEntityCount)
-    region.brains   = make_array(sim_arena, Brain, MaxBrainCount)
+    region.brains   = make_array(sim_arena, Brain,  MaxBrainCount)
     
     // @todo(viktor): Try to make these get enforced more rigorously
     // @todo(viktor): Perhaps try using a dual system here where we support 
@@ -60,7 +60,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
                 chunk_p := [3]i32{chunk_x, chunk_y, chunk_z}
-                chunk :^Chunk= extract_chunk(world, chunk_p)
+                chunk := extract_chunk(world, chunk_p)
                 
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
@@ -94,7 +94,9 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             
                             if dest.brain_id != 0 {
                                 brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
-                                brain.parts[dest.brain_slot.index] = dest
+                                // :PointerArtthmetic
+                                base := cast([^]^Entity) &brain.parts
+                                base[dest.brain_slot.index] = dest
                             }
                         }
                         
