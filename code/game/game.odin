@@ -19,7 +19,7 @@ UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32
 TimestepPercentage:            f32 = 100
-RenderCollisionOutlineAndTraversablePoints: b32
+RenderCollisionOutlineAndTraversablePoints: b32 = true
 
 ////////////////////////////////////////////////
 
@@ -113,18 +113,10 @@ State :: struct {
     mode_arena: Arena,
     
     mixer: Mixer,
-    
     world: World,
-    
-    effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
     
     // @note(viktor): This is for testing the changing of volume and pitch and should not persist.
     music: ^PlayingSound,
-    
-    // @note(viktor): Particle System tests
-    next_particle: u32,
-    particles:     [256]Particle,
-    cells:         [ParticleCellSize][ParticleCellSize]ParticleCell,
 }
 
 TransientState :: struct {
@@ -172,21 +164,12 @@ TaskWithMemory :: struct {
 
 ControlledHero :: struct {
     brain_id: BrainId,
+    recenter_t: f32,
 }
 
 // @note(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
 Platform: PlatformAPI
-
-debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, generation_id: AssetGenerationId) {
-    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
-    if tran_state.is_initialized {
-        assets = tran_state.assets
-        generation_id = tran_state.generation_id
-    }
-    
-    return assets, generation_id
-}
 
 @(export)
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
@@ -194,23 +177,19 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     when DebugEnabled {
         if memory.debug_storage == nil do return
-        assert(size_of(DebugState) <= len(memory.debug_storage), "The DebugState cannot fit inside the debug memory")
+        assert(size_of(DebugState) <= len(memory.debug_storage))
         GlobalDebugMemory = memory
         GlobalDebugTable = memory.debug_table
     }
     
-    
     ////////////////////////////////////////////////
 
-    assert(size_of(State) <= len(memory.permanent_storage), "The State cannot fit inside the permanent memory")
+    assert(size_of(State) <= len(memory.permanent_storage))
     state := cast(^State) raw_data(memory.permanent_storage)
     if !state.is_initialized {
         init_arena(&state.mode_arena, memory.permanent_storage[size_of(State):])
         
-        state.effects_entropy = seed_random_series(500)
-        
         init_mixer(&state.mixer, &state.mode_arena)
-        
         init_world(&state.world, &state.mode_arena)
         
         when DebugEnabled {
@@ -220,7 +199,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         state.is_initialized = true
     }
 
-    assert(size_of(TransientState) <= len(memory.transient_storage), "The Transient State cannot fit inside the permanent memory")
+    assert(size_of(TransientState) <= len(memory.transient_storage))
     tran_state := cast(^TransientState) raw_data(memory.transient_storage)
     if !tran_state.is_initialized {
         init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
@@ -254,6 +233,8 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         
         tran_state.is_initialized = true
     }
+
+    ////////////////////////////////////////////////
     
     { debug_data_block("Game")
         debug_record_value(&TimestepPercentage)
@@ -299,9 +280,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
     }
     
-    ////////////////////////////////////////////////
-    // Input
-
     if SoundPanningWithMouse {
         // @note(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
@@ -339,111 +317,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     update_and_render_world(&state.world, tran_state, &render_group, input)
     
-    if FountainTest { 
-        ////////////////////////////////////////////////
-        // @note(viktor): Particle system test
-        font_id := first_font_from(tran_state.assets, .Font)
-        font := get_font(tran_state.assets, font_id, render_group.generation_id)
-        if font == nil {
-            load_font(tran_state.assets, font_id, false)
-        } else {
-            font_info := get_font_info(tran_state.assets, font_id)
-            for _ in 0..<2 {
-                particle := &state.particles[state.next_particle]
-                state.next_particle += 1
-                if state.next_particle >= len(state.particles) {
-                    state.next_particle = 0
-                }
-                particle.p = {random_bilateral(&state.effects_entropy, f32)*0.1, 0, 0}
-                particle.dp = {random_bilateral(&state.effects_entropy, f32)*0, (random_unilateral(&state.effects_entropy, f32)*0.4)+7, 0}
-                particle.ddp = {0, -9.8, 0}
-                particle.color = V4(random_unilateral(&state.effects_entropy, v3), 1)
-                particle.dcolor = {0,0,0,-0.2}
-                
-                nothings := "Handmade"
-                
-                r := random_choice_data(&state.effects_entropy, transmute([]u8) nothings)^
-                
-                particle.bitmap_id = get_bitmap_for_glyph(font, font_info, cast(rune) r)
-            }
-            
-            for &row in state.cells {
-                zero(row[:])
-            }
-            
-            grid_scale :f32= 0.3
-            grid_origin:= v3{-0.5 * grid_scale * ParticleCellSize, 0, 0}
-            for particle in state.particles {
-                p := ( particle.p - grid_origin ) / grid_scale
-                x := truncate(p.x)
-                y := truncate(p.y)
-                
-                x = clamp(x, 1, ParticleCellSize-2)
-                y = clamp(y, 1, ParticleCellSize-2)
-                
-                cell := &state.cells[y][x]
-                
-                density: f32 = particle.color.a
-                cell.density                += density
-                cell.velocity_times_density += density * particle.dp
-            }
-            
-            if ShowGrid {
-                for row, y in state.cells {
-                    for cell, x in row {
-                        alpha := clamp_01(0.1 * cell.density)
-                        color := v4{1,1,1, alpha}
-                        position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
-                        push_rectangle_outline(&render_group, rectangle_center_dimension(position.xy, grid_scale), default_flat_transform(), color, 0.05)
-                    }
-                }
-            }
-            
-            for &particle in state.particles {
-                p := ( particle.p - grid_origin ) / grid_scale
-                x := truncate(p.x)
-                y := truncate(p.y)
-                
-                x = clamp(x, 1, ParticleCellSize-2)
-                y = clamp(y, 1, ParticleCellSize-2)
-                
-                cell := &state.cells[y][x]
-                cell_l := &state.cells[y][x-1]
-                cell_r := &state.cells[y][x+1]
-                cell_u := &state.cells[y+1][x]
-                cell_d := &state.cells[y-1][x]
-                
-                dispersion: v3
-                dc : f32 = 0.3
-                dispersion += dc * (cell.density - cell_l.density) * v3{-1, 0, 0}
-                dispersion += dc * (cell.density - cell_r.density) * v3{ 1, 0, 0}
-                dispersion += dc * (cell.density - cell_d.density) * v3{ 0,-1, 0}
-                dispersion += dc * (cell.density - cell_u.density) * v3{ 0, 1, 0}
-                
-                particle_ddp := particle.ddp + dispersion
-                // @note(viktor): simulate particle forward in time
-                particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
-                particle.dp    += particle_ddp * input.delta_time
-                particle.color += particle.dcolor * input.delta_time
-                // @todo(viktor): should we just clamp colors in the renderer?
-                color := clamp_01(particle.color)
-                if color.a > 0.9 {
-                    color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
-                }
-
-                if particle.p.y < 0 {
-                    coefficient_of_restitution :f32= 0.3
-                    coefficient_of_friction :f32= 0.7
-                    particle.p.y *= -1
-                    particle.dp.y *= -coefficient_of_restitution
-                    particle.dp.x *= coefficient_of_friction
-                }
-                // @note(viktor): render the particle
-                push_bitmap(&render_group, particle.bitmap_id, default_flat_transform(), 0.4, particle.p, color)
-            }
-        }             
-    }
-    
     // @todo(viktor): We should probably pull the generation stuff, because
     // if we don't do ground chunks its a huge waste of effort
     if tran_state.generation_id != 0 {
@@ -469,7 +342,19 @@ output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
     output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
 }
 
+////////////////////////////////////////////////
 
+debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, generation_id: AssetGenerationId) {
+    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
+    if tran_state.is_initialized {
+        assets = tran_state.assets
+        generation_id = tran_state.generation_id
+    }
+    
+    return assets, generation_id
+}
+
+////////////////////////////////////////////////
 
 begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
     for &task in tran_state.tasks {
@@ -493,6 +378,9 @@ end_task_with_memory :: proc (task: ^TaskWithMemory) {
     
     task.in_use = false
 }
+
+////////////////////////////////////////////////
+// @cleanup
 
 make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
     for y in 0..<bitmap.height {

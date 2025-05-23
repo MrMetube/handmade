@@ -16,12 +16,10 @@ Entity :: struct {
     flags: EntityFlags,
     
     p, dp: v3,
-    ddp: v3, // @note(viktor): Do not pack this @metaprogram
+    ddp: v3, // @NoPack @todo(viktor): @metaprogram
 
     t_bob, dt_bob: f32,
-    ddt_bob:  f32, // @note(viktor): Do not pack this @metaprogram
-    
-    move_spec: MoveSpec, // @note(viktor): Do not pack this @metaprogram
+    ddt_bob:  f32, // @NoPack @todo(viktor): @metaprogram
     
     collision: ^EntityCollisionVolumeGroup,
     
@@ -49,7 +47,6 @@ EntityId :: distinct u32
 
 EntityFlag :: enum {
     Collides,
-    Moveable,
     MarkedForDeletion,
 }
 EntityFlags :: bit_set[EntityFlag]
@@ -174,25 +171,23 @@ mark_for_deletion :: proc(entity: ^Entity) {
     }
 }
 
-add_wall :: proc(world: ^World, p: WorldPosition) {
+add_wall :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world, world.wall_collision)
+    defer end_entity(world, entity, p)
     
     entity.flags += {.Collides}
-    
+    entity.occupying = occupying
     append(&entity.pieces, VisiblePiece{
         asset = .Rock,
         height = 1.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
         color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
     })
-    
-    end_entity(world, entity, p)
 }
 
 add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
     p := map_into_worldspace(world, region.origin, get_sim_space_traversable(occupying).p)
     
     body := begin_grounded_entity(world, world.hero_body_collision)
-        body.flags += {.Moveable}
         body.brain_id = brain_id
         body.brain_kind = .Hero
         body.brain_slot = brain_slot_for(BrainHeroParts, "body")
@@ -223,7 +218,7 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
     end_entity(world, body, p)
     
     head := begin_grounded_entity(world, world.hero_head_collision)
-        head.flags += {.Collides, .Moveable}
+        head.flags += {.Collides}
         head.brain_id = brain_id
         head.brain_kind = .Hero
         head.brain_slot = brain_slot_for(BrainHeroParts, "head")
@@ -245,10 +240,16 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
     end_entity(world, head, p)
 }
 
-add_monster :: proc(world: ^World, p: WorldPosition) {
+add_monster :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world, world.monstar_collision)
+    defer end_entity(world, entity, p)
     
-    entity.flags += {.Collides, .Moveable}
+    entity.flags += {.Collides}
+    
+    entity.brain_id = add_brain(world)
+    entity.brain_kind = .Monster
+    entity.brain_slot = brain_slot_for(BrainMonster, "body")
+    entity.occupying = occupying
     
     height :: 0.75
     append(&entity.pieces, VisiblePiece{
@@ -264,21 +265,16 @@ add_monster :: proc(world: ^World, p: WorldPosition) {
         color  = 1,
     })
     
-    
     init_hitpoints(entity, 3)
-    
-    end_entity(world, entity, p)
 }
 
 add_familiar :: proc(world: ^World, p: WorldPosition) {
     entity := begin_grounded_entity(world, world.familiar_collision)
-    
+    defer end_entity(world, entity, p)
     
     entity.brain_id   = add_brain(world)
     entity.brain_kind = .Familiar
     entity.brain_slot = brain_slot_for(BrainFamiliarParts, "familiar")
-    
-    entity.flags += {.Moveable}
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Head,
@@ -293,11 +289,14 @@ add_familiar :: proc(world: ^World, p: WorldPosition) {
         height = 0.3,
         color  = {1,1,1,0.5},
     })
-    
-    end_entity(world, entity, p)
 }
 
-add_standart_room :: proc(world: ^World, p: WorldPosition) {
+StandartRoom :: struct {
+    p:      [17][9]WorldPosition,
+    ground: [17][9]TraversableReference,
+}
+
+add_standart_room :: proc(world: ^World, p: WorldPosition) -> (result: StandartRoom) {
     // @volatile
     h_width  :i32= 17/2
     h_height :i32=  9/2
@@ -310,11 +309,19 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) {
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
             
             entity := begin_grounded_entity(world, world.floor_collision)
-            entity.traversables = make_array(&world.arena, TraversablePoint, 1)
-            append(&entity.traversables, TraversablePoint{})
+                entity.traversables = make_array(&world.arena, TraversablePoint, 1)
+                append(&entity.traversables, TraversablePoint{})
             end_entity(world, entity, p)
+            
+            occupying: TraversableReference
+            occupying.entity.id = entity.id
+            
+            result.p[offset_x+8][offset_y+4] = p
+            result.ground[offset_x+8][offset_y+4] = occupying
         }
     }
+    
+    return result
 }
 
 init_hitpoints :: proc(entity: ^Entity, count: u32) {

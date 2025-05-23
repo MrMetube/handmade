@@ -44,10 +44,16 @@ World :: struct {
     creation_buffer:       [4]Entity,
     last_used_entity_id:   EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
     
-    general_entropy: RandomSeries,
+    game_entropy: RandomSeries,
+    effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
     
     first_free_chunk: ^Chunk,
     first_free_block: ^WorldEntityBlock,
+    
+    // @note(viktor): Particle System tests
+    next_particle: u32,
+    particles:     [256]Particle,
+    cells:         [ParticleCellSize][ParticleCellSize]ParticleCell,
 }
 
 // @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
@@ -97,7 +103,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
 
     world.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
     
-    world.general_entropy = seed_random_series(123)
+    world.game_entropy = seed_random_series(123)
+    world.effects_entropy = seed_random_series(500)
     
     pixels_to_meters :: 1.0 / 42.0
     chunk_dim_in_meters :f32= pixels_to_meters * 256
@@ -111,15 +118,15 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     tiles_per_screen :: [2]i32{17,9}
     
-    tile_size_in_meters :: 1.5
+    tile_size_in_meters :f32= 1.5
     world.null_collision     = make_null_collision(world)
     
-    world.wall_collision      = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
-    world.stairs_collision    = make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
-    world.hero_body_collision = make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
-    world.hero_head_collision = make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
-    world.monstar_collision   = make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
-    world.familiar_collision  = make_simple_grounded_collision(world, {0.5, 0.5, 1})
+    world.wall_collision      = world.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
+    world.stairs_collision    = world.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
+    world.hero_body_collision = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
+    world.hero_head_collision = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
+    world.monstar_collision   = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
+    world.familiar_collision  = world.null_collision//make_simple_grounded_collision(world, {0.5, 0.5, 1})
     
     world.floor_collision    = make_simple_floor_collision(world, v3{tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
     
@@ -137,24 +144,14 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     world.camera_p = new_camera_p
     
-    series := seed_random_series(0)
-    monster_p  := new_camera_p.chunk + {10,5,0}
-    add_monster(world,  chunk_position_from_tile_positon(world, monster_p.x, monster_p.y, monster_p.z))
-    for _ in 0..< 1 {
-        familiar_p := new_camera_p.chunk
-        familiar_p.x += random_between_i32(&series, 0, 14)
-        familiar_p.y += random_between_i32(&series, 0, 1)
-        add_familiar(world, chunk_position_from_tile_positon(world, familiar_p.x, familiar_p.y, familiar_p.z))
-    }
-    
     screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
     created_stair: b32
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
     for room in u32(0) ..< 8 {
-        when !true {
-            choice := random_choice(&series, 2)
+        when true {
+            choice := random_choice(&world.game_entropy, 2)
         } else {
             choice := 1
         }
@@ -175,37 +172,39 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         room_x := screen_col * tiles_per_screen.x
         room_y := screen_row * tiles_per_screen.y
         
-        for tile_y in 0..< tiles_per_screen.y {
-            for tile_x in 0 ..< tiles_per_screen.x {
-                col := tile_x + room_x
-                row := tile_y + room_y
-                
-                should_be_wall: b32
-                if tile_x == 0                    && (!door_left  || tile_y != tiles_per_screen.y / 2) {
-                    should_be_wall = true
-                }
-                if tile_x == tiles_per_screen.x-1 && (!door_right || tile_y != tiles_per_screen.y / 2) {
-                    should_be_wall = true
-                }
-
-                if tile_y == 0                    && (!door_bottom || tile_x != tiles_per_screen.x / 2) {
-                    should_be_wall = true
-                }
-                if tile_y == tiles_per_screen.y-1 && (!door_top    || tile_x != tiles_per_screen.x / 2) {
-                    should_be_wall = true
-                }
-                
-                if should_be_wall {
-                    add_wall(world, chunk_position_from_tile_positon(world, col, row, tile_z))
-                } else if need_to_place_stair {
-                    need_to_place_stair = false
-                }
-                
+        p := chunk_position_from_tile_positon(world, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, tile_z)
+        room := add_standart_room(world, p) 
+        
+        for tile_y in 0..< len(room.p[0]) {
+            tile_x :: 0
+            if !door_left || tile_y != len(room.p[0]) / 2 {
+                add_wall(world, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            }
+        }
+        for tile_y in 0..< len(room.p[0]) {
+            tile_x :: tiles_per_screen.x-1
+            if !door_right || tile_y != len(room.p[0]) / 2 {
+                add_wall(world, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            }
+        }
+        for tile_x in 0 ..< len(room.p) {
+            tile_y :: 0
+            if !door_bottom || tile_x != len(room.p) / 2 {
+                add_wall(world, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            }
+        }
+        for tile_x in 0 ..< len(room.p) {
+            tile_y :: tiles_per_screen.y-1
+            if !door_top || tile_x != len(room.p) / 2 {
+                add_wall(world, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
         
-        p := chunk_position_from_tile_positon(world, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, tile_z)
-        add_standart_room(world, p) 
+        add_monster(world, room.p[3][4], room.ground[3][4])
+        for _ in 0..< 1 {
+            familiar_p := room.p[2][5]
+            add_familiar(world, familiar_p)
+        }
         
         door_left   = door_right
         door_bottom = door_top
@@ -227,8 +226,9 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
 }
 
 update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
-    dt := input.delta_time * TimestepPercentage/100.0
     timed_function()
+    
+    dt := input.delta_time * TimestepPercentage/100.0
     
     monitor_width_in_meters :: 0.635
     buffer_size := [2]i32{render_group.commands.width, render_group.commands.height}
@@ -278,15 +278,25 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 con_hero^ = { brain_id = brain_id }
                 add_hero(world, sim_region, standing_on, brain_id)
             }
+        } else {
+            if is_down(controller.shoulder_left) {
+                standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
+                if ok {
+                    p := map_into_worldspace(world, world.camera_p, standing_on.entity.pointer.p)
+                    add_monster(world, p, standing_on)
+                }
+            }
         }
     }
 
     ////////////////////////////////////////////////
     // Run all brains
     
+    block := begin_timed_block("execute_brains")
     for &brain in slice(sim_region.brains) {
-        execute_brain(input, sim_region, &brain)
+        execute_brain(input, world, sim_region, &brain)
     }
+    end_timed_block(block)
     
     ////////////////////////////////////////////////
     // Simulate all entities
@@ -362,8 +372,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             // entity.t_bob += entity.ddt_bob*square(dt) + entity.dt_bob*dt
             // entity.dt_bob += 0.5*entity.ddt_bob*dt
             
-            if .Moveable in entity.flags {
-                move_entity(sim_region, &entity, entity.ddp, entity.move_spec, dt)
+            if entity.ddp != 0 {
+                move_entity(sim_region, &entity, dt)
             }
             
             ////////////////////////////////////////////////
@@ -431,7 +441,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             draw_hitpoints(render_group, &entity, 0.5, transform)
-
+            
             
             
             
@@ -470,6 +480,111 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 }
             }
         }
+    }
+    
+    if FountainTest { 
+        ////////////////////////////////////////////////
+        // @note(viktor): Particle system test
+        font_id := first_font_from(tran_state.assets, .Font)
+        font := get_font(tran_state.assets, font_id, render_group.generation_id)
+        if font == nil {
+            load_font(tran_state.assets, font_id, false)
+        } else {
+            font_info := get_font_info(tran_state.assets, font_id)
+            for _ in 0..<2 {
+                particle := &world.particles[world.next_particle]
+                world.next_particle += 1
+                if world.next_particle >= len(world.particles) {
+                    world.next_particle = 0
+                }
+                particle.p = {random_bilateral(&world.effects_entropy, f32)*0.1, 0, 0}
+                particle.dp = {random_bilateral(&world.effects_entropy, f32)*0, (random_unilateral(&world.effects_entropy, f32)*0.4)+7, 0}
+                particle.ddp = {0, -9.8, 0}
+                particle.color = V4(random_unilateral(&world.effects_entropy, v3), 1)
+                particle.dcolor = {0,0,0,-0.2}
+                
+                nothings := "Handmade"
+                
+                r := random_choice_data(&world.effects_entropy, transmute([]u8) nothings)^
+                
+                particle.bitmap_id = get_bitmap_for_glyph(font, font_info, cast(rune) r)
+            }
+            
+            for &row in world.cells {
+                zero(row[:])
+            }
+            
+            grid_scale :f32= 0.3
+            grid_origin:= v3{-0.5 * grid_scale * ParticleCellSize, 0, 0}
+            for particle in world.particles {
+                p := ( particle.p - grid_origin ) / grid_scale
+                x := truncate(p.x)
+                y := truncate(p.y)
+                
+                x = clamp(x, 1, ParticleCellSize-2)
+                y = clamp(y, 1, ParticleCellSize-2)
+                
+                cell := &world.cells[y][x]
+                
+                density: f32 = particle.color.a
+                cell.density                += density
+                cell.velocity_times_density += density * particle.dp
+            }
+            
+            if ShowGrid {
+                for row, y in world.cells {
+                    for cell, x in row {
+                        alpha := clamp_01(0.1 * cell.density)
+                        color := v4{1,1,1, alpha}
+                        position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
+                        push_rectangle_outline(render_group, rectangle_center_dimension(position.xy, grid_scale), default_flat_transform(), color, 0.05)
+                    }
+                }
+            }
+            
+            for &particle in world.particles {
+                p := ( particle.p - grid_origin ) / grid_scale
+                x := truncate(p.x)
+                y := truncate(p.y)
+                
+                x = clamp(x, 1, ParticleCellSize-2)
+                y = clamp(y, 1, ParticleCellSize-2)
+                
+                cell := &world.cells[y][x]
+                cell_l := &world.cells[y][x-1]
+                cell_r := &world.cells[y][x+1]
+                cell_u := &world.cells[y+1][x]
+                cell_d := &world.cells[y-1][x]
+                
+                dispersion: v3
+                dc : f32 = 0.3
+                dispersion += dc * (cell.density - cell_l.density) * v3{-1, 0, 0}
+                dispersion += dc * (cell.density - cell_r.density) * v3{ 1, 0, 0}
+                dispersion += dc * (cell.density - cell_d.density) * v3{ 0,-1, 0}
+                dispersion += dc * (cell.density - cell_u.density) * v3{ 0, 1, 0}
+                
+                particle_ddp := particle.ddp + dispersion
+                // @note(viktor): simulate particle forward in time
+                particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
+                particle.dp    += particle_ddp * input.delta_time
+                particle.color += particle.dcolor * input.delta_time
+                // @todo(viktor): should we just clamp colors in the renderer?
+                color := clamp_01(particle.color)
+                if color.a > 0.9 {
+                    color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
+                }
+
+                if particle.p.y < 0 {
+                    coefficient_of_restitution :f32= 0.3
+                    coefficient_of_friction :f32= 0.7
+                    particle.p.y *= -1
+                    particle.dp.y *= -coefficient_of_restitution
+                    particle.dp.x *= coefficient_of_friction
+                }
+                // @note(viktor): render the particle
+                push_bitmap(render_group, particle.bitmap_id, default_flat_transform(), 0.4, particle.p, color)
+            }
+        }             
     }
     
     when false do if EnvironmentTest { 
@@ -622,7 +737,6 @@ get_chunk :: proc (arena: ^Arena = nil, world: ^World, point: WorldPosition) -> 
     return get_chunk_3(arena, world, point.chunk)
 }
 get_chunk_3_internal :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^^Chunk) {
-    timed_function()
     ChunkSafeMargin :: 256
     
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -724,7 +838,7 @@ pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
             ref.id = ref.pointer.id
         }
     } else if ref.id != 0 {
-        if region == nil || get_entity_hash_from_id(region, ref.id) != nil {
+        if region != nil && get_entity_hash_from_id(region, ref.id) != nil {
             ref.id = 0
         }
     }

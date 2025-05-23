@@ -27,12 +27,6 @@ EntityHash :: struct {
     id:      EntityId, // @todo(viktor): Why are we storing these in the hash?
 }
 
-MoveSpec :: struct {
-    normalize_accelaration: b32,
-    drag: f32,
-    speed: f32,
-}
-
 ////////////////////////////////////////////////
 
 begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
@@ -332,10 +326,6 @@ get_sim_space_traversable_raw :: proc(entity: ^Entity, index: i64) -> (result: T
     return result
 }
 
-default_move_spec :: proc() -> MoveSpec {
-    return { normalize_accelaration = false, drag = 1, speed = 0 }
-}
-
 transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, desired_ref: TraversableReference) -> (result: b32) {
     desired := get_traversable(desired_ref)
     if desired.occupant == nil {
@@ -351,28 +341,11 @@ transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, d
     return result
 }
 
-move_entity :: proc(region: ^SimRegion, entity: ^Entity, ddp: v3, move_spec: MoveSpec, dt: f32) {
+move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
     timed_function()
     
-    ddp := ddp
-    
-    if move_spec.normalize_accelaration {
-        ddp_length_squared := length_squared(ddp)
-        
-        if ddp_length_squared > 1 {
-            ddp *= 1 / square_root(ddp_length_squared)
-        }
-    }
-    
-    ddp *= move_spec.speed
-    
-    // @todo(viktor): ODE here
-    drag := -move_spec.drag * entity.dp
-    drag.z = 0
-    ddp += drag
-    
-    entity_delta := 0.5*ddp * square(dt) + entity.dp * dt
-    entity.dp = ddp * dt + entity.dp
+    entity_delta := 0.5*entity.ddp * square(dt) + entity.dp * dt
+    entity.dp = entity.ddp * dt + entity.dp
     // @todo(viktor): upgrade physical motion routines to handle capping the maximum velocity?
     assert(length_squared(entity.dp) <= square(region.max_entity_velocity))
     

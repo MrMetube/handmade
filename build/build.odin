@@ -38,6 +38,8 @@ import win "core:sys/windows"
     But how does this work with vscode? ughh...
 */
 
+// @todo(viktor): before copypasta check that those files weren't modified by the user and abort instead of squashing those accidental changes
+
 // @todo(viktor): once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
 
 flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon -subsystem:windows -ignore-vs-search `

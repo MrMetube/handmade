@@ -57,7 +57,7 @@ DegPerRad :: 360.0/Tau
 // ---------------------- Scalar operations
 // ---------------------- ---------------------- ----------------------
 
-@(require_results) square :: proc(x: $T) -> T { return x * x }
+@(require_results) square :: proc(x: $T) -> T where intrinsics.type_is_numeric(T) || intrinsics.type_is_array(T) || intrinsics.type_is_simd_vector(T) { return x * x }
 
 square_root :: simd.sqrt
 
