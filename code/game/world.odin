@@ -326,7 +326,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
             
             switch entity.movement_mode {
-              case .Floating: // nothing
+              case ._Floating: // nothing
               case .Planted:
                 if entity.occupying.entity.pointer != nil {
                     entity.p = entity.occupying.entity.pointer.p

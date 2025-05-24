@@ -83,7 +83,7 @@ PairwiseCollsionRuleFlag :: enum {
 MovementMode :: enum {
     Planted, 
     Hopping,
-    Floating,
+    _Floating,
 }
 
 EntityCollisionVolumeGroup :: struct {
@@ -223,7 +223,7 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         head.brain_id = brain_id
         head.brain_kind = .Hero
         head.brain_slot = brain_slot_for(BrainHero, "head")
-        head.movement_mode = .Floating
+        head.movement_mode = ._Floating
         
         hero_height :: 3.5
         // @todo(viktor): should render above the body
@@ -306,11 +306,11 @@ add_familiar :: proc(world: ^World, p: WorldPosition, occupying: TraversableRefe
     entity.brain_kind = .Familiar
     entity.brain_slot = brain_slot_for(BrainFamiliar, "familiar")
     entity.occupying  = occupying
-    entity.movement_mode = .Floating
+    entity.movement_mode = ._Floating
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Head,
-        height = 1,
+        height = 2,
         color  = 1,
         offset = {0, 1, 0},
         flags  = { .BobUpAndDown }
@@ -339,6 +339,9 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) -> (result: StandartR
             p := p
             p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
+            
+            p.offset.x += random_bilateral(&world.game_entropy, f32) * 0.2
+            p.offset.y += random_bilateral(&world.game_entropy, f32) * 0.2
             
             entity := begin_grounded_entity(world, world.floor_collision)
                 entity.traversables = make_array(&world.arena, TraversablePoint, 1)

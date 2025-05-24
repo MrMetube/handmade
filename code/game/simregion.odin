@@ -188,7 +188,44 @@ end_sim :: proc(region: ^SimRegion) {
     }
 }
 
+////////////////////////////////////////////////
+// @cleanup spacial queries and sim functions
+
+get_closest_entity_by_brain_kind :: proc(region: ^SimRegion, from: v3, kind: BrainKind, max_radius: f32) -> (result: ^Entity, distance_squared: f32) {
+    distance_squared = square(max_radius)
+    // @todo(viktor): We could return the delta and more as we already computed them but do we need that?
+        
+    for &test in slice(region.entities) {
+        if test.brain_kind == kind {
+            dsq := length_squared(test.p.xy - from.xy)
+            if dsq < distance_squared {
+                distance_squared = dsq
+                result = &test
+            }
+        }
+    }
+    
+    return result, distance_squared
+}
+
+get_closest_traversable_along_ray :: proc(region: ^SimRegion, from_p: v3, dir: v3, skip: TraversableReference, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
+    timed_function()
+    // @todo(viktor): Actually implement a smarter spatial query
+    for probe in 0..<10 {
+        factor := cast(f32) probe * 0.5
+        sample := from_p + dir * factor
+        result, _ = get_closest_traversable(region, sample, flags)
+        if result != skip {
+            ok = true
+            break
+        }
+    }
+    
+    return result, ok
+}
+
 get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
+    timed_function()
     // @todo(viktor): make spatial queries easy for things
     closest_point_dsq :f32= 1000
     for &test in slice(region.entities) {
@@ -208,6 +245,7 @@ get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[e
                 dsq := length_squared(delta_p)
                 if dsq < closest_point_dsq {
                     result.entity.pointer = &test
+                    result.entity.id = test.id
                     result.index = point_index
                     
                     closest_point_dsq = dsq

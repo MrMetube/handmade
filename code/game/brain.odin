@@ -47,7 +47,7 @@ BrainFamiliar :: struct {
 }
 
 BrainSnake :: struct {
-    segments: [16]^Entity,
+    segments: [8]^Entity,
 }
 
 BrainMonster :: struct {
@@ -145,7 +145,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
                 con_ddp *= 1 / square_root(ddp_length_squared)
             }
             
-            speed :f32= 30
+            speed :f32= 60
             drag :f32= 8
             con_ddp *= speed
             
@@ -209,51 +209,46 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
         hero     := &brain.familiar.hero
         
         if hero^ == nil {
-            closest_hero: ^Entity
-            closest_hero_dsq := square(f32(10))
+            hero^, _ = get_closest_entity_by_brain_kind(region, familiar.p, .Hero, 15)
+        }
+        
+        target_p := get_sim_space_traversable(familiar.occupying).p
+        target_dp: v3
+        if hero^ != nil {
+            target_dp = hero^.dp
             
-            // @cleanup get_closest_traversable
-            for &test in slice(region.entities) {
-                if test.brain_kind == .Hero {
-                    dsq := length_squared(test.p.xy - familiar.p.xy)
-                    if dsq < closest_hero_dsq {
-                        closest_hero_dsq = dsq
-                        closest_hero = &test
+            blocked := true
+            test, ok := get_closest_traversable(region, hero^.p, {.Unoccupied})
+            if ok {
+                if test == hero^.occupying {
+                    blocked = false
+                } else {
+                    test_p := get_sim_space_traversable(test).p
+                    if transactional_occupy(familiar, &familiar.occupying, test) {
+                        target_p = test_p
+                        blocked = false
                     }
                 }
             }
             
-            hero^ = closest_hero
-        }
-        
-        if FamiliarFollowsHero {
-            if hero^ != nil {
-                target_p := familiar.occupying.entity.pointer.p
+            if !blocked {
+                distance_squared: f32
+                hero^, distance_squared = get_closest_entity_by_brain_kind(region, familiar.p, .Hero, 15)
                 
-                test, ok := get_closest_traversable(region, hero^.p, {.Unoccupied})
-                if ok {
-                    target_hero := hero^.p - target_p
-                    test_p := test.entity.pointer.p
-                    test_hero := hero^.p - test_p
-                    
-                    if length_squared(target_hero) > length_squared(test_hero) {
-                        if transactional_occupy(familiar, &familiar.occupying, test) {
-                            target_p = test_p
-                        }
+                if hero^ != nil && distance_squared > auto_cast square(10) {
+                    delta := normalize_or_zero(hero^.p - familiar.p)
+                    target_traversable, target_ok := get_closest_traversable_along_ray(region, familiar.p, delta, familiar.occupying)
+                    if target_ok {
+                        target_p = hero^.p
                     }
-                }
-                
-                target_delta: v3 = target_p - familiar.p
-                distance_squared := length_squared(target_delta)
-                if distance_squared > 0.001 {
-                    familiar.ddp = square_root(distance_squared) * target_delta
                 }
             }
         }
         
-        normalize_accelaration := true
-        drag :v3= 80
-        speed :f32= 500
+        familiar.ddp = 200 * (target_p - familiar.p) + 2 * (target_dp - familiar.dp)
+        
+        drag :v3= 8
+        speed :f32= 100
         
         // @copypasta from the head movement abover
         ddp_length_squared := length_squared(familiar.ddp)
@@ -292,7 +287,6 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
         }
         
       case .Snake:
-        
         head_moved: b32
         for segment, index in brain.snake.segments {
             if segment == nil do break
@@ -313,7 +307,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
                     delta := target_p - segment.p
                     distance := length(delta)
                     
-                    if abs(distance) < 2 {
+                    if index != 0 || abs(distance) < 0.4 {
                         max_distance :f32= 0.4
                         t_distance := clamp_01_to_range(0, distance, max_distance)
                         segment.ddt_bob = t_distance * -30

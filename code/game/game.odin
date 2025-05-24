@@ -10,7 +10,6 @@ INTERNAL :: #config(INTERNAL, false)
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
-FamiliarFollowsHero:           b32
 FountainTest:                  b32
 ShowGrid:                      b32
 EnvironmentTest:               b32
@@ -250,7 +249,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
         
         { debug_data_block("Entity")
-            debug_record_value(&FamiliarFollowsHero)
             debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
         }
         
@@ -265,7 +263,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         debug_ui_element(ArenaOccupancy{ &state.world.arena }, "World Arena")
         debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transitive State Arena")
         debug_ui_element(FrameSlider{})
-        debug_ui_element(TopClocksList{})
+        debug_ui_element(FrameBarsGraph{})
         debug_ui_element(FrameInfo{})
     }
     
