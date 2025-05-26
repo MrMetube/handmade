@@ -33,6 +33,14 @@ Entity :: struct {
     occupying: TraversableReference,
     came_from: TraversableReference,
     
+    angle_base: v3,
+    angle_current: f32,
+    angle_start: f32,
+    angle_target: f32,
+    angle_current_offset: f32,
+    angle_base_offset: f32,
+    angle_swipe_offset: f32,
+    
     facing_direction: f32,
     // @todo(viktor): generation index so we know how " to date" this entity is
     
@@ -84,6 +92,9 @@ MovementMode :: enum {
     Planted, 
     Hopping,
     _Floating,
+    
+    AngleOffset,
+    AngleAttackSwipe,
 }
 
 EntityCollisionVolumeGroup :: struct {
@@ -240,6 +251,26 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
             world.camera_following_id = head.id
         }
     end_entity(world, head, p)
+    
+    glove := begin_grounded_entity(world, world.glove_collision)
+        glove.flags += {.Collides}
+        glove.brain_id = brain_id
+        glove.brain_kind = .Hero
+        glove.brain_slot = brain_slot_for(BrainHero, "glove")
+        
+        glove.movement_mode = .AngleOffset
+        glove.angle_current = -0.25 * Tau
+        glove.angle_base_offset  = 0.75
+        glove.angle_swipe_offset = 1.5
+        
+        append(&head.pieces, VisiblePiece{
+            asset  = .Sword,
+            height = hero_height,
+            offset = {0, -0.5*hero_height, 0},
+            color  = 1,
+        })
+        
+    end_entity(world, glove, p)
 }
 
 add_snake_piece :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {

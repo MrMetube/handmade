@@ -39,7 +39,7 @@ BrainSlot :: struct {
 ////////////////////////////////////////////////
 
 BrainHero :: struct {
-    head, body: ^Entity
+    head, body, glove: ^Entity
 }
 
 BrainFamiliar :: struct {
@@ -65,8 +65,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
     switch brain.kind {
       case .None: unreachable()
       case .Hero:
-        head := brain.hero.head
-        body := brain.hero.body
+        using brain.hero
         
         controller_index := brain.id - cast(BrainId) ReservedBrainId.FirstHero
         con_hero := &world.controlled_heroes[controller_index]
@@ -117,25 +116,39 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
             con_hero.recenter_t = 1
         }
         
+        attacked := false
         dfacing: v2
-        if controller.button_up.ended_down    do dfacing =  {0, 1}
-        if controller.button_down.ended_down  do dfacing = -{0, 1}
-        if controller.button_left.ended_down  do dfacing = -{1, 0}
-        if controller.button_right.ended_down do dfacing =  {1, 0}
+        if controller.button_up.ended_down    { dfacing =  {0, 1}; attacked = true }
+        if controller.button_down.ended_down  { dfacing = -{0, 1}; attacked = true }
+        if controller.button_left.ended_down  { dfacing = -{1, 0}; attacked = true }
+        if controller.button_right.ended_down { dfacing =  {1, 0}; attacked = true }
         
-        if was_pressed(controller.start) {
-            standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied})
-            if ok {
-                add_hero(world, region, standing_on, 0)
-            }
+        if glove != nil && glove.movement_mode != .AngleOffset {
+            attacked = false
+        }
+        
+        if attacked && glove != nil {
+            glove.t_movement = 0
+            glove.movement_mode = .AngleAttackSwipe
+            glove.angle_start = glove.angle_current
+            glove.angle_target = glove.angle_current > 0 ? -0.25 * Tau : 0.25 * Tau
         }
         
         if head != nil {
-            if dfacing.x != 0  {
+            if attacked {
                 head.facing_direction = atan2(dfacing.y, dfacing.x)
             }
+            
             if body != nil {
-                body.facing_direction = head.facing_direction
+                if glove == nil || glove.movement_mode != .AngleAttackSwipe {
+                    body.facing_direction  = head.facing_direction
+                }
+            }
+            
+            if glove != nil && body != nil {
+                glove.facing_direction = head.facing_direction
+                
+                glove.angle_base = body.p
             }
 
             ////////////////////////////////////////////////
@@ -194,6 +207,14 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
             head.ddp = con_ddp
         }
         
+        if was_pressed(controller.start) {
+            standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied})
+            if ok {
+                add_hero(world, region, standing_on, 0)
+            }
+        }
+        
+        
         if body != nil {
             head_delta :v3
             if head != nil {
@@ -203,7 +224,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
             body.y_axis = (v2{0, 1} + 1 * head_delta.xy)
             // body.x_axis = perpendicular(body.y_axis)
         }
-        
+
       case .Familiar:
         familiar := brain.familiar.familiar
         hero     := &brain.familiar.hero
@@ -239,7 +260,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
                     delta := normalize_or_zero(hero^.p - familiar.p)
                     target_traversable, target_ok := get_closest_traversable_along_ray(region, familiar.p, delta, familiar.occupying)
                     if target_ok {
-                        target_p = hero^.p
+                        target_p = get_sim_space_traversable(target_traversable).p
                     }
                 }
             }

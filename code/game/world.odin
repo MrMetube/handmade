@@ -32,6 +32,7 @@ World :: struct {
     stairs_collision, 
     hero_body_collision, 
     hero_head_collision, 
+    glove_collision,
     monstar_collision, 
     familiar_collision: ^EntityCollisionVolumeGroup, 
     
@@ -123,6 +124,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     world.wall_collision      = world.null_collision // make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world.typical_floor_height})
     world.stairs_collision    = world.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world.typical_floor_height + 0.1})
+    world.glove_collision = make_simple_grounded_collision(world, {0.2, 0.2, 0.2})
     world.hero_body_collision = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
     world.hero_head_collision = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
     world.monstar_collision   = world.null_collision//make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
@@ -327,6 +329,28 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             switch entity.movement_mode {
               case ._Floating: // nothing
+              
+              case .AngleAttackSwipe:
+                if entity.t_movement < 1 {
+                    entity.angle_current = lerp(entity.angle_start, entity.angle_target, entity.t_movement)
+                    entity.angle_current_offset = lerp(entity.angle_base_offset, entity.angle_swipe_offset, sin_01(entity.t_movement))
+                } else  {
+                    entity.movement_mode = .AngleOffset
+                    
+                    entity.angle_current = entity.angle_target
+                    entity.angle_current_offset = entity.angle_base_offset
+                }
+                
+                entity.t_movement += dt * 8
+                entity.t_movement = min(entity.t_movement, 1)
+                
+                
+                
+                fallthrough
+            case .AngleOffset:
+                arm_ := entity.angle_current_offset * arm(entity.angle_current + entity.facing_direction)
+                entity.p = entity.angle_base + V3(arm_.xy, 0) + v3{0, .2, 0}
+                
               case .Planted:
                 if entity.occupying.entity.pointer != nil {
                     entity.p = entity.occupying.entity.pointer.p
@@ -344,7 +368,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 pt := occupying
                 
                 if t_jump <= entity.t_movement {
-                    
                     t := clamp_01_to_range(t_jump, entity.t_movement, 1)
                     entity.t_bob = sin(t * Pi) * 0.1
                     entity.p = lerp(came_from, occupying, entity.t_movement)
@@ -375,10 +398,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     entity.t_movement = 1
                 }
             }
-            
-            // entity.ddt_bob += 100 * (0-entity.t_bob) + 12 * (0-entity.dt_bob)
-            // entity.t_bob += entity.ddt_bob*square(dt) + entity.dt_bob*dt
-            // entity.dt_bob += 0.5*entity.ddt_bob*dt
             
             if entity.ddp != 0 || entity.dp != 0 {
                 move_entity(sim_region, &entity, dt)
