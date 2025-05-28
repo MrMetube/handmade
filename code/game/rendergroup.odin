@@ -64,9 +64,6 @@ RenderGroup :: struct {
     camera:                          Camera,
     monitor_half_diameter_in_meters: v2,
     
-    t_global_color: v4,
-    global_color:   v4,
-    
     commands: ^RenderCommands,
     
     generation_id: AssetGenerationId,
@@ -103,6 +100,7 @@ EnvironmentMap :: struct {
 
 @(common)
 RenderEntryType :: enum u8 {
+    None,
     RenderEntryClear,
     RenderEntryBitmap,
     RenderEntryRectangle,
@@ -119,6 +117,8 @@ RenderEntryHeader :: struct { // @todo(viktor): Don't store type here, store in 
 RenderEntryClip :: struct {
     rect: Rectangle2i,
     next: ^RenderEntryClip,
+    
+    fx: ClipRectFX,
 }
 
 @(common)
@@ -144,6 +144,12 @@ RenderEntryRectangle :: struct {
     rect:  Rectangle2,
 }
 
+@(common)
+ClipRectFX :: struct {
+    t_color: v4,
+    color:   v4,
+}
+        
 UsedBitmapDim :: struct {
     size:  v2,
     align: v2,
@@ -163,8 +169,6 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
         assets = assets,
         renders_in_background = renders_in_background,
         commands = commands,
-        
-        global_color   = 1,
         
         generation_id = generation_id,
     }
@@ -213,7 +217,9 @@ orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels:
 }
 
 store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
-    result = lerp(color, group.global_color, group.t_global_color)
+    // @todo(viktor): This should now happen per layer
+    // result = lerp(color, group.global_color, group.t_global_color)
+    result = color
     result.rgb *= result.a
     return result
 }
@@ -237,6 +243,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
           case RenderEntryRectangle:        header.type = .RenderEntryRectangle
           case RenderEntryClip:             header.type = .RenderEntryClip
         }
+        assert(header.type != .None)
 
         result = cast(^T) &commands.push_buffer[offset + header_size]
 
@@ -264,7 +271,7 @@ clear :: proc(group: ^RenderGroup, color: v4) {
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }
-push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2) -> (result: u16) {
+push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipRectFX{}) -> (result: u16) {
     assert(group.camera.mode != .None)
     
     size := cast(u32) size_of(RenderEntryClip)
@@ -282,6 +289,7 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2) -> (result:
         
         clip := RenderEntryClip { rect = rec_cast(i32, rect) }
         clip.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
+        clip.fx = fx
         
         entry^ = clip
     }

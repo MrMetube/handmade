@@ -264,9 +264,43 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         transform := default_flat_transform()
         transform.offset -= camera_p
         transform.sort_bias = 10000
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(screen_bounds)),                         transform, Orange,0.1)
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(sim_region.bounds).xy),           transform, Blue,  0.2)
-        push_rectangle_outline(render_group, rectangle_center_dimension(v2{}, rectangle_get_dimension(sim_region.updatable_bounds).xy), transform, Green, 0.2)
+        push_rectangle_outline(render_group, screen_bounds,               transform, Orange, 0.1)
+        push_rectangle_outline(render_group, sim_region.bounds,           transform, Blue,   0.2)
+        push_rectangle_outline(render_group, sim_region.updatable_bounds, transform, Green,  0.2)
+    }
+    
+    fade_top_end      :=  0.75 * world.typical_floor_height
+    fade_top_start    :=  0.5  * world.typical_floor_height
+    fade_bottom_start := -1    * world.typical_floor_height
+    fade_bottom_end   := -4    * world.typical_floor_height
+    
+    rect := rectangle_min_dimension(v2{0,0}, vec_cast(f32, buffer_size))
+    
+    MinimumLayer :: -4
+    MaximumLayer :: 1
+    clip_rect_index: [MaximumLayer - MinimumLayer + 1]u16
+    for &clip_rect, index in clip_rect_index {
+        relative_layer_index := MinimumLayer + index
+        camera_relative_ground_z: f32 = sim_region.origin.offset.z + world.typical_floor_height * cast(f32) relative_layer_index
+        
+        fx: ClipRectFX
+        if camera_relative_ground_z > fade_top_start {
+            // Above the current level
+            render_group.current_clip_rect_index = clip_rect_index[0]
+            
+            fx.t_color.a = clamp_01_to_range(fade_top_start, camera_relative_ground_z, fade_top_end)
+        } else if camera_relative_ground_z < fade_bottom_start {
+            // Below the current level
+            render_group.current_clip_rect_index = clip_rect_index[2]
+            
+            fx.t_color.rgb = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
+            fx.color = haze_color
+        } else { 
+            // The current level
+            render_group.current_clip_rect_index = clip_rect_index[1]
+        }
+        
+        clip_rect = push_clip_rect(render_group, rect, fx)
     }
     
     ////////////////////////////////////////////////
@@ -296,7 +330,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     }
 
     ////////////////////////////////////////////////
-    // Run all brains
     
     execute_brains := begin_timed_block("execute_brains")
     for &brain in slice(sim_region.brains) {
@@ -305,225 +338,58 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     end_timed_block(execute_brains)
     
     ////////////////////////////////////////////////
-    // Simulate all entities
+    
+    // @todo(viktor): :TransientClipRect
+    old_clip_rect_index := render_group.current_clip_rect_index
+    defer render_group.current_clip_rect_index = old_clip_rect_index
+
+    render_group.current_clip_rect_index = clip_rect_index[0]
     
     simulate_entities := begin_timed_block("simulate_entities")
     for &entity in slice(sim_region.entities) {
-        // @todo(viktor): we dont really have a way to unique-ify these :(
-        debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
-        if debug_requested(debug_id) { 
-            debug_begin_data_block("Game/Entity")
-        }
-        defer if debug_requested(debug_id) {
-            debug_end_data_block()
-        }
-        
-        // @cleanup is this still relevant
-        if entity.updatable { // @todo(viktor):  move this out into entity.odin
-            ////////////////////////////////////////////////
-            // Physics
-            if entity.movement_mode == .Planted {
-                if entity.occupying.entity.pointer != nil {
-                    entity.p = get_sim_space_traversable(entity.occupying).p
-                }
-            }
-            
-            switch entity.movement_mode {
-              case ._Floating: // nothing
-              
-              case .AngleAttackSwipe:
-                if entity.t_movement < 1 {
-                    entity.angle_current = lerp(entity.angle_start, entity.angle_target, entity.t_movement)
-                    entity.angle_current_offset = lerp(entity.angle_base_offset, entity.angle_swipe_offset, sin_01(entity.t_movement))
-                } else  {
-                    entity.movement_mode = .AngleOffset
-                    
-                    entity.angle_current = entity.angle_target
-                    entity.angle_current_offset = entity.angle_base_offset
-                }
-                
-                entity.t_movement += dt * 8
-                entity.t_movement = min(entity.t_movement, 1)
-                
-                
-                
-                fallthrough
-            case .AngleOffset:
-                arm_ := entity.angle_current_offset * arm(entity.angle_current + entity.facing_direction)
-                entity.p = entity.angle_base + V3(arm_.xy, 0) + v3{0, .2, 0}
-                
-              case .Planted:
-                if entity.occupying.entity.pointer != nil {
-                    entity.p = entity.occupying.entity.pointer.p
-                }
-                
-              case .Hopping:
-                t_jump :: 0.1
-                t_thrust :: 0.8
-                if entity.t_movement < t_thrust {
-                    entity.ddt_bob -= 60
-                }
-                
-                occupying := get_sim_space_traversable(entity.occupying).p
-                came_from := get_sim_space_traversable(entity.came_from).p
-                pt := occupying
-                
-                if t_jump <= entity.t_movement {
-                    t := clamp_01_to_range(t_jump, entity.t_movement, 1)
-                    entity.t_bob = sin(t * Pi) * 0.1
-                    entity.p = lerp(came_from, occupying, entity.t_movement)
-                    entity.dp = 0
-                    
-                    pf := came_from
-                    
-                    // :ZHandling
-                    height := v3{0, 0.3, 0.3}
-                    
-                    c := pf
-                    a := -4 * height
-                    b := pt - pf - a
-                    entity.p = a * square(t) + b * t + c
-                }
-                
-                if entity.t_movement >= 1 {
-                    entity.movement_mode = .Planted
-                    entity.dt_bob = -3
-                    entity.p = pt
-                    entity.came_from = entity.occupying
-                }
-                
-                hop_duration :f32: 0.2
-                entity.t_movement += dt * (1 / hop_duration)
-                
-                if entity.t_movement >= 1 {
-                    entity.t_movement = 1
-                }
-            }
-            
-            if entity.ddp != 0 || entity.dp != 0 {
-                move_entity(sim_region, &entity, dt)
-            }
-            
-            ////////////////////////////////////////////////
-            // Rendering
-            
-            camera_relative_ground := get_entity_ground_point(&entity) - camera_p
-            fade_top_end      :=  0.75 * world.typical_floor_height
-            fade_top_start    :=  0.5  * world.typical_floor_height
-            fade_bottom_start := -1    * world.typical_floor_height
-            fade_bottom_end   := -4    * world.typical_floor_height 
-            
-            if camera_relative_ground.z > fade_top_start {
-                render_group.global_color = 0
-                render_group.t_global_color.rgb = 0
-                render_group.t_global_color.a = clamp_01_to_range(fade_top_start, camera_relative_ground.z, fade_top_end)
-            } else if camera_relative_ground.z < fade_bottom_start {
-                render_group.t_global_color.rgb = clamp_01_to_range(fade_bottom_start, camera_relative_ground.z, fade_bottom_end)
-                render_group.t_global_color.a = 0
-                render_group.global_color = haze_color
-            } else {
-                render_group.t_global_color = 0
-            }
-            
-            // @todo(viktor): this is incorrect, should be computed after update
-            shadow_alpha := 1 - 0.5 * entity.p.z
-            if shadow_alpha < 0 {
-                shadow_alpha = 0.0
-            }
-            
-            facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
-            facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-            
-            transform := default_upright_transform()
-            transform.offset = get_entity_ground_point(&entity) - camera_p
-            
-            shadow_transform := default_flat_transform()
-            shadow_transform.offset = get_entity_ground_point(&entity) - camera_p
-            shadow_transform.offset.y -= 0.5
-            
-            for piece in slice(&entity.pieces) {
-                offset := piece.offset
-                color := piece.color
-                x_axis := entity.x_axis
-                y_axis := entity.y_axis
-                
-                if .BobUpAndDown in piece.flags {
-                    // @todo(viktor): Reenable this floating animation
-                    entity.t_bob += dt
-                    if entity.t_bob > Tau {
-                        entity.t_bob -= Tau
-                    }
-                    hz :: 4
-                    coeff := sin(entity.t_bob * hz)
-                    z := (coeff) * 0.3 + 0.1
-                    
-                    offset += {0, z, 0}
-                    color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
-                }
-                
-                if .SquishAxis in piece.flags {
-                    y_axis *= 0.4
-                }
-                
-                bitmap_id := best_match_bitmap_from(tran_state.assets, piece.asset, facing_match, facing_weights)
-                push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
-                
-                if debug_requested(debug_id) { 
-                    debug_record_value(&bitmap_id)
-                }
-            }
-            
-            draw_hitpoints(render_group, &entity, 0.5, transform)
-            
-            if RenderCollisionOutlineAndTraversablePoints {
-                transform.upright = false
-                color := Green
-                color.rgb *= 0.4
-                
-                for traversable in slice(entity.traversables) {
-                    rect := rectangle_center_dimension(traversable.p, 1.3)
-                    push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Green)
-                    push_rectangle_outline(render_group, rect, transform, Black)
-                }
-            }
-            
-            when DebugEnabled {
-                for volume in entity.collision.volumes {
-                    local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
-                    
-                    if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
-                        debug_hit(debug_id, local_mouse_p.z)
-                    }
-                    
-                    highlighted, color := debug_highlighted(debug_id)
-                    if highlighted {
-                        push_rectangle_outline(render_group, volume, transform, color, 0.05)
-                    }
-                }
-                
-                if debug_requested(debug_id) { 
-                    debug_record_value(cast(^u32) &entity.id, name = "entity_id")
-                    debug_record_value(&entity.p.x)
-                    debug_record_value(&entity.p.y)
-                    debug_record_value(&entity.p.y)
-                    debug_record_value(&entity.dp)
-                }
-            }
-            
-        }
+        simulate_entity(input, world, sim_region, render_group, camera_p, &entity, dt, haze_color, clip_rect_index[:], MinimumLayer, MaximumLayer)
     }
-    render_group.t_global_color = 0
     end_timed_block(simulate_entities)
     
+    ////////////////////////////////////////////////
+    
+    fountain_test(render_group, world, dt)
+    enviroment_test()
+    
+    ////////////////////////////////////////////////
+    
+    // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
+    // can know about the location of the camera at the end of the frame so there isn't
+    // a frame of lag in camera updating compared to the hero.
+    end_sim(sim_region)
+    end_temporary_memory(sim_memory)
+    
+    check_arena(&world.arena)
+    
+    // @todo(viktor): Should switch mode. Implemented in :CutsceneEpisodes
+    heroes_exist: b32
+    for con_hero in world.controlled_heroes {
+        if con_hero.brain_id != 0 {
+            heroes_exist = true
+            break
+        }
+    }
+}
+
+
+
+////////////////////////////////////////////////
+
+fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
     if FountainTest { 
         ////////////////////////////////////////////////
         // @note(viktor): Particle system test
-        font_id := first_font_from(tran_state.assets, .Font)
-        font := get_font(tran_state.assets, font_id, render_group.generation_id)
+        font_id := first_font_from(render_group.assets, .Font)
+        font := get_font(render_group.assets, font_id, render_group.generation_id)
         if font == nil {
-            load_font(tran_state.assets, font_id, false)
+            load_font(render_group.assets, font_id, false)
         } else {
-            font_info := get_font_info(tran_state.assets, font_id)
+            font_info := get_font_info(render_group.assets, font_id)
             for _ in 0..<2 {
                 particle := &world.particles[world.next_particle]
                 world.next_particle += 1
@@ -598,9 +464,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 
                 particle_ddp := particle.ddp + dispersion
                 // @note(viktor): simulate particle forward in time
-                particle.p     += particle_ddp * 0.5 * square(input.delta_time) + particle.dp * input.delta_time
-                particle.dp    += particle_ddp * input.delta_time
-                particle.color += particle.dcolor * input.delta_time
+                particle.p     += particle_ddp * 0.5 * square(dt) + particle.dp * dt
+                particle.dp    += particle_ddp * dt
+                particle.color += particle.dcolor * dt
                 // @todo(viktor): should we just clamp colors in the renderer?
                 color := clamp_01(particle.color)
                 if color.a > 0.9 {
@@ -619,7 +485,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
         }             
     }
-    
+}
+
+enviroment_test :: proc() {
     when false do if EnvironmentTest { 
         ////////////////////////////////////////////////
         // @note(viktor): Coordinate System and Environment Map Test
@@ -683,23 +551,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 entry.texture = it.LOD[0]
                 assert(it.LOD[0].memory != nil)
             }
-        }
-    }
-    
-    // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
-    // can know about the location of the camera at the end of the frame so there isn't
-    // a frame of lag in camera updating compared to the hero.       
-    end_sim(sim_region)
-    end_temporary_memory(sim_memory)
-    
-    check_arena(&world.arena)
-    
-    // @todo(viktor): Should switch mode. Implemented in :CutsceneEpisodes
-    heroes_exist: b32
-    for con_hero in world.controlled_heroes {
-        if con_hero.brain_id != 0 {
-            heroes_exist = true
-            break
         }
     }
 }
@@ -889,20 +740,4 @@ clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
 
 block_has_room :: proc(block: ^WorldEntityBlock, size: i64) -> b32 {
     return block.entity_data.count + size < len(block.entity_data.data)
-}
-
-draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
-    if entity.hit_point_max > 1 {
-        health_size: v2 = 0.1
-        spacing_between: f32 = health_size.x * 1.5
-        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between
-
-        for index in 0..<entity.hit_point_max {
-            hit_point := entity.hit_points[index]
-            color := hit_point.filled_amount == 0 ? Gray : Red
-            // @cleanup rect
-            push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
-            health_x += spacing_between
-        }
-    }
 }

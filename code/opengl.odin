@@ -319,6 +319,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
         }
         
         switch header.type {
+          case .None: unreachable()
           case .RenderEntryClear:
             entry := cast(^RenderEntryClear) entry_data
             

@@ -129,6 +129,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         }
         
         switch header.type {
+          case .None: unreachable()
           case .RenderEntryClear:
             entry := cast(^RenderEntryClear) entry_data
             draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.premultiplied_color, clip_rect)
@@ -148,9 +149,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
                 entry.bitmap^, entry.premultiplied_color,
                 clip_rect,
             )
-            
-          case:
-            panic("Unhandled Entry")
         }
     }
 }
