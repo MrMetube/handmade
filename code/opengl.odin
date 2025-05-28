@@ -322,8 +322,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
           case .RenderEntryClear:
             entry := cast(^RenderEntryClear) entry_data
             
-            color := entry.color
-            color.rgb *= color.a
+            color := entry.premultiplied_color
             color.r = square(color.r)
             color.g = square(color.g)
             color.b = square(color.b)
@@ -334,8 +333,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
             
-            color := entry.color
-            color.rgb *= color.a
+            color := entry.premultiplied_color
             color.r = square(color.r)
             color.g = square(color.g)
             color.b = square(color.b)
@@ -359,21 +357,14 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
                 min_uv := v2{0+texel_x, 0+texel_y}
                 max_uv := v2{1-texel_x, 1-texel_y}
                 
-                color := entry.color
-                color.rgb *= color.a
-                color.r = square(color.r)
-                color.g = square(color.g)
-                color.b = square(color.b)
-                
-                
                 min_x_min_y := entry.p
                 max_x_min_y := entry.p + entry.x_axis
                 min_x_max_y := entry.p + entry.y_axis
                 max_x_max_y := entry.p + entry.x_axis + entry.y_axis
                 
                 glBegin(gl.TRIANGLES)
-                
-                    glColor4fv(&entry.color[0])
+                    
+                    glColor4fv(&entry.premultiplied_color[0])
                     // @note(viktor): Lower triangle
                     glTexCoord2f(min_uv.x, min_uv.y)
                     glVertex2fv(&min_x_min_y[0])
@@ -393,7 +384,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
 
                     glTexCoord2f(min_uv.x, max_uv.y)
                     glVertex2fv(&min_x_max_y[0])
-                
+                    
                 glEnd()
             }
             

@@ -468,7 +468,7 @@ add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
     
     p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
     text_bounds = rectangle_add_offset(text_bounds, p)
-    text_bounds = rectangle_add_radius(text_bounds, 10)
+    text_bounds = rectangle_add_radius(text_bounds, 4)
     push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
     push_text(debug, text, p, color)
 }

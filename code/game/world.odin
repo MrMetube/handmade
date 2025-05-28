@@ -151,7 +151,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for room in u32(0) ..< 3 {
+    for room in u32(0) ..< 5 {
         when !true {
             choice := random_choice(&world.game_entropy, 2)
         } else {
@@ -242,7 +242,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     focal_length, distance_above_ground : f32 = 0.6, 10
     perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
-    clear(render_group, DarkBlue)
+    haze_color := DarkBlue
+    clear(render_group, haze_color)
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := rectangle_min_max(
@@ -412,11 +413,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             fade_bottom_start := -1    * world.typical_floor_height
             fade_bottom_end   := -4    * world.typical_floor_height 
             
-            render_group.global_alpha = 1
             if camera_relative_ground.z > fade_top_start {
-                render_group.global_alpha = clamp_01_to_range(fade_top_end, camera_relative_ground.z, fade_top_start)
+                render_group.global_color = 0
+                render_group.t_global_color.rgb = 0
+                render_group.t_global_color.a = clamp_01_to_range(fade_top_start, camera_relative_ground.z, fade_top_end)
             } else if camera_relative_ground.z < fade_bottom_start {
-                render_group.global_alpha = clamp_01_to_range(fade_bottom_end, camera_relative_ground.z, fade_bottom_start)
+                render_group.t_global_color.rgb = clamp_01_to_range(fade_bottom_start, camera_relative_ground.z, fade_bottom_end)
+                render_group.t_global_color.a = 0
+                render_group.global_color = haze_color
+            } else {
+                render_group.t_global_color = 0
             }
             
             // @todo(viktor): this is incorrect, should be computed after update
@@ -506,6 +512,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
         }
     }
+    render_group.t_global_color = 0
     end_timed_block(simulate_entities)
     
     if FountainTest { 
@@ -882,4 +889,20 @@ clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
 
 block_has_room :: proc(block: ^WorldEntityBlock, size: i64) -> b32 {
     return block.entity_data.count + size < len(block.entity_data.data)
+}
+
+draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
+    if entity.hit_point_max > 1 {
+        health_size: v2 = 0.1
+        spacing_between: f32 = health_size.x * 1.5
+        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between
+
+        for index in 0..<entity.hit_point_max {
+            hit_point := entity.hit_points[index]
+            color := hit_point.filled_amount == 0 ? Gray : Red
+            // @cleanup rect
+            push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
+            health_x += spacing_between
+        }
+    }
 }

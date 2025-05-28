@@ -131,21 +131,21 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         switch header.type {
           case .RenderEntryClear:
             entry := cast(^RenderEntryClear) entry_data
-            draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.color, clip_rect)
+            draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.premultiplied_color, clip_rect)
             
           case .RenderEntryClip:
             // @todo(viktor): 
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
-            draw_rectangle(target, entry.rect, entry.color, clip_rect)
+            draw_rectangle(target, entry.rect, entry.premultiplied_color, clip_rect)
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
             
             draw_rectangle_quickly(target,
                 entry.p, entry.x_axis, entry.y_axis,
-                entry.bitmap^, entry.color,
+                entry.bitmap^, entry.premultiplied_color,
                 clip_rect,
             )
             
@@ -167,19 +167,17 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         return
     }
     
-    // @note(viktor): premultiply color
-    color := color
-    color.rgb *= color.a
     /* 
-        length_x_axis := length(x_axis)
-        length_y_axis := length(y_axis)
-        normal_x_axis := (length_y_axis / length_x_axis) * x_axis
-        normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-        // @note(viktor): normal_z_scale could be a parameter if we want people
-        // to have control over the amount of scaling in the z direction that
-        // the normals appear to have
-        normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
+    length_x_axis := length(x_axis)
+    length_y_axis := length(y_axis)
+    normal_x_axis := (length_y_axis / length_x_axis) * x_axis
+    normal_y_axis := (length_x_axis / length_y_axis) * y_axis
+    // @note(viktor): normal_z_scale could be a parameter if we want people
+    // to have control over the amount of scaling in the z direction that
+    // the normals appear to have
+    normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
     */
+    
     fill_rect := inverted_infinity_rectangle(Rectangle2i)
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
         floorp := floor(testp, i32)
@@ -415,10 +413,6 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     
     assert(texture.memory != nil)
 
-    // @note(viktor): premultiply color
-    color := color
-    color.rgb *= color.a
-
     length_x_axis := length(x_axis)
     length_y_axis := length(y_axis)
     normal_x_axis := (length_y_axis / length_x_axis) * x_axis
@@ -636,12 +630,9 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         delta_y_n_x_axis_y := delta_y * normal_x_axis_y
         delta_y_n_y_axis_y := delta_y * normal_y_axis_y
         
-        
-        // @note(viktor): premultiply color alpha
         color := color
-        color.rgb *= color.a
-        
         color *= 255
+        
         color_r := cast(f32x8) color.r
         color_g := cast(f32x8) color.g
         color_b := cast(f32x8) color.b

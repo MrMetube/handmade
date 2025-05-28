@@ -59,7 +59,13 @@ square :: proc(x: $T) -> T where intrinsics.type_is_numeric(T) || intrinsics.typ
 
 square_root :: simd.sqrt
 
-lerp :: proc(from: $T, to: T, t: f32) -> T {
+lerp  :: proc{ lerp_f, lerp_v }
+lerp_f :: proc(from: $Value, to: Value, t: f32) -> Value {
+    result := (1-t) * from + t * to
+    
+    return result
+}
+lerp_v :: proc(from: $Value, to: Value, t: $T) -> Value where intrinsics.type_is_array(T) {
     result := (1-t) * from + t * to
     
     return result

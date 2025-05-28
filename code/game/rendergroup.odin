@@ -62,8 +62,10 @@ RenderGroup :: struct {
     renders_in_background: b32,
     
     camera:                          Camera,
-    global_alpha:                    f32,
     monitor_half_diameter_in_meters: v2,
+    
+    t_global_color: v4,
+    global_color:   v4,
     
     commands: ^RenderCommands,
     
@@ -121,7 +123,7 @@ RenderEntryClip :: struct {
 
 @(common)
 RenderEntryClear :: struct {
-    color:  v4,
+    premultiplied_color:  v4,
 }
 
 @(common)
@@ -129,7 +131,7 @@ RenderEntryBitmap :: struct {
     bitmap: ^Bitmap,
     id:     u32, // BitmapId @cleanup
     
-    color:  v4,
+    premultiplied_color:  v4,
     p:      v2,
     // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
     x_axis: v2,
@@ -138,7 +140,7 @@ RenderEntryBitmap :: struct {
 
 @(common)
 RenderEntryRectangle :: struct {
-    color: v4,
+    premultiplied_color: v4,
     rect:  Rectangle2,
 }
 
@@ -161,7 +163,9 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
         assets = assets,
         renders_in_background = renders_in_background,
         commands = commands,
-        global_alpha = 1,
+        
+        global_color   = 1,
+        
         generation_id = generation_id,
     }
 }
@@ -208,6 +212,12 @@ orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels:
     group.current_clip_rect_index = push_clip_rect(group, clip)
 }
 
+store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
+    result = lerp(color, group.global_color, group.t_global_color)
+    result.rgb *= result.a
+    return result
+}
+
 push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
     assert(group.camera.mode != .None)
     
@@ -249,7 +259,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
 clear :: proc(group: ^RenderGroup, color: v4) {
     entry := push_render_element(group, RenderEntryClear, NegativeInfinity)
     if entry != nil {
-        entry.color = color
+        entry.premultiplied_color = store_color(group, color)
     }
 }
 
@@ -327,33 +337,17 @@ push_bitmap_raw :: proc(
         element := push_render_element(group, RenderEntryBitmap, used_dim.basis.sort_key)
         
         if element != nil {
-            alpha := v4{1,1,1, group.global_alpha}
-            
             element.bitmap = bitmap
             element.id     = cast(u32) asset_id
             
-            element.color  = color * alpha
             element.p      = used_dim.basis.p
+            element.premultiplied_color = store_color(group, color)
             
             size := used_dim.basis.scale * used_dim.size
             element.x_axis = size.x * x_axis
             element.y_axis = size.y * y_axis
         }
     }
-}
-
-get_used_bitmap_dim :: proc(
-    group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
-    offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
-) -> (result: UsedBitmapDim) {
-    result.size  = v2{bitmap.width_over_height, 1} * height
-    result.align = use_alignment ? bitmap.align_percentage * result.size : 0
-    result.p.z   = offset.z
-    result.p.xy  = offset.xy - result.align * x_axis - result.align * y_axis
-    
-    result.basis = project_with_transform(group.camera, transform, result.p)
-    
-    return result
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -373,8 +367,7 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
         dim := basis.scale * size.xy
         
         if element != nil {
-            alpha := v4{1,1,1, group.global_alpha}
-            element.color = color * alpha
+            element.premultiplied_color = store_color(group, color)
             element.rect  = rectangle_center_dimension(bp - 0.5 * dim, dim)
         }
     }
@@ -400,20 +393,18 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
 }
 
-draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
-    if entity.hit_point_max > 1 {
-        health_size: v2 = 0.1
-        spacing_between: f32 = health_size.x * 1.5
-        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between
-
-        for index in 0..<entity.hit_point_max {
-            hit_point := entity.hit_points[index]
-            color := hit_point.filled_amount == 0 ? Gray : Red
-            // @cleanup rect
-            push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
-            health_x += spacing_between
-        }
-    }
+get_used_bitmap_dim :: proc(
+    group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
+    offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
+) -> (result: UsedBitmapDim) {
+    result.size  = v2{bitmap.width_over_height, 1} * height
+    result.align = use_alignment ? bitmap.align_percentage * result.size : 0
+    result.p.z   = offset.z
+    result.p.xy  = offset.xy - result.align * x_axis - result.align * y_axis
+    
+    result.basis = project_with_transform(group.camera, transform, result.p)
+    
+    return result
 }
 
 get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangle2) {
