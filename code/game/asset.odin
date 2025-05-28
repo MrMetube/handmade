@@ -395,7 +395,6 @@ best_match_font_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, wei
     return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
 best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
-    timed_function()
     type := assets.types[id]
 
     if type.first_asset_index != type.one_past_last_index {

@@ -453,9 +453,7 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
     push_rectangle(&debug.render_group, filled, debug.ui_transform, Green)
 }
 
-add_tooltip :: proc(debug: ^DebugState, text: string) {
-    color := Isabelline
-    
+add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
     layout := &debug.mouse_text_layout
     text_bounds := measure_text(debug, text)
     size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
@@ -469,7 +467,10 @@ add_tooltip :: proc(debug: ^DebugState, text: string) {
     defer render_group.current_clip_rect_index = old_clip_rect
     
     p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
-    push_text(debug, text, p, color, pz = 100000)
+    text_bounds = rectangle_add_offset(text_bounds, p)
+    text_bounds = rectangle_add_radius(text_bounds, 10)
+    push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
+    push_text(debug, text, p, color)
 }
 
 get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
@@ -576,16 +577,28 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     
     merge_sort(sort_entries, temp_space)
     
+    total_time_percentage := 1 / total_time * 100
+    running_sum: f32
     p := v2{rect.min.x, rect.max.y} - v2{0, debug_get_baseline(debug)}
     for sort_entry in sort_entries {
         entry := entries[sort_entry.index]
+        running_sum += entry.stats.sum
+        
+        order_of_magnitude :: proc(value: $T) -> (T, string) {
+            if      value < 10_000             { return value,              " "}
+            else if value < 10_000_000         { return value/1000,         "k"}
+            else if value < 10_000_000_000     { return value/1000_000,     "M"}
+            else if value < 10_000_000_000_000 { return value/1000_000_000, "G"}
+            return value, "?"
+        }
         
         text := fmt.tprintf(
-            "% 10vcy / % 4v : % 8.0fcy % 2.5v%% - %s", 
-            cast(u64) entry.stats.sum, 
-            cast(u64) entry.stats.count, 
-            entry.stats.avg,
-            entry.stats.sum * 100 / total_time, 
+            " % 4v%s cy - % 2.5v%%  - % 4v%s - %s", 
+            order_of_magnitude(cast(u64) entry.stats.sum), 
+            
+            round(entry.stats.sum * total_time_percentage * 100, f32) * 0.01, 
+            order_of_magnitude(cast(u64) entry.stats.count), 
+            
             entry.element.guid.name,
         )
         
@@ -593,6 +606,16 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         color := color_wheel[sort_entry.index % len(color_wheel)]
         push_text(debug, text, p, color)
         
+        region_rect := measure_text(debug, text)
+        region_rect = rectangle_add_offset(region_rect, p)
+        if rectangle_contains(region_rect, mouse_p) {
+            tooltip := fmt.tprintf("Cumulative to this point: [% 2.5v%%] - Average: % 4.0f%s cy",
+                round(running_sum * total_time_percentage * 100, f32) * 0.01, 
+                order_of_magnitude(entry.stats.avg),
+            )
+            add_tooltip(debug, tooltip)
+        }
+                
         if p.y < rect.min.y {
             break
         } else {
@@ -1265,7 +1288,7 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
           case .Draw: 
             if codepoint != ' ' {
                 push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
-                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,0}, {0,0,0,1})
+                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,0}, Black)
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)

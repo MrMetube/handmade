@@ -650,18 +650,21 @@ main :: proc() {
             }
             
             if seconds_elapsed_for_frame < target_seconds_per_frame {
+                // Sleep
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
                     if sleep_ms > 0 { 
                         win.Sleep(cast(u32) sleep_ms)
                     }
                 }
-                test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
                 
-                if test_seconds_elapsed < target_seconds_per_frame {
+                test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
+                if test_seconds_elapsed > target_seconds_per_frame {
                     // @logging sleep missed
-                    fmt.println("Sleep missed")
+                    fmt.printfln("Sleep missed sim+sleep: %.3fms but targeted: %.3fms, delta %.6fms", 1000*test_seconds_elapsed, 1000*target_seconds_per_frame, 1000*(test_seconds_elapsed - target_seconds_per_frame))
                 }
+                
+                // Busy Waiting
                 for seconds_elapsed_for_frame < target_seconds_per_frame {
                     seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
                 }
@@ -725,7 +728,10 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
     
     if GlobalRenderType == .RenderOpenGL_DisplayOpenGL {
         gl_render_commands(commands, window_width, window_height)
-        win.SwapBuffers(device_context)
+        
+        { timed_block("SwapBuffers")
+            win.SwapBuffers(device_context)
+        }
     } else {
         offscreen_buffer := Bitmap{
             memory = GlobalBackBuffer.memory,

@@ -151,21 +151,21 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for room in u32(0) ..< 8 {
-        when true {
+    for room in u32(0) ..< 3 {
+        when !true {
             choice := random_choice(&world.game_entropy, 2)
         } else {
-            choice := 1
+            choice := 2
         }
         
         created_stair = false
         switch(choice) {
-        case 0: door_right  = true
-        case 1: door_top    = true
-        // case 2: stair_down  = true
-        // case 3: stair_up    = true
-        // case 4: door_left   = true
-        // case 5: door_bottom = true
+          case 0: door_right  = true
+          case 1: door_top    = true
+          case 2: stair_down  = true
+          case 3: stair_up    = true
+          // case 4: door_left   = true
+          // case 5: door_bottom = true
         }
         
         created_stair = stair_down || stair_up
@@ -203,7 +203,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         }
         
         add_monster(world,  room.p[3][4], room.ground[3][4])
-        add_familiar(world, room.p[2][5], room.ground[2][5])
+        // add_familiar(world, room.p[2][5], room.ground[2][5])
         
         snake_brain := add_brain(world)
         for piece_index in u32(0)..<len(BrainSnake{}.segments) {
@@ -253,7 +253,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // @todo(viktor): by how much should we expand the sim region?
     // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := rectangle_add_radius(camera_bounds, v3{45, 45, 45})
+    sim_bounds := rectangle_add_radius(camera_bounds, v3{30, 30, 10})
     sim_origin := world.camera_p
     sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
@@ -297,15 +297,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     ////////////////////////////////////////////////
     // Run all brains
     
-    block := begin_timed_block("execute_brains")
+    execute_brains := begin_timed_block("execute_brains")
     for &brain in slice(sim_region.brains) {
         execute_brain(input, world, sim_region, &brain)
     }
-    end_timed_block(block)
+    end_timed_block(execute_brains)
     
     ////////////////////////////////////////////////
     // Simulate all entities
     
+    simulate_entities := begin_timed_block("simulate_entities")
     for &entity in slice(sim_region.entities) {
         // @todo(viktor): we dont really have a way to unique-ify these :(
         debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
@@ -320,7 +321,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
         if entity.updatable { // @todo(viktor):  move this out into entity.odin
             ////////////////////////////////////////////////
             // Physics
-            
             if entity.movement_mode == .Planted {
                 if entity.occupying.entity.pointer != nil {
                     entity.p = get_sim_space_traversable(entity.occupying).p
@@ -410,7 +410,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             fade_top_end      :=  0.75 * world.typical_floor_height
             fade_top_start    :=  0.5  * world.typical_floor_height
             fade_bottom_start := -1    * world.typical_floor_height
-            fade_bottom_end   := -1.5  * world.typical_floor_height 
+            fade_bottom_end   := -4    * world.typical_floor_height 
             
             render_group.global_alpha = 1
             if camera_relative_ground.z > fade_top_start {
@@ -469,18 +469,15 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             
             draw_hitpoints(render_group, &entity, 0.5, transform)
             
-            
-            
-            
-            
             if RenderCollisionOutlineAndTraversablePoints {
                 transform.upright = false
                 color := Green
                 color.rgb *= 0.4
-                push_rectangle_outline(render_group, entity.collision.total_volume, transform, color)
+                
                 for traversable in slice(entity.traversables) {
-                    rect := rectangle_center_dimension(traversable.p, 0.1)
-                    push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Blue)
+                    rect := rectangle_center_dimension(traversable.p, 1.3)
+                    push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Green)
+                    push_rectangle_outline(render_group, rect, transform, Black)
                 }
             }
             
@@ -506,8 +503,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                     debug_record_value(&entity.dp)
                 }
             }
+            
         }
     }
+    end_timed_block(simulate_entities)
     
     if FountainTest { 
         ////////////////////////////////////////////////

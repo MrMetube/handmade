@@ -36,8 +36,8 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     
     MaxEntityCount :: 4096
     MaxBrainCount  :: 128
-    region.entities = make_array(sim_arena, Entity, MaxEntityCount)
-    region.brains   = make_array(sim_arena, Brain,  MaxBrainCount)
+    region.entities = make_array(sim_arena, Entity, MaxEntityCount, no_clear())
+    region.brains   = make_array(sim_arena, Brain,  MaxBrainCount,  no_clear())
     
     // @todo(viktor): Try to make these get enforced more rigorously
     // @todo(viktor): Perhaps try using a dual system here where we support 
@@ -55,6 +55,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(world, region.origin, region.bounds.max)
+    
     // @todo(viktor): @speed this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
@@ -67,7 +68,6 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                     chunk_delta := world_distance(world, chunk_world_p, region.origin)
                     block := chunk.first_block
                     for block != nil {
-                        
                         // :PointerArithmetic
                         entities := (cast([^]Entity) &block.entity_data.data)[:block.entity_count]
                         for &source in entities {
@@ -314,6 +314,8 @@ get_or_add_brain :: proc(region: ^SimRegion, id: BrainId, kind: BrainKind) -> (r
 }
 
 connect_entity_references :: proc(region: ^SimRegion) {
+    timed_function()
+    
     for &entity in slice(region.entities) {
         // for &ref in slice(entity.paired_entities) {
         //     load_entity_reference(region, &ref)

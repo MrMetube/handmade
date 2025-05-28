@@ -289,6 +289,8 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
 }
 
 gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_height: i32) {
+    timed_function()
+    
     gl.Viewport(0, 0, commands.width, commands.height)
     gl_set_screenspace(window_width, window_height)
     

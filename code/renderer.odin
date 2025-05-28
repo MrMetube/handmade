@@ -25,6 +25,8 @@ init_render_commands :: proc(commands: ^RenderCommands, max_push_buffer_size: u3
 }
 
 linearize_clip_rects :: proc(commands: ^RenderCommands, temp_memory: pmm) {
+    timed_function()
+    
     out := cast([^]RenderEntryClip) temp_memory
     out_index: u32
     for rect := commands.rects.last; rect != nil; rect = rect.next {
@@ -35,8 +37,8 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, temp_memory: pmm) {
 }
 
 sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
-    block := game.begin_timed_block(#procedure)
-    defer game.end_timed_block(block)
+    timed_function()
+    
     // @todo(viktor): This is not the best way to sort.
     // :PointerArithmetic
     count := commands.push_buffer_element_count
@@ -102,8 +104,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
-    block := game.begin_timed_block(#procedure)
-    defer game.end_timed_block(block)
+    timed_function()
     using work := cast(^TileRenderWork) data
 
     assert(commands != nil)
@@ -410,8 +411,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
 }
 
 draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture, normal_map: Bitmap, color: v4, top, middle, bottom: EnvironmentMap, pixels_to_meters: f32) {
-    block := game.begin_timed_block(#procedure)
-    defer game.end_timed_block(block)
+    timed_function()
     
     assert(texture.memory != nil)
 

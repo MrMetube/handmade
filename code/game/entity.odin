@@ -371,9 +371,18 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) -> (result: StandartR
             p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
             
-            p.offset.x += random_bilateral(&world.game_entropy, f32) * 0.2
-            p.offset.y += random_bilateral(&world.game_entropy, f32) * 0.2
+            if offset_x >= -4 && offset_x <= -1 && offset_y >= -1 && offset_y <= 1 {
+                continue
+            }
             
+            when false {
+                p.offset.x += random_bilateral(&world.game_entropy, f32) * 0.2
+                p.offset.y += random_bilateral(&world.game_entropy, f32) * 0.2
+            }
+            
+            if offset_x == 3  && offset_y >= -3 && offset_y <= 3 {
+                p.offset.z += 0.4 * cast(f32) (offset_y - -3)
+            }
             entity := begin_grounded_entity(world, world.floor_collision)
                 entity.traversables = make_array(&world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})

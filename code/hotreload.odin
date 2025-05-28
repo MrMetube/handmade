@@ -68,3 +68,20 @@ get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
     }
     return last_write_time
 }
+
+
+////////////////////////////////////////////////
+// reimplement to allow the deferred_out to work
+end_timed_block :: proc(info: TimedBlockInfo) {
+    game.end_timed_block(info)
+}
+
+@(deferred_out=end_timed_block)
+timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
+    return game.begin_timed_block(name, loc, hit_count)
+}
+
+@(deferred_out = end_timed_block)
+timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) { 
+    return game.begin_timed_block(loc.procedure, loc, hit_count)
+}

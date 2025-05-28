@@ -54,6 +54,7 @@ push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (
 
 @(require_results)
 push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: pmm) {
+    timed_function()
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
     size := size_init + alignment_offset
@@ -65,7 +66,18 @@ push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushP
     assert(size >= size_init)
     
     if .ClearToZero in params.flags {
-        bytes := (cast([^]u8) result)[:size]
+        timed_block("ClearToZero")
+        
+        cache_line :: [8]u64
+        cache_line_size :: size_of(cache_line)
+        cache_line_count: u64
+        if size > cache_line_size {
+            cache_line_count = size/cache_line_size
+            cache_lines := (cast([^]cache_line) result)[:cache_line_count]
+            for &w in cache_lines do w = 0
+        }
+        
+        bytes := (cast([^]u8) result)[cache_line_count*cache_line_size:size]
         for &b in bytes do b = 0
     }
     

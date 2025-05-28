@@ -30,8 +30,8 @@ append_fixed_array :: proc(a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
     return result
 }
 
-make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32) -> (result: Array(T)) {
-    result.data = push_slice(arena, T, len)
+make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
+    result.data = push_slice(arena, T, len, params)
     return result
 }
 
