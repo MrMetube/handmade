@@ -13,38 +13,21 @@ import "core:time"
 
 import win "core:sys/windows"
 
-/* @todo(viktor): A checker before build
-    Entity should always be used by pointer. 
-    In loops, function parameters and local variables.
+/* 
+    @study(viktor): 
+    If the build does not change its faster to not build/rebuild and execute just the build.exe.
+    But if the amount of times the build changes increases, then it would be simpler to just odin run it directly.
+    Currently the saved time is ~35% i.e. 0,52 seconds for each build.
+
+    @todo(viktor): 
+    - before copypasta check that those files weren't modified by the user and abort instead of squashing those accidental changes
+    - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
+    - get rid of INTERNAL define
 */
 
-// @study(viktor): If the build does not change its faster to build/rebuild and execute the build.exe.
-// But if the amount of times the build changes increases, then it would be simpler to just odin run it directly.
-// Currently we the saved time is ~35% i.e. 0,52 seconds each time we build.
-
-/* @todo(viktor): The command line is a terrible user interface.
-
-    It sucks that the builder expects a command line,
-    It would be more pleasent if it were a GUI Programm
-    which just ran its code through the click of a button.
-    
-    The logic and parameters should stay in code as it is easier
-    to modify, as needs change.
-    
-    i just want a tiny window to click/press a key
-    - rebuild the game
-    - start / restart the game
-    
-    But how does this work with vscode? ughh...
-*/
-
-// @todo(viktor): before copypasta check that those files weren't modified by the user and abort instead of squashing those accidental changes
-
-// @todo(viktor): once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
-
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon -subsystem:windows -ignore-vs-search `
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon -subsystem:windows -ignore-vs-search -use-single-module `
 debug    :: ` -debug `
-internal :: ` -define:INTERNAL=true ` // @todo(viktor): get rid of this
+internal :: ` -define:INTERNAL=true ` // @cleanup
 pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 
 commoner :: ` -custom-attribute:common `
 
@@ -76,9 +59,9 @@ main :: proc() {
     } else {
         for arg in os.args[1:] {
             switch arg {
-                case `AssetBuilder`: run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
-                case `Game`:         build_game()
-                case `Platform`:     build_platform()
+              case `AssetBuilder`: run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
+              case `Game`:         build_game()
+              case `Platform`:     build_platform()
             }
         }
     }

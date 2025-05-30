@@ -312,9 +312,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
-            assert(clip_rect_index < commands.clip_rect_count)
-            
-            rect := commands.clip_rects[clip_rect_index].rect
+            rect := commands.clip_rects.data[clip_rect_index].rect
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
         }
         

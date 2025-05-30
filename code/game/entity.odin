@@ -121,6 +121,7 @@ TraversableReference :: struct {
     index:  i64,
 }
 
+// @cleanup
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
 get_entity_ground_point_ :: proc(entity: ^Entity) -> (result: v3) {
     result = get_entity_ground_point(entity, entity.p)
@@ -160,6 +161,7 @@ end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
     pack_entity_into_world(nil, world, entity, p)
 }
 
+// @cleanup
 begin_grounded_entity :: proc(world: ^World, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
     result = begin_entity(world)
     result.collision = collision
@@ -213,13 +215,13 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
             height = hero_height*1.3,
             offset = {0, -0.3, 0},
             color  = 1,
-            flags  = { .SquishAxis, .BobUpAndDown }
+            flags  = { .SquishAxis, .BobUpAndDown },
         })
         append(&body.pieces, VisiblePiece{
             asset  = .Body,
             height = hero_height,
             color  = 1,
-            flags  = { .SquishAxis }
+            flags  = { .SquishAxis },
         })
         append(&body.pieces, VisiblePiece{
             asset  = .Shadow,
@@ -344,7 +346,7 @@ add_familiar :: proc(world: ^World, p: WorldPosition, occupying: TraversableRefe
         height = 2,
         color  = 1,
         offset = {0, 1, 0},
-        flags  = { .BobUpAndDown }
+        flags  = { .BobUpAndDown },
     })
     
     append(&entity.pieces, VisiblePiece{
@@ -446,16 +448,16 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
             entity.t_movement = min(entity.t_movement, 1)
             
             fallthrough
-        case .AngleOffset:
+          case .AngleOffset:
             arm_ := entity.angle_current_offset * arm(entity.angle_current + entity.facing_direction)
             entity.p = entity.angle_base + V3(arm_.xy, 0) + v3{0, .2, 0}
             
-            case .Planted:
+          case .Planted:
             if entity.occupying.entity.pointer != nil {
                 entity.p = entity.occupying.entity.pointer.p
             }
             
-            case .Hopping:
+          case .Hopping:
             t_jump :: 0.1
             t_thrust :: 0.8
             if entity.t_movement < t_thrust {
@@ -566,7 +568,6 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         draw_hitpoints(render_group, entity, 0.5, transform)
         
         if RenderCollisionOutlineAndTraversablePoints {
-            transform.upright = false
             color := Green
             color.rgb *= 0.4
             

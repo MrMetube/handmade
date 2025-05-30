@@ -259,16 +259,14 @@ main :: proc() {
     MaxPossibleOverlap :: 8 * size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     
-    // @todo(viktor): @cleanup
-    current_sort_memory_size : umm = 1 * Megabyte
-    current_clip_memory_size : umm = 256 * Kilobyte
-    sort_memory := allocate_memory(current_sort_memory_size)
-    clip_memory := allocate_memory(current_clip_memory_size)
+    sort_entries: []SortEntry
+    clip_rects:   []RenderEntryClip
     
     // @todo(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
     push_buffer_size :: 32 * Megabyte
-    push_buffer := allocate_memory(push_buffer_size)
+    push_buffer_memory := allocate_memory(push_buffer_size)
+    push_buffer := (cast([^]u8) push_buffer_memory)[:push_buffer_size]
     
     game_memory := GameMemory{
         high_priority_queue = &high_queue,
@@ -507,7 +505,7 @@ main :: proc() {
         //  Update and Render
         game_updated := game.begin_timed_block("game updated")
         
-        init_render_commands(&render_commands, push_buffer_size, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
+        init_render_commands(&render_commands, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
         
         if !GlobalPause {
             if state.input_record_index != 0 {
@@ -682,22 +680,22 @@ main :: proc() {
             window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
             
-            needed_sort_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(SortEntry) )
-            if needed_sort_memory_size > current_sort_memory_size {
-                deallocate_memory(sort_memory)
-                current_sort_memory_size = needed_sort_memory_size
-                sort_memory = allocate_memory(needed_sort_memory_size)
+            needed_sort_size := render_commands.push_buffer_element_count
+            if needed_sort_size > auto_cast len(sort_entries) {
+                deallocate_memory(raw_data(sort_entries))
+                needed_sort_entries_size := needed_sort_size * size_of(SortEntry)
+                sort_entries = (cast([^]SortEntry) allocate_memory(needed_sort_entries_size))[:needed_sort_size]
             }
             // @copypasta
-            needed_clip_memory_size := cast(umm) (render_commands.push_buffer_element_count * size_of(RenderEntryClip) )
-            if needed_clip_memory_size > current_clip_memory_size {
-                deallocate_memory(clip_memory)
-                current_clip_memory_size = needed_clip_memory_size
-                clip_memory = allocate_memory(needed_clip_memory_size)
+            needed_clip_size := render_commands.clip_rects.count
+            if needed_clip_size > auto_cast len(clip_rects) {
+                deallocate_memory(raw_data(clip_rects))
+                needed_clip_memory_size := needed_clip_size * size_of(RenderEntryClip)
+                clip_rects = (cast([^]RenderEntryClip) allocate_memory(needed_clip_memory_size))[:needed_clip_size]
             }
             
             render := game.begin_timed_block("render")
-            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_memory, clip_memory)
+            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_entries, clip_rects)
             game.end_timed_block(render)
             
             win.ReleaseDC(window, device_context)
@@ -717,9 +715,9 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_memory, clip_memory: pmm) {
-    sort_render_elements(commands, sort_memory)
-    linearize_clip_rects(commands, clip_memory)
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_entries: []SortEntry, clip_rects: []RenderEntryClip) {
+    sort_render_elements(commands, sort_entries)
+    linearize_clip_rects(commands, clip_rects)
     /* 
         if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
             render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)

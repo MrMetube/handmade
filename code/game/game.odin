@@ -175,7 +175,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     Platform = memory.Platform_api
     
     when DebugEnabled {
-        if memory.debug_storage == nil do return
+        assert(memory.debug_storage != nil)
         assert(size_of(DebugState) <= len(memory.debug_storage))
         GlobalDebugMemory = memory
         GlobalDebugTable = memory.debug_table

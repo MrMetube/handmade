@@ -50,8 +50,7 @@ RenderCommands :: struct {
     sort_entry_at:             u32,
     push_buffer_element_count: u32,
     
-    clip_rect_count: u16, // :Array
-    clip_rects:      [^]RenderEntryClip,
+    clip_rects: Array(RenderEntryClip),
     
     rects: Deque(RenderEntryClip),
 }
@@ -74,7 +73,6 @@ RenderGroup :: struct {
 Transform :: struct {
     offset:    v3,  
     scale:     f32,
-    upright:   b32,
     sort_bias: f32,
 }
 
@@ -174,8 +172,10 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
     }
 }
 
+
+// @cleanup
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
-default_upright_transform :: proc() -> Transform { return { scale = 1, upright = true} }
+default_upright_transform :: proc() -> Transform { return { scale = 1 } }
 
 perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
     // @todo(viktor): need to adjust this based on buffer size
@@ -223,6 +223,8 @@ store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
     result.rgb *= result.a
     return result
 }
+
+////////////////////////////////////////////////
 
 push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
     assert(group.camera.mode != .None)
@@ -282,9 +284,9 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
         entry := cast(^RenderEntryClip) &commands.push_buffer[commands.push_buffer_size]
         commands.push_buffer_size += size
     
-        result = group.commands.clip_rect_count
+        result = cast(u16) group.commands.clip_rects.count
         deque_append(&commands.rects, entry)
-        group.commands.clip_rect_count += 1
+        group.commands.clip_rects.count += 1
         group.current_clip_rect_index = result
         
         clip := RenderEntryClip { rect = rec_cast(i32, rect) }
@@ -314,7 +316,7 @@ push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, tra
 
 push_bitmap :: proc(
     group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1,1,1,1}, use_alignment:b32=true, x_axis := v2{1,0}, y_axis := v2{0,1},
+    offset := v3{}, color := v4{1,1,1,1}, use_alignment: b32 =true, x_axis := v2{1,0}, y_axis := v2{0,1},
 ) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     if group.renders_in_background && bitmap == nil {
@@ -363,16 +365,15 @@ push_rectangle2 :: proc(group: ^RenderGroup, rect: Rectangle2, transform: Transf
     push_rectangle(group, Rect3(rect, 0, 0), transform, color)
 }
 push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
-    center := rectangle_get_center(rect)
-    size   := rectangle_get_dimension(rect)
-    p := center + 0.5*size
+    p := rect.max
     basis := project_with_transform(group.camera, transform, p)
     
     if basis.valid {
         element := push_render_element(group, RenderEntryRectangle, basis.sort_key)
         
+        dimension := rectangle_get_dimension(rect)
         bp  := basis.p
-        dim := basis.scale * size.xy
+        dim := basis.scale * dimension.xy
         
         if element != nil {
             element.premultiplied_color = store_color(group, color)
@@ -386,19 +387,30 @@ push_rectangle_outline2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform:
     push_rectangle_outline(group, Rect3(rec, 0, 0), transform, color, thickness)
 }
 push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: v2 = 0.1) {
-    // @todo(viktor): there are rounding issues with draw_rectangle
-    // @cleanup offset and size
     
-    offset := rectangle_get_center(rec)
-    size   := rectangle_get_dimension(rec)
+    // @todo(viktor): there are rounding issues with draw_rectangle
+    // ^ What did this mean? I do not see any gaps.
+    
+    center         := rectangle_get_center(rec)
+    half_dimension := rectangle_get_dimension(rec) * 0.5
     
     // Top and Bottom
-    push_rectangle(group, rectangle_center_dimension(offset - {0, size.y*0.5, 0}, v3{size.x+thickness.x, thickness.y, size.z}), transform, color)
-    push_rectangle(group, rectangle_center_dimension(offset + {0, size.y*0.5, 0}, v3{size.x+thickness.x, thickness.y, size.z}), transform, color)
-
+    center_top    := center + {0, half_dimension.y, 0}
+    center_bottom := center - {0, half_dimension.y, 0}
+    center_left   := center - {half_dimension.x, 0, 0}
+    center_right  := center + {half_dimension.x, 0, 0}
+    
+    half_thickness := thickness * 0.5
+    
+    half_dim_horizontal := v3{half_dimension.x+half_thickness.x, half_thickness.y, half_dimension.z}
+    half_dim_vertical   := v3{half_thickness.x, half_dimension.y-half_thickness.y, half_dimension.z}
+    
+    push_rectangle(group, rectangle_center_half_dimension(center_top,    half_dim_horizontal), transform, color)
+    push_rectangle(group, rectangle_center_half_dimension(center_bottom, half_dim_horizontal), transform, color)
+    
     // Left and Right
-    push_rectangle(group, rectangle_center_dimension(offset - {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
-    push_rectangle(group, rectangle_center_dimension(offset + {size.x*0.5, 0, 0}, v3{thickness.x, size.y-thickness.y, size.z}), transform, color)
+    push_rectangle(group, rectangle_center_half_dimension(center_left,  half_dim_vertical), transform, color)
+    push_rectangle(group, rectangle_center_half_dimension(center_right, half_dim_vertical), transform, color)
 }
 
 get_used_bitmap_dim :: proc(
@@ -417,37 +429,38 @@ get_used_bitmap_dim :: proc(
 
 get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangle2) {
     result = get_camera_rectangle_at_distance(group, group.camera.distance_above_target)
-
     return result
 }
 
 get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
     camera_half_diameter := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_diameter_in_meters).xy
     result = rectangle_center_half_dimension(v2{}, camera_half_diameter)
-
+    
     return result
 }
 
 project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3) -> (result: ProjectedBasis) {
-    p := V3(base_p.xy, 0) + transform.offset
+    p  := base_p.xyz + transform.offset.xyz
+    // pw := base_p.w   + transform.offset.w
+    
     near_clip_plane :: 0.2
     distance_above_target := camera.distance_above_target
     
+    projected: v3
     switch camera.mode {
       case .None: unreachable()
       case .Perspective:
-        base_z: f32
-        
         if UseDebugCamera {
             distance_above_target *= DebugCameraDistance
         }
         
+        base_z: f32
         distance_to_p_z := distance_above_target - p.z
         // @todo(viktor): transform.scale is unused
         if distance_to_p_z > near_clip_plane {
             raw := V3(p.xy, 1)
-            projected := camera.focal_length * raw / distance_to_p_z
-
+            projected = camera.focal_length * raw / distance_to_p_z
+            
             result.scale = projected.z  * camera.meters_to_pixels_for_monitor  
             result.p     = projected.xy * camera.meters_to_pixels_for_monitor + camera.screen_center  + v2{0, result.scale * base_z}
             result.valid = true
@@ -458,14 +471,21 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
         result.scale = camera.meters_to_pixels_for_monitor
         result.valid = true
     }
-
-    result.sort_key = transform.sort_bias + 4096 * (p.z + 0.5 * (transform.upright ? 1 : 0)) - p.y
+    
+    perspective_z  := projected.z
+    displacement_z := result.scale * 0//* pw
+    
+    perspective_term := perspective_z
+    y_term := -p.y
+    z_term := displacement_z
+    
+    result.sort_key = 4096 * perspective_term + 1024 * y_term + z_term + transform.sort_bias
     
     return result
 }
 
-unproject_with_transform :: proc(camera: Camera, transform: Transform, pixels_xy: v2) -> (result: v3) {
-    result.xy = (pixels_xy - camera.screen_center) / camera.meters_to_pixels_for_monitor 
+unproject_with_transform :: proc(camera: Camera, transform: Transform, pixel_p: v2) -> (result: v3) {
+    result.xy = (pixel_p - camera.screen_center) / camera.meters_to_pixels_for_monitor 
     result.z  = transform.offset.z
     
     switch camera.mode {
@@ -475,6 +495,6 @@ unproject_with_transform :: proc(camera: Camera, transform: Transform, pixels_xy
     }
     
     result -= transform.offset
-
+    
     return result
 }

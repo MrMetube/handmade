@@ -1,6 +1,6 @@
 {
     "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
-    "checker_args": "-define:INTERNAL=true  -custom-attribute:common",
+    "checker_args": "-define:INTERNAL=true -ignore-unknown-attributes",
 
     "enable_format": false,
     

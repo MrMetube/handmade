@@ -10,7 +10,7 @@ Brain :: struct {
         snake:    BrainSnake,
         monster:  BrainMonster,
         familiar: BrainFamiliar,
-    }
+    },
 }
 
 BrainId :: distinct EntityId
@@ -39,11 +39,11 @@ BrainSlot :: struct {
 ////////////////////////////////////////////////
 
 BrainHero :: struct {
-    head, body, glove: ^Entity
+    head, body, glove: ^Entity,
 }
 
 BrainFamiliar :: struct {
-    familiar, hero: ^Entity
+    familiar, hero: ^Entity,
 }
 
 BrainSnake :: struct {

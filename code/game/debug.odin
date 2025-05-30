@@ -335,11 +335,11 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.shadow_transform  = default_flat_transform()
         debug.text_transform    = default_flat_transform()
         
-        debug.backing_transform.sort_bias = 16_000
-        debug.ui_transform.sort_bias      = 20_000
-        debug.shadow_transform.sort_bias  = 24_000
-        debug.text_transform.sort_bias    = 28_000
     }
+    debug.backing_transform.sort_bias = 16_000_000
+    debug.ui_transform.sort_bias      = 20_000_000
+    debug.shadow_transform.sort_bias  = 24_000_000
+    debug.text_transform.sort_bias    = 28_000_000
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
     

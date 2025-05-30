@@ -14,40 +14,37 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: proc(commands: ^RenderCommands, max_push_buffer_size: u32, push_buffer: pmm, width, height: i32) {
+init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
     commands^ = {
         width  = width, 
         height = height,
         
-        push_buffer = (cast([^]u8) push_buffer)[:max_push_buffer_size],
-        sort_entry_at = max_push_buffer_size,
+        push_buffer = push_buffer,
+        sort_entry_at = auto_cast len(push_buffer),
     }
 }
 
-linearize_clip_rects :: proc(commands: ^RenderCommands, temp_memory: pmm) {
+linearize_clip_rects :: proc(commands: ^RenderCommands, temp_space: []RenderEntryClip) {
     timed_function()
     
-    out := cast([^]RenderEntryClip) temp_memory
-    out_index: u32
+    count := commands.clip_rects.count
+    commands.clip_rects = { data = temp_space }
     for rect := commands.rects.last; rect != nil; rect = rect.next {
-        out[out_index] = rect^
-        out_index += 1
+        append(&commands.clip_rects, rect^)
     }
-    commands.clip_rects = out
+    assert(count == commands.clip_rects.count)
 }
 
-sort_render_elements :: proc(commands: ^RenderCommands, temp_memory: pmm) {
+sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortEntry) {
     timed_function()
     
     // @todo(viktor): This is not the best way to sort.
-    // :PointerArithmetic
     count := commands.push_buffer_element_count
     if count != 0 {
+        // :PointerArithmetic
         sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
-        temp_space   := (cast([^]SortEntry) temp_memory)[:count]
-
-        // merge_sort(sort_entries, temp_space)
-        radix_sort(sort_entries, temp_space)
+        
+        radix_sort(sort_entries, temp_space[:count])
         
         when INTERNAL do is_sorted(sort_entries)
     }
@@ -122,9 +119,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
-            assert(clip_rect_index < commands.clip_rect_count)
-            
-            rect := commands.clip_rects[clip_rect_index].rect
+            rect := commands.clip_rects.data[clip_rect_index].rect
             clip_rect = rectangle_intersection(clip_rect, rect)
         }
         
