@@ -315,7 +315,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
                 // maybe keep trying on subsequent frames?
                 
                 brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
-                con_hero^ = { brain_id = brain_id }
+                con_hero ^= { brain_id = brain_id }
                 add_hero(world, sim_region, standing_on, brain_id)
             }
         } else {
@@ -559,7 +559,7 @@ enviroment_test :: proc() {
 
 make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGroup) {
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
-    result^ = {}
+    result ^= {}
     
     return result
 }
@@ -567,7 +567,7 @@ make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGro
 make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
-    result^ = {
+    result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
         volumes = push(&world.arena, Rectangle3, 1),
     }
@@ -579,7 +579,7 @@ make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) 
 make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
-    result^ = {
+    result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
         volumes = {},
     }
@@ -652,7 +652,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (res
         result.chunk = chunk_p
         
         result.next = next_pointer_of_the_chunks_previous_chunk^
-        next_pointer_of_the_chunks_previous_chunk^ = result
+        next_pointer_of_the_chunks_previous_chunk ^= result
     }
     
     return result

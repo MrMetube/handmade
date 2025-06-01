@@ -85,7 +85,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             hash.pointer = dest
                             
                             // @todo(viktor): this should really be a decompression not a copy
-                            dest^ = source
+                            dest ^= source
                             
                             dest.id = source.id
                             dest.p += chunk_delta
@@ -375,7 +375,7 @@ transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, d
         if dest != nil {
             dest.occupant = nil
         }
-        dest_ref^ = desired_ref
+        dest_ref ^= desired_ref
         desired.occupant = entity
         result = true
     }

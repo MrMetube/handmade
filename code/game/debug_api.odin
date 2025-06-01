@@ -20,7 +20,7 @@ debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(val
     
     event := debug_record_event(nil, guid)
     if GlobalDebugTable.edit_event.guid == guid {
-        value^ = GlobalDebugTable.edit_event.value.(Value)
+        value ^= GlobalDebugTable.edit_event.value.(Value)
     }
     event.value = value^
 }
@@ -170,7 +170,7 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, GlobalDebugTable.record_increment)
     result = &GlobalDebugTable.events[state.array_index][state.events_index]
     
-    result^ = {
+    result ^= {
         guid = guid,
         
         clock        = read_cycle_counter(),

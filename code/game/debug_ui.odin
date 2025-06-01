@@ -1047,7 +1047,7 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
 
 end_click_interaction :: proc(debug: ^DebugState, input: Input) {
     interaction := &debug.interaction
-    defer interaction^ = {}
+    defer interaction ^= {}
     
     frame_ordinal := debug.most_recent_frame_ordinal
     
@@ -1065,32 +1065,32 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
         switch value in interaction.value {
           case DebugValue: 
             target := cast(^DebugValue) target 
-            target^ = value
+            target ^= value
           case i32: 
             target := cast(^i32) target 
-            target^ = value
+            target ^= value
           case b32: 
             target := cast(^b32) target 
-            target^ = value
+            target ^= value
           case DebugInteractionKind: 
             target := cast(^DebugInteractionKind) target 
-            target^ = value
+            target ^= value
         
           case DebugGUID: 
             target := cast(^DebugGUID) target 
-            target^ = value    
+            target ^= value    
           case ^b32: 
             target := cast(^^b32) target 
-            target^ = value
+            target ^= value
           case ^v2: 
             target := cast(^^v2) target 
-            target^ = value
+            target ^= value
           case ^DebugEventLink: 
             target := cast(^^DebugEventLink) target 
-            target^ = value
+            target ^= value
           case ^DebugTree: 
             target := cast(^^DebugTree) target 
-            target^ = value
+            target ^= value
         }
         
       case .ToggleValue:
@@ -1109,7 +1109,7 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
 
 add_tree :: proc(debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^DebugTree) {
     result = push(&debug.arena, DebugTree, no_clear())
-    result^ = {
+    result ^= {
         root = root,
         p = p,
     }

@@ -403,7 +403,7 @@ make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
             dst := &bitmap.memory[y * bitmap.width + x]
-            dst^ = vec_cast(u8, color)
+            dst ^= vec_cast(u8, color)
         }
     }
 }
@@ -428,7 +428,7 @@ make_sphere_normal_map :: proc(buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
             color := 255 * V4((normal + 1) * 0.5, roughness)
             
             dst := &buffer.memory[y * buffer.width + x]
-            dst^ = vec_cast(u8, color)
+            dst ^= vec_cast(u8, color)
         }
     }
 }
@@ -452,7 +452,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
             color := V4(alpha * base_color, alpha)
             
             dst := &buffer.memory[y * buffer.width + x]
-            dst^ = vec_cast(u8, color)
+            dst ^= vec_cast(u8, color)
         }
     }
 }

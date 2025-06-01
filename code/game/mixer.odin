@@ -49,7 +49,7 @@ play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 
     playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound, no_clear())
     
     // @todo(viktor): should volume default to [0.5,0.5] to be centered?
-    playing_sound^ = {
+    playing_sound ^= {
         id = id,
         
         d_sample = pitch,
@@ -251,7 +251,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         if sound_finished {
             // :ListEntryRemovalInLoop
             list_push(&mixer.first_free_playing_sound, playing_sound)
-            playing_sound_pointer^ = playing_sound.next
+            playing_sound_pointer ^= playing_sound.next
         } else {
             playing_sound_pointer = &playing_sound.next
         }

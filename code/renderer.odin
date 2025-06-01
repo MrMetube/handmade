@@ -15,12 +15,12 @@ TileRenderWork :: struct {
 }
 
 init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
-    commands^ = {
+    commands ^= {
         width  = width, 
         height = height,
         
         push_buffer = push_buffer,
-        sort_entry_at = auto_cast len(push_buffer),
+        sort_sprite_bounds_at = auto_cast len(push_buffer),
     }
 }
 
@@ -35,18 +35,22 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, temp_space: []RenderEntr
     assert(count == commands.clip_rects.count)
 }
 
-sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortEntry) {
+sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortSpriteBounds) {
     timed_function()
     
     // @todo(viktor): This is not the best way to sort.
     count := commands.push_buffer_element_count
     if count != 0 {
         // :PointerArithmetic
-        sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
+        entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
         
-        radix_sort(sort_entries, temp_space[:count])
+        // @note(viktor): we render from back to front, so if the A sprite is in front of the B sprite 
+        // the B sprite should be rendered first and then the A sprite should be rendered
+        comparator :: proc(a, b: SortSpriteBounds) -> b32 { return !sort_sprite_bounds_is_in_front_of(a,b) }
         
-        when INTERNAL do is_sorted(sort_entries)
+        merge_sort(entries, temp_space[:count], comparator)
+        
+        when INTERNAL do is_sorted(entries, comparator)
     }
 }
 
@@ -72,7 +76,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
             work := &works[work_index]
             defer work_index += 1
             
-            work^ = {
+            work ^= {
                 commands  = commands,
                 target = target,
                 base_clip_rect = {
@@ -108,11 +112,11 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     assert(target.memory != nil)
     
     // :PointerArithmetic
-    sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:commands.push_buffer_element_count]
+    entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:commands.push_buffer_element_count]
     
     clip_rect := base_clip_rect
     clip_rect_index := max(u16)
-    for sort_entry, i in sort_entries {
+    for sort_entry, i in entries {
         header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry.index]
         // :PointerArithmetic
         entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderEntryHeader)]
@@ -539,7 +543,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                 blended := (1 - texel.a) * pixel + texel
                 blended = linear_1_to_srgb_255(blended)
 
-                dst^ = vec_cast(u8, blended)
+                dst ^= vec_cast(u8, blended)
             }
         }
     }
@@ -775,7 +779,7 @@ sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughn
     if Global_Rendering_Environment_ShowLightingSampling {
         // @note(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[index.y * lod.width + index.x]
-        texel^ = 255
+        texel ^= 255
     }
 
     return result

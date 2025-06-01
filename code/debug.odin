@@ -153,7 +153,7 @@ when INTERNAL {
             if x >= 0 && x < back_buffer.width {
                 for y in top..<bottom {
                     pixel := &back_buffer.memory[y*back_buffer.width + x]
-                    pixel^ = color
+                    pixel ^= color
                 }
             }
         }

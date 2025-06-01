@@ -393,7 +393,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
         
         if thread == nil {
             thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
-            thread^ = { thread_index = event.thread_index }
+            thread ^= { thread_index = event.thread_index }
             
             list_push(&debug.thread, thread)
         }
@@ -471,7 +471,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             stored_event := store_event(debug, event, element)
             assert(stored_event != nil)
             node := &stored_event.node
-            node^ = {
+            node ^= {
                 element = element,
                 parent_relative_clock = event.clock - clock_basis,
                 
@@ -532,7 +532,7 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
         }
     }
     
-    result^ = {
+    result ^= {
         event       = event,
         frame_index = collation_frame.frame_index,
     }
@@ -543,11 +543,11 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
 }
 
 increment_frame_ordinal :: proc(value:^i32) {
-    value^ = (value^+1) % len(DebugState{}.frames)
+    value ^= (value^+1) % len(DebugState{}.frames)
 }
 
 init_frame :: proc(debug: ^DebugState, frame: ^DebugFrame, begin_clock: i64) {
-    frame^ = {
+    frame ^= {
         frame_index = debug.total_frame_count,
         begin_clock = begin_clock,
     }
@@ -580,13 +580,13 @@ free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
                 }
             }
             
-            frame^ = {}
+            frame ^= {}
         }
     }
     
     frame := &debug.frames[frame_ordinal]
     assert(freed_count == frame.stored_event_count)
-    frame^ = {}
+    frame ^= {}
 }
 
 get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {
@@ -694,14 +694,14 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
     }
     
     result.parent = parent^
-    parent^ = result
+    parent ^= result
     
     return result
 }
 
 free_open_block :: proc(thread: ^DebugThread, first_open_block: ^^DebugOpenBlock) {
     free_block := first_open_block^
-    first_open_block^ = free_block.parent
+    first_open_block ^= free_block.parent
     
     free_block.next_free    = thread.first_free_block
     thread.first_free_block = free_block

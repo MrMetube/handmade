@@ -47,7 +47,7 @@ RenderCommands :: struct {
     push_buffer:      []u8, // :DisjointArray
     push_buffer_size: u32,
     
-    sort_entry_at:             u32,
+    sort_sprite_bounds_at:     u32,
     push_buffer_element_count: u32,
     
     clip_rects: Array(RenderEntryClip),
@@ -74,6 +74,7 @@ Transform :: struct {
     offset:    v3,  
     scale:     f32,
     sort_bias: f32,
+    is_upright: b32,
 }
 
 Camera :: struct {
@@ -156,14 +157,38 @@ UsedBitmapDim :: struct {
 }
 
 ProjectedBasis :: struct {
-    p:        v2,
-    scale:    f32,
-    valid:    b32,
-    sort_key: f32,
+    p:     v2,
+    scale: f32,
+    valid: b32,
 }
 
+@(common)
+SpriteBounds :: struct {
+    y_min, y_max, z_max: f32,
+}
+@(common)
+SortSpriteBounds :: struct {
+    using bounds: SpriteBounds,
+    index:  u32,
+}
+
+@(common)
+sort_sprite_bounds_is_in_front_of :: proc(a, b: SortSpriteBounds) -> (a_in_front_of_b: b32) {
+    both_are_z_sprites := a.y_min != a.y_max && b.y_min != b.y_max
+    
+    a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
+    b_includes_a := a.y_min >= b.y_min && a.y_max < b.y_max
+    
+    sort_by_z := both_are_z_sprites || a_includes_b || b_includes_a
+    
+    a_in_front_of_b = sort_by_z ? a.z_max > b.z_max : a.y_min < b.y_min
+    
+    return a_in_front_of_b
+}
+
+// @cleanup
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
-    group^ = {
+    group ^= {
         assets = assets,
         renders_in_background = renders_in_background,
         commands = commands,
@@ -172,10 +197,8 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
     }
 }
 
-
-// @cleanup
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
-default_upright_transform :: proc() -> Transform { return { scale = 1 } }
+default_upright_transform :: proc() -> Transform { return { scale = 1, is_upright = true } }
 
 perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
     // @todo(viktor): need to adjust this based on buffer size
@@ -226,7 +249,7 @@ store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
 
 ////////////////////////////////////////////////
 
-push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (result: ^T) {
+push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBounds) -> (result: ^T) {
     assert(group.camera.mode != .None)
     
     header_size := cast(u32) size_of(RenderEntryHeader)
@@ -234,7 +257,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
     
     commands := group.commands
     // :PointerArithmetic
-    if commands.push_buffer_size + size < commands.sort_entry_at - size_of(SortEntry) {
+    if commands.push_buffer_size + size < commands.sort_sprite_bounds_at - size_of(SortSpriteBounds) {
         offset := commands.push_buffer_size
         header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
         header.clip_rect_index = group.current_clip_rect_index
@@ -249,12 +272,10 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
 
         result = cast(^T) &commands.push_buffer[offset + header_size]
 
-        commands.sort_entry_at -= size_of(SortEntry)
-        entry := cast(^SortEntry) &commands.push_buffer[commands.sort_entry_at]
-        entry^ = {
-            sort_key = sort_key,
-            index    = offset,
-        }
+        commands.sort_sprite_bounds_at -= size_of(SortSpriteBounds)
+        entry := cast(^SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at]
+        entry.bounds = bounds
+        entry.index  = offset
         
         commands.push_buffer_size += size
         commands.push_buffer_element_count += 1
@@ -266,7 +287,14 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, sort_key: f32) -> (
 }
 
 clear :: proc(group: ^RenderGroup, color: v4) {
-    entry := push_render_element(group, RenderEntryClear, NegativeInfinity)
+    bounds := SpriteBounds {
+        y_min = NegativeInfinity,
+        y_max = PositiveInfinity,
+        z_max = NegativeInfinity,
+    }
+    
+    entry := push_render_element(group, RenderEntryClear, bounds)
+    
     if entry != nil {
         entry.premultiplied_color = store_color(group, color)
     }
@@ -280,7 +308,7 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
     
     commands := group.commands
     // :PointerArithmetic
-    if commands.push_buffer_size + size < commands.sort_entry_at - size_of(SortEntry) {
+    if commands.push_buffer_size + size < commands.sort_sprite_bounds_at - size_of(SortSpriteBounds) {
         entry := cast(^RenderEntryClip) &commands.push_buffer[commands.push_buffer_size]
         commands.push_buffer_size += size
     
@@ -293,7 +321,7 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
         clip.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
         clip.fx = fx
         
-        entry^ = clip
+        entry ^= clip
     }
     return result
 }
@@ -335,6 +363,25 @@ push_bitmap :: proc(
     }
 }
 
+get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
+    y := transform.offset.y + offset.y
+    result = SpriteBounds {
+        y_min = y,
+        y_max = y,
+        z_max = transform.offset.z + offset.z,
+    }
+    
+    // @todo(viktor): More accurate calculations - this doesn't handle neither alignment nor rotation nor axis shear/scale
+    if transform.is_upright {
+        result.z_max += .5 * height
+    } else {
+        result.y_min -= .5 * height
+        result.y_max += .5 * height
+    }
+    
+    return result
+}
+
 push_bitmap_raw :: proc(
     group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, 
     offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
@@ -344,7 +391,9 @@ push_bitmap_raw :: proc(
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis, y_axis)
     if used_dim.basis.valid {
         assert(bitmap.texture_handle != 0)
-        element := push_render_element(group, RenderEntryBitmap, used_dim.basis.sort_key)
+        
+        bounds := get_sprite_bounds(transform, offset, height)
+        element := push_render_element(group, RenderEntryBitmap, bounds)
         
         if element != nil {
             element.bitmap = bitmap
@@ -369,9 +418,11 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
     basis := project_with_transform(group.camera, transform, p)
     
     if basis.valid {
-        element := push_render_element(group, RenderEntryRectangle, basis.sort_key)
-        
         dimension := rectangle_get_dimension(rect)
+        
+        bounds := get_sprite_bounds(transform, 0, dimension.y)
+        element := push_render_element(group, RenderEntryRectangle, bounds)
+        
         bp  := basis.p
         dim := basis.scale * dimension.xy
         
@@ -440,13 +491,11 @@ get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_came
 }
 
 project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3) -> (result: ProjectedBasis) {
-    p  := base_p.xyz + transform.offset.xyz
-    // pw := base_p.w   + transform.offset.w
+    p := base_p + transform.offset
     
     near_clip_plane :: 0.2
-    distance_above_target := camera.distance_above_target
     
-    projected: v3
+    distance_above_target := camera.distance_above_target
     switch camera.mode {
       case .None: unreachable()
       case .Perspective:
@@ -459,7 +508,7 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
         // @todo(viktor): transform.scale is unused
         if distance_to_p_z > near_clip_plane {
             raw := V3(p.xy, 1)
-            projected = camera.focal_length * raw / distance_to_p_z
+            projected := camera.focal_length * raw / distance_to_p_z
             
             result.scale = projected.z  * camera.meters_to_pixels_for_monitor  
             result.p     = projected.xy * camera.meters_to_pixels_for_monitor + camera.screen_center  + v2{0, result.scale * base_z}
@@ -471,16 +520,7 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
         result.scale = camera.meters_to_pixels_for_monitor
         result.valid = true
     }
-    
-    perspective_z  := projected.z
-    displacement_z := result.scale * 0//* pw
-    
-    perspective_term := perspective_z
-    y_term := -p.y
-    z_term := displacement_z
-    
-    result.sort_key = 4096 * perspective_term + 1024 * y_term + z_term + transform.sort_bias
-    
+
     return result
 }
 

@@ -302,7 +302,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     count := commands.push_buffer_element_count
     // :PointerArithmetic
     if count == 0 do return
-    sort_entries := (cast([^]SortEntry) &commands.push_buffer[commands.sort_entry_at])[:count]
+    sort_entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
     
     clip_rect_index := max(u16)
     for sort_entry, i in sort_entries {

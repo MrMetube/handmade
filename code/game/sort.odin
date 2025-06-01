@@ -8,12 +8,19 @@ SortEntry :: struct {
     index:    u32,
 }
 
-is_sorted :: proc(entries: []SortEntry) {
-    count := len(entries)
-    for index in 0 ..< count-1 {
-        a := &entries[index]
-        b := &entries[index+1]
-        assert(a.sort_key <= b.sort_key)
+compare_sort_entries :: proc(a, b: SortEntry) -> b32 { return a.sort_key < b.sort_key }
+
+is_sorted :: proc(entries: []$T, comes_before: proc(a, b: T) -> b32) {
+    for index in 0 ..< len(entries)-1 {
+        a := entries[index]
+        b := entries[index+1]
+        sorted := #force_inline comes_before(a, b)
+        if !sorted {
+            // @note(viktor): Indices back into the data tables are not part of the sort key
+            a.index = 0
+            b.index = 0
+            assert(a == b)
+        }
     }
 }
 
@@ -51,30 +58,7 @@ radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_che
     }
 }
 
-SpriteBounds :: struct {
-    y_min, y_max, z_max: f32,
-    index:               u32,
-}
-
-compare_sort_entries :: proc(a, b: ^SortEntry) -> b32 { return a.sort_key > b.sort_key }
-compare_sprite_bounds :: proc(a, b: ^SpriteBounds) -> (result: b32) {
-    both_are_z_sprites := a.y_min != a.y_max && b.y_min != b.y_max
-    
-    a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
-    b_includes_a := a.y_min >= b.y_min && a.y_max < b.y_max
-    
-    sort_by_z := both_are_z_sprites || a_includes_b || b_includes_a
-    
-    if sort_by_z {
-        result = a.z_max > b.z_max
-    } else { // sort_by_y
-        result = a.y_min < b.y_min
-    }
-    
-    return result
-}
-
-merge_sort :: proc(entries: []$T, temp_space: []T, b_comes_before_a: proc(a, b: ^T) -> b32) #no_bounds_check {
+merge_sort :: proc(entries: []$T, temp_space: []T, comes_before: proc(a, b: T) -> b32) #no_bounds_check {
     count := len(entries)
     
     switch count {
@@ -82,7 +66,7 @@ merge_sort :: proc(entries: []$T, temp_space: []T, b_comes_before_a: proc(a, b: 
       case 2: 
         a := &entries[0]
         b := &entries[1]
-        if #force_inline b_comes_before_a(a, b) {
+        if #force_inline comes_before(b^, a^) {
             swap(a, b)
         }
       case:
@@ -90,8 +74,8 @@ merge_sort :: proc(entries: []$T, temp_space: []T, b_comes_before_a: proc(a, b: 
         as := entries[:middle]
         bs := entries[middle:]
         
-        merge_sort(as, temp_space, b_comes_before_a)
-        merge_sort(bs, temp_space, b_comes_before_a)
+        merge_sort(as, temp_space, comes_before)
+        merge_sort(bs, temp_space, comes_before)
         
         // @todo(viktor): This can probably be done with less memory, by being smarter 
         // about where we copy from and to.
@@ -100,7 +84,7 @@ merge_sort :: proc(entries: []$T, temp_space: []T, b_comes_before_a: proc(a, b: 
             a := &as[ai]
             b := &bs[bi]
             
-            if #force_inline b_comes_before_a(a, b) {
+            if #force_inline comes_before(b^, a^) {
                 bi += 1
                 temp_space[ci] = b^
             } else {

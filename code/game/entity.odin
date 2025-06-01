@@ -525,7 +525,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         }
         
         relative_layer, offset_z := convert_to_relative_layer(world, transform.offset.z)
-        transform.offset.z = offset_z
+        // transform.offset.z = offset_z
         
         if !(minimum_layer <= relative_layer && relative_layer <= maximum_layer) {
             return
@@ -667,7 +667,7 @@ clear_collision_rules :: proc(world: ^World, entity_id: EntityId) {
             if rule.id_a == entity_id || rule.id_b == entity_id {
                 // :ListEntryRemovalInLoop
                 list_push(&world.first_free_collision_rule, rule)
-                rule_pointer^ = rule.next
+                rule_pointer ^= rule.next
             } else {
                 rule_pointer = &rule.next
             }

@@ -86,7 +86,7 @@ main :: proc() {
 
 make_hha :: proc() -> (hha: ^HHA) {
     hha = new(HHA)
-    hha^ = {
+    hha ^= {
         tag_count   = 1,
         asset_count = 1,
         type_count  = 1,
@@ -375,7 +375,7 @@ add_asset :: proc(hha: ^HHA) -> (asset_index: u32, data: ^AssetData, src: ^Sourc
 add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.5, 0.5}) -> (u32) {
     result, data, src := add_asset(hha)
     
-    src^ = SourceBitmapInfo{ filename }
+    src ^= SourceBitmapInfo{ filename }
     
     data.info.bitmap.align_percentage = align_percentage
     
@@ -385,7 +385,7 @@ add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.
 add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (u32) {
     result, data, src := add_asset(hha)
     
-    src^ = SourceSoundInfo{
+    src ^= SourceSoundInfo{
         filename           = filename,
         first_sample_index = first_sample_index,
     }
@@ -399,7 +399,7 @@ add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0
 add_font_asset :: proc(hha: ^HHA, source: ^SourceFont) -> (u32) {
     result, data, src := add_asset(hha)
     
-    src^ = SourceFontInfo{ source }
+    src ^= SourceFontInfo{ source }
     
     ascent, descent, linegap: i32
     tt.GetFontVMetrics(&source.font, &ascent, &descent, &linegap)
@@ -414,7 +414,7 @@ add_font_asset :: proc(hha: ^HHA, source: ^SourceFont) -> (u32) {
 add_character_asset :: proc(hha: ^HHA, font: ^SourceFont, codepoint: rune) {
     bitmap_id, data, src := add_asset(hha)
     
-    src^ = SourceFontGlyphInfo{
+    src ^= SourceFontGlyphInfo{
         font      = font,
         codepoint = codepoint,
     }
@@ -527,7 +527,7 @@ load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo)
             src  := mono_bitmap[(h-1 - y) * w + x]
             dest := &result.memory[(y+1) * result.width + x+1]
             
-            dest^ = premuliply_alpha(255, 255, 255, src)
+            dest ^= premuliply_alpha(255, 255, 255, src)
         }
     }
     
@@ -608,7 +608,7 @@ load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
                 c := raw_pixels[y * header.width + x]
                 p := &pixels[y * header.width + x]
                 
-                p^ = premuliply_alpha( 
+                p ^= premuliply_alpha( 
                     cast(u8) ((c & red_mask)   >> red_shift),
                     cast(u8) ((c & green_mask) >> green_shift),
                     cast(u8) ((c & blue_mask)  >> blue_shift),

@@ -724,7 +724,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
                     load_asset_work_immediatly(&work)
                 } else {
                     task_work := push(&task.arena, LoadAssetWork, no_clear())
-                    task_work^ = work
+                    task_work ^= work
                     Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
                 }
             } else {

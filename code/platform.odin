@@ -259,7 +259,7 @@ main :: proc() {
     MaxPossibleOverlap :: 8 * size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     
-    sort_entries: []SortEntry
+    sort_entries: []SortSpriteBounds
     clip_rects:   []RenderEntryClip
     
     // @todo(viktor): decide what our push_buffer size is
@@ -268,7 +268,7 @@ main :: proc() {
     push_buffer_memory := allocate_memory(push_buffer_size)
     push_buffer := (cast([^]u8) push_buffer_memory)[:push_buffer_size]
     
-    game_memory := GameMemory{
+    game_memory := GameMemory {
         high_priority_queue = &high_queue,
         low_priority_queue  = &low_queue,
         
@@ -405,7 +405,7 @@ main :: proc() {
                 
                 old_keyboard_controller := &old_input.controllers[0]
                 new_keyboard_controller := &new_input.controllers[0]
-                new_keyboard_controller^ = {}
+                new_keyboard_controller ^= {}
                 new_keyboard_controller.is_connected = true
                 
                 for &button, index in new_keyboard_controller.buttons {
@@ -683,8 +683,9 @@ main :: proc() {
             needed_sort_size := render_commands.push_buffer_element_count
             if needed_sort_size > auto_cast len(sort_entries) {
                 deallocate_memory(raw_data(sort_entries))
-                needed_sort_entries_size := needed_sort_size * size_of(SortEntry)
-                sort_entries = (cast([^]SortEntry) allocate_memory(needed_sort_entries_size))[:needed_sort_size]
+                // @todo(viktor): @cleanup use a slice allocation instead of a manual style
+                needed_sort_entries_size := needed_sort_size * size_of(SortSpriteBounds)
+                sort_entries = (cast([^]SortSpriteBounds) allocate_memory(needed_sort_entries_size))[:needed_sort_size]
             }
             // @copypasta
             needed_clip_size := render_commands.clip_rects.count
@@ -715,7 +716,7 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_entries: []SortEntry, clip_rects: []RenderEntryClip) {
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_entries: []SortSpriteBounds, clip_rects: []RenderEntryClip) {
     sort_render_elements(commands, sort_entries)
     linearize_clip_rects(commands, clip_rects)
     /* 
