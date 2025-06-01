@@ -535,7 +535,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         
         for piece in slice(&entity.pieces) {
             offset := piece.offset
-            color := piece.color
+            color  := piece.color
             x_axis := entity.x_axis
             y_axis := entity.y_axis
             

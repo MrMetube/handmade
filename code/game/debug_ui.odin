@@ -575,7 +575,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         total_time += entry.stats.sum
     }
     
-    merge_sort(sort_entries, temp_space)
+    merge_sort(sort_entries, temp_space, compare_sort_entries)
     
     total_time_percentage := 1 / total_time * 100
     running_sum: f32
@@ -583,14 +583,6 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     for sort_entry in sort_entries {
         entry := entries[sort_entry.index]
         running_sum += entry.stats.sum
-        
-        order_of_magnitude :: proc(value: $T) -> (T, string) {
-            if      value < 10_000             { return value,              " "}
-            else if value < 10_000_000         { return value/1000,         "k"}
-            else if value < 10_000_000_000     { return value/1000_000,     "M"}
-            else if value < 10_000_000_000_000 { return value/1000_000_000, "G"}
-            return value, "?"
-        }
         
         text := fmt.tprintf(
             " % 4v%s cy - % 2.5v%%  - % 4v%s - %s", 
@@ -622,6 +614,14 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             p.y -= debug_get_line_advance(debug)
         }
     }
+}
+
+order_of_magnitude :: proc(value: $T) -> (T, string) {
+    if      value < 10_000             { return value,              " "}
+    else if value < 10_000_000         { return value/1000,         "k"}
+    else if value < 10_000_000_000     { return value/1000_000,     "M"}
+    else if value < 10_000_000_000_000 { return value/1000_000_000, "G"}
+    return value, "?"
 }
 
 draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
@@ -676,7 +676,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             }
             
             if rectangle_contains(region_rect, mouse_p) {
-                text := fmt.tprintf("%s - %v cycles", element.guid.name, node.duration)
+                text := fmt.tprintf("%s - %v %s cycles", element.guid.name, order_of_magnitude(cast(u64) node.duration), )
                 add_tooltip(debug, text)
                 
                 // @copypasta with draw_profile

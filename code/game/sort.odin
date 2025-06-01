@@ -3,7 +3,6 @@ package game
 
 @(common="file")
 
-
 SortEntry :: struct {
     sort_key: f32,
     index:    u32,
@@ -18,7 +17,7 @@ is_sorted :: proc(entries: []SortEntry) {
     }
 }
 
-radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) {
+radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
         sort_key_offsets: [256]u32
@@ -52,23 +51,30 @@ radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) {
     }
 }
 
-sort_key_to_u32 :: proc(sort_key: f32) -> (result: u32) {
-    result = transmute(u32) sort_key
+SpriteBounds :: struct {
+    y_min, y_max, z_max: f32,
+    index:               u32,
+}
 
-    SignBit :: 0x8000_0000
-    is_negative := (result & SignBit) != 0
-    if is_negative {
-        result = ~result
-    } else {
-        result |= SignBit
+compare_sort_entries :: proc(a, b: ^SortEntry) -> b32 { return a.sort_key > b.sort_key }
+compare_sprite_bounds :: proc(a, b: ^SpriteBounds) -> (result: b32) {
+    both_are_z_sprites := a.y_min != a.y_max && b.y_min != b.y_max
+    
+    a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
+    b_includes_a := a.y_min >= b.y_min && a.y_max < b.y_max
+    
+    sort_by_z := both_are_z_sprites || a_includes_b || b_includes_a
+    
+    if sort_by_z {
+        result = a.z_max > b.z_max
+    } else { // sort_by_y
+        result = a.y_min < b.y_min
     }
-
+    
     return result
 }
 
-
-merge_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) {
-    entries := entries
+merge_sort :: proc(entries: []$T, temp_space: []T, b_comes_before_a: proc(a, b: ^T) -> b32) #no_bounds_check {
     count := len(entries)
     
     switch count {
@@ -76,116 +82,49 @@ merge_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) {
       case 2: 
         a := &entries[0]
         b := &entries[1]
-        if a.sort_key > b.sort_key {
+        if #force_inline b_comes_before_a(a, b) {
             swap(a, b)
         }
       case:
-        as := entries[:count/2]
-        bs := entries[count/2:]
+        middle := count/2
+        as := entries[:middle]
+        bs := entries[middle:]
         
-        merge_sort(as, temp_space)
-        merge_sort(bs, temp_space)
+        merge_sort(as, temp_space, b_comes_before_a)
+        merge_sort(bs, temp_space, b_comes_before_a)
         
-        // Merge as and bs
-        InPlace :: false
-        when InPlace {
-            // @note(viktor): We need to block-copy a lot of elements.
-            // We swap them one-by-one in a chain to their destination
-            // and then swap what was their to its destination.
-            // This is neither cache friendly nor efficient.
+        // @todo(viktor): This can probably be done with less memory, by being smarter 
+        // about where we copy from and to.
+        ai, bi, ci: int
+        for ai < len(as) && bi < len(bs) {
+            a := &as[ai]
+            b := &bs[bi]
             
-            to_merge := entries[:]
-            for {
-                // 1 - Skip all the as that are less or equal to b1
-                ai: int
-                b1 := bs[0].sort_key
-                for ai < len(as) && as[ai].sort_key <= b1 {
-                    ai += 1
-                }
-                
-                if ai == len(as) do break
-                
-                // 2 - Swap entries so that c comes after b
-                // [as,cs] [bs] => [as] [bs] [cs]
-                
-                cs := as[ai:]
-                to_merge = to_merge[ai:]
-
-                span  := len(to_merge)
-                start := 0
-                index := start
-                
-                src := to_merge[index]
-                
-                cn := len(cs)
-                bn := len(bs)
-                swap_count := 0
-                for {
-                    dst := index + (index >= cn ? -cn : bn)
-
-                    destination := &to_merge[dst]
-                    copy := destination^
-                    destination^ = src
-                    
-                    swap_count += 1
-                    
-                    if dst == start {
-                        if swap_count == span do break
-                        
-                        // We hit a cycle that does not contain all elements of bs and cs.
-                        // (That implies that our shift amount divides our span without remainder.)
-                        // Therefore we start at the first element not in the cycle and make another
-                        // swap-cycle and repeat this a total of shift/span times.
-                        start += 1
-                        dst   += 1
-                        copy  = to_merge[start]
-                    }
-                    
-                    index = dst
-                    src   = copy
-                }
-                
-                // ==>
-                // 3 - Repeat 1 with a' = b, b' = c
-                // Note that we swapped the elements but not the slices themselves,
-                // so we need to swap cs and bs lengths as well.
-                as = to_merge[:len(bs)]
-                bs = to_merge[len(bs):]
-            }
-        } else {
-            // @todo(viktor): This can probably be done with less memory, by being smarter 
-            // about where we copy from and to.
-            ai, bi, ci: int
-            for ai < len(as) && bi < len(bs) {
-                a := as[ai]
-                b := bs[bi]
-                
-                if a.sort_key <= b.sort_key {
-                    ai += 1
-                    temp_space[ci] = a
-                    ci += 1
-                } else {
-                    bi += 1
-                    temp_space[ci] = b
-                    ci += 1
-                }
+            if #force_inline b_comes_before_a(a, b) {
+                bi += 1
+                temp_space[ci] = b^
+            } else {
+                ai += 1
+                temp_space[ci] = a^
             }
             
-            for a in as[ai:] {
-                temp_space[ci] = a
-                ci += 1
-            }
-            
-            for b in bs[bi:] {
-                temp_space[ci] = b
-                ci += 1
-            }
-            
-            assert(ci == len(entries))
-            
-            for c, index in temp_space[:ci] {
-                entries[index] = c
-            }
+            ci += 1
+        }
+        
+        for a in as[ai:] {
+            temp_space[ci] = a
+            ci += 1
+        }
+        
+        for b in bs[bi:] {
+            temp_space[ci] = b
+            ci += 1
+        }
+        
+        assert(ci == len(entries))
+        
+        for c, index in temp_space[:ci] {
+            entries[index] = c
         }
     }
 }
@@ -206,4 +145,20 @@ bubble_sort :: proc(entries: []SortEntry) {
         
         if sorted do break
     }
+}
+
+////////////////////////////////////////////////
+
+sort_key_to_u32 :: proc(sort_key: f32) -> (result: u32) {
+    result = transmute(u32) sort_key
+
+    SignBit :: 0x8000_0000
+    is_negative := (result & SignBit) != 0
+    if is_negative {
+        result = ~result
+    } else {
+        result |= SignBit
+    }
+
+    return result
 }
