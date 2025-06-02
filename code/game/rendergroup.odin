@@ -65,8 +65,11 @@ RenderGroup :: struct {
     missing_asset_count:   i32,
     renders_in_background: b32, // @cleanup is this still used?
     
-    camera:                          Camera,
-    monitor_half_diameter_in_meters: v2,
+    screen_area: Rectangle2,
+    
+    camera: Camera,
+    
+    monitor_half_dim_in_meters: v2,
     
     commands: ^RenderCommands,
     
@@ -213,26 +216,33 @@ sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_
 
 
 
-// @cleanup
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
+    pixel_size := vec_cast(f32, commands.width, commands.height)
+    
     group ^= {
         assets = assets,
         renders_in_background = renders_in_background,
+        
+        screen_area = rectangle_min_dimension(v2{}, pixel_size),
+        
         commands = commands,
         
         generation_id = generation_id,
     }
+    
+    clip := rectangle_min_dimension(v2{0,0}, pixel_size)
+    group.current_clip_rect_index = push_clip_rect(group, clip)
 }
 
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
 default_upright_transform :: proc() -> Transform { return { scale = 1, is_upright = true } }
 
-perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, focal_length, distance_above_target: f32) {
+perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length, distance_above_target: f32) {
     // @todo(viktor): need to adjust this based on buffer size
     pixels_to_meters := 1.0 / meters_to_pixels
-    pixel_size := vec_cast(f32, pixel_count)
-    group.monitor_half_diameter_in_meters = 0.5 * pixel_size * pixels_to_meters
-        
+    pixel_size := rectangle_get_dimension(group.screen_area)
+    group.monitor_half_dim_in_meters = 0.5 * pixel_size * pixels_to_meters
+    
     group.camera = {
         mode = .Perspective,
         
@@ -242,15 +252,12 @@ perspective :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels, 
         focal_length          = focal_length,
         distance_above_target = distance_above_target,
     }
-    
-    clip := rectangle_min_dimension(v2{0,0}, pixel_size)
-    group.current_clip_rect_index = push_clip_rect(group, clip)
 }
 
-orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels: f32) {
+orthographic :: proc(group: ^RenderGroup, meters_to_pixels: f32) {
     // @todo(viktor): need to adjust this based on buffer size
-    pixel_size := vec_cast(f32, pixel_count)
-    group.monitor_half_diameter_in_meters = 0.5 * meters_to_pixels
+    pixel_size := rectangle_get_dimension(group.screen_area)
+    group.monitor_half_dim_in_meters = 0.5 * meters_to_pixels
     
     group.camera = {
         mode = .Orthographic,
@@ -261,9 +268,6 @@ orthographic :: proc(group: ^RenderGroup, pixel_count: [2]i32, meters_to_pixels:
         focal_length          = 10,
         distance_above_target = 10,
     }
-    
-    clip := rectangle_min_dimension(v2{0,0}, pixel_size)
-    group.current_clip_rect_index = push_clip_rect(group, clip)
 }
 
 store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
@@ -274,9 +278,28 @@ store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
     return result
 }
 
+get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
+    y := transform.offset.y + offset.y
+    result = SpriteBounds {
+        y_min = y,
+        y_max = y,
+        z_max = transform.offset.z + offset.z,
+    }
+    
+    // @todo(viktor): More accurate calculations - this doesn't handle neither alignment nor rotation nor axis shear/scale
+    if transform.is_upright {
+        result.z_max += .5 * height
+    } else {
+        result.y_min -= .5 * height
+        result.y_max += .5 * height
+    }
+    
+    return result
+}
+
 ////////////////////////////////////////////////
 
-push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBounds) -> (result: ^T) {
+push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBounds, screen_bounds: Rectangle2) -> (result: ^T) {
     assert(group.camera.mode != .None)
     
     header_size := cast(u32) size_of(RenderEntryHeader)
@@ -304,6 +327,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
         entry ^= {
             bounds = bounds,
             offset = offset,
+            screen_bounds = screen_bounds,
         }
         
         commands.push_buffer_size += size
@@ -312,6 +336,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
         unreachable()
     }
     
+    assert(result != nil)
     return result
 }
 
@@ -322,17 +347,12 @@ clear :: proc(group: ^RenderGroup, color: v4) {
         z_max = NegativeInfinity,
     }
     
-    entry := push_render_element(group, RenderEntryClear, bounds)
-    
-    if entry != nil {
-        entry.premultiplied_color = store_color(group, color)
-    }
+    entry := push_render_element(group, RenderEntryClear, bounds, group.screen_area)
+    entry.premultiplied_color = store_color(group, color)
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }
 push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipRectFX{}) -> (result: u16) {
-    assert(group.camera.mode != .None)
-    
     size := cast(u32) size_of(RenderEntryClip)
     
     commands := group.commands
@@ -392,25 +412,6 @@ push_bitmap :: proc(
     }
 }
 
-get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
-    y := transform.offset.y + offset.y
-    result = SpriteBounds {
-        y_min = y,
-        y_max = y,
-        z_max = transform.offset.z + offset.z,
-    }
-    
-    // @todo(viktor): More accurate calculations - this doesn't handle neither alignment nor rotation nor axis shear/scale
-    if transform.is_upright {
-        result.z_max += .5 * height
-    } else {
-        result.y_min -= .5 * height
-        result.y_max += .5 * height
-    }
-    
-    return result
-}
-
 push_bitmap_raw :: proc(
     group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, 
     offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
@@ -422,19 +423,20 @@ push_bitmap_raw :: proc(
         assert(bitmap.texture_handle != 0)
         
         bounds := get_sprite_bounds(transform, offset, height)
-        element := push_render_element(group, RenderEntryBitmap, bounds)
+
+        size := used_dim.basis.scale * used_dim.size
+        // @todo(viktor): more conservative bounds here
+        screen_rect := rectangle_min_dimension(used_dim.basis.p, size)
+        element := push_render_element(group, RenderEntryBitmap, bounds, screen_rect)
+     
+        element.bitmap = bitmap
+        element.id     = cast(u32) asset_id
         
-        if element != nil {
-            element.bitmap = bitmap
-            element.id     = cast(u32) asset_id
-            
-            element.p      = used_dim.basis.p
-            element.premultiplied_color = store_color(group, color)
-            
-            size := used_dim.basis.scale * used_dim.size
-            element.x_axis = size.x * x_axis
-            element.y_axis = size.y * y_axis
-        }
+        element.p                   = used_dim.basis.p
+        element.premultiplied_color = store_color(group, color)
+        
+        element.x_axis = size.x * x_axis
+        element.y_axis = size.y * y_axis
     }
 }
 
@@ -443,22 +445,22 @@ push_rectangle2 :: proc(group: ^RenderGroup, rect: Rectangle2, transform: Transf
     push_rectangle(group, Rect3(rect, 0, 0), transform, color)
 }
 push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
+    // @cleanup
     p := rect.max
     basis := project_with_transform(group.camera, transform, p)
     
     if basis.valid {
         dimension := rectangle_get_dimension(rect)
         
-        bounds := get_sprite_bounds(transform, 0, dimension.y)
-        element := push_render_element(group, RenderEntryRectangle, bounds)
-        
         bp  := basis.p
         dim := basis.scale * dimension.xy
-        
-        if element != nil {
-            element.premultiplied_color = store_color(group, color)
-            element.rect  = rectangle_center_dimension(bp - 0.5 * dim, dim)
-        }
+        screen_rect := rectangle_center_dimension(bp - 0.5 * dim, dim)
+                
+        bounds := get_sprite_bounds(transform, 0, dimension.y)
+        element := push_render_element(group, RenderEntryRectangle, bounds, screen_rect)
+
+        element.premultiplied_color = store_color(group, color)
+        element.rect                = screen_rect
     }
 }
 
@@ -493,6 +495,8 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     push_rectangle(group, rectangle_center_half_dimension(center_right, half_dim_vertical), transform, color)
 }
 
+////////////////////////////////////////////////
+
 get_used_bitmap_dim :: proc(
     group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
     offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
@@ -513,8 +517,8 @@ get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangl
 }
 
 get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
-    camera_half_diameter := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_diameter_in_meters).xy
-    result = rectangle_center_half_dimension(v2{}, camera_half_diameter)
+    camera_half_dim := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_dim_in_meters).xy
+    result = rectangle_center_half_dimension(v2{}, camera_half_dim)
     
     return result
 }

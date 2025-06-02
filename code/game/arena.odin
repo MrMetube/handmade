@@ -56,7 +56,6 @@ push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (
 
 @(require_results)
 push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushParams) -> (result: pmm) {
-    timed_function()
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
     size := size_init + alignment_offset

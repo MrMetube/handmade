@@ -79,26 +79,27 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     }
 }
 
-build_sprite_graph :: proc(entries: []SortSpriteBounds, arena: ^Arena) {
-    count := len(entries)
+build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) {
+    timed_function()
+
+    count := len(nodes)
     if count != 0 {
-        for &a, index_a in entries[:count-1] {
+        for &a, index_a in nodes[:count-1] {
             assert(a.flags == {})
             
-            for &b in entries[index_a+1:] {
+            for &b, index_b in nodes[index_a+1:] {
                 if rectangle_intersects(a.screen_bounds, b.screen_bounds) {
                     
-                    a_offset, b_offset := a.offset, b.offset
+                    front_index, behind_index := index_a, index_b
                     if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
-                        swap(&a_offset, &b_offset)
+                        swap(&front_index, &behind_index)
                     }
                     
-                    // @note(viktor): A is always in front of b
                     edge := push(arena, SpriteEdge)
-                    front := &a
+                    front := &nodes[front_index]
                     
-                    edge.front = a_offset
-                    edge.behind = b_offset
+                    edge.front  = auto_cast front_index
+                    edge.behind = auto_cast behind_index
                     
                     edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
                     front.first_edge_with_me_as_the_front = edge
@@ -109,15 +110,16 @@ build_sprite_graph :: proc(entries: []SortSpriteBounds, arena: ^Arena) {
 }
 
 SpriteGraphWalk :: struct {
-    nodes: []SortSpriteBounds,
+    nodes:   []SortSpriteBounds,
     indices: ^Array(u32),
 }
 
 walk_sprite_graph :: proc(nodes: []SortSpriteBounds, indices: ^Array(u32)) {
+    timed_function()
+    
     walk := SpriteGraphWalk { nodes, indices }
     
-    for &node, index in walk.nodes {
-        if .Visited in node.flags do continue
+    for _, index in walk.nodes {
         walk_sprite_graph_front_to_back(&walk, auto_cast index)
     }
     
@@ -126,6 +128,8 @@ walk_sprite_graph :: proc(nodes: []SortSpriteBounds, indices: ^Array(u32)) {
 
 walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
     at := &walk.nodes[index]
+    if .Visited in at.flags do return
+    
     at.flags += { .Visited }
     
     for edge := at.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
@@ -134,7 +138,6 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
     }
     
     // @note(viktor): Do work here!
-    
     append(walk.indices, at.offset)
 }
 

@@ -235,11 +235,10 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     dt := input.delta_time * TimestepPercentage/100.0
     
     monitor_width_in_meters :: 0.635
-    buffer_size := [2]i32{render_group.commands.width, render_group.commands.height}
-    meters_to_pixels_for_monitor := cast(f32) buffer_size.x * monitor_width_in_meters
+    meters_to_pixels_for_monitor := cast(f32) render_group.commands.width * monitor_width_in_meters
     
     focal_length, distance_above_ground : f32 = 0.6, 10
-    perspective(render_group, buffer_size, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
+    perspective(render_group, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     haze_color := DarkBlue
     clear(render_group, haze_color)
@@ -273,8 +272,6 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     fade_bottom_start := -1    * world.typical_floor_height
     fade_bottom_end   := -4    * world.typical_floor_height
     
-    rect := rectangle_min_dimension(v2{0,0}, vec_cast(f32, buffer_size))
-    
     MinimumLayer :: -4
     MaximumLayer :: 1
     clip_rect_index: [MaximumLayer - MinimumLayer + 1]u16
@@ -299,7 +296,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             render_group.current_clip_rect_index = clip_rect_index[1]
         }
         
-        clip_rect = push_clip_rect(render_group, rect, fx)
+        clip_rect = push_clip_rect(render_group, render_group.screen_area, fx)
     }
     
     ////////////////////////////////////////////////

@@ -152,7 +152,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
     if debug.render_group.assets == nil do return
 
-    orthographic(&debug.render_group, {debug.render_group.commands.width, debug.render_group.commands.height}, 1)
+    orthographic(&debug.render_group, 1)
     
     debug.default_clip_rect = debug.render_group.current_clip_rect_index
 
