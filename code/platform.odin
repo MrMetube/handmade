@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "core:os" // @todo(viktor): remove this
 import win "core:sys/windows"
 
 /*
@@ -34,6 +33,7 @@ MonitorRefreshHz :: 120
 HighPriorityThreads :: 10
 LowPriorityThreads  :: 0
 
+FrameTempStorageSize :: 128 * Megabyte
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
 DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
@@ -83,9 +83,8 @@ SoundOutput :: struct {
 }
 
 OffscreenBuffer :: struct {
-    info:                 win.BITMAPINFO,
-    memory:               []Color,
-    width, height, pitch: i32,
+    info:         win.BITMAPINFO,
+    using bitmap: Bitmap,
 }
 
 PlatformState :: struct {
@@ -108,6 +107,8 @@ ReplayBuffer :: struct {
 }
 
 main :: proc() {
+    unused(draw_rectangle_slowly)
+    
     {
         frequency: win.LARGE_INTEGER
         win.QueryPerformanceFrequency(&frequency)
@@ -248,7 +249,13 @@ main :: proc() {
     
     ////////////////////////////////////////////////
     // Memory Setup
-
+    
+    // @todo(viktor): Lets make this our first growable arena!
+    // Also use it in more places if needed!
+    frame_arena: Arena
+    frame_storage := (cast([^]u8) allocate_memory(FrameTempStorageSize))[: FrameTempStorageSize]
+    init_arena(&frame_arena, frame_storage)
+    
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
@@ -258,9 +265,6 @@ main :: proc() {
     // @todo(viktor): remove MaxPossibleOverlap
     MaxPossibleOverlap :: 8 * size_of(Sample)
     samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-    
-    sort_entries: []SortSpriteBounds
-    clip_rects:   []RenderEntryClip
     
     // @todo(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
@@ -350,7 +354,8 @@ main :: proc() {
     //  Game Loop
         
     for GlobalRunning {
-        { game.debug_begin_data_block("Platform"); defer game.debug_end_data_block()
+        
+        { debug_data_block("Platform")
             
             game.debug_record_b32(&GlobalPause)
             game.debug_record_b32(&GlobalDebugShowCursor)
@@ -376,8 +381,7 @@ main :: proc() {
             }
             
             { // Mouse Input 
-                mouse_input := game.begin_timed_block("mouse_input")
-                defer game.end_timed_block(mouse_input)
+                timed_block("mouse_input")
                 
                 mouse: win.POINT
                 win.GetCursorPos(&mouse)
@@ -400,8 +404,7 @@ main :: proc() {
             }
             
             { // Keyboard Input
-                keyboard_input := game.begin_timed_block("keyboard_input")
-                defer game.end_timed_block(keyboard_input)
+                timed_block("keyboard_input")
                 
                 old_keyboard_controller := &old_input.controllers[0]
                 new_keyboard_controller := &new_input.controllers[0]
@@ -627,7 +630,7 @@ main :: proc() {
                 // @todo(viktor): if this is too slow the audio and the whole game will lag
                 unload_game_lib()
 
-                for attempt in 0..<100 {
+                for _ in 0..<100 {
                     game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
                     if game_lib_is_valid do break
                     win.Sleep(100)
@@ -639,8 +642,11 @@ main :: proc() {
             
             game.end_timed_block(debug_colation)
         }
+
+        swap(&new_input, &old_input)
         ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
+        
         {
             seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
             for seconds_elapsed_for_frame < target_seconds_per_frame && !do_next_work_queue_entry(&low_queue) {
@@ -681,36 +687,18 @@ main :: proc() {
         frame_display := game.begin_timed_block("frame display")
         
         {
-            window_width, window_height := get_window_dimension(window)
             device_context := win.GetDC(window)
+            defer win.ReleaseDC(window, device_context)
             
-            needed_sort_size := render_commands.push_buffer_element_count
-            if needed_sort_size > auto_cast len(sort_entries) {
-                deallocate_memory(raw_data(sort_entries))
-                // @todo(viktor): @cleanup use a slice allocation instead of a manual style
-                needed_sort_entries_size := needed_sort_size * size_of(SortSpriteBounds)
-                sort_entries = (cast([^]SortSpriteBounds) allocate_memory(needed_sort_entries_size))[:needed_sort_size]
-            }
-            // @copypasta
-            needed_clip_size := render_commands.clip_rects.count
-            if needed_clip_size > auto_cast len(clip_rects) {
-                deallocate_memory(raw_data(clip_rects))
-                needed_clip_memory_size := needed_clip_size * size_of(RenderEntryClip)
-                clip_rects = (cast([^]RenderEntryClip) allocate_memory(needed_clip_memory_size))[:needed_clip_size]
-            }
+            window_width, window_height := get_window_dimension(window)
             
-            render := game.begin_timed_block("render")
-            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, sort_entries, clip_rects)
-            game.end_timed_block(render)
-            
-            win.ReleaseDC(window, device_context)
+            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, &frame_arena)
             
             flip_counter = get_wall_clock()
         }
         
         game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
-        swap(&new_input, &old_input)
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))
@@ -720,29 +708,29 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, sort_entries: []SortSpriteBounds, clip_rects: []RenderEntryClip) {
-    sort_render_elements(commands, sort_entries)
-    linearize_clip_rects(commands, clip_rects)
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, arena: ^Arena) {
+    timed_function()
+    
+    temp := begin_temporary_memory(arena)
+    defer end_temporary_memory(temp)
+
+    prep := prep_for_render(commands, temp.arena)
+    
     /* 
-        if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
-            render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
-        }
+    if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
+        render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
+    }
     */
     
     if GlobalRenderType == .RenderOpenGL_DisplayOpenGL {
-        gl_render_commands(commands, window_width, window_height)
+        gl_render_commands(commands, prep, window_width, window_height)
         
         { timed_block("SwapBuffers")
             win.SwapBuffers(device_context)
         }
     } else {
-        offscreen_buffer := Bitmap{
-            memory = GlobalBackBuffer.memory,
-            width  = GlobalBackBuffer.width,
-            height = GlobalBackBuffer.height,
-        }
-        
-        software_render_commands(render_queue, commands, offscreen_buffer)
+        offscreen_buffer := GlobalBackBuffer.bitmap
+        software_render_commands(render_queue, commands, prep, offscreen_buffer)
         
         if GlobalRenderType == .RenderSoftware_DisplayGDI {
             display_bitmap_gdi(&GlobalBackBuffer, device_context, window_width, window_height)
@@ -979,8 +967,8 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     }
     
     bytes_per_pixel :: 4
-    buffer.pitch = align16(buffer.width)
-    bitmap_memory_size := buffer.pitch * buffer.height * bytes_per_pixel
+    buffer_pitch := align16(buffer.width)
+    bitmap_memory_size := buffer_pitch * buffer.height * bytes_per_pixel
     buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
     buffer.memory = buffer_ptr[:buffer.width*buffer.height]
     
@@ -1007,10 +995,7 @@ toggle_fullscreen :: proc(window: win.HWND) {
     } else {
         win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style | win.WS_OVERLAPPEDWINDOW))
         win.SetWindowPlacement(window, &GlobalWindowPosition)
-        win.SetWindowPos(window, nil, 0, 0, 0, 0, 
-            win.SWP_NOMOVE | win.SWP_NOSIZE | win.SWP_NOZORDER | 
-            win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED
-        )
+        win.SetWindowPos(window, nil, 0, 0, 0, 0, win.SWP_NOMOVE | win.SWP_NOSIZE | win.SWP_NOZORDER | win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED)
     }
 }
 
@@ -1037,8 +1022,8 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
       case win.WM_PAINT:
         paint: win.PAINTSTRUCT
         device_context := win.BeginPaint(window, &paint)
-        
-        when false {
+        unused(device_context)
+        when false { // This has rotten quite a bit
             window_width, window_height := get_window_dimension(window)
             render_to_window(&GlobalBackBuffer, device_context, window_width, window_height)
         }

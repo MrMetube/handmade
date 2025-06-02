@@ -1,7 +1,6 @@
 package main
 
 import "core:simd"
-import win "core:sys/windows"
 
 Global_Rendering_RenderSingleThreaded: b32
 Global_Rendering_Environment_ShowLightingBounceDirection: b32
@@ -9,6 +8,7 @@ Global_Rendering_Environment_ShowLightingSampling: b32
 
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
+    prep:     RenderPrep,
     target:   Bitmap,
     
     base_clip_rect: Rectangle2i, 
@@ -23,19 +23,28 @@ init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width
         sort_sprite_bounds_at = auto_cast len(push_buffer),
     }
 }
-
-linearize_clip_rects :: proc(commands: ^RenderCommands, temp_space: []RenderEntryClip) {
-    timed_function()
     
-    count := commands.clip_rects.count
-    commands.clip_rects = { data = temp_space }
-    for rect := commands.rects.last; rect != nil; rect = rect.next {
-        append(&commands.clip_rects, rect^)
-    }
-    assert(count == commands.clip_rects.count)
+prep_for_render :: proc(commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
+    sort_render_elements(commands, &result, temp_arena)
+    linearize_clip_rects(commands, &result, temp_arena)
+    
+    return result
 }
 
-sort_render_elements :: proc(commands: ^RenderCommands, arena: ^Arena) {
+linearize_clip_rects :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
+    timed_function()
+    
+    count := commands.clip_rects_count
+    prep.clip_rects =  make_array(arena, RenderEntryClip, count)
+    
+    for rect := commands.rects.last; rect != nil; rect = rect.next {
+        append(&prep.clip_rects, rect^)
+    }
+    
+    assert(count == auto_cast prep.clip_rects.count)
+}
+
+sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
     timed_function()
     
     // @todo(viktor): This is not the best way to sort.
@@ -45,9 +54,10 @@ sort_render_elements :: proc(commands: ^RenderCommands, arena: ^Arena) {
         entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
         
         build_sprite_graph(entries, arena)
-        // walk_sprite_graph(entries)
+        prep.sorted_indices = make_array(arena, u32, count)
+        walk_sprite_graph(entries, &prep.sorted_indices)
         
-        when SlowCode {
+        when false && SlowCode {
             length := len(entries)
             for a, index in entries {
                 CheckTotalOrdering ::  false // ? O(n²) : O(n)
@@ -73,20 +83,22 @@ build_sprite_graph :: proc(entries: []SortSpriteBounds, arena: ^Arena) {
     count := len(entries)
     if count != 0 {
         for &a, index_a in entries[:count-1] {
-            for &b, index_b in entries[index_a+1:] {
+            assert(a.flags == {})
+            
+            for &b in entries[index_a+1:] {
                 if rectangle_intersects(a.screen_bounds, b.screen_bounds) {
                     
-                    a_index, b_index := a.index, b.index
+                    a_offset, b_offset := a.offset, b.offset
                     if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
-                        swap(&a_index, &b_index)
+                        swap(&a_offset, &b_offset)
                     }
                     
                     // @note(viktor): A is always in front of b
                     edge := push(arena, SpriteEdge)
                     front := &a
                     
-                    edge.front = a_index
-                    edge.behind = b_index
+                    edge.front = a_offset
+                    edge.behind = b_offset
                     
                     edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
                     front.first_edge_with_me_as_the_front = edge
@@ -108,6 +120,8 @@ walk_sprite_graph :: proc(nodes: []SortSpriteBounds, indices: ^Array(u32)) {
         if .Visited in node.flags do continue
         walk_sprite_graph_front_to_back(&walk, auto_cast index)
     }
+    
+    assert(indices.count == auto_cast len(nodes))
 }
 
 walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
@@ -121,12 +135,12 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
     
     // @note(viktor): Do work here!
     
-    append(walk.indices, index)
+    append(walk.indices, at.offset)
 }
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {
+software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, prep: RenderPrep, target: Bitmap) {
     assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
 
     /* @todo(viktor):
@@ -149,8 +163,9 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
             defer work_index += 1
             
             work ^= {
-                commands  = commands,
-                target = target,
+                commands = commands,
+                prep     = prep,
+                target   = target,
                 base_clip_rect = {
                     min = tile_size * {x, y},
                 },
@@ -183,19 +198,18 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     assert(commands != nil)
     assert(target.memory != nil)
     
-    // :PointerArithmetic
-    entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:commands.push_buffer_element_count]
+    sorted_draw_indices := slice(prep.sorted_indices)
     
     clip_rect := base_clip_rect
     clip_rect_index := max(u16)
-    for sort_entry, i in entries {
-        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry.index]
+    for sort_entry_index in sorted_draw_indices {
+        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         // :PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderEntryHeader)]
+        entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
-            rect := commands.clip_rects.data[clip_rect_index].rect
+            rect := prep.clip_rects.data[clip_rect_index].rect
             clip_rect = rectangle_intersection(clip_rect, rect)
         }
         

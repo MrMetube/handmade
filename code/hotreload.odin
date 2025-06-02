@@ -85,3 +85,12 @@ timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i
 timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) { 
     return game.begin_timed_block(loc.procedure, loc, hit_count)
 }
+
+debug_end_data_block :: proc() {
+    game.debug_end_data_block()
+}
+
+@(deferred_out = debug_end_data_block)
+debug_data_block :: proc(name: string, loc := #caller_location) {
+    game.debug_begin_data_block(name, loc)
+}

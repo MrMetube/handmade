@@ -151,7 +151,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for room in u32(0) ..< 5 {
+    for _ in u32(0) ..< 5 {
         when !true {
             choice := random_choice(&world.game_entropy, 2)
         } else {
@@ -169,7 +169,6 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         }
         
         created_stair = stair_down || stair_up
-        need_to_place_stair := created_stair
         
         room_x := screen_col * tiles_per_screen.x
         room_y := screen_row * tiles_per_screen.y

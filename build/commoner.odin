@@ -47,7 +47,8 @@ extract_common_and_exports :: proc() {
 }
 
 Header :: 
-`#+no-instrumentation
+`#+vet !unused-procedures
+#+no-instrumentation
 package %v
 ///////////////////////////////////////////////
 //////////////////@important///////////////////

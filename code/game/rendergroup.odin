@@ -49,10 +49,15 @@ RenderCommands :: struct {
     
     sort_sprite_bounds_at:     u32,
     push_buffer_element_count: u32,
-    
-    clip_rects: Array(RenderEntryClip),
+    clip_rects_count: u32,
     
     rects: Deque(RenderEntryClip),
+}
+
+@(common)
+RenderPrep :: struct {
+    clip_rects:     Array(RenderEntryClip),
+    sorted_indices: Array(u32),
 }
 
 RenderGroup :: struct {
@@ -171,7 +176,7 @@ ProjectedBasis :: struct {
 @(common)
 SortSpriteBounds :: struct {
     using bounds: SpriteBounds,
-    index:  u32,
+    offset:  u32,
     
     screen_bounds: Rectangle2,
     first_edge_with_me_as_the_front: ^SpriteEdge,
@@ -291,20 +296,22 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
           case RenderEntryClip:             header.type = .RenderEntryClip
         }
         assert(header.type != .None)
-
+        
         result = cast(^T) &commands.push_buffer[offset + header_size]
-
+        
         commands.sort_sprite_bounds_at -= size_of(SortSpriteBounds)
         entry := cast(^SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at]
-        entry.bounds = bounds
-        entry.index  = offset
+        entry ^= {
+            bounds = bounds,
+            offset = offset,
+        }
         
         commands.push_buffer_size += size
         commands.push_buffer_element_count += 1
     } else {
         unreachable()
     }
-
+    
     return result
 }
 
@@ -333,10 +340,10 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
     if commands.push_buffer_size + size < commands.sort_sprite_bounds_at - size_of(SortSpriteBounds) {
         entry := cast(^RenderEntryClip) &commands.push_buffer[commands.push_buffer_size]
         commands.push_buffer_size += size
-    
-        result = cast(u16) group.commands.clip_rects.count
+        
+        result = cast(u16) group.commands.clip_rects_count
         deque_append(&commands.rects, entry)
-        group.commands.clip_rects.count += 1
+        group.commands.clip_rects_count += 1
         group.current_clip_rect_index = result
         
         clip := RenderEntryClip { rect = rec_cast(i32, rect) }

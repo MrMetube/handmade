@@ -288,7 +288,7 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
     win.SwapBuffers(device_context)
 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_height: i32) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_width, window_height: i32) {
     timed_function()
     
     gl.Viewport(0, 0, commands.width, commands.height)
@@ -299,20 +299,17 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
-    count := commands.push_buffer_element_count
-    // :PointerArithmetic
-    if count == 0 do return
-    sort_entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
+    sorted_draw_indices := slice(prep.sorted_indices)
     
     clip_rect_index := max(u16)
-    for sort_entry, i in sort_entries {
-        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry.index]
+    for sort_entry_index in sorted_draw_indices {
+        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry.index + size_of(RenderEntryHeader)]
+        entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
-            rect := commands.clip_rects.data[clip_rect_index].rect
+            rect := prep.clip_rects.data[clip_rect_index].rect
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
         }
         
@@ -388,8 +385,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, window_width, window_heigh
             }
             
           case .RenderEntryClip:
-            entry := cast(^RenderEntryBitmap) entry_data
-
+            // @note(viktor): clip rects are handled before rendering
           case:
             panic("Unhandled Entry")
         }

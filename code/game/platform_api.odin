@@ -1,5 +1,6 @@
 package game
 
+// @todo(viktor): generate this in the metaprogram
 @(common) 
 PlatformAPI :: struct {
     enqueue_work:      PlatformEnqueueWork,

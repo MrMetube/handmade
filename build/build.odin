@@ -33,7 +33,7 @@ commoner :: ` -custom-attribute:common `
 
 optimizations    :: ` -o:none ` when true else ` -o:speed `
 PedanticGame     :: false
-PedanticPlatform :: false
+PedanticPlatform :: !false
 
 src_path :: `.\build\`   
 exe_path :: `.\build\build.exe`

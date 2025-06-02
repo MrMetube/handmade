@@ -1,5 +1,7 @@
 package game
 
+@(common="file")
+
 Arena :: struct {
     storage:    []u8, // :Array
     used:       u64,

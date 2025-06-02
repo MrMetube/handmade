@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 @(common) import "base:runtime"

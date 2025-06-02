@@ -466,8 +466,6 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
                                 }
                                 
                                 if test_hit {
-                                    test_p := entity.p + entity_delta * test_t
-                                    
                                     t_min = test_t
                                     wall_normal_min = test_wall_normal
                                     hit_min = &test_entity
@@ -557,9 +555,9 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
 
 
 handle_collision :: proc(world: ^World, a, b: ^Entity) -> (stops_on_collision: b32) {
-    a, b := a, b
-    
     when false {
+        a, b := a, b
+    
         if a.type > b.type do a, b = b, a
         
         stops_on_collision = true
