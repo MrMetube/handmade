@@ -124,7 +124,7 @@ TraversableReference :: struct {
 // @cleanup
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
 get_entity_ground_point_ :: proc(entity: ^Entity) -> (result: v3) {
-    result = get_entity_ground_point(entity, entity.p)
+    result = get_entity_ground_point(entity, entity.p) 
     
     return result
 }

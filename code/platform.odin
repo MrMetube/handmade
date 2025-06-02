@@ -659,7 +659,9 @@ main :: proc() {
                 test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
                 if test_seconds_elapsed > target_seconds_per_frame {
                     // @logging sleep missed
-                    fmt.printfln("Sleep missed sim+sleep: %.3fms but targeted: %.3fms, delta %.6fms", 1000*test_seconds_elapsed, 1000*target_seconds_per_frame, 1000*(test_seconds_elapsed - target_seconds_per_frame))
+                    if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
+                        fmt.printfln("Missed sleep - %.3f %vs / %.3f %vs - %.3f %vs", order_of_magnitude(test_seconds_elapsed), order_of_magnitude(target_seconds_per_frame), order_of_magnitude(test_seconds_elapsed - target_seconds_per_frame))
+                    }
                 }
                 
                 // Busy Waiting
@@ -668,7 +670,9 @@ main :: proc() {
                 }
             } else {
                 // @logging Missed frame, maybe because window was moved
-                fmt.println("Missed frame")
+                if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
+                    fmt.printfln("Missed frame - %.3f %vs / %.3f %vs - %.3f %vs", order_of_magnitude(seconds_elapsed_for_frame), order_of_magnitude(target_seconds_per_frame), order_of_magnitude(seconds_elapsed_for_frame - target_seconds_per_frame))
+                }
             }
         }
         

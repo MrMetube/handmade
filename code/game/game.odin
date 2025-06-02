@@ -1,8 +1,8 @@
 package game
 
 // @cleanup
-@(common)
-INTERNAL :: #config(INTERNAL, false)
+@(common) INTERNAL :: #config(INTERNAL, false)
+@(common) SlowCode :: INTERNAL
 
 ////////////////////////////////////////////////
 // @todo(viktor): Find a better place for these configurations

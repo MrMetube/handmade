@@ -50,7 +50,68 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortSprite
         
         merge_sort(entries, temp_space[:count], comparator)
         
-        when INTERNAL do is_sorted(entries, comparator)
+        when SlowCode {
+            length := len(entries)
+            for a, index in entries {
+                CheckTotalOrdering :: !true // ? O(n²) : O(n)
+                end := CheckTotalOrdering ? length : min(index+2, length)
+                
+                for index_b in index+1 ..< end {
+                    b := entries[index_b]
+                    sorted := #force_inline comparator(a, b)
+                    if !sorted {
+                        // @note(viktor): Indices back into the data tables are not part of the sort key
+                        a := a
+                        a.index = 0
+                        b.index = 0
+                        assert(a == b)
+                    }
+                }
+            }
+        }
+    }
+}
+
+SpriteNode :: struct {
+    screen_bounds: Rectangle2,
+    z_max: f32,
+}
+
+SpriteEdge :: struct {
+    front, behind: u32,
+}
+
+add_edge :: proc(a, b: SpriteNode) {
+    
+}
+
+build_sprite_graph :: proc() {
+    input_nodes: []SpriteNode
+    count := len(input_nodes)
+    if count != 0 {
+        for &a, index_a in input_nodes[:count-1] {
+            for &b, index_b in input_nodes[index_a+1:] {
+
+                if rectangle_intersects(a.screen_bounds, b.screen_bounds) {
+                    a_bounds := SpriteBounds {
+                        y_min = a.screen_bounds.min.y,
+                        y_max = a.screen_bounds.max.y,
+                        z_max = a.z_max,
+                    }
+                    b_bounds := SpriteBounds {
+                        y_min = b.screen_bounds.min.y,
+                        y_max = b.screen_bounds.max.y,
+                        z_max = b.z_max,
+                    }
+                    
+                    if sort_sprite_bounds_is_in_front_of(a_bounds, b_bounds) {
+                        add_edge(a, b)
+                    } else {
+                        add_edge(b, a)
+                    }
+                }
+            }
+        }
     }
 }
 

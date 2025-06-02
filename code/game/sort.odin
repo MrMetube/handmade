@@ -10,21 +10,7 @@ SortEntry :: struct {
 
 compare_sort_entries :: proc(a, b: SortEntry) -> b32 { return a.sort_key < b.sort_key }
 
-is_sorted :: proc(entries: []$T, comes_before: proc(a, b: T) -> b32) {
-    for index in 0 ..< len(entries)-1 {
-        a := entries[index]
-        b := entries[index+1]
-        sorted := #force_inline comes_before(a, b)
-        if !sorted {
-            // @note(viktor): Indices back into the data tables are not part of the sort key
-            a.index = 0
-            b.index = 0
-            assert(a == b)
-        }
-    }
-}
-
-radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
+pradix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
         sort_key_offsets: [256]u32

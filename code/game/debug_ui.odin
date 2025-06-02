@@ -1,5 +1,6 @@
 package game
 
+import "base:intrinsics"
 import "core:fmt"
 
 DebugEventLink :: struct {
@@ -614,14 +615,6 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             p.y -= debug_get_line_advance(debug)
         }
     }
-}
-
-order_of_magnitude :: proc(value: $T) -> (T, string) {
-    if      value < 10_000             { return value,              " "}
-    else if value < 10_000_000         { return value/1000,         "k"}
-    else if value < 10_000_000_000     { return value/1000_000,     "M"}
-    else if value < 10_000_000_000_000 { return value/1000_000_000, "G"}
-    return value, "?"
 }
 
 draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {

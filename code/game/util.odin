@@ -196,3 +196,20 @@ assert :: proc(condition: $B, message := #caller_expression(condition), loc := #
         }
     }
 }
+
+order_of_magnitude :: proc(value: $T) -> (T, string) {
+    when intrinsics.type_is_float(T) {
+        if value < 1e-9  { return value * 1e12, "p"}
+        if value < 1e-6  { return value * 1e9,  "n"}
+        if value < 1e-3  { return value * 1e6,  "u"} // @todo(viktor): fix the terminal encoding or font or whatever to actually display 'μ' correctly
+        if value < 1e0   { return value * 1e3,  "m"}
+    }
+    
+    if value < 1e3   { return value,        " "}
+    if value < 1e6   { return value / 1e3,  "k"}
+    if value < 1e9   { return value / 1e6,  "M"}
+    if value < 1e12  { return value / 1e9,  "G"}
+    if value < 1e15  { return value / 1e12, "T"}
+    
+    return value, "?"
+}

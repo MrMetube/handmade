@@ -58,7 +58,7 @@ RenderCommands :: struct {
 RenderGroup :: struct {
     assets:                ^Assets,
     missing_asset_count:   i32,
-    renders_in_background: b32,
+    renders_in_background: b32, // @cleanup is this still used?
     
     camera:                          Camera,
     monitor_half_diameter_in_meters: v2,
@@ -173,7 +173,7 @@ SortSpriteBounds :: struct {
 }
 
 @(common)
-sort_sprite_bounds_is_in_front_of :: proc(a, b: SortSpriteBounds) -> (a_in_front_of_b: b32) {
+sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_b: b32) {
     both_are_z_sprites := a.y_min != a.y_max && b.y_min != b.y_max
     
     a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
