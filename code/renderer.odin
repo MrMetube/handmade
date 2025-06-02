@@ -35,7 +35,7 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, temp_space: []RenderEntr
     assert(count == commands.clip_rects.count)
 }
 
-sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortSpriteBounds) {
+sort_render_elements :: proc(commands: ^RenderCommands, arena: ^Arena) {
     timed_function()
     
     // @todo(viktor): This is not the best way to sort.
@@ -44,52 +44,8 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortSprite
         // :PointerArithmetic
         entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
         
-        z_sprites := Array(SortSpriteBounds) { data = temp_space}
-        y_sprites := Array(SortSpriteBounds) { data = entries }
-        
-        for &entry in entries {
-            is_z_sprite := entry.y_min != entry.y_max
-            if is_z_sprite {
-                append(&z_sprites, entry)
-            } else {
-                append(&y_sprites, entry)
-            }
-        }
-
-        // The rest of the z_sprites buffer is exactly the size of the y_sprites, as they were taken from there.
-        // Therefore we can use it as the tempspace for the sorting. Likewise vice versa.
-        merge_sort(slice(y_sprites), z_sprites.data[z_sprites.count:], proc(a, b: SortSpriteBounds) -> b32 { return a.y_min > b.y_min })
-        merge_sort(slice(z_sprites), y_sprites.data[y_sprites.count:], proc(a, b: SortSpriteBounds) -> b32 { return a.z_max < b.z_max })
-        
-        { 
-            entries := y_sprites
-            append(&entries, slice(z_sprites))
-        }
-        z_sprites = { data = y_sprites.data[y_sprites.count:][:z_sprites.count], count = z_sprites.count }
-        
-        cs := Array(SortSpriteBounds) { data = temp_space }
-        ai, bi: i64
-        for ai < y_sprites.count && bi < z_sprites.count {
-            a := &y_sprites.data[ai]
-            b := &z_sprites.data[bi]
-            
-            if !sort_sprite_bounds_is_in_front_of(b^, a^) {
-                bi += 1
-                append(&cs, b^)
-            } else {
-                ai += 1
-                append(&cs, a^)
-            }
-        }
-        
-        append(&cs, slice(z_sprites)[bi:])
-        append(&cs, slice(y_sprites)[ai:])
-        
-        assert(cs.count == auto_cast len(entries))
-        
-        for c, index in slice(cs) {
-            entries[index] = c
-        }
+        build_sprite_graph(entries, arena)
+        // walk_sprite_graph(entries)
         
         when SlowCode {
             length := len(entries)
@@ -113,48 +69,62 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortSprite
     }
 }
 
-SpriteNode :: struct {
-    screen_bounds: Rectangle2,
-    z_max: f32,
-}
-
-SpriteEdge :: struct {
-    front, behind: u32,
-}
-
-add_edge :: proc(a, b: SpriteNode) {
-    
-}
-
-build_sprite_graph :: proc() {
-    input_nodes: []SpriteNode
-    count := len(input_nodes)
+build_sprite_graph :: proc(entries: []SortSpriteBounds, arena: ^Arena) {
+    count := len(entries)
     if count != 0 {
-        for &a, index_a in input_nodes[:count-1] {
-            for &b, index_b in input_nodes[index_a+1:] {
-
+        for &a, index_a in entries[:count-1] {
+            for &b, index_b in entries[index_a+1:] {
                 if rectangle_intersects(a.screen_bounds, b.screen_bounds) {
-                    a_bounds := SpriteBounds {
-                        y_min = a.screen_bounds.min.y,
-                        y_max = a.screen_bounds.max.y,
-                        z_max = a.z_max,
-                    }
-                    b_bounds := SpriteBounds {
-                        y_min = b.screen_bounds.min.y,
-                        y_max = b.screen_bounds.max.y,
-                        z_max = b.z_max,
+                    
+                    a_index, b_index := a.index, b.index
+                    if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
+                        swap(&a_index, &b_index)
                     }
                     
-                    if sort_sprite_bounds_is_in_front_of(a_bounds, b_bounds) {
-                        add_edge(a, b)
-                    } else {
-                        add_edge(b, a)
-                    }
+                    // @note(viktor): A is always in front of b
+                    edge := push(arena, SpriteEdge)
+                    front := &a
+                    
+                    edge.front = a_index
+                    edge.behind = b_index
+                    
+                    edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
+                    front.first_edge_with_me_as_the_front = edge
                 }
             }
         }
     }
 }
+
+SpriteGraphWalk :: struct {
+    nodes: []SortSpriteBounds,
+    indices: ^Array(u32),
+}
+
+walk_sprite_graph :: proc(nodes: []SortSpriteBounds, indices: ^Array(u32)) {
+    walk := SpriteGraphWalk { nodes, indices }
+    
+    for &node, index in walk.nodes {
+        if .Visited in node.flags do continue
+        walk_sprite_graph_front_to_back(&walk, auto_cast index)
+    }
+}
+
+walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
+    at := &walk.nodes[index]
+    at.flags += { .Visited }
+    
+    for edge := at.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
+        assert(edge.front == index)
+        walk_sprite_graph_front_to_back(walk, edge.behind)
+    }
+    
+    // @note(viktor): Do work here!
+    
+    append(walk.indices, index)
+}
+
+////////////////////////////////////////////////
 
 software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, target: Bitmap) {
     assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)

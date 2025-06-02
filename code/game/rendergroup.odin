@@ -162,14 +162,31 @@ ProjectedBasis :: struct {
     valid: b32,
 }
 
-@(common)
-SpriteBounds :: struct {
-    y_min, y_max, z_max: f32,
-}
+
+
+
+
+////////////////////////////////////////////////
+
 @(common)
 SortSpriteBounds :: struct {
     using bounds: SpriteBounds,
     index:  u32,
+    
+    screen_bounds: Rectangle2,
+    first_edge_with_me_as_the_front: ^SpriteEdge,
+    flags: bit_set[enum{ Visited, Drawn}],
+}
+
+@(common)
+SpriteBounds :: struct {
+    y_min, y_max, z_max: f32,
+}
+
+@(common)
+SpriteEdge :: struct {
+    front, behind: u32,
+    next_edge_with_same_front: ^SpriteEdge,
 }
 
 @(common)
@@ -185,6 +202,11 @@ sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_
     
     return a_in_front_of_b
 }
+
+////////////////////////////////////////////////
+
+
+
 
 // @cleanup
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
