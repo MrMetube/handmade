@@ -570,11 +570,13 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         if RenderCollisionOutlineAndTraversablePoints {
             color := Green
             color.rgb *= 0.4
+            flat_transform := transform
+            flat_transform.is_upright = false
             
             for traversable in slice(entity.traversables) {
                 rect := rectangle_center_dimension(traversable.p, 1.3)
-                push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Green)
-                // push_rectangle_outline(render_group, rect, transform, Black)
+                push_rectangle(render_group, rect, flat_transform, traversable.occupant != nil ? Red : Green)
+                // push_rectangle_outline(render_group, rect, flat_transform, Black)
             }
         }
         

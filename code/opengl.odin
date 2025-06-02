@@ -298,11 +298,15 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
     gl.Enable(gl.TEXTURE_2D)
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-    
-    gl.ClearColor(commands.clear_color.r, commands.clear_color.g, commands.clear_color.b, commands.clear_color.a)
+            
+    clear_color := commands.clear_color
+    clear_color.r = square(clear_color.r)
+    clear_color.g = square(clear_color.g)
+    clear_color.b = square(clear_color.b)
+    gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
     gl.Clear(gl.COLOR_BUFFER_BIT)
-    
-    /* clip_rect_index := max(u16)
+            
+    clip_rect_index := max(u16)
     for sort_entry_index in prep.sorted_offsets {
         header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         //:PointerArithmetic
@@ -380,7 +384,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
           case:
             panic("Unhandled Entry")
         }
-    } */
+    }
     
     draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u32) {
         bound := &bounds[index]
@@ -429,16 +433,18 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
                 if .Cycle in bound.flags {
                     color := color_wheel[color_index]
                     color_index += 1
-                    if color_index >= len(color_wheel) do color_index = 0
+                    if color_index >= len(color_wheel) {
+                        color_index = 0
+                    }
+                    
+                    gl.Disable(gl.TEXTURE_2D)
                     
                     glBegin(gl.LINES)
-                    gl.Disable(gl.TEXTURE_2D)
                     glColor4fv(&color[0])
-                        
-                        draw_bounds_recursive(bounds, auto_cast index)
+                    draw_bounds_recursive(bounds, auto_cast index)
+                    glEnd()
                         
                     gl.Enable(gl.TEXTURE_2D)
-                    glEnd()
                 }
             }
         }

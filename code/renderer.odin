@@ -47,35 +47,14 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
 sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
     timed_function()
     
-    // @todo(viktor): This is not the best way to sort.
     count := commands.push_buffer_element_count
-    if count != 0 {
-        // :PointerArithmetic
-        entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
-        
-        build_sprite_graph(entries, arena)
-        prep.sorted_offsets = walk_sprite_graph(entries, arena)
-        
-        when SlowCode && false {
-            length := len(entries)
-            for a, index in entries {
-                CheckTotalOrdering :: false // ? O(n²) : O(n)
-                end := CheckTotalOrdering ? length : min(index+2, length)
-                
-                for index_b in index+1 ..< end {
-                    b := entries[index_b]
-                    sorted := !sort_sprite_bounds_is_in_front_of(a, b)
-                    if !sorted {
-                        // @note(viktor): Offsets back into the push_buffer are not part of the sort key
-                        a := a
-                        a.offset = 0
-                        b.offset = 0
-                        assert(a == b)
-                    }
-                }
-            }
-        }
-    }
+    if count == 0 do return
+    
+    // :PointerArithmetic
+    entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
+    
+    build_sprite_graph(entries, arena)
+    prep.sorted_offsets = walk_sprite_graph(entries, arena)
 }
 
 build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) {
@@ -132,9 +111,9 @@ walk_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) -> (result: 
 
 walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
     at := &walk.nodes[index]
-    if .Visited in at.flags do return
     
     walk.hit_cycle ||= .Cycle in at.flags
+    if .Visited in at.flags do return
 
     at.flags += { .Visited, .Cycle }
 

@@ -80,9 +80,9 @@ RenderGroup :: struct {
 }
 
 Transform :: struct {
-    offset:    v3,  
-    scale:     f32,
-    sort_bias: f32,
+    offset:     v3,  
+    scale:      f32,
+    sort_bias:  f32,
     is_upright: b32,
 }
 
@@ -278,7 +278,7 @@ get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (res
     result = SpriteBounds {
         y_min = y,
         y_max = y,
-        z_max = transform.offset.z + offset.z,
+        z_max = transform.offset.z + offset.z + transform.sort_bias,
     }
     
     // @todo(viktor): More accurate calculations - this doesn't handle neither alignment nor rotation nor axis shear/scale
@@ -340,7 +340,7 @@ clear :: proc(group: ^RenderGroup, color: v4) {
         y_max = PositiveInfinity,
         z_max = NegativeInfinity,
     }
-    group.commands.clear_color = color
+    group.commands.clear_color = store_color(group, color)
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }

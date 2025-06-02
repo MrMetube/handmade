@@ -201,14 +201,14 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
             }
         }
         
-        // add_monster(world,  room.p[3][4], room.ground[3][4])
-        // add_familiar(world, room.p[2][5], room.ground[2][5])
+        add_monster(world,  room.p[3][4], room.ground[3][4])
+        add_familiar(world, room.p[2][5], room.ground[2][5])
         
-        // snake_brain := add_brain(world)
-        // for piece_index in u32(0)..<len(BrainSnake{}.segments) {
-        //     x := 1+piece_index
-        //     add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
-        // }
+        snake_brain := add_brain(world)
+        for piece_index in u32(0)..<len(BrainSnake{}.segments) {
+            x := 1+piece_index
+            add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
+        }
         
         door_left   = door_right
         door_bottom = door_top
