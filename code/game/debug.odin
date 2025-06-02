@@ -131,7 +131,7 @@ DebugOpenBlock :: struct {
 #assert(size_of(DebugValue) == 64)
 #assert(size_of(DebugGUID) == 56)
 #assert(size_of(DebugEvent) == 136)
-#assert(size_of(DebugTable) == DebugTableSize)
+#assert(!DebugEnabled || size_of(DebugTable) == DebugTableSize)
 @(common) DebugTableSize :: 136_000_160
 DebugTable :: struct {
     record_increment: u64,

@@ -299,10 +299,11 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
-    sorted_draw_indices := slice(prep.sorted_indices)
+    gl.ClearColor(commands.clear_color.r, commands.clear_color.g, commands.clear_color.b, commands.clear_color.a)
+    gl.Clear(gl.COLOR_BUFFER_BIT)
     
-    clip_rect_index := max(u16)
-    for sort_entry_index in sorted_draw_indices {
+    /* clip_rect_index := max(u16)
+    for sort_entry_index in prep.sorted_offsets {
         header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         //:PointerArithmetic
         entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
@@ -315,17 +316,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
         
         switch header.type {
           case .None: unreachable()
-          case .RenderEntryClear:
-            entry := cast(^RenderEntryClear) entry_data
-            
-            color := entry.premultiplied_color
-            color.r = square(color.r)
-            color.g = square(color.g)
-            color.b = square(color.b)
-            
-            gl.ClearColor(color.r, color.g, color.b, color.a)
-            gl.Clear(gl.COLOR_BUFFER_BIT)
-            
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
             
@@ -358,6 +348,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
                 min_x_max_y := entry.p + entry.y_axis
                 max_x_max_y := entry.p + entry.x_axis + entry.y_axis
                 
+                // @todo(viktor): why is this inlined glRectangle? explain
                 glBegin(gl.TRIANGLES)
                     
                     glColor4fv(&entry.premultiplied_color[0])
@@ -388,6 +379,68 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
             // @note(viktor): clip rects are handled before rendering
           case:
             panic("Unhandled Entry")
+        }
+    } */
+    
+    draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u32) {
+        bound := &bounds[index]
+        if .DebugBox in bound.flags do return
+        bound.flags += { .DebugBox }
+                
+        bound_center := rectangle_get_center(bound.screen_bounds)
+        for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
+            assert(edge.front == index)
+            
+            behind := bounds[edge.behind]
+            behind_center := rectangle_get_center(behind.screen_bounds)
+            
+            glVertex2fv(&bound_center[0])
+            glVertex2fv(&behind_center[0])
+            
+            draw_bounds_recursive(bounds, edge.behind)
+        }
+        
+        min := bound.screen_bounds.min
+        max := bound.screen_bounds.max
+        glVertex2f(min.x, min.y)
+        glVertex2f(min.x, max.y)
+        
+        glVertex2f(min.x, max.y)
+        glVertex2f(max.x, max.y)
+        
+        glVertex2f(max.x, max.y)
+        glVertex2f(max.x, min.y)
+        
+        glVertex2f(max.x, min.y)
+        glVertex2f(min.x, min.y)
+    }
+    
+    if GlobalDebugShowRenderSortGroups {
+        count := commands.push_buffer_element_count
+        if count != 0 {
+            // :PointerArithmetic
+            bounds := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
+            
+            color_wheel := color_wheel
+            color_index: u32
+            for bound, index in bounds {
+                if .DebugBox in bound.flags do continue
+            
+                if .Cycle in bound.flags {
+                    color := color_wheel[color_index]
+                    color_index += 1
+                    if color_index >= len(color_wheel) do color_index = 0
+                    
+                    glBegin(gl.LINES)
+                    gl.Disable(gl.TEXTURE_2D)
+                    glColor4fv(&color[0])
+                        
+                        draw_bounds_recursive(bounds, auto_cast index)
+                        
+                    gl.Enable(gl.TEXTURE_2D)
+                    glEnd()
+                }
+            }
         }
     }
 }

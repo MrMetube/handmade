@@ -43,6 +43,7 @@ Bitmap :: struct {
 RenderCommands :: struct {
     width, height: i32,
     
+    clear_color: v4,
     // @note(viktor): Packed array of disjoint elements.
     push_buffer:      []u8, // :DisjointArray
     push_buffer_size: u32,
@@ -57,7 +58,7 @@ RenderCommands :: struct {
 @(common)
 RenderPrep :: struct {
     clip_rects:     Array(RenderEntryClip),
-    sorted_indices: Array(u32),
+    sorted_offsets: []u32,
 }
 
 RenderGroup :: struct {
@@ -108,7 +109,6 @@ EnvironmentMap :: struct {
 @(common)
 RenderEntryType :: enum u8 {
     None,
-    RenderEntryClear,
     RenderEntryBitmap,
     RenderEntryRectangle,
     RenderEntryClip,
@@ -126,11 +126,6 @@ RenderEntryClip :: struct {
     next: ^RenderEntryClip,
     
     fx: ClipRectFX,
-}
-
-@(common)
-RenderEntryClear :: struct {
-    premultiplied_color:  v4,
 }
 
 @(common)
@@ -183,7 +178,7 @@ SortSpriteBounds :: struct {
     
     screen_bounds: Rectangle2,
     first_edge_with_me_as_the_front: ^SpriteEdge,
-    flags: bit_set[enum{ Visited, Drawn}],
+    flags: bit_set[enum{ Visited, Drawn,    DebugBox, Cycle }],
 }
 
 @(common)
@@ -313,7 +308,6 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
         header.clip_rect_index = group.current_clip_rect_index
         
         switch typeid_of(T) {
-          case RenderEntryClear:            header.type = .RenderEntryClear
           case RenderEntryBitmap:           header.type = .RenderEntryBitmap
           case RenderEntryRectangle:        header.type = .RenderEntryRectangle
           case RenderEntryClip:             header.type = .RenderEntryClip
@@ -346,9 +340,7 @@ clear :: proc(group: ^RenderGroup, color: v4) {
         y_max = PositiveInfinity,
         z_max = NegativeInfinity,
     }
-    
-    entry := push_render_element(group, RenderEntryClear, bounds, group.screen_area)
-    entry.premultiplied_color = store_color(group, color)
+    group.commands.clear_color = color
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }
@@ -445,16 +437,13 @@ push_rectangle2 :: proc(group: ^RenderGroup, rect: Rectangle2, transform: Transf
     push_rectangle(group, Rect3(rect, 0, 0), transform, color)
 }
 push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
-    // @cleanup
-    p := rect.max
-    basis := project_with_transform(group.camera, transform, p)
+    basis := project_with_transform(group.camera, transform, rect.min)
     
     if basis.valid {
         dimension := rectangle_get_dimension(rect)
         
-        bp  := basis.p
         dim := basis.scale * dimension.xy
-        screen_rect := rectangle_center_dimension(bp - 0.5 * dim, dim)
+        screen_rect := rectangle_min_dimension(basis.p, dim)
                 
         bounds := get_sprite_bounds(transform, 0, dimension.y)
         element := push_render_element(group, RenderEntryRectangle, bounds, screen_rect)

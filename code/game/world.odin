@@ -151,7 +151,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for _ in u32(0) ..< 5 {
+    for _ in u32(0) ..< 2 {
         when !true {
             choice := random_choice(&world.game_entropy, 2)
         } else {
@@ -201,14 +201,14 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
             }
         }
         
-        add_monster(world,  room.p[3][4], room.ground[3][4])
+        // add_monster(world,  room.p[3][4], room.ground[3][4])
         // add_familiar(world, room.p[2][5], room.ground[2][5])
         
-        snake_brain := add_brain(world)
-        for piece_index in u32(0)..<len(BrainSnake{}.segments) {
-            x := 1+piece_index
-            add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
-        }
+        // snake_brain := add_brain(world)
+        // for piece_index in u32(0)..<len(BrainSnake{}.segments) {
+        //     x := 1+piece_index
+        //     add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
+        // }
         
         door_left   = door_right
         door_bottom = door_top
@@ -561,7 +561,7 @@ make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGro
 }
 
 make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
-    // @todo(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
+    // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
@@ -573,7 +573,7 @@ make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) 
 }
 
 make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
-    // @todo(viktor): NOT WORLD ARENA!!! change to using the fundamental types arena
+    // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),

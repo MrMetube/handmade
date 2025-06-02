@@ -54,23 +54,22 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
         entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
         
         build_sprite_graph(entries, arena)
-        prep.sorted_indices = make_array(arena, u32, count)
-        walk_sprite_graph(entries, &prep.sorted_indices)
+        prep.sorted_offsets = walk_sprite_graph(entries, arena)
         
-        when false && SlowCode {
+        when SlowCode && false {
             length := len(entries)
             for a, index in entries {
-                CheckTotalOrdering ::  false // ? O(n²) : O(n)
+                CheckTotalOrdering :: false // ? O(n²) : O(n)
                 end := CheckTotalOrdering ? length : min(index+2, length)
                 
                 for index_b in index+1 ..< end {
                     b := entries[index_b]
-                    sorted := ! #force_inline sort_sprite_bounds_is_in_front_of(a, b)
+                    sorted := !sort_sprite_bounds_is_in_front_of(a, b)
                     if !sorted {
-                        // @note(viktor): Indices back into the data tables are not part of the sort key
+                        // @note(viktor): Offsets back into the push_buffer are not part of the sort key
                         a := a
-                        a.index = 0
-                        b.index = 0
+                        a.offset = 0
+                        b.offset = 0
                         assert(a == b)
                     }
                 }
@@ -111,34 +110,45 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) {
 
 SpriteGraphWalk :: struct {
     nodes:   []SortSpriteBounds,
-    indices: ^Array(u32),
+    offsets: ^Array(u32),
+    hit_cycle: b32,
 }
 
-walk_sprite_graph :: proc(nodes: []SortSpriteBounds, indices: ^Array(u32)) {
+walk_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) -> (result: []u32) {
     timed_function()
     
-    walk := SpriteGraphWalk { nodes, indices }
+    offsets := make_array(arena, u32, len(nodes))
+    walk := SpriteGraphWalk { nodes, &offsets, false }
     
-    for _, index in walk.nodes {
+    for at, index in walk.nodes {
+        walk.hit_cycle = false
         walk_sprite_graph_front_to_back(&walk, auto_cast index)
     }
     
-    assert(indices.count == auto_cast len(nodes))
+    assert(offsets.count == auto_cast len(nodes))
+    
+    return slice(offsets)
 }
 
 walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
     at := &walk.nodes[index]
     if .Visited in at.flags do return
     
-    at.flags += { .Visited }
-    
+    walk.hit_cycle ||= .Cycle in at.flags
+
+    at.flags += { .Visited, .Cycle }
+
     for edge := at.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
         assert(edge.front == index)
         walk_sprite_graph_front_to_back(walk, edge.behind)
     }
     
     // @note(viktor): Do work here!
-    append(walk.indices, at.offset)
+    append(walk.offsets, at.offset)
+    
+    if !walk.hit_cycle {
+        at.flags -= { .Cycle }
+    }
 }
 
 ////////////////////////////////////////////////
@@ -201,11 +211,12 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     assert(commands != nil)
     assert(target.memory != nil)
     
-    sorted_draw_indices := slice(prep.sorted_indices)
-    
     clip_rect := base_clip_rect
     clip_rect_index := max(u16)
-    for sort_entry_index in sorted_draw_indices {
+    
+    draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)}, commands.clear_color, clip_rect)
+    
+    for sort_entry_index in prep.sorted_offsets {
         header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         // :PointerArithmetic
         entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
@@ -218,10 +229,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         
         switch header.type {
           case .None: unreachable()
-          case .RenderEntryClear:
-            entry := cast(^RenderEntryClear) entry_data
-            draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)} , entry.premultiplied_color, clip_rect)
-            
           case .RenderEntryClip:
             // @todo(viktor): 
             

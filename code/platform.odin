@@ -26,7 +26,6 @@ import win "core:sys/windows"
 // Resolution :: [2]i32 {2560, 1440}
 Resolution :: [2]i32 {1920, 1080}
 // Resolution :: [2]i32 {1280, 720}
-// Resolution :: [2]i32 {640, 360}
 
 MonitorRefreshHz :: 120
 
@@ -48,23 +47,18 @@ GlobalSoundBuffer: ^IDirectSoundBuffer
 
 GlobalPerformanceCounterFrequency: f64
 
-GlobalPause :b32= false
 
-RenderType :: enum {
-    RenderOpenGL_DisplayOpenGL,
-    RenderSoftware_DisplayGDI,
-    RenderSoftware_DisplayOpenGL,
-}
-
-GlobalRenderType: RenderType
-
-GlobalDebugShowCursor: b32 = INTERNAL
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
-GlobalBlitTextureHandle: u32
-BlitVertexArrayObject: u32
-BlitVertexBufferObject, BlitTextureCoordinatesVbo: u32
 
+GlobalBlitTextureHandle: u32
+
+// Debug Variables
+
+GlobalPause: b32
+GlobalDebugShowCursor: b32 = INTERNAL
+GlobalDebugShowRenderSortGroups: b32 = true
+GlobalRenderType: RenderType
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
@@ -104,6 +98,12 @@ ReplayBuffer :: struct {
     filehandle:   win.HANDLE,
     memory_map:   win.HANDLE,
     memory_block: []u8,
+}
+
+RenderType :: enum {
+    RenderOpenGL_DisplayOpenGL,
+    RenderSoftware_DisplayOpenGL,
+    RenderSoftware_DisplayGDI,
 }
 
 main :: proc() {
@@ -359,6 +359,7 @@ main :: proc() {
             
             game.debug_record_b32(&GlobalPause)
             game.debug_record_b32(&GlobalDebugShowCursor)
+            game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
             game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
         }
         

@@ -574,11 +574,11 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
             for traversable in slice(entity.traversables) {
                 rect := rectangle_center_dimension(traversable.p, 1.3)
                 push_rectangle(render_group, rect, transform, traversable.occupant != nil ? Red : Green)
-                push_rectangle_outline(render_group, rect, transform, Black)
+                // push_rectangle_outline(render_group, rect, transform, Black)
             }
         }
         
-        when DebugEnabled {
+        when DebugEnabled do if false {
             for volume in entity.collision.volumes {
                 local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
                 
