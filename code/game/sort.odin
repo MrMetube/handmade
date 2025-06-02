@@ -59,41 +59,32 @@ merge_sort :: proc(entries: []$T, temp_space: []T, comes_before: proc(a, b: T) -
         middle := count/2
         as := entries[:middle]
         bs := entries[middle:]
-        
+        cs := Array(T) { data = temp_space }
         merge_sort(as, temp_space, comes_before)
         merge_sort(bs, temp_space, comes_before)
         
         // @todo(viktor): This can probably be done with less memory, by being smarter 
         // about where we copy from and to.
-        ai, bi, ci: int
+        ai, bi: int
         for ai < len(as) && bi < len(bs) {
             a := &as[ai]
             b := &bs[bi]
             
             if #force_inline comes_before(b^, a^) {
                 bi += 1
-                temp_space[ci] = b^
+                append(&cs, b^)
             } else {
                 ai += 1
-                temp_space[ci] = a^
+                append(&cs, a^)
             }
-            
-            ci += 1
         }
         
-        for a in as[ai:] {
-            temp_space[ci] = a
-            ci += 1
-        }
+        append(&cs, as[ai:])
+        append(&cs, bs[bi:])
         
-        for b in bs[bi:] {
-            temp_space[ci] = b
-            ci += 1
-        }
+        assert(cs.count == auto_cast len(entries))
         
-        assert(ci == len(entries))
-        
-        for c, index in temp_space[:ci] {
+        for c, index in slice(cs) {
             entries[index] = c
         }
     }

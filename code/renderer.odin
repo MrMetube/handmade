@@ -44,21 +44,62 @@ sort_render_elements :: proc(commands: ^RenderCommands, temp_space: []SortSprite
         // :PointerArithmetic
         entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
         
-        // @note(viktor): we render from back to front, so if the A sprite is in front of the B sprite 
-        // the B sprite should be rendered first and then the A sprite should be rendered
-        comparator :: proc(a, b: SortSpriteBounds) -> b32 { return !sort_sprite_bounds_is_in_front_of(a,b) }
+        z_sprites := Array(SortSpriteBounds) { data = temp_space}
+        y_sprites := Array(SortSpriteBounds) { data = entries }
         
-        merge_sort(entries, temp_space[:count], comparator)
+        for &entry in entries {
+            is_z_sprite := entry.y_min != entry.y_max
+            if is_z_sprite {
+                append(&z_sprites, entry)
+            } else {
+                append(&y_sprites, entry)
+            }
+        }
+
+        // The rest of the z_sprites buffer is exactly the size of the y_sprites, as they were taken from there.
+        // Therefore we can use it as the tempspace for the sorting. Likewise vice versa.
+        merge_sort(slice(y_sprites), z_sprites.data[z_sprites.count:], proc(a, b: SortSpriteBounds) -> b32 { return a.y_min > b.y_min })
+        merge_sort(slice(z_sprites), y_sprites.data[y_sprites.count:], proc(a, b: SortSpriteBounds) -> b32 { return a.z_max < b.z_max })
+        
+        { 
+            entries := y_sprites
+            append(&entries, slice(z_sprites))
+        }
+        z_sprites = { data = y_sprites.data[y_sprites.count:][:z_sprites.count], count = z_sprites.count }
+        
+        cs := Array(SortSpriteBounds) { data = temp_space }
+        ai, bi: i64
+        for ai < y_sprites.count && bi < z_sprites.count {
+            a := &y_sprites.data[ai]
+            b := &z_sprites.data[bi]
+            
+            if !sort_sprite_bounds_is_in_front_of(b^, a^) {
+                bi += 1
+                append(&cs, b^)
+            } else {
+                ai += 1
+                append(&cs, a^)
+            }
+        }
+        
+        append(&cs, slice(z_sprites)[bi:])
+        append(&cs, slice(y_sprites)[ai:])
+        
+        assert(cs.count == auto_cast len(entries))
+        
+        for c, index in slice(cs) {
+            entries[index] = c
+        }
         
         when SlowCode {
             length := len(entries)
             for a, index in entries {
-                CheckTotalOrdering :: !true // ? O(n²) : O(n)
+                CheckTotalOrdering ::  false // ? O(n²) : O(n)
                 end := CheckTotalOrdering ? length : min(index+2, length)
                 
                 for index_b in index+1 ..< end {
                     b := entries[index_b]
-                    sorted := #force_inline comparator(a, b)
+                    sorted := ! #force_inline sort_sprite_bounds_is_in_front_of(a, b)
                     if !sorted {
                         // @note(viktor): Indices back into the data tables are not part of the sort key
                         a := a

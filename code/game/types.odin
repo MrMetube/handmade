@@ -12,7 +12,7 @@ FixedArray :: struct ($N: i64, $T: typeid) {
     count: i64,
 }
 
-append :: proc { append_fixed_array, append_array, append_array_ }
+append :: proc { append_fixed_array, append_array, append_array_, append_array_many }
 @(require_results) append_array_ :: proc(a: ^Array($T)) -> (result: ^T) {
     result = &a.data[a.count]
     a.count += 1
@@ -27,6 +27,16 @@ append_fixed_array :: proc(a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
     a.data[a.count] = value
     result = &a.data[a.count]
     a.count += 1
+    return result
+}
+append_array_many :: proc(a: ^Array($T), values: []T) -> (result: []T) {
+    start := a.count
+    for &value in values {
+        a.data[a.count] = value
+        a.count += 1
+    }
+    
+    result = a.data[start:a.count]
     return result
 }
 
