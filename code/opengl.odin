@@ -391,12 +391,12 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
         if .DebugBox in bound.flags do return
         bound.flags += { .DebugBox }
                 
-        bound_center := rectangle_get_center(bound.screen_bounds)
+        bound_center := get_center(bound.screen_bounds)
         for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
             assert(edge.front == index)
             
             behind := bounds[edge.behind]
-            behind_center := rectangle_get_center(behind.screen_bounds)
+            behind_center := get_center(behind.screen_bounds)
             
             glVertex2fv(&bound_center[0])
             glVertex2fv(&behind_center[0])

@@ -210,7 +210,7 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
         text := fmt.tprint(expanded ? "-" : "+", view_name)
         text_bounds := measure_text(debug, text)
                 
-        size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+        size := v2{ get_dimension(text_bounds).x, layout.line_advance }
         element := begin_ui_element_rectangle(layout, &size)
         
         interaction: DebugInteraction
@@ -242,7 +242,7 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
     color := interaction_is_hot(debug, move_interaction) ? Isabelline : Jasmine
     push_rectangle(&debug.render_group, move_handle, debug.ui_transform, color)
     
-    if rectangle_contains(move_handle, mouse_p) {
+    if contains(move_handle, mouse_p) {
         debug.next_hot_interaction = move_interaction
     }
 }
@@ -426,7 +426,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, clip_rect, debug.backing_transform)
         defer debug.render_group.current_clip_rect_index = old_clip_rect
         
-        if rectangle_contains(rect, mouse_p) {
+        if contains(rect, mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
         }
         
@@ -457,7 +457,7 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
 add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
     layout := &debug.mouse_text_layout
     text_bounds := measure_text(debug, text)
-    size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+    size := v2{ get_dimension(text_bounds).x, layout.line_advance }
     
     element := begin_ui_element_rectangle(layout, &size)
     end_ui_element(&element, false)
@@ -468,8 +468,8 @@ add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
     defer render_group.current_clip_rect_index = old_clip_rect
     
     p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
-    text_bounds = rectangle_add_offset(text_bounds, p)
-    text_bounds = rectangle_add_radius(text_bounds, 4)
+    text_bounds = add_offset(text_bounds, p)
+    text_bounds = add_radius(text_bounds, 4)
     push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
     push_text(debug, text, p, color)
 }
@@ -484,7 +484,7 @@ get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
 draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
     
-    dim := rectangle_get_dimension(rect)
+    dim := get_dimension(rect)
     bar_width := dim.x / cast(f32) (MaxFrameCount)
     
     at_x := rect.min.x
@@ -515,7 +515,7 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
             text = fmt.tprint(frame_delta, "frames ago")
         }
         
-        if rectangle_contains(region_rect, mouse_p) {
+        if contains(region_rect, mouse_p) {
             if color == 0 do color = V4(Green.rgb, 0.7)
             
             id := DebugId{ value = {root_element, &frame} }
@@ -600,8 +600,8 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         push_text(debug, text, p, color)
         
         region_rect := measure_text(debug, text)
-        region_rect = rectangle_add_offset(region_rect, p)
-        if rectangle_contains(region_rect, mouse_p) {
+        region_rect = add_offset(region_rect, p)
+        if contains(region_rect, mouse_p) {
             tooltip := fmt.tprintf("Cumulative to this point: [% 2.5v%%] - Average: % 4.0f%s cy",
                 round(running_sum * total_time_percentage * 100, f32) * 0.01, 
                 order_of_magnitude(entry.stats.avg),
@@ -618,7 +618,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 }
 
 draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
-    dim := rectangle_get_dimension(rect)
+    dim := get_dimension(rect)
     bar_width := dim.x / cast(f32) (MaxFrameCount-1)
     
     at_x := rect.min.x
@@ -668,7 +668,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
                 push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
             }
             
-            if rectangle_contains(region_rect, mouse_p) {
+            if contains(region_rect, mouse_p) {
                 text := fmt.tprintf("%s - %v %s cycles", element.guid.name, order_of_magnitude(cast(u64) node.duration), )
                 add_tooltip(debug, text)
                 
@@ -686,7 +686,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 
 draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     lane_count := cast(f32) debug.max_thread_count
-    lane_height := safe_ratio_n(rectangle_get_dimension(rect).y, lane_count, rectangle_get_dimension(rect).y)
+    lane_height := safe_ratio_n(get_dimension(rect).y, lane_count, get_dimension(rect).y)
     
     frame := &root_element.frames[debug.viewed_frame_ordinal]
     total_clocks := get_total_clocks(frame)
@@ -710,7 +710,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
     root := root_event.node
     
     frame_span := cast(f32) (root.duration)
-    dimension := rectangle_get_dimension(rect)
+    dimension := get_dimension(rect)
     pixel_span := dimension.x
     
     frame_scale := safe_ratio_0(pixel_span, frame_span)
@@ -744,7 +744,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
             push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2,.2,.2, 1}, 1)
         }
         
-        if rectangle_contains(region_rect, mouse_p) {
+        if contains(region_rect, mouse_p) {
             text := fmt.tprintf("%s - %d cycles", element.guid.name, node.duration)
             add_tooltip(debug, text)
             
@@ -828,14 +828,14 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
                 kind   = .Resize,
                 value = element.size,
             }
-            if rectangle_contains(resize_box, layout.mouse_p) {
+            if contains(resize_box, layout.mouse_p) {
                 was_resized = true
                 layout.debug.next_hot_interaction = resize_interaction
             }
         }
     }
     
-    if !was_resized && .HasInteraction in element.flags && rectangle_contains(element.bounds, layout.mouse_p) {
+    if !was_resized && .HasInteraction in element.flags && contains(element.bounds, layout.mouse_p) {
         layout.debug.next_hot_interaction = element.interaction
     }
     
@@ -849,7 +849,7 @@ advance_element :: proc(layout: ^Layout, element_rect: Rectangle2) {
         layout.p.y += layout.next_line_dy - layout.spacing.y
         layout.line_initialized = false
     } else {
-        layout.p.x += rectangle_get_dimension(element_rect).x + layout.spacing.x
+        layout.p.x += get_dimension(element_rect).x + layout.spacing.x
     }
 }
 
@@ -877,7 +877,7 @@ basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInte
     
     debug := layout.debug
     text_bounds := measure_text(debug, text)
-    size := v2{ rectangle_get_dimension(text_bounds).x, layout.line_advance }
+    size := v2{ get_dimension(text_bounds).x, layout.line_advance }
     size += 2*padding
     
     element := begin_ui_element_rectangle(layout, &size)
@@ -1256,7 +1256,7 @@ measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
 }
 
 text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p: v2, font_scale: f32, color: v4 = Jasmine, pz:f32= 0) -> (result: Rectangle2) {
-    result = inverted_infinity_rectangle(Rectangle2)
+    result = rectangle_inverted_infinity(Rectangle2)
     // @todo(viktor): @robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
     // 贺佳樱我爱你
@@ -1288,7 +1288,7 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
             if bitmap != nil {
                 dim := get_used_bitmap_dim(group, bitmap^, default_flat_transform(), height, V3(p, pz))
                 glyph_rect := rectangle_min_dimension(dim.p.xy, dim.size)
-                result = rectangle_union(result, glyph_rect)
+                result = get_union(result, glyph_rect)
             }
         }
     }

@@ -55,10 +55,10 @@ GlobalBlitTextureHandle: u32
 
 // Debug Variables
 
-GlobalPause: b32
-GlobalDebugShowCursor: b32 = INTERNAL
-GlobalDebugShowRenderSortGroups: b32 = true
-GlobalRenderType: RenderType
+GlobalPause:                     b32
+GlobalDebugShowCursor:           b32 = INTERNAL
+GlobalDebugShowRenderSortGroups: b32
+GlobalRenderType:                RenderType
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
@@ -649,9 +649,9 @@ main :: proc() {
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         
         {
-            seconds_elapsed_for_frame := get_seconds_elapsed(last_counter, get_wall_clock())
+            seconds_elapsed_for_frame := get_seconds_elapsed_until_now(last_counter)
             for seconds_elapsed_for_frame < target_seconds_per_frame && !do_next_work_queue_entry(&low_queue) {
-                seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
+                seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
             }
             
             if seconds_elapsed_for_frame < target_seconds_per_frame {
@@ -663,7 +663,7 @@ main :: proc() {
                     }
                 }
                 
-                test_seconds_elapsed := get_seconds_elapsed(last_counter, get_wall_clock())
+                test_seconds_elapsed := get_seconds_elapsed_until_now(last_counter)
                 if test_seconds_elapsed > target_seconds_per_frame {
                     // @logging sleep missed
                     if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
@@ -673,7 +673,7 @@ main :: proc() {
                 
                 // Busy Waiting
                 for seconds_elapsed_for_frame < target_seconds_per_frame {
-                    seconds_elapsed_for_frame = get_seconds_elapsed(last_counter, get_wall_clock())
+                    seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
                 }
             } else {
                 // @logging Missed frame, maybe because window was moved
@@ -742,13 +742,12 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
 }
 
 display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {
-    #no_bounds_check if true {
+    #no_bounds_check {
         for y in 0..<buffer.height {
             row := buffer.memory[y * buffer.width:][:buffer.width]
             for &useful_color in row {
-                // @note(viktor): Windows expects the color to be ordered like this:
-                // struct{ b, g, r, pad: u8 }
-                useful_color.r, useful_color.b = useful_color.b, useful_color.r
+                // @note(viktor): Windows expects the color to be ordered like this: struct{ b, g, r, pad: u8 }
+                swap(&useful_color.r, &useful_color.b)
             }
         }
     }
@@ -797,6 +796,10 @@ get_wall_clock :: proc() -> i64 {
 
 get_seconds_elapsed :: proc(start, end: i64) -> f32 {
     return cast(f32) (cast(f64) (end - start) / GlobalPerformanceCounterFrequency)
+}
+get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
+    end := get_wall_clock()
+    return get_seconds_elapsed(start, end)
 }
 
 ////////////////////////////////////////////////   
@@ -900,14 +903,14 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
         
         GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
-        return // @todo(viktor): Logging
+        return // @todo(viktor): @logging
     }
 }
 
 clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
     region1, region2 : pmm
     region1_size, region2_size: win.DWORD
-    
+    // @copypasta
     if result := GlobalSoundBuffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // @todo(viktor): assert that region1/2_size is valid
         // @todo(viktor): Collapse these two loops
@@ -1020,6 +1023,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         } else {
             win.SetLayeredWindowAttributes(window, win.RGB(0,0,0),  64, LWA_ALPHA)
         }
+        
       case win.WM_PAINT:
         paint: win.PAINTSTRUCT
         device_context := win.BeginPaint(window, &paint)
@@ -1029,10 +1033,12 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             render_to_window(&GlobalBackBuffer, device_context, window_width, window_height)
         }
         win.EndPaint(window, &paint)
+        
       case win.WM_SETCURSOR: 
         if !GlobalDebugShowCursor {
             win.SetCursor(nil)
         }
+        
       case:
         result = win.DefWindowProcA(window, message, w_param, l_param)
     }
@@ -1041,7 +1047,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         
 process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
     if is_down != new_state.ended_down {
-        new_state.ended_down = is_down
+        new_state.ended_down             = is_down
         new_state.half_transition_count += 1
     }
 }
@@ -1052,20 +1058,24 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
         peek_message := game.begin_timed_block("peek_message")
         has_message := win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE)
         game.end_timed_block(peek_message)
+        
         if !has_message do break
         
         switch message.message {
           case win.WM_QUIT:
             GlobalRunning = false
           case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
-            key_message := game.begin_timed_block("key_message")
-            defer game.end_timed_block(key_message)
+            timed_block("key_message")
+            
             vk_code := message.wParam
             
-            was_down := cast(b32) (message.lParam & (1 << 30))
-            is_down: b32 = !(cast(b32) (message.lParam & (1 << 31)))
+            AltDown :: 1 << 29
+            WasDown :: 1 << 30
+            IsUp    :: 1 << 31
             
-            alt_down := cast(b32) (message.lParam & (1 << 29))
+            alt_down :b32= (message.lParam & AltDown) != 0
+            was_down :b32= (message.lParam & WasDown) != 0
+            is_down  :b32= (message.lParam & IsUp)    == 0
             
             if was_down != is_down {
                 switch vk_code {
@@ -1102,8 +1112,8 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                 }
             }
           case:
-            default_message_handler := game.begin_timed_block("default_message_handler")
-            defer game.end_timed_block(default_message_handler)
+            timed_block("default_message_handler")
+            
             win.TranslateMessage(&message)
             win.DispatchMessageW(&message)
         }

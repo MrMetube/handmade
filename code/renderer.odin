@@ -53,20 +53,54 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     // :PointerArithmetic
     entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
     
-    build_sprite_graph(entries, arena)
+    build_sprite_graph(entries, arena, vec_cast(f32, commands.width, commands.height))
     prep.sorted_offsets = walk_sprite_graph(entries, arena)
 }
 
-build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) {
-    timed_function()
+SortGridEntry :: struct { // :LinkedList
+    next:     ^SortGridEntry,
+    occupant_index: u32,
+}
 
+build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) {
+    timed_function()
+    
     count := len(nodes)
     if count != 0 {
+        Width  :: 16
+        Height :: 9
+        
+        bucketing := game.begin_timed_block("bucketing")
+        grid: [Width][Height]^SortGridEntry
+        inv_cell_size :v2= v2{Width, Height} / screen_size
+        screen_rect := rectangle_min_dimension(v2{}, screen_size)
+        for &a, index_a in nodes {
+            if !intersects(a.screen_bounds, screen_rect) do continue
+            
+            grid_span := Rectangle2i {
+                min = truncate(inv_cell_size * a.screen_bounds.min),
+                max = truncate(inv_cell_size * a.screen_bounds.max),
+            }
+            
+            grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({16, 9}-1) })
+            
+            for grid_x in grid_span.min.x ..= grid_span.max.x {
+                for grid_y in grid_span.min.y ..= grid_span.max.y {
+                    entry := push(arena, SortGridEntry)
+                    entry.occupant_index = auto_cast index_a
+                    
+                    slot := &grid[grid_x][grid_y]
+                    entry.next = slot^
+                    slot      ^= entry
+                }
+            }
+        }
+        game.end_timed_block(bucketing)
+        
         for &a, index_a in nodes[:count-1] {
             assert(a.flags == {})
-            
             for &b, index_b in nodes[index_a+1:] {
-                if rectangle_intersects(a.screen_bounds, b.screen_bounds) {
+                if intersects(a.screen_bounds, b.screen_bounds) {
                     
                     front_index, behind_index := index_a, index_b
                     if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
@@ -203,7 +237,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
             rect := prep.clip_rects.data[clip_rect_index].rect
-            clip_rect = rectangle_intersection(clip_rect, rect)
+            clip_rect = get_intersection(clip_rect, rect)
         }
         
         switch header.type {
@@ -250,7 +284,7 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
     normal_z_scale := lerp(length_x_axis, length_y_axis, 0.5)
     */
     
-    fill_rect := inverted_infinity_rectangle(Rectangle2i)
+    fill_rect := rectangle_inverted_infinity(Rectangle2i)
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
         floorp := floor(testp, i32)
         ceilp  := ceil(testp, i32)
@@ -260,9 +294,9 @@ draw_rectangle_quickly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textu
         fill_rect.max.x = max(fill_rect.max.x, ceilp.x)
         fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
     }
-    fill_rect = rectangle_intersection(fill_rect, clip_rect)
+    fill_rect = get_intersection(fill_rect, clip_rect)
 
-    if rectangle_has_area(fill_rect) {
+    if has_area(fill_rect) {
         maskFF :: 0xffffffff
         maskFFx8 :: cast(u32x8) maskFF
         clip_mask := maskFFx8
@@ -626,7 +660,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 
 draw_rectangle :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: Rectangle2i){
     origin := rect.min
-    dim := rectangle_get_dimension(rect)
+    dim := get_dimension(rect)
     x_axis := v2{dim.x, 0}
     y_axis := v2{0, dim.y}
     
@@ -634,7 +668,7 @@ draw_rectangle :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: R
 }
 
 draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color: v4, clip_rect: Rectangle2i){
-    fill_rect := inverted_infinity_rectangle(Rectangle2i)
+    fill_rect := rectangle_inverted_infinity(Rectangle2i)
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
         floorp := floor(testp, i32)
         ceilp  := ceil(testp, i32)
@@ -644,9 +678,9 @@ draw_rectangle_rotated :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color
         fill_rect.max.x = max(fill_rect.max.x, ceilp.x)
         fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
     }
-    fill_rect = rectangle_intersection(fill_rect, clip_rect)
+    fill_rect = get_intersection(fill_rect, clip_rect)
     
-    if rectangle_has_area(fill_rect) {
+    if has_area(fill_rect) {
         maskFF :: 0xffffffff
         
         clip_mask := cast(u32x8) maskFF

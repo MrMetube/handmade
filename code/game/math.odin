@@ -355,7 +355,7 @@ rectangle_min_max  :: proc(min, max: $T) -> Rectangle(T) {
 }
 rectangle_min_dimension  :: proc { rectangle_min_dimension_2, rectangle_min_dimension_v }
 rectangle_min_dimension_2  :: proc(x, y, w, h: $E) -> Rectangle([2]E) {
-    return rectangle_min_dimension_v([2]E{x, y}, [2]E{w, h})
+    return min_dimension_v([2]E{x, y}, [2]E{w, h})
 }
 rectangle_min_dimension_v  :: proc(min, dimension: $T) -> Rectangle(T) {
     return { min, min + dimension }
@@ -367,7 +367,7 @@ rectangle_center_half_dimension :: proc(center, half_dimension: $T) -> Rectangle
     return { center - half_dimension, center + half_dimension }
 }
 
-inverted_infinity_rectangle :: proc($R: typeid) -> (result: R) {
+rectangle_inverted_infinity :: proc($R: typeid) -> (result: R) {
     T :: intrinsics.type_field_type(R, "min")
     #assert(intrinsics.type_is_subtype_of(R, Rectangle(T)))
     E :: intrinsics.type_elem_type(T)
@@ -378,32 +378,32 @@ inverted_infinity_rectangle :: proc($R: typeid) -> (result: R) {
     return result
 }
 
-rectangle_get_dimension :: proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
-rectangle_get_center    :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min + (rect.max - rect.min) / 2 }
+get_dimension :: proc(rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
+get_center    :: proc(rect: Rectangle($T)) -> (result: T) { return rect.min + (rect.max - rect.min) / 2 }
 
-rectangle_add_radius :: proc(rect: $R/Rectangle($T), radius: T) -> (result: R) {
+add_radius :: proc(rect: $R/Rectangle($T), radius: T) -> (result: R) {
     result = rect
     result.min -= radius
     result.max += radius
     return result
 }
 
-rectangle_scale_radius :: proc(rect: $R/Rectangle($T), factor: T) -> (result: R) {
+scale_radius :: proc(rect: $R/Rectangle($T), factor: T) -> (result: R) {
     result = rect
-    center := rectangle_get_center(rect)
+    center := get_center(rect)
     result.min = lerp(center, result.min, factor)
     result.max = lerp(center, result.max, factor)
     return result
 }
 
-rectangle_add_offset :: proc(rect: $R/Rectangle($T), offset: T) -> (result: R) {
+add_offset :: proc(rect: $R/Rectangle($T), offset: T) -> (result: R) {
     result.min = rect.min + offset
     result.max = rect.max + offset
     
     return result
 }
 
-rectangle_contains :: proc(rect: Rectangle($T), point: T) -> (result: b32) {
+contains :: proc(rect: Rectangle($T), point: T) -> (result: b32) {
     result = true
     #unroll for i in 0..<len(T) {
         result &&= rect.min[i] < point[i] && point[i] < rect.max[i] 
@@ -411,7 +411,7 @@ rectangle_contains :: proc(rect: Rectangle($T), point: T) -> (result: b32) {
     return result
 }
 
-rectangle_intersects :: proc(a, b: Rectangle($T)) -> (result: b32) {
+intersects :: proc(a, b: Rectangle($T)) -> (result: b32) {
     result = true
     #unroll for i in 0..<len(T) {
         result &&= !(b.max[i] <= a.min[i] || b.min[i] >= a.max[i])
@@ -420,7 +420,7 @@ rectangle_intersects :: proc(a, b: Rectangle($T)) -> (result: b32) {
     return result
 }
 
-rectangle_intersection :: proc(a, b: $R/Rectangle($T)) -> (result: R) {
+get_intersection :: proc(a, b: $R/Rectangle($T)) -> (result: R) {
     #unroll for i in 0..<len(T) {
         result.min[i] = max(a.min[i], b.min[i])
         result.max[i] = min(a.max[i], b.max[i])
@@ -430,7 +430,7 @@ rectangle_intersection :: proc(a, b: $R/Rectangle($T)) -> (result: R) {
     
 }
 
-rectangle_union :: proc(a, b: $R/Rectangle($T)) -> (result: R) {
+get_union :: proc(a, b: $R/Rectangle($T)) -> (result: R) {
     #unroll for i in 0..<len(T) {
         result.min[i] = min(a.min[i], b.min[i])
         result.max[i] = max(a.max[i], b.max[i])
@@ -439,33 +439,49 @@ rectangle_union :: proc(a, b: $R/Rectangle($T)) -> (result: R) {
     return result
 }
 
-rectangle_get_barycentric :: proc(rect: Rectangle($T), p: T) -> (result: T) {
+get_barycentric :: proc(rect: Rectangle($T), p: T) -> (result: T) {
     result = safe_ratio_0(p - rect.min, rect.max - rect.min)
 
     return result
 }
 
-rectangle_xy :: proc(rect: Rectangle3) -> (result: Rectangle2) {
+get_xy :: proc(rect: Rectangle3) -> (result: Rectangle2) {
     result.min = rect.min.xy
     result.max = rect.max.xy
     
     return result
 }
 
-rectangle_clamped_area :: proc(rect: Rectangle2i) -> (result: i32) {
-    dimension := rect.max - rect.min
-    if dimension.x > 0 && dimension.y > 0 {
-        result = dimension.x * dimension.y
+// @note(viktor): Area without the points at the maximum
+get_volume_or_zero :: get_area_or_zero
+get_area_or_zero :: proc(rect: $R/Rectangle($T)) -> (result: T) {
+    dimension := get_dimension(rect)
+    result = 1
+    #unroll for i in 0..<len(T) {
+        result *= max(0, dimension[i])
     }
-    
     return result
 }
 
-rectangle_has_area :: proc(rect: $R/Rectangle($T)) -> (result: b32) {
-    result = true
+has_area :: proc(rect: $R/Rectangle($T)) -> (result: b32) {
+    area := get_area_or_zero(rect)
+    result = area != 0
+    return result
+}
+
+// @note(viktor): Area with the points at the maximum
+get_volume_or_zero_inclusive :: get_area_or_zero_inclusive
+get_area_or_zero_inclusive :: proc(rect: $R/Rectangle($T)) -> (result: T) {
+    dimension := get_dimension(rect) + 1
+    result = 1
     #unroll for i in 0..<len(T) {
-        result &&= rect.min[i] < rect.max[i]
+        result *= max(0, dimension[i])
     }
-    
+    return result
+}
+
+has_area_inclusive :: proc(rect: $R/Rectangle($T)) -> (result: b32) {
+    area := get_area_or_zero_inclusive(rect)
+    result = area != 0
     return result
 }

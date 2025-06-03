@@ -252,7 +252,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // @todo(viktor): by how much should we expand the sim region?
     // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := rectangle_add_radius(camera_bounds, v3{30, 30, 10})
+    sim_bounds := add_radius(camera_bounds, v3{30, 30, 10})
     sim_origin := world.camera_p
     sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     

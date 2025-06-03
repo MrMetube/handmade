@@ -235,7 +235,7 @@ default_upright_transform :: proc() -> Transform { return { scale = 1, is_uprigh
 perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length, distance_above_target: f32) {
     // @todo(viktor): need to adjust this based on buffer size
     pixels_to_meters := 1.0 / meters_to_pixels
-    pixel_size := rectangle_get_dimension(group.screen_area)
+    pixel_size := get_dimension(group.screen_area)
     group.monitor_half_dim_in_meters = 0.5 * pixel_size * pixels_to_meters
     
     group.camera = {
@@ -251,7 +251,7 @@ perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length, distanc
 
 orthographic :: proc(group: ^RenderGroup, meters_to_pixels: f32) {
     // @todo(viktor): need to adjust this based on buffer size
-    pixel_size := rectangle_get_dimension(group.screen_area)
+    pixel_size := get_dimension(group.screen_area)
     group.monitor_half_dim_in_meters = 0.5 * meters_to_pixels
     
     group.camera = {
@@ -369,8 +369,8 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
 push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> (result: u16) {
     rect3 := Rect3(rect, 0, 0)
     
-    center := rectangle_get_center(rect3)
-    size   := rectangle_get_dimension(rect3)
+    center := get_center(rect3)
+    size   := get_dimension(rect3)
     p := center + 0.5*size
     basis := project_with_transform(group.camera, transform, p)
     
@@ -440,7 +440,7 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
     basis := project_with_transform(group.camera, transform, rect.min)
     
     if basis.valid {
-        dimension := rectangle_get_dimension(rect)
+        dimension := get_dimension(rect)
         
         dim := basis.scale * dimension.xy
         screen_rect := rectangle_min_dimension(basis.p, dim)
@@ -462,8 +462,8 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
     // @todo(viktor): there are rounding issues with draw_rectangle
     // ^ What did this mean? I do not see any gaps.
     
-    center         := rectangle_get_center(rec)
-    half_dimension := rectangle_get_dimension(rec) * 0.5
+    center         := get_center(rec)
+    half_dimension := get_dimension(rec) * 0.5
     
     // Top and Bottom
     center_top    := center + {0, half_dimension.y, 0}

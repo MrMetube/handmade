@@ -50,8 +50,8 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
     
     region.world = world
     region.origin = origin
-    region.updatable_bounds = rectangle_add_radius(bounds, v3{region.max_entity_radius, region.max_entity_radius, 0})
-    region.bounds = rectangle_add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
+    region.updatable_bounds = add_radius(bounds, v3{region.max_entity_radius, region.max_entity_radius, 0})
+    region.bounds = add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
     
     min_p := map_into_worldspace(world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(world, region.origin, region.bounds.max)
@@ -259,8 +259,8 @@ get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[e
 }
 
 entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
-    grown := rectangle_add_radius(bounds, 0.5 * rectangle_get_dimension(volume))
-    result = rectangle_contains(grown, p + rectangle_get_center(volume))
+    grown := add_radius(bounds, 0.5 * get_dimension(volume))
+    result = contains(grown, p + get_center(volume))
     return result
 }
 
@@ -419,11 +419,11 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
                 if can_collide(region.world, entity, &test_entity) {
                     for volume in entity.collision.volumes {
                         for test_volume in test_entity.collision.volumes {
-                            minkowski_diameter := rectangle_get_dimension(volume) + rectangle_get_dimension(test_volume)
+                            minkowski_diameter := get_dimension(volume) + get_dimension(test_volume)
                             min_corner := -0.5 * minkowski_diameter
                             max_corner :=  0.5 * minkowski_diameter
                             
-                            rel := (entity.p + rectangle_get_center(volume)) - (test_entity.p + rectangle_get_center(test_volume))
+                            rel := (entity.p + get_center(volume)) - (test_entity.p + get_center(test_volume))
                             
                             // @todo(viktor): do we want an close inclusion on the max_corner?
                             if rel.z >= min_corner.z && rel.z < max_corner.z {
@@ -519,10 +519,10 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
 entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
     outer: for a_volume in a.collision.volumes {
         for b_volume in b.collision.volumes {
-            a_rect := rectangle_center_dimension(a.p + rectangle_get_center(a_volume), rectangle_get_dimension(a_volume) + epsilon)
-            b_rect := rectangle_center_dimension(b.p + rectangle_get_center(b_volume), rectangle_get_dimension(b_volume))
+            a_rect := rectangle_center_dimension(a.p + get_center(a_volume), get_dimension(a_volume) + epsilon)
+            b_rect := rectangle_center_dimension(b.p + get_center(b_volume), get_dimension(b_volume))
             
-            if rectangle_intersects(a_rect, b_rect) {
+            if intersects(a_rect, b_rect) {
                 result = true
                 break outer
             }
