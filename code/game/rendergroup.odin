@@ -49,7 +49,7 @@ RenderCommands :: struct {
     push_buffer_size: u32,
     
     sort_sprite_bounds_at:     u32,
-    push_buffer_element_count: u32,
+    push_buffer_element_count: u32, // @cleanup should this be renamed
     clip_rects_count: u32,
     
     rects: Deque(RenderEntryClip),
@@ -178,7 +178,9 @@ SortSpriteBounds :: struct {
     
     screen_bounds: Rectangle2,
     first_edge_with_me_as_the_front: ^SpriteEdge,
-    flags: bit_set[enum{ Visited, Drawn,    DebugBox, Cycle }],
+    
+    generation_count: u16,
+    flags: bit_set[enum u16{Visited, Drawn,    DebugBox, Cycle }],
 }
 
 @(common)
@@ -188,7 +190,7 @@ SpriteBounds :: struct {
 
 @(common)
 SpriteEdge :: struct {
-    front, behind: u32,
+    front, behind: u16,
     next_edge_with_same_front: ^SpriteEdge,
 }
 
@@ -276,8 +278,8 @@ store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
 get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
     y := transform.offset.y + offset.y
     result = SpriteBounds {
-        y_min = y,
-        y_max = y,
+        y_min = y - transform.sort_bias,
+        y_max = y - transform.sort_bias,
         z_max = transform.offset.z + offset.z + transform.sort_bias,
     }
     
@@ -350,7 +352,10 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
     commands := group.commands
     // :PointerArithmetic
     if commands.push_buffer_size + size < commands.sort_sprite_bounds_at - size_of(SortSpriteBounds) {
-        entry := cast(^RenderEntryClip) &commands.push_buffer[commands.push_buffer_size]
+        offset := commands.push_buffer_size
+        assert(offset != 0)
+        
+        entry := cast(^RenderEntryClip) &commands.push_buffer[offset]
         commands.push_buffer_size += size
         
         result = cast(u16) group.commands.clip_rects_count

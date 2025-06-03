@@ -57,7 +57,6 @@ GlobalBlitTextureHandle: u32
 
 GlobalPause:                     b32
 GlobalDebugShowCursor:           b32 = INTERNAL
-GlobalDebugShowRenderSortGroups: b32
 GlobalRenderType:                RenderType
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
@@ -356,11 +355,15 @@ main :: proc() {
     for GlobalRunning {
         
         { debug_data_block("Platform")
-            
             game.debug_record_b32(&GlobalPause)
             game.debug_record_b32(&GlobalDebugShowCursor)
             game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
             game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
+            game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
+            {debug_data_block("Environment")
+                game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
+                game.debug_record_b32(&GlobalDebugShowLightingSampling)
+            }
         }
         
         ////////////////////////////////////////////////   

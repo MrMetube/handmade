@@ -296,7 +296,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             }
         }
     
-      case DebugEventLink, b32, f32, i32, u32, v2, v3, v4, Rectangle2, Rectangle3:
+      case DebugEventLink, b32, f32, i32, i64, u32, v2, v3, v4, Rectangle2, Rectangle3:
         null_event := DebugEvent {
             guid = element.guid,
             value = element.type,
@@ -470,7 +470,10 @@ add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
     p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
     text_bounds = add_offset(text_bounds, p)
     text_bounds = add_radius(text_bounds, 4)
-    push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
+    
+    background := debug.text_transform
+    background.sort_bias -= 1000
+    push_rectangle(&debug.render_group, text_bounds, background, {0,0,0,0.95})
     push_text(debug, text, p, color)
 }
 
@@ -1012,7 +1015,7 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
                        ThreadProfileGraph, FrameBarsGraph, TopClocksList,
                        FrameSlider, FrameInfo,
                        ArenaOccupancy,
-                       BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, v2, v3, v4:
+                       BitmapId, SoundId, FontId, Rectangle2, Rectangle3, u32, i32, i64, v2, v3, v4:
                     debug.hot_interaction.kind = .NOP
                   case b32:
                     debug.hot_interaction.kind = .ToggleValue
@@ -1213,7 +1216,7 @@ get_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^Debu
     hash_index := ((cast(umm) id.value[0] >> 2) + (cast(umm) id.value[1] >> 2)) % len(debug.view_hash)
     slot := &debug.view_hash[hash_index]
 
-    for search := slot^ ; search != nil; search = search.next {
+    for search := slot^; search != nil; search = search.next {
         if search.id == id {
             result = search
             break

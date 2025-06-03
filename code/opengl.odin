@@ -307,86 +307,91 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
     gl.Clear(gl.COLOR_BUFFER_BIT)
             
     clip_rect_index := max(u16)
-    for sort_entry_index in prep.sorted_offsets {
-        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
-        //:PointerArithmetic
-        entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
-        
-        if clip_rect_index != header.clip_rect_index {
-            clip_rect_index = header.clip_rect_index
-            rect := prep.clip_rects.data[clip_rect_index].rect
-            gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
-        }
-        
-        switch header.type {
-          case .None: unreachable()
-          case .RenderEntryRectangle:
-            entry := cast(^RenderEntryRectangle) entry_data
+    for sort_entry_offset in prep.sorted_offsets {
+        offset := sort_entry_offset
+        for offset != 0 {
+            header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
+            defer offset = header.next_offset_to_render
             
-            color := entry.premultiplied_color
-            color.r = square(color.r)
-            color.g = square(color.g)
-            color.b = square(color.b)
+            //:PointerArithmetic
+            entry_data := &commands.push_buffer[offset + size_of(RenderEntryHeader)]
             
-            gl.Disable(gl.TEXTURE_2D)
-            gl_rectangle(entry.rect.min, entry.rect.max, color)
-            gl.Enable(gl.TEXTURE_2D)
-            
-          case .RenderEntryBitmap:
-            entry := cast(^RenderEntryBitmap) entry_data
-            
-            bitmap := entry.bitmap
-            assert(bitmap.texture_handle != 0)
-            
-            if bitmap.width != 0 && bitmap.height != 0 {
-                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
-                
-                texel_x := 1 / cast(f32) bitmap.width
-                texel_y := 1 / cast(f32) bitmap.height
-                
-                min_uv := v2{0+texel_x, 0+texel_y}
-                max_uv := v2{1-texel_x, 1-texel_y}
-                
-                min_x_min_y := entry.p
-                max_x_min_y := entry.p + entry.x_axis
-                min_x_max_y := entry.p + entry.y_axis
-                max_x_max_y := entry.p + entry.x_axis + entry.y_axis
-                
-                // @todo(viktor): why is this inlined glRectangle? explain
-                glBegin(gl.TRIANGLES)
-                    
-                    glColor4fv(&entry.premultiplied_color[0])
-                    // @note(viktor): Lower triangle
-                    glTexCoord2f(min_uv.x, min_uv.y)
-                    glVertex2fv(&min_x_min_y[0])
-
-                    glTexCoord2f(max_uv.x, min_uv.y)
-                    glVertex2fv(&max_x_min_y[0])
-
-                    glTexCoord2f(max_uv.x, max_uv.y)
-                    glVertex2fv(&max_x_max_y[0])
-
-                    // @note(viktor): Upper triangle
-                    glTexCoord2f(min_uv.x, min_uv.y)
-                    glVertex2fv(&min_x_min_y[0])
-
-                    glTexCoord2f(max_uv.x, max_uv.y)
-                    glVertex2fv(&max_x_max_y[0])
-
-                    glTexCoord2f(min_uv.x, max_uv.y)
-                    glVertex2fv(&min_x_max_y[0])
-                    
-                glEnd()
+            if clip_rect_index != header.clip_rect_index {
+                clip_rect_index = header.clip_rect_index
+                rect := prep.clip_rects.data[clip_rect_index].rect
+                gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
             }
             
-          case .RenderEntryClip:
-            // @note(viktor): clip rects are handled before rendering
-          case:
-            panic("Unhandled Entry")
+            switch header.type {
+              case .None: unreachable()
+              case .RenderEntryRectangle:
+                entry := cast(^RenderEntryRectangle) entry_data
+                
+                color := entry.premultiplied_color
+                color.r = square(color.r)
+                color.g = square(color.g)
+                color.b = square(color.b)
+                
+                gl.Disable(gl.TEXTURE_2D)
+                gl_rectangle(entry.rect.min, entry.rect.max, color)
+                gl.Enable(gl.TEXTURE_2D)
+                
+              case .RenderEntryBitmap:
+                entry := cast(^RenderEntryBitmap) entry_data
+                
+                bitmap := entry.bitmap
+                assert(bitmap.texture_handle != 0)
+                
+                if bitmap.width != 0 && bitmap.height != 0 {
+                    gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
+                    
+                    texel_x := 1 / cast(f32) bitmap.width
+                    texel_y := 1 / cast(f32) bitmap.height
+                    
+                    min_uv := v2{0+texel_x, 0+texel_y}
+                    max_uv := v2{1-texel_x, 1-texel_y}
+                    
+                    min_x_min_y := entry.p
+                    max_x_min_y := entry.p + entry.x_axis
+                    min_x_max_y := entry.p + entry.y_axis
+                    max_x_max_y := entry.p + entry.x_axis + entry.y_axis
+                    
+                    // @todo(viktor): why is this inlined glRectangle? explain
+                    glBegin(gl.TRIANGLES)
+                        
+                        glColor4fv(&entry.premultiplied_color[0])
+                        // @note(viktor): Lower triangle
+                        glTexCoord2f(min_uv.x, min_uv.y)
+                        glVertex2fv(&min_x_min_y[0])
+    
+                        glTexCoord2f(max_uv.x, min_uv.y)
+                        glVertex2fv(&max_x_min_y[0])
+    
+                        glTexCoord2f(max_uv.x, max_uv.y)
+                        glVertex2fv(&max_x_max_y[0])
+    
+                        // @note(viktor): Upper triangle
+                        glTexCoord2f(min_uv.x, min_uv.y)
+                        glVertex2fv(&min_x_min_y[0])
+    
+                        glTexCoord2f(max_uv.x, max_uv.y)
+                        glVertex2fv(&max_x_max_y[0])
+    
+                        glTexCoord2f(min_uv.x, max_uv.y)
+                        glVertex2fv(&min_x_max_y[0])
+                        
+                    glEnd()
+                }
+                
+              case .RenderEntryClip:
+                // @note(viktor): clip rects are handled before rendering
+              case:
+                panic("Unhandled Entry")
+            }
         }
     }
     
-    draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u32) {
+    draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
         bound := &bounds[index]
         if .DebugBox in bound.flags do return
         bound.flags += { .DebugBox }

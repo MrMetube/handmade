@@ -231,7 +231,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
 
 update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
     timed_function()
-    
+
     dt := input.delta_time * TimestepPercentage/100.0
     
     monitor_width_in_meters :: 0.635

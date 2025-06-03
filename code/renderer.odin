@@ -2,9 +2,10 @@ package main
 
 import "core:simd"
 
-Global_Rendering_RenderSingleThreaded: b32
-Global_Rendering_Environment_ShowLightingBounceDirection: b32
-Global_Rendering_Environment_ShowLightingSampling: b32
+GlobalDebugRenderSingleThreaded: b32
+GlobalDebugShowLightingBounceDirection: b32
+GlobalDebugShowLightingSampling: b32
+GlobalDebugShowRenderSortGroups: b32
 
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
@@ -14,11 +15,23 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
+SortGridEntry :: struct { // :LinkedList
+    next:     ^SortGridEntry,
+    occupant_index: u16,
+}
+
+SpriteGraphWalk :: struct {
+    nodes:   []SortSpriteBounds,
+    offsets: ^Array(u32),
+    hit_cycle: b32,
+}
+
 init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
     commands ^= {
         width  = width, 
         height = height,
         
+        push_buffer_size = size_of(RenderEntryHeader), 
         push_buffer = push_buffer,
         sort_sprite_bounds_at = auto_cast len(push_buffer),
     }
@@ -57,74 +70,72 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     prep.sorted_offsets = walk_sprite_graph(entries, arena)
 }
 
-SortGridEntry :: struct { // :LinkedList
-    next:     ^SortGridEntry,
-    occupant_index: u32,
-}
-
 build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) {
     timed_function()
     
     count := len(nodes)
+    assert(cast(u64) count < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
     if count != 0 {
-        Width  :: 16
-        Height :: 9
+        // Grid Factor vs cycles in "bucketing"
+        //  o:none   / o:speed
+        // 1 - 200 M / 
+        // 2 -  85 M / 15 M
+        // 4 -  60 M / 11 M
+        // 8 -  55 M / 10 M
+        // 12 - 55 M / 10 M
+        Width  :: 8*16
+        Height :: 8*9
         
         bucketing := game.begin_timed_block("bucketing")
+        
         grid: [Width][Height]^SortGridEntry
-        inv_cell_size :v2= v2{Width, Height} / screen_size
+        inv_cell_size := v2{Width, Height} / screen_size
         screen_rect := rectangle_min_dimension(v2{}, screen_size)
+        
         for &a, index_a in nodes {
+            index_a := cast(u16) index_a
             if !intersects(a.screen_bounds, screen_rect) do continue
             
-            grid_span := Rectangle2i {
-                min = truncate(inv_cell_size * a.screen_bounds.min),
-                max = truncate(inv_cell_size * a.screen_bounds.max),
-            }
+            grid_span := rectangle_min_max(truncate(inv_cell_size * a.screen_bounds.min), truncate(inv_cell_size * a.screen_bounds.max))
             
-            grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({16, 9}-1) })
+            grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({Width, Height}-1) })
             
             for grid_x in grid_span.min.x ..= grid_span.max.x {
                 for grid_y in grid_span.min.y ..= grid_span.max.y {
-                    entry := push(arena, SortGridEntry)
+                    entry := push(arena, SortGridEntry, no_clear())
                     entry.occupant_index = auto_cast index_a
                     
                     slot := &grid[grid_x][grid_y]
                     entry.next = slot^
-                    slot      ^= entry
+                    defer slot ^= entry
+                    
+                    for entry_b := slot^; entry_b != nil; entry_b = entry_b.next {
+                        index_b := entry_b.occupant_index
+                        b := &nodes[index_b]
+                        
+                        if b.generation_count == index_a || !intersects(a.screen_bounds, b.screen_bounds) do continue
+                        b.generation_count = index_a
+                        
+                        front_index, behind_index := index_a, index_b
+                        if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
+                            swap(&front_index, &behind_index)
+                        }
+                        
+                        edge := push(arena, SpriteEdge, no_clear())
+                        front := &nodes[front_index]
+                        
+                        edge.front  = auto_cast front_index
+                        edge.behind = auto_cast behind_index
+                        
+                        edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
+                        front.first_edge_with_me_as_the_front = edge
+                        
+                    }
                 }
             }
         }
         game.end_timed_block(bucketing)
-        
-        for &a, index_a in nodes[:count-1] {
-            assert(a.flags == {})
-            for &b, index_b in nodes[index_a+1:] {
-                if intersects(a.screen_bounds, b.screen_bounds) {
-                    
-                    front_index, behind_index := index_a, index_b
-                    if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
-                        swap(&front_index, &behind_index)
-                    }
-                    
-                    edge := push(arena, SpriteEdge)
-                    front := &nodes[front_index]
-                    
-                    edge.front  = auto_cast front_index
-                    edge.behind = auto_cast behind_index
-                    
-                    edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
-                    front.first_edge_with_me_as_the_front = edge
-                }
-            }
-        }
     }
-}
-
-SpriteGraphWalk :: struct {
-    nodes:   []SortSpriteBounds,
-    offsets: ^Array(u32),
-    hit_cycle: b32,
 }
 
 walk_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) -> (result: []u32) {
@@ -143,7 +154,7 @@ walk_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) -> (result: 
     return slice(offsets)
 }
 
-walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
+walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
     at := &walk.nodes[index]
     
     walk.hit_cycle ||= .Cycle in at.flags
@@ -169,6 +180,7 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u32) {
 software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, prep: RenderPrep, target: Bitmap) {
     assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
 
+    // @todo(viktor): Is this still relevant?
     /* @todo(viktor):
         - Make sure the tiles are all cache-aligned
         - How big should the tiles be for performance?
@@ -206,7 +218,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
                 work.base_clip_rect.max.y = target.height
             }
             
-            if Global_Rendering_RenderSingleThreaded {
+            if GlobalDebugRenderSingleThreaded {
                 do_tile_render_work(work)
             } else {
                 enqueue_work(queue, do_tile_render_work, work)
@@ -635,7 +647,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
                     }
 
                     texel.rgb += texel.a * light_color.rgb
-                    if Global_Rendering_Environment_ShowLightingBounceDirection {
+                    if GlobalDebugShowLightingBounceDirection {
                         // @note(viktor): draws the bounce direction
                         texel.rgb = 0.5 + 0.5 * bounce_direction
                         texel.rgb *= texel.a
@@ -885,7 +897,7 @@ sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughn
 
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
 
-    if Global_Rendering_Environment_ShowLightingSampling {
+    if GlobalDebugShowLightingSampling {
         // @note(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[index.y * lod.width + index.x]
         texel ^= 255
