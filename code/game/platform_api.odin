@@ -6,9 +6,6 @@ PlatformAPI :: struct {
     enqueue_work:      PlatformEnqueueWork,
     complete_all_work: PlatformCompleteAllWork,
     
-    allocate_memory:   PlatformAllocateMemory,
-    deallocate_memory: PlatformDeallocateMemory,
-    
     allocate_texture:   PlatformAllocateTexture,
     deallocate_texture: PlatformDeallocateTexture,
         
@@ -17,16 +14,11 @@ PlatformAPI :: struct {
     open_next_file:                     PlatformOpenNextFile,
     read_data_from_file:                PlatformReadDataFromFile,
     mark_file_error:                    PlatformMarkFileError,
-
-    debug: DebugCode,
 }
 
 @(common) PlatformWorkQueueCallback :: #type proc(data: pmm)
 @(common) PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm)
 @(common) PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
-
-@(common) PlatformAllocateMemory   :: #type proc(size: u64) -> pmm
-@(common) PlatformDeallocateMemory :: #type proc(memory: pmm)
 
 @(common) PlatformAllocateTexture   :: #type proc(width, height: i32, data: pmm) -> u32
 @(common) PlatformDeallocateTexture :: #type proc(texture: u32)

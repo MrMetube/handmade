@@ -1,6 +1,6 @@
 package game
 
-// @cleanup
+// @cleanup #placeholder
 @(common) INTERNAL :: #config(INTERNAL, false)
 @(common) SlowCode :: INTERNAL
 

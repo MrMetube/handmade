@@ -77,6 +77,11 @@ RenderGroup :: struct {
     generation_id: AssetGenerationId,
     
     current_clip_rect_index: u16,
+    
+    is_aggregating:     b32,
+    aggregate_count:    u32,
+    aggregate_bounds:   SpriteBounds,
+    first_aggregate_at: u32,
 }
 
 Transform :: struct {
@@ -195,8 +200,13 @@ SpriteEdge :: struct {
 }
 
 @(common)
+is_y_sprite :: proc(s: SpriteBounds) -> b32 {
+    return s.y_min == s.y_max
+}
+
+@(common)
 sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_b: b32) {
-    both_are_z_sprites := a.y_min != a.y_max && b.y_min != b.y_max
+    both_are_z_sprites := !is_y_sprite(a) && !is_y_sprite(b)
     
     a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
     b_includes_a := a.y_min >= b.y_min && a.y_max < b.y_max
@@ -302,38 +312,81 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
     header_size := cast(u32) size_of(RenderEntryHeader)
     size := cast(u32) size_of(T) + header_size
     
-    commands := group.commands
     // :PointerArithmetic
-    if commands.push_buffer_size + size < commands.sort_sprite_bounds_at - size_of(SortSpriteBounds) {
-        offset := commands.push_buffer_size
-        header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
-        header.clip_rect_index = group.current_clip_rect_index
-        
+    if group.commands.push_buffer_size + size < group.commands.sort_sprite_bounds_at - size_of(SortSpriteBounds) {
+        type: RenderEntryType
         switch typeid_of(T) {
-          case RenderEntryBitmap:           header.type = .RenderEntryBitmap
-          case RenderEntryRectangle:        header.type = .RenderEntryRectangle
-          case RenderEntryClip:             header.type = .RenderEntryClip
+          case RenderEntryBitmap:    type = .RenderEntryBitmap
+          case RenderEntryRectangle: type = .RenderEntryRectangle
+          case RenderEntryClip:      type = .RenderEntryClip
         }
-        assert(header.type != .None)
+        assert(type != .None)
         
-        result = cast(^T) &commands.push_buffer[offset + header_size]
+        offset := group.commands.push_buffer_size
+        assert(offset != 0)
         
-        commands.sort_sprite_bounds_at -= size_of(SortSpriteBounds)
-        entry := cast(^SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at]
-        entry ^= {
+        header := cast(^RenderEntryHeader) &group.commands.push_buffer[offset]
+        header ^= {
+            clip_rect_index = group.current_clip_rect_index,
+            type = type,
+        }
+        
+        result = cast(^T) &group.commands.push_buffer[offset + header_size]
+        
+        group.commands.sort_sprite_bounds_at -= size_of(SortSpriteBounds)
+        sort_entry := cast(^SortSpriteBounds) &group.commands.push_buffer[group.commands.sort_sprite_bounds_at]
+        sort_entry ^= {
             bounds = bounds,
             offset = offset,
             screen_bounds = screen_bounds,
         }
         
-        commands.push_buffer_size += size
-        commands.push_buffer_element_count += 1
+        
+        if group.aggregate_count == 0 {
+            group.aggregate_bounds = bounds
+        } else if is_y_sprite(group.aggregate_bounds) {
+            assert(is_y_sprite(bounds) == is_y_sprite(group.aggregate_bounds))
+            group.aggregate_bounds.z_max = max(group.aggregate_bounds.z_max, bounds.z_max)
+        } else {
+            assert(is_y_sprite(bounds) == is_y_sprite(group.aggregate_bounds))
+            group.aggregate_bounds.y_max = max(group.aggregate_bounds.y_max, bounds.y_max)
+            group.aggregate_bounds.y_min = min(group.aggregate_bounds.y_min, bounds.y_min)
+        }
+        
+        group.aggregate_count += 1
+            
+        group.commands.push_buffer_element_count += 1
+        group.commands.push_buffer_size += size
     } else {
         unreachable()
     }
     
     assert(result != nil)
     return result
+}
+
+begin_aggregate_sort_key :: proc(group: ^RenderGroup) {
+    assert(!group.is_aggregating)
+    group.is_aggregating = true
+    
+    group.aggregate_bounds = {
+        y_max = NegativeInfinity,
+        y_min = PositiveInfinity,
+        z_max = NegativeInfinity,
+    }
+    group.aggregate_count = 0
+    group.first_aggregate_at = group.commands.sort_sprite_bounds_at - size_of(SortSpriteBounds)
+}
+
+end_aggregate_sort_key :: proc(group: ^RenderGroup) {
+    assert(group.is_aggregating)
+    
+    group.is_aggregating = false
+    start := group.first_aggregate_at - group.aggregate_count * size_of(SortSpriteBounds)
+    entries := (cast([^]SortSpriteBounds) &group.commands.push_buffer[start])[:group.aggregate_count]
+    for &entry in entries {
+        entry.bounds = group.aggregate_bounds
+    }
 }
 
 clear :: proc(group: ^RenderGroup, color: v4) {

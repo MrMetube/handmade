@@ -279,9 +279,6 @@ main :: proc() {
             enqueue_work      = enqueue_work,
             complete_all_work = complete_all_work,
             
-            allocate_memory   = allocate_memory,
-            deallocate_memory = deallocate_memory,
-            
             allocate_texture   = allocate_texture,
             deallocate_texture = deallocate_texture,
             
@@ -327,7 +324,7 @@ main :: proc() {
         
         game_memory.debug_table = cast(^DebugTable) allocate_memory(DebugTableSize)
         
-        when INTERNAL {
+        when false && INTERNAL {
             game_memory.Platform_api.debug = {
                 read_entire_file       = DEBUG_read_entire_file,
                 write_entire_file      = DEBUG_write_entire_file,
@@ -779,12 +776,12 @@ display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, wi
 ////////////////////////////////////////////////
 // Exports to the game
 
-allocate_memory : PlatformAllocateMemory : proc(#any_int size: u64) -> (result: pmm) {
+allocate_memory :: proc(#any_int size: u64) -> (result: pmm) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     return result
 }
 
-deallocate_memory : PlatformDeallocateMemory : proc(memory: pmm) {
+deallocate_memory :: proc(memory: pmm) {
     win.VirtualFree(memory, 0, win.MEM_RELEASE)
 }
 

@@ -151,12 +151,11 @@ extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_f
         
         data := files[key]
         corrected, _ := strings.replace(data, "package game", header, -1, context.temp_allocator)
-        corrected, _ = strings.replace(corrected, `@(common="file")`, "", -1, context.temp_allocator)
+        corrected, _ = strings.replace(corrected, CommonTagFile, "", -1, context.temp_allocator)
         os.write_entire_file(path, transmute([]u8) corrected)
     }
 }
 
-// @todo(viktor): maybe compress the exports with the common as there is a lot of shared code
 visit_and_extract_exports :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
     using my := cast(^ExtractContext) context.user_ptr
     
@@ -199,10 +198,6 @@ collect_exports :: proc(collect: ^map[string]Code, attributes: []^ast.Attribute,
                         
                         name = strings.trim_right_space(declaration[:eon])
                         declaration = declaration[eon+2:eoh]
-                        
-                    // } else if strings.equal_fold(att_name, CommonTagFile) {
-                    //     common_files[attribute.node.pos.file] = true
-                    //     return
                     } else {
                         append(&other_attributes, fmt.tprint(att_name))
                     }

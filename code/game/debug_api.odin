@@ -3,9 +3,9 @@ package game
 
 @(common) import "base:runtime"
 
-@(common) DebugEnabled :: true && INTERNAL
+DebugEnabled :: true && INTERNAL
 
-@(common) DebugGUID :: struct {
+DebugGUID :: struct {
     name:      string,
     file_path: string,
     procedure: string,

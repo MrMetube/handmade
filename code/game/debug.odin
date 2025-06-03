@@ -244,44 +244,15 @@ DebugProfileNode :: struct {
 }
 
 ////////////////////////////////////////////////
-// @cleanup what here is even used anymore?
-
-@(common) 
-DebugCode :: struct {
-    read_entire_file:       DebugReadEntireFile,
-    write_entire_file:      DebugWriteEntireFile,
-    free_file_memory:       DebugFreeFileMemory,
-    execute_system_command: DebugExecuteSystemCommand,
-    get_process_state:      DebugGetProcessState,
-}
-
-@(common) 
-DebugProcessState :: struct {
-    started_successfully: b32,
-    is_running:           b32,
-    return_code:          i32,
-}
-
-@(common)
-DebugExecutingProcess :: struct {
-    os_handle: umm,
-}
-
-@(common) DebugReadEntireFile       :: #type proc(filename: string) -> (result: []u8)
-@(common) DebugWriteEntireFile      :: #type proc(filename: string, memory: []u8) -> b32
-@(common) DebugFreeFileMemory       :: #type proc(memory: []u8)
-@(common) DebugExecuteSystemCommand :: #type proc(directory, command, command_line: string) -> DebugExecutingProcess
-@(common) DebugGetProcessState      :: #type proc(process: DebugExecutingProcess) -> DebugProcessState
-
-////////////////////////////////////////////////
 
 DebugStatistic :: struct {
-    sum, avg, min, max: f32, count: u32,
+    sum, avg, min, max: f32, 
+    count: u32,
 }
 
 ClockEntry :: struct {
     element: ^DebugElement,
-    stats: DebugStatistic,
+    stats:   DebugStatistic,
 }
 
 ////////////////////////////////////////////////

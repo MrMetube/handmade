@@ -211,17 +211,17 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         body.occupying = occupying
         
         append(&body.pieces, VisiblePiece{
+            asset  = .Body,
+            height = hero_height,
+            color  = 1,
+            flags  = { .SquishAxis },
+        })
+        append(&body.pieces, VisiblePiece{
             asset  = .Cape,
             height = hero_height*1.3,
             offset = {0, -0.3, 0},
             color  = 1,
             flags  = { .SquishAxis, .BobUpAndDown },
-        })
-        append(&body.pieces, VisiblePiece{
-            asset  = .Body,
-            height = hero_height,
-            color  = 1,
-            flags  = { .SquishAxis },
         })
         append(&body.pieces, VisiblePiece{
             asset  = .Shadow,
@@ -533,6 +533,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         
         render_group.current_clip_rect_index = clip_rect_index[relative_layer - minimum_layer]
         
+        begin_aggregate_sort_key(render_group)
         for piece in slice(&entity.pieces) {
             offset := piece.offset
             color  := piece.color
@@ -541,16 +542,16 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
             
             if .BobUpAndDown in piece.flags {
                 // @todo(viktor): Reenable this floating animation
-                entity.t_bob += dt
-                if entity.t_bob > Tau {
-                    entity.t_bob -= Tau
-                }
-                hz :: 4
-                coeff := sin(entity.t_bob * hz)
-                z := (coeff) * 0.3 + 0.1
+                // entity.t_bob += dt
+                // if entity.t_bob > Tau {
+                //     entity.t_bob -= Tau
+                // }
+                // hz :: 4
+                // coeff := sin(entity.t_bob * hz)
+                // z := (coeff) * 0.3 + 0.1
                 
-                offset += {0, z, 0}
-                color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
+                // offset += {0, z, 0}
+                // color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
             }
             
             if .SquishAxis in piece.flags {
@@ -564,6 +565,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
                 debug_record_value(&bitmap_id)
             }
         }
+        end_aggregate_sort_key(render_group)
         
         draw_hitpoints(render_group, entity, 0.5, transform)
         
