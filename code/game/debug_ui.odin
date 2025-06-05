@@ -1,8 +1,5 @@
 package game
 
-import "base:intrinsics"
-import "core:fmt"
-
 DebugEventLink :: struct {
     next, prev: ^DebugEventLink,
     // @volatile sentinel() abuses the fact that first_child and last_child could be viewed as prev and next
@@ -163,7 +160,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     end_layout(&debug.mouse_text_layout)
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
-    debug.root_group.name = fmt.bprintf(debug.root_info, "%5.4f ms", most_recent_frame.seconds_elapsed*1000)
+    debug.root_group.name = print(debug.root_info, "% %s", format_order_of_magnitude_float(most_recent_frame.seconds_elapsed, { precision = 3 }))
     
     interact(debug, input, mouse_p)
 }
@@ -190,14 +187,7 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
     } else {
         timed_block("draw event group")
         
-        last_slash: u32
-        #reverse for r, index in link.name {
-            if r == '/' {
-                last_slash = auto_cast index
-                break
-            }
-        }
-        view_name := last_slash != 0 ? link.name[last_slash+1:] : link.name
+        _ = print(DebugPrintBuffer[:], "%", IntegerFormat{v =cast(u32)0x12345678, kind = .Hexadecimal_Lowercase})
         
         id := id_from_link(tree, link)
         view := get_view_for_variable(debug, id)
@@ -207,7 +197,7 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
         collapsible := &view.kind.(DebugViewCollapsible)
         
         expanded := collapsible.expanded
-        text := fmt.tprint(expanded ? "-" : "+", view_name)
+        text := print(DebugPrintBuffer[:], "% %", expanded ? "-" : "+", link.name)
         text_bounds := measure_text(debug, text)
                 
         size := v2{ get_dimension(text_bounds).x, layout.line_advance }
@@ -311,16 +301,9 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
                 view.kind = DebugViewCollapsible{}
             }
             collapsible := &view.kind.(DebugViewCollapsible)
-            text = fmt.tprintf("%s %v", collapsible.expanded ? "-" : "+", element.guid.name)
+            text = print(DebugPrintBuffer[:], "% %", collapsible.expanded ? "-" : "+", element.guid.name)
         } else {
-            last_slash: u32
-            #reverse for r, index in element.guid.name {
-                if r == '/' {
-                    last_slash = auto_cast index
-                    break
-                }
-            }
-            text = fmt.tprintf("%s %v", last_slash != 0 ? element.guid.name[last_slash+1:] : element.guid.name, value)
+            text = print(DebugPrintBuffer[:], "% %", element.guid.name, value)
         }
         
         autodetect_interaction := DebugInteraction{ id = id, kind = .AutoDetect, target = element }
@@ -329,7 +312,12 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
       case FrameInfo:
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
         
-        text := fmt.tprintf("Viewed Frame: %5.4f ms, %d events, %d data blocks, %d profile_blocks", viewed_frame.seconds_elapsed*1000, viewed_frame.stored_event_count, viewed_frame.data_block_count, viewed_frame.profile_block_count)
+        text := print(DebugPrintBuffer[:], "Viewed Frame: % %s, % % events, % % data_blocks, % % profile_blocks",
+            format_order_of_magnitude_float(viewed_frame.seconds_elapsed), 
+            format_order_of_magnitude_int(viewed_frame.stored_event_count), 
+            format_order_of_magnitude_int(viewed_frame.data_block_count), 
+            format_order_of_magnitude_int(viewed_frame.profile_block_count), 
+        )
         basic_text_element(layout, text)
         
       case ArenaOccupancy:
@@ -349,7 +337,9 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             begin_ui_row(layout)
                 boolean_button(layout, "Occupancy", is_occupancy, set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}))
                 arena := graph.arena
-                action_button(layout, fmt.tprintf("%s %m/%m", element.guid.name, arena.used, len(arena.storage)), {}, backdrop_color = {})
+                // @todo(viktor): %m format helper
+                text := print(DebugPrintBuffer[:], "%, % % / % %", element.guid.name, format_memory_size(arena.used), format_memory_size(len(arena.storage)))
+                action_button(layout, text, {}, backdrop_color = {})
             end_ui_row(layout)
             
             
@@ -375,7 +365,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         }
         
         begin_ui_row(layout)
-            boolean_button(layout, "Pause",       debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
+            boolean_button(layout, debug.paused ? "Unpause" : "Pause",       debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
             if debug.paused {
                 boolean_button(layout, "< Back",      false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
                 boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
@@ -411,7 +401,8 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             boolean_button(layout, "Frames", is_frame_bars, set_value_interaction(id, &element.type, cast(DebugValue) FrameBarsGraph{}))
             boolean_button(layout, "Clocks", is_top_clocks, set_value_interaction(id, &element.type, cast(DebugValue) TopClocksList{}))
             action_button(layout,  "Root", set_value_interaction(id, &graph.root, DebugGUID{} ))
-            action_button(layout, fmt.tprint("Viewing:", viewed_element.guid.name), {}, backdrop_color = {})
+            text := print(DebugPrintBuffer[:], "Viewing: %", viewed_element.guid.name)
+            action_button(layout, text, {}, backdrop_color = {})
         end_ui_row(layout)
         
         ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
@@ -515,7 +506,7 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
             if frame_delta < 0 {
                 frame_delta += MaxFrameCount
             }
-            text = fmt.tprint(frame_delta, "frames ago")
+            text = print(DebugPrintBuffer[:], "% frames ago", frame_delta)
         }
         
         if contains(region_rect, mouse_p) {
@@ -588,16 +579,14 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         entry := entries[sort_entry.index]
         running_sum += entry.stats.sum
         
-        text := fmt.tprintf(
-            " % 4v%s cy - % 2.5v%%  - % 4v%s - %s", 
-            order_of_magnitude(cast(u64) entry.stats.sum), 
-            
-            round(entry.stats.sum * total_time_percentage * 100, f32) * 0.01, 
-            order_of_magnitude(cast(u64) entry.stats.count), 
-            
+        info := FormatInfo{ precision = 0, width = 4 }
+
+        text := print(DebugPrintBuffer[:], "total % %cy - % %% / % %%  - %",
+            format_order_of_magnitude_int(cast(u64) entry.stats.sum, info),
+            format_percentage(entry.stats.sum * total_time_percentage),
+            format_percentage(running_sum * total_time_percentage),
             entry.element.guid.name,
         )
-        
         color_wheel := color_wheel
         color := color_wheel[sort_entry.index % len(color_wheel)]
         push_text(debug, text, p, color)
@@ -605,9 +594,9 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         region_rect := measure_text(debug, text)
         region_rect = add_offset(region_rect, p)
         if contains(region_rect, mouse_p) {
-            tooltip := fmt.tprintf("Cumulative to this point: [% 2.5v%%] - Average: % 4.0f%s cy",
-                round(running_sum * total_time_percentage * 100, f32) * 0.01, 
-                order_of_magnitude(entry.stats.avg),
+            tooltip := print(DebugPrintBuffer[:], "average % %cy - % %hits",
+                format_order_of_magnitude_float(entry.stats.avg, info),
+                format_order_of_magnitude_int(cast(u64) entry.stats.count), 
             )
             add_tooltip(debug, tooltip)
         }
@@ -672,7 +661,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             }
             
             if contains(region_rect, mouse_p) {
-                text := fmt.tprintf("%s - %v %s cycles", element.guid.name, order_of_magnitude(cast(u64) node.duration), )
+                text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude_int(node.duration))
                 add_tooltip(debug, text)
                 
                 // @copypasta with draw_profile
@@ -748,7 +737,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         }
         
         if contains(region_rect, mouse_p) {
-            text := fmt.tprintf("%s - %d cycles", element.guid.name, node.duration)
+            text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude_int(node.duration))
             add_tooltip(debug, text)
             
             if node.first_child != nil {
@@ -1118,24 +1107,10 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^
 get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: b32) -> (result: ^DebugEventLink) {
     assert(parent != nil)
     result = parent
-    
-    first_slash := -1
-    for r, index in name {
-        if r == '/' {
-            first_slash = index
-            break
-        }
+
+    if create_terminal {
+        result = get_or_create_group_with_name(debug, parent, name)
     }
-    
-    if first_slash != -1 || create_terminal {
-        left := first_slash != -1 ? name[:first_slash] : name
-        result = get_or_create_group_with_name(debug, parent, left)
-        if first_slash != -1 {
-            right := name[first_slash+1:]
-            result = get_group_by_hierarchical_name(debug, result, right, create_terminal)
-        }
-    }
-    
     
     assert(result != nil)
     return result

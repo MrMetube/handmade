@@ -738,12 +738,12 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         for it := parse_chunk_at(behind_header, cast(pmm) &behind_header[header.size - 4]); is_valid_riff_iter(it); it = next_chunk(it) {
             #partial switch get_type(it) {
             case .fmt_: 
-                fmt := cast(^WAVE_fmt) get_chunk_data(it)
-                assert(fmt.format_tag == .PCM)
-                assert(fmt.n_samples_per_seconds == 48000)
-                assert(fmt.bits_per_sample == 16)
-                assert(fmt.block_align == size_of(u16) * fmt.n_channels)
-                channel_count = cast(u32) fmt.n_channels
+                fmt_ := cast(^WAVE_fmt) get_chunk_data(it)
+                assert(fmt_.format_tag == .PCM)
+                assert(fmt_.n_samples_per_seconds == 48000)
+                assert(fmt_.bits_per_sample == 16)
+                assert(fmt_.block_align == size_of(u16) * fmt_.n_channels)
+                channel_count = cast(u32) fmt_.n_channels
             case .data: 
                 sample_data = cast([^]i16) get_chunk_data(it)
                 sample_data_size = get_chunk_size(it)

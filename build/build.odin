@@ -24,8 +24,7 @@ import win "core:sys/windows"
     - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
     - get rid of INTERNAL define
 */
-
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon -subsystem:windows -ignore-vs-search -use-single-module `
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon  -ignore-vs-search -use-single-module `
 debug    :: ` -debug `
 internal :: ` -define:INTERNAL=true ` // @cleanup
 pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 

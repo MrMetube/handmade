@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import win "core:sys/windows"
 
 FileHandle :: struct {
@@ -104,13 +103,13 @@ end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(gr
 
 mark_file_error : PlatformMarkFileError : proc(handle: ^PlatformFileHandle, error_message: string) {
     when INTERNAL {
-        fmt.println("FILE ERROR:", error_message)
+        println("FILE ERROR:", error_message)
         
         error_code := win.GetLastError()
         buffer: [1024]u16
         length := win.FormatMessageW(win.FORMAT_MESSAGE_FROM_SYSTEM, nil, error_code, 0, &buffer[0], len(buffer), nil, )
         message, _ := win.utf16_to_utf8(buffer[:length])
-        fmt.printfln("ERROR: %s", string(message))
+        println("ERROR: %", string(message))
     }
     handle.no_errors = false
 }

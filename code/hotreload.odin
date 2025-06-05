@@ -1,7 +1,6 @@
 package main
 
 import "core:os"
-import "core:fmt"
 import win "core:sys/windows"
 
 game := game_stubs
@@ -15,7 +14,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
     } else {
         if !win.FreeLibrary(game_lib) {
             // @logging 
-            fmt.println("Failed to load game.dll")
+            println("Failed to load game.dll")
         }
     }
     
@@ -30,8 +29,8 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil
         } else {
             // @logging 
-            fmt.println("Failed to initialize game api")
-            fmt.println(os.error_string(os.get_last_error()))
+            println("Failed to initialize game api")
+            println(os.error_string(os.get_last_error()))
         }
     }
 
@@ -72,6 +71,7 @@ get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
 
 ////////////////////////////////////////////////
 // reimplement to allow the deferred_out to work
+
 end_timed_block :: proc(info: TimedBlockInfo) {
     game.end_timed_block(info)
 }

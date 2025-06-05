@@ -7,7 +7,7 @@ package game
     - This is a thread safe operation
     - At the end of the frame we collate all these events 
     - To track data we collect events of interest into elements
-    - an element keep a history of values
+    - an element keeps a history of values
     
     ////////////////////////////////////////////////
 */
@@ -24,6 +24,8 @@ GlobalDebugTable:  ^DebugTable
 
 DebugMaxEventCount :: 500_000 when DebugEnabled else 0
 MaxFrameCount :: 512
+
+DebugPrintBuffer: [512]u8
 
 ////////////////////////////////////////////////
 
@@ -285,12 +287,12 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.most_recent_frame_ordinal = 0
         debug.oldest_frame_ordinal_that_is_already_freed = 0
         
-        root_event := DebugEvent{ guid = { name = "ProfileRoot" } }
-        debug.profile_root = get_element_from_guid_by_parent(debug, root_event, nil, ElementOps{})
-        debug.root_info = push_slice(&debug.arena, u8, 512)
-        debug.root_group    = create_link(debug, "Root")
+        debug.profile_root  = get_element_from_guid_by_parent(debug, { guid = { name = "ProfileRoot" } }, nil, {})
         debug.profile_group = create_link(debug, "Profiles")
-        debug.root_group.name = cast(string) debug.root_info
+        
+        debug.root_info     = push_slice(&debug.arena, u8, 512)
+        debug.root_group    = create_link(debug, "Root")
+        debug.root_group.name = cast(string) debug.root_info[:0]
         
         debug.font_scale = 0.6
         
@@ -306,11 +308,11 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.shadow_transform  = default_flat_transform()
         debug.text_transform    = default_flat_transform()
         
+        debug.backing_transform.sort_bias = 16_000
+        debug.ui_transform.sort_bias      = 20_000
+        debug.shadow_transform.sort_bias  = 24_000
+        debug.text_transform.sort_bias    = 28_000
     }
-    debug.backing_transform.sort_bias = 16_000
-    debug.ui_transform.sort_bias      = 20_000
-    debug.shadow_transform.sort_bias  = 24_000
-    debug.text_transform.sort_bias    = 28_000
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
     

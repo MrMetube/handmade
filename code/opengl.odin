@@ -19,6 +19,7 @@ GlAttribs := [?]i32{
     0,
 }
 
+// @todo(viktor): maybe use the foreign system here. See: C:\Odin\examples\demo\demo.odin:1682:0
 glBegin: proc(_: u32)
 glEnd: proc()
 glMatrixMode: proc(_: i32)

@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import win "core:sys/windows"
 
 /*
@@ -174,20 +173,20 @@ main :: proc() {
     init_work_queue(&high_queue, high_infos[:])
     init_work_queue(&low_queue,  low_infos[:])
     
-    fmt.print("\033[2J") // Clear the terminal
+    print("\033[2J") // Clear the terminal
 
     state: PlatformState
     {
         exe_path_buffer: [win.MAX_PATH_WIDE]u16
         size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
         exe_path_and_name := win.wstring_to_utf8(raw_data(exe_path_buffer[:size_of_filename]), cast(int) size_of_filename) or_else ""
-        one_past_last_slash: u32
+        on_last_slash: u32
         for r, i in exe_path_and_name {
             if r == '\\' {
-                one_past_last_slash = cast(u32) i + 1
+                on_last_slash = cast(u32) i
             }
         }
-        state.exe_path = exe_path_and_name[:one_past_last_slash]
+        state.exe_path = exe_path_and_name[:on_last_slash]
     }
     
     // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
@@ -667,7 +666,12 @@ main :: proc() {
                 if test_seconds_elapsed > target_seconds_per_frame {
                     // @logging sleep missed
                     if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                        fmt.printfln("Missed sleep - %.3f %vs / %.3f %vs - %.3f %vs", order_of_magnitude(test_seconds_elapsed), order_of_magnitude(target_seconds_per_frame), order_of_magnitude(test_seconds_elapsed - target_seconds_per_frame))
+                        info := FormatInfo{ precision = 3 }
+                        println("Missed sleep - % %s / % %s - % %s", 
+                            format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
+                            format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
+                            format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
+                        )
                     }
                 }
                 
@@ -678,7 +682,12 @@ main :: proc() {
             } else {
                 // @logging Missed frame, maybe because window was moved
                 if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                    fmt.printfln("Missed frame - %.3f %vs / %.3f %vs - %.3f %vs", order_of_magnitude(seconds_elapsed_for_frame), order_of_magnitude(target_seconds_per_frame), order_of_magnitude(seconds_elapsed_for_frame - target_seconds_per_frame))
+                    info := FormatInfo{ precision = 3 }
+                    println("Missed sleep - % %s / % %s - % %s", 
+                        format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
+                        format_order_of_magnitude_float(target_seconds_per_frame, info),
+                        format_order_of_magnitude_float(seconds_elapsed_for_frame - target_seconds_per_frame, info),
+                    )
                 }
             }
         }
@@ -806,7 +815,8 @@ get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
 //  Record and Replay
 
 get_record_replay_filepath :: proc(state: PlatformState, index:i32) -> win.wstring {
-    return build_exe_path(state, fmt.tprintf("editloop_%d.input", index))
+    buffer: [64]u8
+    return build_exe_path(state, print(buffer[:], "editloop_%.input", index))
 }
 
 begin_recording_input :: proc(state: ^PlatformState, input_recording_index: i32) {
@@ -1121,5 +1131,8 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
 }
 
 build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
-    return win.utf8_to_wstring(fmt.tprint(state.exe_path, filename, sep=""))
+    buffer: [256]u8
+    filename := filename
+    path := print(buffer[:], "%\\%", state.exe_path, filename)
+    return win.utf8_to_wstring(path)
 }

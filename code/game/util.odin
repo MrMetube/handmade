@@ -4,7 +4,6 @@ package game
 @(common="file") 
 import "base:intrinsics"
 import "base:runtime"
-import "core:fmt"
 import "core:simd/x86"
 
 was_pressed :: proc(button: InputButton) -> b32 {
@@ -186,9 +185,9 @@ unused :: proc "contextless" (_: $T) {}
 assert :: proc(condition: $B, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(B) {
     if !condition {
         // @todo(viktor): We are not a console application
-        fmt.print(loc, prefix)
+        print("% %", loc, prefix)
         if len(message) > 0 {
-            fmt.println(":", message)
+            println(": %", message)
         }
         
         when ODIN_DEBUG {
@@ -203,15 +202,43 @@ order_of_magnitude :: proc(value: $T) -> (T, string) {
     when intrinsics.type_is_float(T) {
         if value < 1e-9  { return value * 1e12, "p"}
         if value < 1e-6  { return value * 1e9,  "n"}
-        if value < 1e-3  { return value * 1e6,  "u"} // @todo(viktor): fix the terminal encoding or font or whatever to actually display 'μ' correctly
+        if value < 1e-3  { return value * 1e6,  "μ"} // @todo(viktor): fix the debug console encoding or font or whatever to actually display 'μ' correctly
         if value < 1e0   { return value * 1e3,  "m"}
     }
     
     if value < 1e3   { return value,        " "}
     if value < 1e6   { return value / 1e3,  "k"}
     if value < 1e9   { return value / 1e6,  "M"}
-    if value < 1e12  { return value / 1e9,  "G"}
-    if value < 1e15  { return value / 1e12, "T"}
+    
+    when size_of(T) >= 8 {
+        if value < 1e12  { return value / 1e9,  "G"}
+        if value < 1e15  { return value / 1e12, "T"}
+    }
     
     return value, "?"
+}
+
+
+format_memory_size :: proc(#any_int value: u64) -> (u64, string) {
+    if value < Kilobyte  { return value,            " b"}
+    if value < Megabyte  { return value / Kilobyte, "kb"}
+    if value < Gigabyte  { return value / Megabyte, "Mb"}
+    if value < Terabyte  { return value / Gigabyte, "Gb"}
+    return value / Terabyte , "Tb"
+}
+
+
+format_order_of_magnitude_int :: proc(value: $T, info: FormatInfo = {}) -> (IntegerFormat, string) 
+where intrinsics.type_is_integer(T) {
+    v, magnitude := order_of_magnitude(value)
+    return IntegerFormat{ v = v, info = info}, magnitude
+}
+format_order_of_magnitude_float :: proc(value: $T, info: FormatInfo = {}) -> (FloatFormat, string)
+where intrinsics.type_is_float(T) {
+    v, magnitude := order_of_magnitude(value)
+    return FloatFormat{ v = v, info = info}, magnitude
+}
+        
+format_percentage :: proc(value: f32) -> FloatFormat {
+    return { v = round(value * 100, f32) * 0.01, info = { precision = 2, width = 5 } }
 }
