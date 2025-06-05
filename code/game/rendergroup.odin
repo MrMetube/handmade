@@ -53,6 +53,8 @@ RenderCommands :: struct {
     clip_rects_count: u32,
     
     rects: Deque(RenderEntryClip),
+    
+    last_used_manual_sort_key: u16,
 }
 
 @(common)
@@ -89,6 +91,8 @@ Transform :: struct {
     scale:      f32,
     sort_bias:  f32,
     is_upright: b32,
+    
+    manual_sort_key: ManualSortKey,
 }
 
 Camera :: struct {
@@ -170,58 +174,7 @@ ProjectedBasis :: struct {
     valid: b32,
 }
 
-
-
-
-
 ////////////////////////////////////////////////
-
-@(common)
-SortSpriteBounds :: struct {
-    using bounds: SpriteBounds,
-    offset:  u32,
-    
-    screen_bounds: Rectangle2,
-    first_edge_with_me_as_the_front: ^SpriteEdge,
-    
-    generation_count: u16,
-    flags: bit_set[enum u16{Visited, Drawn,    DebugBox, Cycle }],
-}
-
-@(common)
-SpriteBounds :: struct {
-    y_min, y_max, z_max: f32,
-}
-
-@(common)
-SpriteEdge :: struct {
-    front, behind: u16,
-    next_edge_with_same_front: ^SpriteEdge,
-}
-
-@(common)
-is_y_sprite :: proc(s: SpriteBounds) -> b32 {
-    return s.y_min == s.y_max
-}
-
-@(common)
-sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_b: b32) {
-    both_are_z_sprites := !is_y_sprite(a) && !is_y_sprite(b)
-    
-    a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
-    b_includes_a := a.y_min >= b.y_min && a.y_max < b.y_max
-    
-    sort_by_z := both_are_z_sprites || a_includes_b || b_includes_a
-    
-    a_in_front_of_b = sort_by_z ? a.z_max > b.z_max : a.y_min < b.y_min
-    
-    return a_in_front_of_b
-}
-
-////////////////////////////////////////////////
-
-
-
 
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
     pixel_size := vec_cast(f32, commands.width, commands.height)
@@ -285,25 +238,6 @@ store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
     return result
 }
 
-get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
-    y := transform.offset.y + offset.y
-    result = SpriteBounds {
-        y_min = y - transform.sort_bias,
-        y_max = y - transform.sort_bias,
-        z_max = transform.offset.z + offset.z + transform.sort_bias,
-    }
-    
-    // @todo(viktor): More accurate calculations - this doesn't handle neither alignment nor rotation nor axis shear/scale
-    if transform.is_upright {
-        result.z_max += .5 * height
-    } else {
-        result.y_min -= .5 * height
-        result.y_max += .5 * height
-    }
-    
-    return result
-}
-
 ////////////////////////////////////////////////
 
 push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBounds, screen_bounds: Rectangle2) -> (result: ^T) {
@@ -341,19 +275,19 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
             screen_bounds = screen_bounds,
         }
         
-        
-        if group.aggregate_count == 0 {
-            group.aggregate_bounds = bounds
-        } else if is_y_sprite(group.aggregate_bounds) {
-            assert(is_y_sprite(bounds) == is_y_sprite(group.aggregate_bounds))
-            group.aggregate_bounds.z_max = max(group.aggregate_bounds.z_max, bounds.z_max)
-        } else {
-            assert(is_y_sprite(bounds) == is_y_sprite(group.aggregate_bounds))
-            group.aggregate_bounds.y_max = max(group.aggregate_bounds.y_max, bounds.y_max)
-            group.aggregate_bounds.y_min = min(group.aggregate_bounds.y_min, bounds.y_min)
+        if group.is_aggregating {
+            if group.aggregate_count == 0 {
+                group.aggregate_bounds = bounds
+            } else if is_y_sprite(group.aggregate_bounds) {
+                assert(is_y_sprite(bounds) == is_y_sprite(group.aggregate_bounds))
+                group.aggregate_bounds.z_max = max(group.aggregate_bounds.z_max, bounds.z_max)
+            } else {
+                assert(is_y_sprite(bounds) == is_y_sprite(group.aggregate_bounds))
+                group.aggregate_bounds.y_max = max(group.aggregate_bounds.y_max, bounds.y_max)
+                group.aggregate_bounds.y_min = min(group.aggregate_bounds.y_min, bounds.y_min)
+            }
+            group.aggregate_count += 1
         }
-        
-        group.aggregate_count += 1
             
         group.commands.push_buffer_element_count += 1
         group.commands.push_buffer_size += size
@@ -363,30 +297,6 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
     
     assert(result != nil)
     return result
-}
-
-begin_aggregate_sort_key :: proc(group: ^RenderGroup) {
-    assert(!group.is_aggregating)
-    group.is_aggregating = true
-    
-    group.aggregate_bounds = {
-        y_max = NegativeInfinity,
-        y_min = PositiveInfinity,
-        z_max = NegativeInfinity,
-    }
-    group.aggregate_count = 0
-    group.first_aggregate_at = group.commands.sort_sprite_bounds_at - size_of(SortSpriteBounds)
-}
-
-end_aggregate_sort_key :: proc(group: ^RenderGroup) {
-    assert(group.is_aggregating)
-    
-    group.is_aggregating = false
-    start := group.first_aggregate_at - group.aggregate_count * size_of(SortSpriteBounds)
-    entries := (cast([^]SortSpriteBounds) &group.commands.push_buffer[start])[:group.aggregate_count]
-    for &entry in entries {
-        entry.bounds = group.aggregate_bounds
-    }
 }
 
 clear :: proc(group: ^RenderGroup, color: v4) {
@@ -473,7 +383,8 @@ push_bitmap_raw :: proc(
         assert(bitmap.texture_handle != 0)
         
         bounds := get_sprite_bounds(transform, offset, height)
-
+        bounds.manual_sort_key = transform.manual_sort_key
+        
         size := used_dim.basis.scale * used_dim.size
         // @todo(viktor): more conservative bounds here
         screen_rect := rectangle_min_dimension(used_dim.basis.p, size)
@@ -615,6 +526,111 @@ unproject_with_transform :: proc(camera: Camera, transform: Transform, pixel_p: 
     }
     
     result -= transform.offset
+    
+    return result
+}
+
+////////////////////////////////////////////////
+
+@(common)
+SortSpriteBounds :: struct {
+    using bounds: SpriteBounds,
+    offset:  u32,
+    
+    screen_bounds: Rectangle2,
+    first_edge_with_me_as_the_front: ^SpriteEdge,
+    
+    generation_count: u16,
+    flags: bit_set[enum u16{Visited, Drawn,    DebugBox, Cycle }],
+}
+
+@(common)
+SpriteBounds :: struct {
+    y_min, y_max, z_max: f32,
+    using manual_sort_key: ManualSortKey,
+}
+
+@(common)
+ManualSortKey :: struct {
+    always_in_front_of: u16,
+    always_behind:      u16,
+}
+
+@(common)
+SpriteEdge :: struct {
+    front, behind: u16,
+    next_edge_with_same_front: ^SpriteEdge,
+}
+
+@(common)
+is_y_sprite :: proc(s: SpriteBounds) -> b32 {
+    return s.y_min == s.y_max
+}
+
+@(common)
+sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_b: b32) {
+    if a.always_in_front_of != 0 && a.always_in_front_of == b.always_behind do return true
+    if a.always_behind      != 0 && a.always_behind == b.always_in_front_of do return false
+    
+    both_are_z_sprites := !is_y_sprite(a) && !is_y_sprite(b)
+    
+    a_includes_b := b.y_min >= a.y_min && b.y_max < a.y_max
+    b_includes_a := a.y_min >= b.y_min && a.y_max < b.y_max
+    
+    sort_by_z := both_are_z_sprites || a_includes_b || b_includes_a
+    
+    a_in_front_of_b = sort_by_z ? a.z_max > b.z_max : a.y_min < b.y_min
+    
+    return a_in_front_of_b
+}
+
+reserve_sort_key :: proc(group: ^RenderGroup) -> u16 {
+    group.commands.last_used_manual_sort_key += 1
+    result := group.commands.last_used_manual_sort_key
+    assert(result != 0)
+    return result
+}
+
+begin_aggregate_sort_key :: proc(group: ^RenderGroup) {
+    assert(!group.is_aggregating)
+    group.is_aggregating = true
+    
+    group.aggregate_bounds = {
+        y_max = NegativeInfinity,
+        y_min = PositiveInfinity,
+        z_max = NegativeInfinity,
+    }
+    group.aggregate_count = 0
+    group.first_aggregate_at = group.commands.sort_sprite_bounds_at - size_of(SortSpriteBounds)
+}
+
+end_aggregate_sort_key :: proc(group: ^RenderGroup) {
+    assert(group.is_aggregating)
+    
+    group.is_aggregating = false
+    start := group.first_aggregate_at - group.aggregate_count * size_of(SortSpriteBounds)
+    entries := (cast([^]SortSpriteBounds) &group.commands.push_buffer[start])[:group.aggregate_count]
+    for &entry in entries {
+        entry.bounds = group.aggregate_bounds
+    }
+}
+
+get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
+    y := transform.offset.y + offset.y
+    result = SpriteBounds {
+        y_min = y - transform.sort_bias,
+        y_max = y - transform.sort_bias,
+        z_max = transform.offset.z + offset.z + transform.sort_bias,
+        manual_sort_key = transform.manual_sort_key,
+    }
+    
+    // @todo(viktor): More accurate calculations - this doesn't handle neither alignment nor rotation nor axis shear/scale
+    if transform.is_upright {
+        result.z_max += .5 * height
+    } else {
+        result.y_min -= .5 * height
+        result.y_max += .5 * height
+    }
     
     return result
 }

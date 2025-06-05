@@ -329,7 +329,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     execute_brains := begin_timed_block("execute_brains")
     for &brain in slice(sim_region.brains) {
-        execute_brain(input, world, sim_region, &brain)
+        execute_brain(input, world, sim_region, render_group, &brain)
     }
     end_timed_block(execute_brains)
     

@@ -59,7 +59,7 @@ brain_slot_for :: proc($base: typeid, $member: string, index: u32 = 0) -> BrainS
     return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) + index }
 }
 
-execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^Brain) {
+execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
     dt := input.delta_time
     
     switch brain.kind {
@@ -140,6 +140,10 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
             }
             
             if body != nil {
+                sort_key := reserve_sort_key(render_group)
+                head.manual_sort_key.always_in_front_of = sort_key
+                body.manual_sort_key.always_behind      = sort_key
+                
                 if glove == nil || glove.movement_mode != .AngleAttackSwipe {
                     body.facing_direction  = head.facing_direction
                 }
@@ -245,9 +249,11 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
                     blocked = false
                 } else {
                     test_p := get_sim_space_traversable(test).p
-                    if transactional_occupy(familiar, &familiar.occupying, test) {
-                        target_p = test_p
-                        blocked = false
+                    if length_squared(test_p - hero^.p) + square(f32(0.15)) < length_squared(target_p - hero^.p) {
+                        if transactional_occupy(familiar, &familiar.occupying, test) {
+                            target_p = test_p
+                            blocked = false
+                        }
                     }
                 }
             }
@@ -268,8 +274,8 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, brain: ^B
         
         familiar.ddp = 200 * (target_p - familiar.p) + 2 * (target_dp - familiar.dp)
         
-        drag :v3= 8
-        speed :f32= 100
+        drag :v3= 10
+        speed :f32= 50
         
         // @copypasta from the head movement abover
         ddp_length_squared := length_squared(familiar.ddp)

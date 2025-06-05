@@ -1,12 +1,14 @@
 package game
 
 Entity :: struct {
-    
     id: EntityId,
     
     brain_kind: BrainKind,
     brain_slot: BrainSlot,
     brain_id:   BrainId,
+    
+    // @todo(viktor): @metaprogram
+    manual_sort_key: ManualSortKey, // @transient
     
     ////////////////////////////////////////////////
     // @note(viktor): Everything below here is not worked out
@@ -16,10 +18,10 @@ Entity :: struct {
     flags: EntityFlags,
     
     p, dp: v3,
-    ddp: v3, // @NoPack @todo(viktor): @metaprogram
+    ddp: v3, // @transient 
 
     t_bob, dt_bob: f32,
-    ddt_bob:  f32, // @NoPack @todo(viktor): @metaprogram
+    ddt_bob:  f32, // @transient
     
     collision: ^EntityCollisionVolumeGroup,
     
@@ -246,7 +248,7 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
             offset = {0, -0.9*hero_height, 0},
             color  = 1,
         })
-
+        
         init_hitpoints(head, 3)
         
         if world.camera_following_id == 0 {
@@ -509,6 +511,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         
         transform := default_upright_transform()
         transform.offset = get_entity_ground_point(entity) - camera_p
+        transform.manual_sort_key = entity.manual_sort_key
         
         shadow_transform := default_flat_transform()
         shadow_transform.offset = get_entity_ground_point(entity) - camera_p
@@ -533,7 +536,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         
         render_group.current_clip_rect_index = clip_rect_index[relative_layer - minimum_layer]
         
-        begin_aggregate_sort_key(render_group)
+        if entity.pieces.count > 1 do begin_aggregate_sort_key(render_group)
         for piece in slice(&entity.pieces) {
             offset := piece.offset
             color  := piece.color
@@ -565,7 +568,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
                 debug_record_value(&bitmap_id)
             }
         }
-        end_aggregate_sort_key(render_group)
+        if entity.pieces.count > 1 do end_aggregate_sort_key(render_group)
         
         draw_hitpoints(render_group, entity, 0.5, transform)
         

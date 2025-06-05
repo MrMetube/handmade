@@ -78,7 +78,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             assert(hash != nil)
                             assert(hash.pointer == nil)
                             
-                            dest := append(&region.entities)
+                            dest :^Entity= append(&region.entities)
                             
                             assert(hash.id == 0 || hash.id == source.id)
                             hash.id = source.id
@@ -89,6 +89,9 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             
                             dest.id = source.id
                             dest.p += chunk_delta
+                            
+                            // @todo(viktor): @transient marked members should not be unpacked
+                            dest.manual_sort_key = {}
                             
                             dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
                             
