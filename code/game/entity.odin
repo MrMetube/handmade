@@ -7,6 +7,8 @@ Entity :: struct {
     brain_slot: BrainSlot,
     brain_id:   BrainId,
     
+    z_layer: i32,
+    
     // @todo(viktor): @metaprogram
     manual_sort_key: ManualSortKey, // @transient
     
@@ -213,11 +215,11 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
         body.occupying = occupying
         
         append(&body.pieces, VisiblePiece{
-            asset  = .Body,
-            height = hero_height,
-            color  = 1,
-            flags  = { .SquishAxis },
-        })
+            asset  = .Shadow,
+            height = 0.5,
+            offset = {0, -0.5, 0},
+            color  = {1,1,1,0.5},
+        })        
         append(&body.pieces, VisiblePiece{
             asset  = .Cape,
             height = hero_height*1.3,
@@ -226,11 +228,12 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
             flags  = { .SquishAxis, .BobUpAndDown },
         })
         append(&body.pieces, VisiblePiece{
-            asset  = .Shadow,
-            height = 0.5,
-            offset = {0, -0.5, 0},
-            color  = {1,1,1,0.5},
+            asset  = .Body,
+            height = hero_height,
+            color  = 1,
+            flags  = { .SquishAxis },
         })
+        
     end_entity(world, body, p)
     
     head := begin_grounded_entity(world, world.hero_head_collision)
@@ -412,228 +415,237 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
     }
 }
 
-simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, entity: ^Entity, dt: f32, haze_color: v4) {
-    // @todo(viktor): we dont really have a way to unique-ify these :(
-    debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
-    if debug_requested(debug_id) { 
-        debug_begin_data_block("Game/Entity")
+update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
+    fade_top_end      := .95 * world.typical_floor_height
+    fade_top_start    := .3 * world.typical_floor_height
+    fade_bottom_start := -1 * world.typical_floor_height
+    fade_bottom_end   := -4 * world.typical_floor_height
+    
+    MinimumLayer :: -4
+    MaximumLayer :: 1
+    
+    fog_amount: [MaximumLayer - MinimumLayer + 1] f32
+    test_alpha: [MaximumLayer - MinimumLayer + 1] f32
+    for &fog_amount, index in fog_amount {
+        alpha := &test_alpha[index]
+        relative_layer_index := MinimumLayer + index
+        camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
+        
+        alpha     ^= clamp_01_to_range(fade_top_start,    camera_relative_ground_z, fade_top_end)
+        fog_amount = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
     }
-    defer if debug_requested(debug_id) {
-        debug_end_data_block()
-    }
-
-    // @cleanup is this still relevant
-    if entity.updatable { // @todo(viktor):  move this out into entity.odin
-        ////////////////////////////////////////////////
-        // Physics
-        if entity.movement_mode == .Planted {
-            if entity.occupying.entity.pointer != nil {
-                entity.p = get_sim_space_traversable(entity.occupying).p
-            }
+    
+    current_absolute_layer := sim_region.entities.count > 0 ? slice(sim_region.entities)[0].z_layer : 0
+    
+    for &entity in slice(sim_region.entities) {
+        // @todo(viktor): we dont really have a way to unique-ify these :(
+        debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
+        if debug_requested(debug_id) { 
+            debug_begin_data_block("Game/Entity")
+        }
+        defer if debug_requested(debug_id) {
+            debug_end_data_block()
         }
         
-        switch entity.movement_mode {
-            case ._Floating: // nothing
-            
-            case .AngleAttackSwipe:
-            if entity.t_movement < 1 {
-                entity.angle_current = lerp(entity.angle_start, entity.angle_target, entity.t_movement)
-                entity.angle_current_offset = lerp(entity.angle_base_offset, entity.angle_swipe_offset, sin_01(entity.t_movement))
-            } else  {
-                entity.movement_mode = .AngleOffset
-                
-                entity.angle_current = entity.angle_target
-                entity.angle_current_offset = entity.angle_base_offset
-            }
-            
-            entity.t_movement += dt * 8
-            entity.t_movement = min(entity.t_movement, 1)
-            
-            fallthrough
-          case .AngleOffset:
-            arm_ := entity.angle_current_offset * arm(entity.angle_current + entity.facing_direction)
-            entity.p = entity.angle_base + V3(arm_.xy, 0) + v3{0, .2, 0}
-            
-          case .Planted:
-            if entity.occupying.entity.pointer != nil {
-                entity.p = entity.occupying.entity.pointer.p
-            }
-            
-          case .Hopping:
-            t_jump :: 0.1
-            t_thrust :: 0.8
-            if entity.t_movement < t_thrust {
-                entity.ddt_bob -= 60
-            }
-            
-            occupying := get_sim_space_traversable(entity.occupying).p
-            came_from := get_sim_space_traversable(entity.came_from).p
-            pt := occupying
-            
-            if t_jump <= entity.t_movement {
-                t := clamp_01_to_range(t_jump, entity.t_movement, 1)
-                entity.t_bob = sin(t * Pi) * 0.1
-                entity.p = lerp(came_from, occupying, entity.t_movement)
-                entity.dp = 0
-                
-                pf := came_from
-                
-                // :ZHandling
-                height := v3{0, 0.3, 0.3}
-                
-                c := pf
-                a := -4 * height
-                b := pt - pf - a
-                entity.p = a * square(t) + b * t + c
-            }
-            
-            if entity.t_movement >= 1 {
-                entity.movement_mode = .Planted
-                entity.dt_bob = -3
-                entity.p = pt
-                entity.came_from = entity.occupying
-            }
-            
-            hop_duration :f32: 0.2
-            entity.t_movement += dt * (1 / hop_duration)
-            
-            if entity.t_movement >= 1 {
-                entity.t_movement = 1
-            }
-        }
-        
-        if entity.ddp != 0 || entity.dp != 0 {
-            move_entity(sim_region, entity, dt)
-        }
-        
-        ////////////////////////////////////////////////
-        // Rendering
-        
-        fade_top_end      := .95 * world.typical_floor_height
-        fade_top_start    := .3 * world.typical_floor_height
-        fade_bottom_start := -1 * world.typical_floor_height
-        fade_bottom_end   := -4 * world.typical_floor_height
-        
-        MinimumLayer :: -4
-        MaximumLayer :: 1
-        
-        fog_amount: [MaximumLayer - MinimumLayer + 1] f32
-        test_alpha: [MaximumLayer - MinimumLayer + 1] f32
-        for &fog_amount, index in fog_amount {
-            alpha := &test_alpha[index]
-            relative_layer_index := MinimumLayer + index
-            camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
-            
-            alpha     ^= clamp_01_to_range(fade_top_start,    camera_relative_ground_z, fade_top_end)
-            fog_amount = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
-        }
-        
-        facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
-        facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-        
-        convert_to_relative_layer :: proc(world: ^World, z: f32) -> (relative_index: i32, offset_z: f32) {
-            p := map_into_worldspace(world, {chunk = {0, 0, relative_index}}, z)
-            offset_z = p.offset.z
-            relative_index = p.chunk.z
-            return relative_index, offset_z
-        }
-        
-        entity_world_p := map_into_worldspace(world, sim_region.origin, entity.p)
-        relative_layer := entity_world_p.chunk.z - sim_region.origin.chunk.z
-        
-        if !(MinimumLayer <= relative_layer && relative_layer <= MaximumLayer) {
-            return
-        }
-        
-        transform := default_upright_transform()
-        transform.offset = get_entity_ground_point(entity) - camera_p
-        transform.manual_sort_key = entity.manual_sort_key
-        transform.chunk_z = entity_world_p.chunk.z
-        if relative_layer == MaximumLayer || relative_layer == MaximumLayer-1 {
-            transform.t_color.a = test_alpha[relative_layer - MinimumLayer]
-        } else {
-            transform.color = haze_color
-            transform.t_color.rgb = fog_amount[relative_layer - MinimumLayer]
-        }
-        
-        // _, offset_z := convert_to_relative_layer(world, transform.offset.z)
-        // transform.offset.z = offset_z
-        
-        shadow_transform := default_flat_transform()
-        shadow_transform.offset = get_entity_ground_point(entity) - camera_p
-        shadow_transform.offset.y -= 0.5
-        
-        if entity.pieces.count > 1 do begin_aggregate_sort_key(render_group)
-        for piece in slice(&entity.pieces) {
-            offset := piece.offset
-            color  := piece.color
-            x_axis := entity.x_axis
-            y_axis := entity.y_axis
-            
-            if .BobUpAndDown in piece.flags {
-                // @todo(viktor): Reenable this floating animation
-                // entity.t_bob += dt
-                // if entity.t_bob > Tau {
-                //     entity.t_bob -= Tau
-                // }
-                // hz :: 4
-                // coeff := sin(entity.t_bob * hz)
-                // z := (coeff) * 0.3 + 0.1
-                
-                // offset += {0, z, 0}
-                // color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
-            }
-            
-            if .SquishAxis in piece.flags {
-                y_axis *= 0.4
-            }
-            
-            bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
-            push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
-            
-            if debug_requested(debug_id) { 
-                debug_record_value(&bitmap_id)
-            }
-        }
-        if entity.pieces.count > 1 do end_aggregate_sort_key(render_group)
-        
-        draw_hitpoints(render_group, entity, 0.5, transform)
-        
-        if RenderCollisionOutlineAndTraversablePoints {
-            color := Green
-            color.rgb *= 0.4
-            flat_transform := transform
-            flat_transform.is_upright = false
-            
-            for traversable in slice(entity.traversables) {
-                rect := rectangle_center_dimension(traversable.p, 1.5)
-                push_rectangle(render_group, rect, flat_transform, traversable.occupant != nil ? Red : Green)
-            }
-        }
-        
-        when DebugEnabled {
-            for volume in entity.collision.volumes {
-                local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
-                
-                if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
-                    debug_hit(debug_id, local_mouse_p.z)
-                }
-                
-                highlighted, color := debug_highlighted(debug_id)
-                if highlighted {
-                    push_rectangle_outline(render_group, volume, transform, color, 0.05)
+        // @cleanup is this still relevant
+        if entity.updatable { // @todo(viktor):  move this out into entity.odin
+            ////////////////////////////////////////////////
+            // Physics
+            if entity.movement_mode == .Planted {
+                if entity.occupying.entity.pointer != nil {
+                    entity.p = get_sim_space_traversable(entity.occupying).p
                 }
             }
             
-            if debug_requested(debug_id) { 
-                debug_record_value(cast(^u32) &entity.id, name = "entity_id")
-                debug_record_value(&entity.p.x)
-                debug_record_value(&entity.p.y)
-                debug_record_value(&entity.p.y)
-                debug_record_value(&entity.dp)
+            switch entity.movement_mode {
+              case ._Floating: // nothing
+            
+              case .AngleAttackSwipe:
+                if entity.t_movement < 1 {
+                    entity.angle_current = lerp(entity.angle_start, entity.angle_target, entity.t_movement)
+                    entity.angle_current_offset = lerp(entity.angle_base_offset, entity.angle_swipe_offset, sin_01(entity.t_movement))
+                } else  {
+                    entity.movement_mode = .AngleOffset
+                    
+                    entity.angle_current = entity.angle_target
+                    entity.angle_current_offset = entity.angle_base_offset
+                }
+                
+                entity.t_movement += dt * 8
+                entity.t_movement = min(entity.t_movement, 1)
+                
+                fallthrough
+              case .AngleOffset:
+                arm_ := entity.angle_current_offset * arm(entity.angle_current + entity.facing_direction)
+                entity.p = entity.angle_base + V3(arm_.xy, 0) + v3{0, .2, 0}
+                    
+              case .Planted:
+                if entity.occupying.entity.pointer != nil {
+                    entity.p = entity.occupying.entity.pointer.p
+                }
+                        
+              case .Hopping:
+                t_jump :: 0.1
+                t_thrust :: 0.8
+                if entity.t_movement < t_thrust {
+                    entity.ddt_bob -= 60
+                }
+                
+                occupying := get_sim_space_traversable(entity.occupying).p
+                came_from := get_sim_space_traversable(entity.came_from).p
+                pt := occupying
+                
+                if t_jump <= entity.t_movement {
+                    t := clamp_01_to_range(t_jump, entity.t_movement, 1)
+                    entity.t_bob = sin(t * Pi) * 0.1
+                    entity.p = lerp(came_from, occupying, entity.t_movement)
+                    entity.dp = 0
+                    
+                    pf := came_from
+                    
+                    // :ZHandling
+                    height := v3{0, 0.3, 0.3}
+                    
+                    c := pf
+                    a := -4 * height
+                    b := pt - pf - a
+                    entity.p = a * square(t) + b * t + c
+                }
+                
+                if entity.t_movement >= 1 {
+                    entity.movement_mode = .Planted
+                    entity.dt_bob = -3
+                    entity.p = pt
+                    entity.came_from = entity.occupying
+                }
+                
+                hop_duration :f32: 0.2
+                entity.t_movement += dt * (1 / hop_duration)
+                
+                if entity.t_movement >= 1 {
+                    entity.t_movement = 1
+                }
             }
+                            
+            if entity.ddp != 0 || entity.dp != 0 {
+                move_entity(sim_region, &entity, dt)
+            }
+            
+            ////////////////////////////////////////////////
+            // Rendering
+            
+            facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
+            facing_weights := #partial AssetVector{ .FacingDirection = 1 }
+            
+            convert_to_relative_layer :: proc(world: ^World, z: f32) -> (relative_index: i32, offset_z: f32) {
+                p := map_into_worldspace(world, {chunk = {0, 0, relative_index}}, z)
+                offset_z = p.offset.z
+                relative_index = p.chunk.z
+                return relative_index, offset_z
+            }
+            
+            relative_layer := entity.z_layer - sim_region.origin.chunk.z
+            
+            if !(MinimumLayer <= relative_layer && relative_layer <= MaximumLayer) do continue
+            
+            transform := default_upright_transform()
+            transform.offset = get_entity_ground_point(&entity) - camera_p
+            transform.manual_sort_key = entity.manual_sort_key
+            transform.chunk_z = entity.z_layer
+            
+            if current_absolute_layer != entity.z_layer {
+                assert(current_absolute_layer < entity.z_layer)
+                current_absolute_layer = entity.z_layer
+                
+                push_sort_barrier(render_group)
+            }
+            
+            if relative_layer == MaximumLayer || relative_layer == MaximumLayer-1 {
+                transform.t_color.a = test_alpha[relative_layer - MinimumLayer]
+            } else {
+                transform.color = haze_color
+                transform.t_color.rgb = fog_amount[relative_layer - MinimumLayer]
+            }
+            
+            // _, offset_z := convert_to_relative_layer(world, transform.offset.z)
+            // transform.offset.z = offset_z
+            
+            shadow_transform := default_flat_transform()
+            shadow_transform.offset = get_entity_ground_point(&entity) - camera_p
+            shadow_transform.offset.y -= 0.5
+            
+            if entity.pieces.count > 1 do begin_aggregate_sort_key(render_group)
+            for piece in slice(&entity.pieces) {
+                offset := piece.offset
+                color  := piece.color
+                x_axis := entity.x_axis
+                y_axis := entity.y_axis
+                
+                if .BobUpAndDown in piece.flags {
+                    // @todo(viktor): Reenable this floating animation
+                    // entity.t_bob += dt
+                    // if entity.t_bob > Tau {
+                    //     entity.t_bob -= Tau
+                    // }
+                    // hz :: 4
+                    // coeff := sin(entity.t_bob * hz)
+                    // z := (coeff) * 0.3 + 0.1
+                    
+                    // offset += {0, z, 0}
+                    // color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
+                }
+                
+                if .SquishAxis in piece.flags {
+                    y_axis *= 0.4
+                }
+                
+                bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
+                push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
+                
+                if debug_requested(debug_id) { 
+                    debug_record_value(&bitmap_id)
+                }
+            }
+            if entity.pieces.count > 1 do end_aggregate_sort_key(render_group)
+            
+            draw_hitpoints(render_group, &entity, 0.5, transform)
+            
+            if RenderCollisionOutlineAndTraversablePoints {
+                color := Green
+                color.rgb *= 0.4
+                flat_transform := transform
+                flat_transform.is_upright = false
+                
+                for traversable in slice(entity.traversables) {
+                    rect := rectangle_center_dimension(traversable.p, 1.5)
+                    push_rectangle(render_group, rect, flat_transform, traversable.occupant != nil ? Red : Green)
+                }
+            }
+            
+            when DebugEnabled {
+                for volume in entity.collision.volumes {
+                    local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
+                    
+                    if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
+                        debug_hit(debug_id, local_mouse_p.z)
+                    }
+                    
+                    highlighted, color := debug_highlighted(debug_id)
+                    if highlighted {
+                        push_rectangle_outline(render_group, volume, transform, color, 0.05)
+                    }
+                }
+                
+                if debug_requested(debug_id) { 
+                    debug_record_value(cast(^u32) &entity.id, name = "entity_id")
+                    debug_record_value(&entity.p.x)
+                    debug_record_value(&entity.p.y)
+                    debug_record_value(&entity.p.y)
+                    debug_record_value(&entity.dp)
+                }
+            }
+            
         }
-        
     }
 }
 

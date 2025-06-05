@@ -309,11 +309,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     old_clip_rect_index := render_group.current_clip_rect_index
     defer render_group.current_clip_rect_index = old_clip_rect_index
 
-    simulate_entities := begin_timed_block("simulate_entities")
-    for &entity in slice(sim_region.entities) {
-        simulate_entity(input, world, sim_region, render_group, camera_p, &entity, dt, haze_color)
-    }
-    end_timed_block(simulate_entities)
+    update_and_render_entities(input, world, sim_region, render_group, camera_p, dt, haze_color)
     
     ////////////////////////////////////////////////
     
@@ -647,7 +643,6 @@ pack_entity_into_world :: proc(region: ^SimRegion, world: ^World, source: ^Entit
 pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entity, chunk: ^Chunk) {
     assert(chunk != nil)
     
-    // :PointerArithmetic
     pack_size := cast(i64) size_of(Entity)
     
     if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
@@ -661,19 +656,16 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entit
     block := chunk.first_block
     
     // :PointerArithmetic
-    dest := &block.entity_data.data[block.entity_data.count]
+    entity := cast(^Entity)  &block.entity_data.data[block.entity_data.count]
     block.entity_data.count += pack_size
-    
     block.entity_count += 1
     
-    entity := (cast(^Entity) dest)
     entity ^= source^
     
     // @volatile see Entity definition @metaprogram
     entity.ddp = 0
     entity.ddt_bob = 0
     
-    // pack_entity_reference(region, &entity.head)
     pack_traversable_reference(region, &entity.came_from)
     pack_traversable_reference(region, &entity.occupying)
 }

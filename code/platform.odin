@@ -251,13 +251,14 @@ main :: proc() {
     // @todo(viktor): Lets make this our first growable arena!
     // Also use it in more places if needed!
     frame_arena: Arena
-    frame_storage := (cast([^]u8) allocate_memory(FrameTempStorageSize))[: FrameTempStorageSize]
+    frame_storage := slice_from_parts(u8, allocate_memory(FrameTempStorageSize), FrameTempStorageSize)
     init_arena(&frame_arena, frame_storage)
     
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
     game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
+    
     // @todo(viktor): make this like sixty seconds?
     // @todo(viktor): pool with bitmap alloc
     // @todo(viktor): remove MaxPossibleOverlap
@@ -267,8 +268,7 @@ main :: proc() {
     // @todo(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
     push_buffer_size :: 32 * Megabyte
-    push_buffer_memory := allocate_memory(push_buffer_size)
-    push_buffer := (cast([^]u8) push_buffer_memory)[:push_buffer_size]
+    push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size), push_buffer_size)
     
     game_memory := GameMemory {
         high_priority_queue = &high_queue,
@@ -983,8 +983,7 @@ resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i3
     bytes_per_pixel :: 4
     buffer_pitch := align16(buffer.width)
     bitmap_memory_size := buffer_pitch * buffer.height * bytes_per_pixel
-    buffer_ptr := cast([^]Color) win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE)
-    buffer.memory = buffer_ptr[:buffer.width*buffer.height]
+    buffer.memory = slice_from_parts(Color, win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE), buffer.width*buffer.height)
     
     // @todo(viktor): probably clear this to black
 }

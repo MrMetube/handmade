@@ -68,8 +68,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                     chunk_delta := world_distance(world, chunk_world_p, region.origin)
                     block := chunk.first_block
                     for block != nil {
-                        // :PointerArithmetic
-                        entities := (cast([^]Entity) &block.entity_data.data)[:block.entity_count]
+                        entities := slice_from_parts(Entity, &block.entity_data.data, block.entity_count)
                         for &source in entities {
                             // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
                             assert(source.id != 0)
@@ -78,7 +77,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             assert(hash != nil)
                             assert(hash.pointer == nil)
                             
-                            dest :^Entity= append(&region.entities)
+                            dest := append(&region.entities)
                             
                             assert(hash.id == 0 || hash.id == source.id)
                             hash.id = source.id
@@ -92,13 +91,14 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             
                             // @todo(viktor): @transient marked members should not be unpacked
                             dest.manual_sort_key = {}
+                            dest.z_layer = chunk_z
                             
                             dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
                             
                             if dest.brain_id != 0 {
                                 brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
-                                // :PointerArtthmetic
-                                base := cast([^]^Entity) &brain.parts
+                                
+                                base := slice_from_parts(^Entity, &brain.parts, size_of(brain.parts) / size_of(^Entity))
                                 base[dest.brain_slot.index] = dest
                             }
                         }

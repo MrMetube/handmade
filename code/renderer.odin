@@ -31,9 +31,9 @@ init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width
         width  = width, 
         height = height,
         
-        push_buffer_size = size_of(RenderEntryHeader), 
+        render_entry_count = 1,
         push_buffer = push_buffer,
-        sort_sprite_bounds_at = auto_cast len(push_buffer),
+        push_buffer_data_at = auto_cast len(push_buffer),
     }
 }
     
@@ -60,105 +60,113 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
 sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
     timed_function()
     
-    count := commands.push_buffer_element_count
-    if count == 0 do return
+    element_count := commands.render_entry_count
+    if element_count == 0 do return
     
-    // :PointerArithmetic
-    entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
+    nodes := slice(commands.sort_entries)
+    offsets := make_array(arena, u32, len(nodes))
     
-    for start: i32; start < auto_cast len(entries)-1; {
-        start = build_sprite_graph(entries[start:], arena, vec_cast(f32, commands.width, commands.height))
+    barrier_count: i64
+    for start: i32; start < auto_cast len(nodes); {
+        count, hit_barrier := build_sprite_graph(nodes[start:], arena, vec_cast(f32, commands.width, commands.height))
+        
+        if hit_barrier {
+            assert(nodes[start+count-1].offset == SpriteBarrierValue)
+            barrier_count += 1
+        }
+        
+        sub_nodes := nodes[start :][: count - (hit_barrier ? 1 : 0)]
+        walk := SpriteGraphWalk { sub_nodes, &offsets, false }
+        for at, index in walk.nodes {
+            assert(at.offset != SpriteBarrierValue)
+            
+            walk.hit_cycle = false
+            if at.offset == SpriteBarrierValue {
+                assert(false)
+                continue
+            }
+            walk_sprite_graph_front_to_back(&walk, auto_cast index)
+        }
+        
+        start += count
     }
-    prep.sorted_offsets = walk_sprite_graph(entries, arena)
+    
+    prep.sorted_offsets =  slice(offsets)
+    assert(offsets.count + barrier_count == auto_cast len(nodes))
 }
 
-build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (result: i32) {
+build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (count: i32, hit_barrier: b32) {
     timed_function()
     
-    count := len(nodes)
-    assert(cast(u64) count < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
-    if count != 0 {
-        // Grid Factor vs cycles in "bucketing"
-        //  o:none   / o:speed
-        // 1 - 200 M / 
-        // 2 -  85 M / 15 M
-        // 4 -  60 M / 11 M
-        // 8 -  55 M / 10 M
-        // 12 - 55 M / 10 M
-        Width  :: 8*16
-        Height :: 8*9
+    assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
+    if len(nodes) == 0 do return
+    // Grid Factor vs cycles in "bucketing"
+    //  o:none   / o:speed
+    // 1 - 200 M / 
+    // 2 -  85 M / 15 M
+    // 4 -  60 M / 11 M
+    // 8 -  55 M / 10 M
+    // 12 - 55 M / 10 M
+    Width  :: 8*16
+    Height :: 8*9
+    
+    bucketing := game.begin_timed_block("bucketing")
+    
+    grid: [Width][Height]^SortGridEntry
+    inv_cell_size := v2{Width, Height} / screen_size
+    screen_rect := rectangle_min_dimension(v2{}, screen_size)
+    
+    for &a, index_a in nodes {
+        count = cast(i32) index_a+1
+        if a.offset == SpriteBarrierValue {
+            hit_barrier = true
+            break
+        }
         
-        bucketing := game.begin_timed_block("bucketing")
+        index_a := cast(u16) index_a
+        if !intersects(a.screen_bounds, screen_rect) do continue
         
-        grid: [Width][Height]^SortGridEntry
-        inv_cell_size := v2{Width, Height} / screen_size
-        screen_rect := rectangle_min_dimension(v2{}, screen_size)
+        grid_span := rectangle_min_max(truncate(inv_cell_size * a.screen_bounds.min), truncate(inv_cell_size * a.screen_bounds.max))
         
-        for &a, index_a in nodes {
-            result = cast(i32) index_a
-            // if a.offset == SpriteBarrierValue do break
-            
-            index_a := cast(u16) index_a
-            if !intersects(a.screen_bounds, screen_rect) do continue
-            
-            grid_span := rectangle_min_max(truncate(inv_cell_size * a.screen_bounds.min), truncate(inv_cell_size * a.screen_bounds.max))
-            
-            grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({Width, Height}-1) })
-            
-            for grid_x in grid_span.min.x ..= grid_span.max.x {
-                for grid_y in grid_span.min.y ..= grid_span.max.y {
-                    entry := push(arena, SortGridEntry, no_clear())
-                    entry.occupant_index = auto_cast index_a
+        grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({Width, Height}-1) })
+        
+        for grid_x in grid_span.min.x ..= grid_span.max.x {
+            for grid_y in grid_span.min.y ..= grid_span.max.y {
+                entry := push(arena, SortGridEntry, no_clear())
+                entry.occupant_index = auto_cast index_a
+                
+                slot := &grid[grid_x][grid_y]
+                entry.next = slot^
+                defer slot ^= entry
+                
+                for entry_b := slot^; entry_b != nil; entry_b = entry_b.next {
+                    index_b := entry_b.occupant_index
+                    b := &nodes[index_b]
                     
-                    slot := &grid[grid_x][grid_y]
-                    entry.next = slot^
-                    defer slot ^= entry
+                    if b.generation_count == index_a || !intersects(a.screen_bounds, b.screen_bounds) do continue
+                    b.generation_count = index_a
                     
-                    for entry_b := slot^; entry_b != nil; entry_b = entry_b.next {
-                        index_b := entry_b.occupant_index
-                        b := &nodes[index_b]
-                        
-                        if b.generation_count == index_a || !intersects(a.screen_bounds, b.screen_bounds) do continue
-                        b.generation_count = index_a
-                        
-                        front_index, behind_index := index_a, index_b
-                        if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
-                            swap(&front_index, &behind_index)
-                        }
-                        
-                        edge := push(arena, SpriteEdge, no_clear())
-                        front := &nodes[front_index]
-                        
-                        edge.front  = auto_cast front_index
-                        edge.behind = auto_cast behind_index
-                        
-                        edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
-                        front.first_edge_with_me_as_the_front = edge
-                        
+                    front_index, behind_index := index_a, index_b
+                    if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
+                        swap(&front_index, &behind_index)
                     }
+                    
+                    edge := push(arena, SpriteEdge, no_clear())
+                    front := &nodes[front_index]
+                    
+                    edge.front  = auto_cast front_index
+                    edge.behind = auto_cast behind_index
+                    
+                    edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
+                    front.first_edge_with_me_as_the_front = edge
+                    
                 }
             }
         }
-        game.end_timed_block(bucketing)
     }
+    game.end_timed_block(bucketing)
     
-    return result
-}
-
-walk_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) -> (result: []u32) {
-    timed_function()
-    
-    offsets := make_array(arena, u32, len(nodes))
-    walk := SpriteGraphWalk { nodes, &offsets, false }
-    
-    for at, index in walk.nodes {
-        walk.hit_cycle = false
-        walk_sprite_graph_front_to_back(&walk, auto_cast index)
-    }
-    
-    assert(offsets.count == auto_cast len(nodes))
-    
-    return slice(offsets)
+    return count, hit_barrier
 }
 
 walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
@@ -249,8 +257,8 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)}, commands.clear_color, clip_rect)
     
     for sort_entry_index in prep.sorted_offsets {
-        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         // :PointerArithmetic
+        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
         entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
         
         if clip_rect_index != header.clip_rect_index {
@@ -262,7 +270,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         switch header.type {
           case .None: unreachable()
           case .RenderEntryClip:
-            // @todo(viktor): 
+            // Already handled in linearize_clip_rects
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data

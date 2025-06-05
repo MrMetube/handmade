@@ -310,9 +310,9 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
     clip_rect_index := max(u16)
     for sort_entry_offset in prep.sorted_offsets {
         offset := sort_entry_offset
-        header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
         
         //:PointerArithmetic
+        header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
         entry_data := &commands.push_buffer[offset + size_of(RenderEntryHeader)]
         
         if clip_rect_index != header.clip_rect_index {
@@ -322,7 +322,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
         }
         
         switch header.type {
-          case .None: unreachable()
+          case .None: 
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
             
@@ -423,14 +423,14 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
     }
     
     if GlobalDebugShowRenderSortGroups {
-        count := commands.push_buffer_element_count
-        if count != 0 {
-            // :PointerArithmetic
-            bounds := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
+        // @todo(viktor): this broke since the separation of the layers with sort barriers
+        if commands.render_entry_count != 0 {
+            bounds := slice(commands.sort_entries)
             
             color_wheel := color_wheel
             color_index: u32
             for bound, index in bounds {
+                if bound.offset == SpriteBarrierValue do continue
                 if .DebugBox in bound.flags do continue
             
                 if .Cycle in bound.flags {

@@ -833,7 +833,7 @@ divider_acquire :: proc(divider: ^Divider, header: ^AssetMemoryHeader) -> (total
     // :PointerArithmetic
     HeaderSize :: size_of(AssetMemoryHeader)
     total_memory   = ((cast([^]u8) header)[HeaderSize:])
-    divider.memory = (cast([^]u8) total_memory)[:header.total_size - HeaderSize]
+    divider.memory = slice_from_parts(u8, total_memory, header.total_size - HeaderSize)
     
     return total_memory
 }

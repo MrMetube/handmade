@@ -41,8 +41,7 @@ push :: proc { push_slice, push_struct, push_size, copy_string }
 @(require_results)
 push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
     size := size_of(Element) * count
-    data := cast([^]Element) push_size(arena, size, params)
-    result = data[:count]
+    result = slice_from_parts(Element, push_size(arena, size, params), count)
     
     return result
 }
@@ -74,7 +73,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushP
         cache_line_count: u64
         if size > cache_line_size {
             cache_line_count = size/cache_line_size
-            cache_lines := (cast([^]cache_line) result)[:cache_line_count]
+            cache_lines := slice_from_parts(cache_line, result, cache_line_count)
             for &w in cache_lines do w = 0
         }
         
@@ -120,8 +119,7 @@ arena_has_room_size :: proc(arena: ^Arena, #any_int size_init: u64, #any_int ali
 
 zero :: proc { zero_size, zero_slice }
 zero_size :: proc(memory: pmm, size: u64) {
-    // :PointerArithmetic
-    bytes := (cast([^]u8)memory)[:size]
+    bytes := slice_from_parts(u8, memory, size)
     for &b in bytes {
         b = {}
     }
