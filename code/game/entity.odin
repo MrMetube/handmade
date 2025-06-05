@@ -412,7 +412,7 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
     }
 }
 
-simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, entity: ^Entity, dt: f32, haze_color: v4, clip_rect_index: []u16, minimum_layer: i32, maximum_layer: i32) {
+simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, entity: ^Entity, dt: f32, clip_rect_index: []u16, minimum_layer: i32, maximum_layer: i32) {
     // @todo(viktor): we dont really have a way to unique-ify these :(
     debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
     if debug_requested(debug_id) { 
@@ -528,7 +528,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         }
         
         relative_layer, offset_z := convert_to_relative_layer(world, transform.offset.z)
-        // transform.offset.z = offset_z
+        transform.offset.z = offset_z
         
         if !(minimum_layer <= relative_layer && relative_layer <= maximum_layer) {
             return
@@ -585,7 +585,7 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
             }
         }
         
-        when DebugEnabled do if false {
+        when DebugEnabled {
             for volume in entity.collision.volumes {
                 local_mouse_p := unproject_with_transform(render_group.camera, transform, input.mouse.p)
                 

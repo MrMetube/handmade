@@ -91,7 +91,7 @@ chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: 
     tile_depth_in_meters := world.typical_floor_height
     
     offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_x, tile_y, tile_z) + {0.5, 0.5, 0})
-    
+    offset.z -= 0.4 * tile_depth_in_meters
     result = map_into_worldspace(world, result, offset + additional_offset)
     
     assert(is_canonical(world, result.offset))
@@ -151,7 +151,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for _ in u32(0) ..< 2 {
+    for _ in u32(0) ..< 4 {
         when !true {
             choice := random_choice(&world.game_entropy, 2)
         } else {
@@ -277,7 +277,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     clip_rect_index: [MaximumLayer - MinimumLayer + 1]u16
     for &clip_rect, index in clip_rect_index {
         relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z: f32 = sim_region.origin.offset.z + world.typical_floor_height * cast(f32) relative_layer_index
+        camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
         
         fx: ClipRectFX
         if camera_relative_ground_z > fade_top_start {
@@ -343,7 +343,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     simulate_entities := begin_timed_block("simulate_entities")
     for &entity in slice(sim_region.entities) {
-        simulate_entity(input, world, sim_region, render_group, camera_p, &entity, dt, haze_color, clip_rect_index[:], MinimumLayer, MaximumLayer)
+        simulate_entity(input, world, sim_region, render_group, camera_p, &entity, dt, clip_rect_index[:], MinimumLayer, MaximumLayer)
     }
     end_timed_block(simulate_entities)
     
