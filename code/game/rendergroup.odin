@@ -87,10 +87,14 @@ RenderGroup :: struct {
 }
 
 Transform :: struct {
+    chunk_z: i32,
+    
     offset:     v3,  
     scale:      f32,
-    sort_bias:  f32,
     is_upright: b32,
+    
+    color:   v4,
+    t_color: v4,
     
     manual_sort_key: ManualSortKey,
 }
@@ -133,8 +137,6 @@ RenderEntryHeader :: struct { // @todo(viktor): Don't store type here, store in 
 RenderEntryClip :: struct {
     rect: Rectangle2i,
     next: ^RenderEntryClip,
-    
-    fx: ClipRectFX,
 }
 
 @(common)
@@ -155,12 +157,6 @@ RenderEntryRectangle :: struct {
     rect:  Rectangle2,
 }
 
-@(common)
-ClipRectFX :: struct {
-    t_color: v4,
-    color:   v4,
-}
-        
 UsedBitmapDim :: struct {
     size:  v2,
     align: v2,
@@ -230,10 +226,8 @@ orthographic :: proc(group: ^RenderGroup, meters_to_pixels: f32) {
     }
 }
 
-store_color :: proc(group: ^RenderGroup, color: v4) -> (result: v4) {
-    // @todo(viktor): This should now happen per layer
-    // result = lerp(color, group.global_color, group.t_global_color)
-    result = color
+store_color :: proc(transform: Transform, color: v4) -> (result: v4) {
+    result = lerp(color, transform.color, transform.t_color)
     result.rgb *= result.a
     return result
 }
@@ -305,11 +299,11 @@ clear :: proc(group: ^RenderGroup, color: v4) {
         y_max = PositiveInfinity,
         z_max = NegativeInfinity,
     }
-    group.commands.clear_color = store_color(group, color)
+    group.commands.clear_color = store_color({}, color)
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }
-push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipRectFX{}) -> (result: u16) {
+push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2) -> (result: u16) {
     size := cast(u32) size_of(RenderEntryClip)
     
     commands := group.commands
@@ -328,7 +322,6 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, fx := ClipR
         
         clip := RenderEntryClip { rect = rec_cast(i32, rect) }
         clip.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
-        clip.fx = fx
         
         entry ^= clip
     }
@@ -394,7 +387,7 @@ push_bitmap_raw :: proc(
         element.id     = cast(u32) asset_id
         
         element.p                   = used_dim.basis.p
-        element.premultiplied_color = store_color(group, color)
+        element.premultiplied_color = store_color(transform, color)
         
         element.x_axis = size.x * x_axis
         element.y_axis = size.y * y_axis
@@ -417,7 +410,7 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
         bounds := get_sprite_bounds(transform, 0, dimension.y)
         element := push_render_element(group, RenderEntryRectangle, bounds, screen_rect)
 
-        element.premultiplied_color = store_color(group, color)
+        element.premultiplied_color = store_color(transform, color)
         element.rect                = screen_rect
     }
 }
@@ -533,6 +526,9 @@ unproject_with_transform :: proc(camera: Camera, transform: Transform, pixel_p: 
 ////////////////////////////////////////////////
 
 @(common)
+SpriteBarrierValue :: 0xFFFFFFFF
+
+@(common)
 SortSpriteBounds :: struct {
     using bounds: SpriteBounds,
     offset:  u32,
@@ -546,6 +542,7 @@ SortSpriteBounds :: struct {
 
 @(common)
 SpriteBounds :: struct {
+    chunk_z: i32,
     y_min, y_max, z_max: f32,
     using manual_sort_key: ManualSortKey,
 }
@@ -569,6 +566,7 @@ is_y_sprite :: proc(s: SpriteBounds) -> b32 {
 
 @(common)
 sort_sprite_bounds_is_in_front_of :: proc(a, b: SpriteBounds) -> (a_in_front_of_b: b32) {
+    if a.chunk_z != b.chunk_z do return a.chunk_z > b.chunk_z
     if a.always_in_front_of != 0 && a.always_in_front_of == b.always_behind do return true
     if a.always_behind      != 0 && a.always_behind == b.always_in_front_of do return false
     
@@ -618,9 +616,11 @@ end_aggregate_sort_key :: proc(group: ^RenderGroup) {
 get_sprite_bounds :: proc(transform: Transform, offset: v3, height: f32) -> (result: SpriteBounds) {
     y := transform.offset.y + offset.y
     result = SpriteBounds {
-        y_min = y - transform.sort_bias,
-        y_max = y - transform.sort_bias,
-        z_max = transform.offset.z + offset.z + transform.sort_bias,
+        chunk_z = transform.chunk_z,
+        
+        y_min = y,
+        y_max = y,
+        z_max = transform.offset.z + offset.z,
         manual_sort_key = transform.manual_sort_key,
     }
     

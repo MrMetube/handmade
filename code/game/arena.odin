@@ -67,7 +67,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushP
     assert(size >= size_init)
     
     if .ClearToZero in params.flags {
-        // timed_block("ClearToZero")
+        timed_block("ClearToZero")
         
         cache_line :: [8]u64
         cache_line_size :: size_of(cache_line)

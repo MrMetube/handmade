@@ -412,7 +412,7 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
     }
 }
 
-simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, entity: ^Entity, dt: f32, clip_rect_index: []u16, minimum_layer: i32, maximum_layer: i32) {
+simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, entity: ^Entity, dt: f32, haze_color: v4) {
     // @todo(viktor): we dont really have a way to unique-ify these :(
     debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
     if debug_requested(debug_id) { 
@@ -509,13 +509,24 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
         ////////////////////////////////////////////////
         // Rendering
         
-        transform := default_upright_transform()
-        transform.offset = get_entity_ground_point(entity) - camera_p
-        transform.manual_sort_key = entity.manual_sort_key
+        fade_top_end      := .95 * world.typical_floor_height
+        fade_top_start    := .3 * world.typical_floor_height
+        fade_bottom_start := -1 * world.typical_floor_height
+        fade_bottom_end   := -4 * world.typical_floor_height
         
-        shadow_transform := default_flat_transform()
-        shadow_transform.offset = get_entity_ground_point(entity) - camera_p
-        shadow_transform.offset.y -= 0.5
+        MinimumLayer :: -4
+        MaximumLayer :: 1
+        
+        fog_amount: [MaximumLayer - MinimumLayer + 1] f32
+        test_alpha: [MaximumLayer - MinimumLayer + 1] f32
+        for &fog_amount, index in fog_amount {
+            alpha := &test_alpha[index]
+            relative_layer_index := MinimumLayer + index
+            camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
+            
+            alpha     ^= clamp_01_to_range(fade_top_start,    camera_relative_ground_z, fade_top_end)
+            fog_amount = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
+        }
         
         facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
         facing_weights := #partial AssetVector{ .FacingDirection = 1 }
@@ -527,14 +538,30 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
             return relative_index, offset_z
         }
         
-        relative_layer, offset_z := convert_to_relative_layer(world, transform.offset.z)
-        transform.offset.z = offset_z
+        entity_world_p := map_into_worldspace(world, sim_region.origin, entity.p)
+        relative_layer := entity_world_p.chunk.z - sim_region.origin.chunk.z
         
-        if !(minimum_layer <= relative_layer && relative_layer <= maximum_layer) {
+        if !(MinimumLayer <= relative_layer && relative_layer <= MaximumLayer) {
             return
         }
         
-        render_group.current_clip_rect_index = clip_rect_index[relative_layer - minimum_layer]
+        transform := default_upright_transform()
+        transform.offset = get_entity_ground_point(entity) - camera_p
+        transform.manual_sort_key = entity.manual_sort_key
+        transform.chunk_z = entity_world_p.chunk.z
+        if relative_layer == MaximumLayer || relative_layer == MaximumLayer-1 {
+            transform.t_color.a = test_alpha[relative_layer - MinimumLayer]
+        } else {
+            transform.color = haze_color
+            transform.t_color.rgb = fog_amount[relative_layer - MinimumLayer]
+        }
+        
+        // _, offset_z := convert_to_relative_layer(world, transform.offset.z)
+        // transform.offset.z = offset_z
+        
+        shadow_transform := default_flat_transform()
+        shadow_transform.offset = get_entity_ground_point(entity) - camera_p
+        shadow_transform.offset.y -= 0.5
         
         if entity.pieces.count > 1 do begin_aggregate_sort_key(render_group)
         for piece in slice(&entity.pieces) {
@@ -579,9 +606,8 @@ simulate_entity :: proc(input: Input, world: ^World, sim_region: ^SimRegion, ren
             flat_transform.is_upright = false
             
             for traversable in slice(entity.traversables) {
-                rect := rectangle_center_dimension(traversable.p, 1.3)
+                rect := rectangle_center_dimension(traversable.p, 1.5)
                 push_rectangle(render_group, rect, flat_transform, traversable.occupant != nil ? Red : Green)
-                // push_rectangle_outline(render_group, rect, flat_transform, Black)
             }
         }
         

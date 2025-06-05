@@ -104,6 +104,7 @@ DebugInteractionKind :: enum {
 Layout :: struct {
     debug:        ^DebugState,
     mouse_p:      v2,
+    dt: f32,
     
     base_p: v2,
     p:      v2,
@@ -155,8 +156,8 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
     mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
     
-    debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p)
-    draw_trees(debug, mouse_p)
+    debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p, input.delta_time)
+    draw_trees(debug, mouse_p, input.delta_time)
     end_layout(&debug.mouse_text_layout)
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
@@ -165,13 +166,13 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     interact(debug, input, mouse_p)
 }
 
-draw_trees :: proc(debug: ^DebugState, mouse_p: v2) {
+draw_trees :: proc(debug: ^DebugState, mouse_p: v2, dt: f32) {
     timed_function()
     
     assert(debug.font_info != nil)
     
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
-        layout := begin_layout(debug, tree.p, mouse_p)
+        layout := begin_layout(debug, tree.p, mouse_p, dt)
         defer end_layout(&layout)
         
         draw_tree(&layout, mouse_p, tree, tree.root)
@@ -423,9 +424,9 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         
         #partial switch value in element.type {
           case ThreadProfileGraph:
-            draw_profile(debug, &graph.root, mouse_p, rect, viewed_element)
+            draw_profile(debug, &graph.root, mouse_p, dt, rect, viewed_element)
           case FrameBarsGraph:
-            draw_frame_bars(debug, &graph.root, mouse_p, rect, viewed_element)
+            draw_frame_bars(debug, &graph.root, mouse_p, dt, rect, viewed_element)
           case TopClocksList:
             draw_top_clocks(debug, &graph.root, mouse_p, rect, viewed_element)
           case: unreachable()
@@ -462,9 +463,12 @@ add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
     text_bounds = add_offset(text_bounds, p)
     text_bounds = add_radius(text_bounds, 4)
     
-    background := debug.text_transform
-    background.sort_bias -= 1000
-    push_rectangle(&debug.render_group, text_bounds, background, {0,0,0,0.95})
+    before := debug.text_transform
+    defer debug.text_transform = before
+    
+    debug.text_transform.chunk_z += 1000
+    push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
+    debug.text_transform.chunk_z += 1000
     push_text(debug, text, p, color)
 }
 
@@ -518,10 +522,8 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
         }
         
         if color.a != 0 {
-            transform := debug.ui_transform
-            push_rectangle(&debug.render_group, region_rect, transform, color)
-            transform.sort_bias += 1000
-            push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2, .2, .2, 1}, {1, 0})
+            push_rectangle(&debug.render_group, region_rect, debug.backing_transform, color)
+            push_rectangle_outline(&debug.render_group, region_rect, debug.ui_transform, color * {.2, .2, .2, 1}, {1, 0})
         }
         at_x += bar_width
     }
@@ -609,19 +611,30 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     }
 }
 
-draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+longest_frame_span: f32
+d_longest_frame_span: f32
+draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
+    // @todo(viktor): the height changes based on the max value. 
+    // Let the user zoom and pan
+    
     dim := get_dimension(rect)
     bar_width := dim.x / cast(f32) (MaxFrameCount-1)
     
     at_x := rect.min.x
-    longest_frame_span: f32
+    target_longest_frame_span: f32
     for &frame in root_element.frames {
         if frame.events.first == nil do continue
         
         root_node := &frame.events.first.node
         frame_span := cast(f32) root_node.duration
-        longest_frame_span = max(longest_frame_span, frame_span)
+        target_longest_frame_span = max(target_longest_frame_span, frame_span)
     }
+    
+    delta_p := target_longest_frame_span - longest_frame_span
+    dd_longest_frame_span := (delta_p > 0 ? 600 : 100) * (delta_p) + (delta_p > 0 ? 34 : 17) * (0 - d_longest_frame_span)
+    dd_longest_frame_span += -3 * d_longest_frame_span
+    d_longest_frame_span += dd_longest_frame_span * dt
+    longest_frame_span += d_longest_frame_span * dt + 0.5 * dd_longest_frame_span * dt * dt
     
     pixel_span := dim.y
     scale := safe_ratio_0(pixel_span, longest_frame_span)
@@ -652,11 +665,11 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
                 border_color := color * {.2,.2,.2, 1}
                 if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
                     border_color = 1
-                    transform.sort_bias += 10
+                    transform.chunk_z += 10
                 }
                 push_rectangle(&debug.render_group, region_rect, transform, color)
                 
-                transform.sort_bias += 10
+                transform.chunk_z += 10
                 push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
             }
             
@@ -676,12 +689,20 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     }
 }
 
-draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+d_total_clocks, total_clocks: f32
+draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
     lane_count := cast(f32) debug.max_thread_count
     lane_height := safe_ratio_n(get_dimension(rect).y, lane_count, get_dimension(rect).y)
     
     frame := &root_element.frames[debug.viewed_frame_ordinal]
-    total_clocks := get_total_clocks(frame)
+    
+    target_total_clocks := cast(f32) get_total_clocks(frame)
+    
+    delta_p := target_total_clocks - total_clocks
+    dd_total_clocks := (delta_p > 0 ? 8000 : 2000) * (delta_p) + 100 * (0 - d_total_clocks)
+    dd_total_clocks += -3 * d_total_clocks
+    d_total_clocks += dd_total_clocks * dt
+    total_clocks += d_total_clocks * dt + 0.5 * dd_total_clocks * dt * dt
     
     next_x := rect.min.x
     relative_clock: i64
@@ -729,10 +750,10 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         
         if x_max - x_min >= 1 {
             transform := debug.ui_transform
-            transform.sort_bias += 1000/lane_height
+            transform.chunk_z += cast(i32) (1000/lane_height)
             push_rectangle(&debug.render_group, region_rect, transform, color)
             
-            transform.sort_bias += 10
+            transform.chunk_z += 10
             push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2,.2,.2, 1}, 1)
         }
         
@@ -754,10 +775,11 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
 
 ///////////////////////////////////////////////
 
-begin_layout :: proc(debug: ^DebugState, p: v2, mouse_p: v2) -> (result: Layout) {
+begin_layout :: proc(debug: ^DebugState, p: v2, mouse_p: v2, dt: f32) -> (result: Layout) {
     result = {
         debug   = debug,
         mouse_p = mouse_p,
+        dt      = dt,
         
         p      = p,
         base_p = p,

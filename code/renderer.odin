@@ -66,11 +66,13 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     // :PointerArithmetic
     entries := (cast([^]SortSpriteBounds) &commands.push_buffer[commands.sort_sprite_bounds_at])[:count]
     
-    build_sprite_graph(entries, arena, vec_cast(f32, commands.width, commands.height))
+    for start: i32; start < auto_cast len(entries)-1; {
+        start = build_sprite_graph(entries[start:], arena, vec_cast(f32, commands.width, commands.height))
+    }
     prep.sorted_offsets = walk_sprite_graph(entries, arena)
 }
 
-build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) {
+build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (result: i32) {
     timed_function()
     
     count := len(nodes)
@@ -93,6 +95,9 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
         screen_rect := rectangle_min_dimension(v2{}, screen_size)
         
         for &a, index_a in nodes {
+            result = cast(i32) index_a
+            // if a.offset == SpriteBarrierValue do break
+            
             index_a := cast(u16) index_a
             if !intersects(a.screen_bounds, screen_rect) do continue
             
@@ -136,6 +141,8 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
         }
         game.end_timed_block(bucketing)
     }
+    
+    return result
 }
 
 walk_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena) -> (result: []u32) {

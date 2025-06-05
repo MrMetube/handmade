@@ -201,14 +201,14 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
             }
         }
         
-        add_monster(world,  room.p[3][4], room.ground[3][4])
-        add_familiar(world, room.p[2][5], room.ground[2][5])
+        // add_monster(world,  room.p[3][4], room.ground[3][4])
+        // add_familiar(world, room.p[2][5], room.ground[2][5])
         
-        snake_brain := add_brain(world)
-        for piece_index in u32(0)..<len(BrainSnake{}.segments) {
-            x := 1+piece_index
-            add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
-        }
+        // snake_brain := add_brain(world)
+        // for piece_index in u32(0)..<len(BrainSnake{}.segments) {
+        //     x := 1+piece_index
+        //     add_snake_piece(world, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
+        // }
         
         door_left   = door_right
         door_bottom = door_top
@@ -252,7 +252,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // @todo(viktor): by how much should we expand the sim region?
     // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := add_radius(camera_bounds, v3{30, 30, 10})
+    sim_bounds := add_radius(camera_bounds, v3{30, 30, 20})
     sim_origin := world.camera_p
     sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
     
@@ -261,47 +261,16 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     if ShowRenderAndSimulationBounds {
         transform := default_flat_transform()
         transform.offset -= camera_p
-        transform.sort_bias = 10000
+        transform.chunk_z = 10000
         push_rectangle_outline(render_group, screen_bounds,               transform, Orange, 0.1)
         push_rectangle_outline(render_group, sim_region.bounds,           transform, Blue,   0.2)
         push_rectangle_outline(render_group, sim_region.updatable_bounds, transform, Green,  0.2)
     }
     
-    fade_top_end      :=  0.75 * world.typical_floor_height
-    fade_top_start    :=  0.5  * world.typical_floor_height
-    fade_bottom_start := -1    * world.typical_floor_height
-    fade_bottom_end   := -4    * world.typical_floor_height
-    
-    MinimumLayer :: -4
-    MaximumLayer :: 1
-    clip_rect_index: [MaximumLayer - MinimumLayer + 1]u16
-    for &clip_rect, index in clip_rect_index {
-        relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
-        
-        fx: ClipRectFX
-        if camera_relative_ground_z > fade_top_start {
-            // Above the current level
-            render_group.current_clip_rect_index = clip_rect_index[0]
-            
-            fx.t_color.a = clamp_01_to_range(fade_top_start, camera_relative_ground_z, fade_top_end)
-        } else if camera_relative_ground_z < fade_bottom_start {
-            // Below the current level
-            render_group.current_clip_rect_index = clip_rect_index[2]
-            
-            fx.t_color.rgb = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
-            fx.color = haze_color
-        } else { 
-            // The current level
-            render_group.current_clip_rect_index = clip_rect_index[1]
-        }
-        
-        clip_rect = push_clip_rect(render_group, render_group.screen_area, fx)
-    }
-    
     ////////////////////////////////////////////////
     // Look to see if any players are trying to join
     
+    handle_join_inputs := begin_timed_block("handle_join_inputs")
     for controller, controller_index in input.controllers {
         con_hero := &world.controlled_heroes[controller_index]
         if con_hero.brain_id == 0 {
@@ -324,7 +293,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
             }
         }
     }
-
+    end_timed_block(handle_join_inputs)
+    
     ////////////////////////////////////////////////
     
     execute_brains := begin_timed_block("execute_brains")
@@ -339,11 +309,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     old_clip_rect_index := render_group.current_clip_rect_index
     defer render_group.current_clip_rect_index = old_clip_rect_index
 
-    render_group.current_clip_rect_index = clip_rect_index[0]
-    
     simulate_entities := begin_timed_block("simulate_entities")
     for &entity in slice(sim_region.entities) {
-        simulate_entity(input, world, sim_region, render_group, camera_p, &entity, dt, clip_rect_index[:], MinimumLayer, MaximumLayer)
+        simulate_entity(input, world, sim_region, render_group, camera_p, &entity, dt, haze_color)
     }
     end_timed_block(simulate_entities)
     
