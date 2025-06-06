@@ -415,7 +415,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         
         old_clip_rect := debug.render_group.current_clip_rect_index
         clip_rect := rect
-        debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, clip_rect, debug.backing_transform)
+        debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, clip_rect, debug.render_target_index, debug.backing_transform)
         defer debug.render_group.current_clip_rect_index = old_clip_rect
         
         if contains(rect, mouse_p) {
@@ -433,7 +433,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         }
     }
 }
-            
+
 draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rect: Rectangle2) {
     push_rectangle(&debug.render_group, rect, debug.backing_transform, DarkGreen)
     
@@ -997,7 +997,7 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
     } else {
         debug.hot_interaction = debug.next_hot_interaction
         
-        for transition_index:= input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
+        for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
             begin_click_interaction(debug, input)
             end_click_interaction(debug, input)
         }

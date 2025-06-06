@@ -416,6 +416,8 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
 }
 
 update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
+    timed_function()
+    
     fade_top_end      := .95 * world.typical_floor_height
     fade_top_start    := .3 * world.typical_floor_height
     fade_bottom_start := -1 * world.typical_floor_height
@@ -536,16 +538,8 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             
             facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
             facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-            
-            convert_to_relative_layer :: proc(world: ^World, z: f32) -> (relative_index: i32, offset_z: f32) {
-                p := map_into_worldspace(world, {chunk = {0, 0, relative_index}}, z)
-                offset_z = p.offset.z
-                relative_index = p.chunk.z
-                return relative_index, offset_z
-            }
-            
+                        
             relative_layer := entity.z_layer - sim_region.origin.chunk.z
-            
             if !(MinimumLayer <= relative_layer && relative_layer <= MaximumLayer) do continue
             
             transform := default_upright_transform()
@@ -554,6 +548,9 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             transform.chunk_z = entity.z_layer
             
             if current_absolute_layer != entity.z_layer {
+                if relative_layer == MaximumLayer {
+                    // push_clip_rect(render_group, render_group.screen_area, 1)
+                }
                 assert(current_absolute_layer < entity.z_layer)
                 current_absolute_layer = entity.z_layer
                 

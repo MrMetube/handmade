@@ -228,10 +228,11 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
     
 }
 
-display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: win.HDC) {
+gl_display_bitmap :: proc(width, height: i32, bitmap: Bitmap) {
     gl.Disable(gl.SCISSOR_TEST)
     
     gl.Viewport(0, 0, width, height)
+    gl.Disable(gl.BLEND)
     
     gl_set_screenspace(width, height)
     
@@ -248,7 +249,7 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
     
     gl.Enable(gl.TEXTURE_2D)
 
-    gl.ClearColor(1, 0, 1, 0)
+    gl.ClearColor(0, 0, 0, 0)
     gl.Clear(gl.COLOR_BUFFER_BIT)
 
     glMatrixMode(gl.TEXTURE)
@@ -260,40 +261,14 @@ display_bitmap_gl :: proc(width, height: i32, bitmap: Bitmap, device_context: wi
     glMatrixMode(gl.PROJECTION)
     glLoadIdentity()
 
-    glBegin(gl.TRIANGLES)
-    
-    P :f32= 1
-    
-    // @note(viktor): Lower triangle
-    glTexCoord2f(0.0, 0.0)
-    glVertex2f(-P, -P)
-    
-    glTexCoord2f(1.0, 0.0)
-    glVertex2f(P, -P)
-    
-    glTexCoord2f(1.0, 1.0)
-    glVertex2f(P, P)
-    
-    // @note(viktor): Upper triangle
-    glTexCoord2f(0.0, 0.0)
-    glVertex2f(-P, -P)
-    
-    glTexCoord2f(1.0, 1.0)
-    glVertex2f(P, P)
-    
-    glTexCoord2f(0.0, 1.0)
-    glVertex2f(-P, P)
-    
-    glEnd()
-    
-    win.SwapBuffers(device_context)
+    gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_width, window_height: i32) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, width, height: i32) {
     timed_function()
     
     gl.Viewport(0, 0, commands.width, commands.height)
-    gl_set_screenspace(window_width, window_height)
+    gl_set_screenspace(width, height)
     
     gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.TEXTURE_2D)
@@ -322,7 +297,10 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
         }
         
         switch header.type {
-          case .None: 
+          case .None: unreachable()
+          case .RenderEntryClip:
+            // @note(viktor): clip rects are handled before rendering
+            
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
             
@@ -350,78 +328,17 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
                 min_uv := v2{0+texel_x, 0+texel_y}
                 max_uv := v2{1-texel_x, 1-texel_y}
                 
-                min_x_min_y := entry.p
-                max_x_min_y := entry.p + entry.x_axis
-                min_x_max_y := entry.p + entry.y_axis
-                max_x_max_y := entry.p + entry.x_axis + entry.y_axis
+                min := entry.p
+                max := entry.p + entry.x_axis + entry.y_axis
                 
-                // @todo(viktor): why is this inlined glRectangle? explain
-                glBegin(gl.TRIANGLES)
-                    
-                    glColor4fv(&entry.premultiplied_color[0])
-                    // @note(viktor): Lower triangle
-                    glTexCoord2f(min_uv.x, min_uv.y)
-                    glVertex2fv(&min_x_min_y[0])
-
-                    glTexCoord2f(max_uv.x, min_uv.y)
-                    glVertex2fv(&max_x_min_y[0])
-
-                    glTexCoord2f(max_uv.x, max_uv.y)
-                    glVertex2fv(&max_x_max_y[0])
-
-                    // @note(viktor): Upper triangle
-                    glTexCoord2f(min_uv.x, min_uv.y)
-                    glVertex2fv(&min_x_min_y[0])
-
-                    glTexCoord2f(max_uv.x, max_uv.y)
-                    glVertex2fv(&max_x_max_y[0])
-
-                    glTexCoord2f(min_uv.x, max_uv.y)
-                    glVertex2fv(&min_x_max_y[0])
-                    
-                glEnd()
+                gl_rectangle(min, max, entry.premultiplied_color, min_uv, max_uv)
             }
             
-          case .RenderEntryClip:
-            // @note(viktor): clip rects are handled before rendering
           case:
             panic("Unhandled Entry")
         }
     }
-    
-    draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
-        bound := &bounds[index]
-        if .DebugBox in bound.flags do return
-        bound.flags += { .DebugBox }
-                
-        bound_center := get_center(bound.screen_bounds)
-        for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
-            assert(edge.front == index)
-            
-            behind := bounds[edge.behind]
-            behind_center := get_center(behind.screen_bounds)
-            
-            glVertex2fv(&bound_center[0])
-            glVertex2fv(&behind_center[0])
-            
-            draw_bounds_recursive(bounds, edge.behind)
-        }
-        
-        min := bound.screen_bounds.min
-        max := bound.screen_bounds.max
-        glVertex2f(min.x, min.y)
-        glVertex2f(min.x, max.y)
-        
-        glVertex2f(min.x, max.y)
-        glVertex2f(max.x, max.y)
-        
-        glVertex2f(max.x, max.y)
-        glVertex2f(max.x, min.y)
-        
-        glVertex2f(max.x, min.y)
-        glVertex2f(min.x, min.y)
-    }
-    
+
     if GlobalDebugShowRenderSortGroups {
         // @todo(viktor): this broke since the separation of the layers with sort barriers
         if commands.render_entry_count != 0 {
@@ -452,6 +369,39 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_w
             }
         }
     }
+}
+    
+draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
+    bound := &bounds[index]
+    if .DebugBox in bound.flags do return
+    bound.flags += { .DebugBox }
+            
+    bound_center := get_center(bound.screen_bounds)
+    for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
+        assert(edge.front == index)
+        
+        behind := bounds[edge.behind]
+        behind_center := get_center(behind.screen_bounds)
+        
+        glVertex2fv(&bound_center[0])
+        glVertex2fv(&behind_center[0])
+        
+        draw_bounds_recursive(bounds, edge.behind)
+    }
+    
+    min := bound.screen_bounds.min
+    max := bound.screen_bounds.max
+    glVertex2f(min.x, min.y)
+    glVertex2f(min.x, max.y)
+    
+    glVertex2f(min.x, max.y)
+    glVertex2f(max.x, max.y)
+    
+    glVertex2f(max.x, max.y)
+    glVertex2f(max.x, min.y)
+    
+    glVertex2f(max.x, min.y)
+    glVertex2f(min.x, min.y)
 }
 
 gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {

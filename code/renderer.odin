@@ -1,5 +1,7 @@
 package main
 
+// @todo(viktor): Pull this out into a third layer or into the game so that we can hotreload it
+
 import "core:simd"
 
 GlobalDebugRenderSingleThreaded: b32
@@ -10,7 +12,7 @@ GlobalDebugShowRenderSortGroups: b32
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
     prep:     RenderPrep,
-    target:   Bitmap,
+    targets:  []Bitmap,
     
     base_clip_rect: Rectangle2i, 
 }
@@ -192,9 +194,15 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, prep: RenderPrep, target: Bitmap) {
-    assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
-
+software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
+    targets := push_slice(arena, Bitmap, commands.max_render_target_index+1)
+    targets[0] = base_target
+    for &target in targets[1:] {
+        target = base_target
+        target.memory = push_slice(arena, Color, target.width * target.height, align_no_clear(16))
+        assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
+    }
+    
     // @todo(viktor): Is this still relevant?
     /* @todo(viktor):
         - Make sure the tiles are all cache-aligned
@@ -206,7 +214,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
     tile_count :: [2]i32{4, 4}
     works: [tile_count.x * tile_count.y]TileRenderWork
     
-    tile_size  := [2]i32{target.width, target.height} / tile_count
+    tile_size  := [2]i32{base_target.width, base_target.height} / tile_count
     tile_size.x = ((tile_size.x + (3)) / 4) * 4
     
     work_index: i32
@@ -218,7 +226,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
             work ^= {
                 commands = commands,
                 prep     = prep,
-                target   = target,
+                targets  = targets,
                 base_clip_rect = {
                     min = tile_size * {x, y},
                 },
@@ -227,10 +235,10 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
             work.base_clip_rect.max = work.base_clip_rect.min + tile_size
             
             if x == tile_count.x-1 {
-                work.base_clip_rect.max.x = target.width 
+                work.base_clip_rect.max.x = base_target.width 
             }
             if y == tile_count.y-1 {
-                work.base_clip_rect.max.y = target.height
+                work.base_clip_rect.max.y = base_target.height
             }
             
             if GlobalDebugRenderSingleThreaded {
@@ -242,20 +250,27 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
     }
 
     complete_all_work(queue)
+    
+    for target in targets[:1] {
+        for b, index in target.memory {
+            base_target.memory[index] = b
+        }
+    }
 }
 
 do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     timed_function()
     using work := cast(^TileRenderWork) data
-
     assert(commands != nil)
-    assert(target.memory != nil)
-    
+
     clip_rect := base_clip_rect
     clip_rect_index := max(u16)
     
-    draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)}, commands.clear_color, clip_rect)
+    for target in targets {
+        draw_rectangle(target, Rectangle2{vec_cast(f32, clip_rect.min), vec_cast(f32, clip_rect.max)}, commands.clear_color, clip_rect)
+    }
     
+    target: Bitmap
     for sort_entry_index in prep.sorted_offsets {
         // :PointerArithmetic
         header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
@@ -263,14 +278,18 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
-            rect := prep.clip_rects.data[clip_rect_index].rect
-            clip_rect = get_intersection(clip_rect, rect)
+            
+            clip := prep.clip_rects.data[clip_rect_index]
+            clip_rect = get_intersection(base_clip_rect, clip.rect)
+            
+            target = targets[clip.render_target_index]
+            assert(target.memory != nil)
         }
         
         switch header.type {
           case .None: unreachable()
           case .RenderEntryClip:
-            // Already handled in linearize_clip_rects
+            // @note(viktor): clip rects are handled before rendering
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data

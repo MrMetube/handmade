@@ -4,6 +4,7 @@ package build
 import "core:fmt"
 import "core:strings"
 import "core:os"
+import "core:log"
 import "core:os/os2"
 import "core:odin/ast"
 import "core:odin/parser"
@@ -27,7 +28,7 @@ CommonTagFile :: `common="file"`
 ExportTag     :: `export`
 Input         :: `D:\handmade\code\game`
 
-extract_common_and_exports :: proc() {
+extract_common_and_exports :: proc() -> (succes: b32) {
     using my_context: ExtractContext
     context.user_ptr = &my_context
     
@@ -42,13 +43,15 @@ extract_common_and_exports :: proc() {
     
     output_package := "main"
     
-    extract_common_game_declarations(input_package, `D:\handmade\code\`, `generated.odin`,         output_package)
-    extract_exports_and_generate_api(input_package, `D:\handmade\code\`, `exports-generated.odin`, output_package)
+    extract_exports_and_generate_api(input_package, `D:\handmade\code`, `\exports-generated.odin`, output_package)
+    if !extract_common_game_declarations(input_package, `D:\handmade\code`, `\generated.odin`, output_package) {
+        return false
+    }
+    return true
 }
 
 Header :: 
 `#+vet !unused-procedures
-#+no-instrumentation
 package %v
 ///////////////////////////////////////////////
 //////////////////@important///////////////////
@@ -119,27 +122,28 @@ load_game_api :: proc(game_lib: win.HMODULE) {`)
     
 }
 
-extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_file, output_package: string) {
+extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_file, output_package: string) -> (success: b32) {
     using my := cast(^ExtractContext) context.user_ptr
-    
-    output := fmt.tprint(output_dir, output_file, sep="")
-    if os.exists(output) do os.remove(output)
-    out, _ := os.open(output, os.O_CREATE)
-    defer os.close(out)
-    fmt.fprintfln(out, Header, output_package)
     
     v := ast.Visitor{ visit = visit_and_extract_commons }
     ast.walk(&v, pkg)
     
-    for key, it in imports {
-        if common_files[it.location.file] != true {
-            fmt.fprintfln(out, "// @copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
-        }
-    }
+    time_of_exe, err := os.last_write_time_by_name(`.\debug.exe`)
+    if err != nil do time_of_exe = 0
     
-    for key, it in declarations {
-        if common_files[it.location.file] != true {
-            fmt.fprintfln(out, "// @copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
+    for key, _ in common_files {
+        path, _ := strings.replace(key, Input, output_dir, 1, context.temp_allocator)
+        path, _ = strings.replace(path, ".odin", "-generated.odin", 1, context.temp_allocator)
+        
+        time_of_copypasta, err2 := os.last_write_time_by_name(path)
+        was_modified := err2 != .Not_Exist && time_of_exe != 0 && time_of_copypasta > time_of_exe
+        if was_modified {
+            log.errorf(`
+Error: A generated file was modifed:
+  Generated: '%s'
+  Original:  '%s'
+  Migrate your changes or delete the generated file to proceed.`, path, key)
+            return false
         }
     }
     
@@ -154,6 +158,26 @@ extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_f
         corrected, _ = strings.replace(corrected, CommonTagFile, "", -1, context.temp_allocator)
         os.write_entire_file(path, transmute([]u8) corrected)
     }
+    
+    output := fmt.tprint(output_dir, output_file, sep="")
+    if os.exists(output) do os.remove(output)
+    out, _ := os.open(output, os.O_CREATE)
+    defer os.close(out)
+    fmt.fprintfln(out, Header, output_package)
+    
+    for key, it in imports {
+        if common_files[it.location.file] != true {
+            fmt.fprintfln(out, "// @copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
+        }
+    }
+    
+    for key, it in declarations {
+        if common_files[it.location.file] != true {
+            fmt.fprintfln(out, "// @copypasta from %s(%d:%d)\n%s\n", it.location.file, it.location.line, it.location.column, it.content)
+        }
+    }
+    
+    return true
 }
 
 visit_and_extract_exports :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {

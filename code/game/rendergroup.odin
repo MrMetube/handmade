@@ -56,6 +56,8 @@ RenderCommands :: struct {
     push_buffer_data_at: u32,
     render_entry_count:  u32,
     
+    max_render_target_index: u32,
+    
     clip_rects_count: u32,
     rects: Deque(RenderEntryClip),
     
@@ -141,6 +143,7 @@ RenderEntryHeader :: struct { // @todo(viktor): Don't store type here, store in 
 RenderEntryClip :: struct {
     rect: Rectangle2i,
     next: ^RenderEntryClip,
+    render_target_index: u32,
 }
 
 @(common)
@@ -177,10 +180,7 @@ ProjectedBasis :: struct {
 ////////////////////////////////////////////////
 
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
-    assert(
-        (cast(umm) &(cast(^RenderCommands)nil).push_buffer) == 
-        (cast(umm) &(cast(^RenderCommands)nil).sort_entries.data)
-    )
+    assert((cast(umm) &(cast(^RenderCommands)nil).push_buffer) == (cast(umm) &(cast(^RenderCommands)nil).sort_entries.data))
     
     pixel_size := vec_cast(f32, commands.width, commands.height)
     
@@ -196,7 +196,7 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
     }
     
     clip := rectangle_min_dimension(v2{0,0}, pixel_size)
-    group.current_clip_rect_index = push_clip_rect(group, clip)
+    group.current_clip_rect_index = push_clip_rect(group, clip, 0)
 }
 
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
@@ -305,7 +305,7 @@ push_sort_sprite_bounds :: proc(commands: ^RenderCommands) -> (result: ^SortSpri
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }
-push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2) -> (result: u16) {
+push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, render_target_index: u32) -> (result: u16) {
     total_size := cast(u32) size_of(RenderEntryClip)
     
     
@@ -320,14 +320,14 @@ push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2) -> (result:
     group.commands.clip_rects_count += 1
     group.current_clip_rect_index = result
     
-    clip := RenderEntryClip { rect = rec_cast(i32, rect) }
-    clip.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
-    
-    entry ^= clip
+    entry ^= { rect = rec_cast(i32, rect) }
+    entry.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
+    entry.render_target_index = render_target_index
+    group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
     
     return result
 }
-push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> (result: u16) {
+push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, render_target_index: u32, transform: Transform) -> (result: u16) {
     rect3 := Rect3(rect, 0, 0)
     
     center := get_center(rect3)
@@ -338,7 +338,7 @@ push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, tra
     if basis.valid {
         bp  := basis.p
         dim := basis.scale * size.xy
-        result = push_clip_rect_direct(group, rectangle_center_dimension(bp - 0.5 * dim, dim))
+        result = push_clip_rect_direct(group, rectangle_center_dimension(bp - 0.5 * dim, dim), render_target_index)
     }
     
     return result
@@ -352,11 +352,6 @@ push_sort_barrier :: proc(group: ^RenderGroup) {
 }
 
 clear :: proc(group: ^RenderGroup, color: v4) {
-    bounds := SpriteBounds {
-        y_min = NegativeInfinity,
-        y_max = PositiveInfinity,
-        z_max = NegativeInfinity,
-    }
     group.commands.clear_color = store_color({}, color)
 }
 

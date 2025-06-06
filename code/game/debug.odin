@@ -71,6 +71,7 @@ DebugState :: struct {
     // Overlay rendering
     render_group: RenderGroup,
     default_clip_rect: u16,
+    render_target_index: u32,
     
     text_transform:    Transform,
     shadow_transform:  Transform,
@@ -312,9 +313,12 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.ui_transform.chunk_z      = 20_000
         debug.shadow_transform.chunk_z  = 24_000
         debug.text_transform.chunk_z    = 28_000
+
+        debug.render_target_index = 1
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
+    push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
     
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })

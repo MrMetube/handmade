@@ -20,7 +20,7 @@ import win "core:sys/windows"
     Currently the saved time is ~35% i.e. 0,52 seconds for each build.
 
     @todo(viktor): 
-    - before copypasta check that those files weren't modified by the user and abort instead of squashing those accidental changes
+    - Find a better way to share common code without a bunch of modules, than copypasta
     - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
     - get rid of INTERNAL define
 */
@@ -87,9 +87,15 @@ build_game :: proc() {
 build_platform :: proc() {
     debug_exe := "debug.exe" 
     if !is_running(debug_exe) {
-        extract_common_and_exports()
+        if !extract_common_and_exports() {
+            os.exit(1)
+        }
         
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PedanticPlatform else ""))
+        if !run_command(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PedanticPlatform else "")) {
+            
+            // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
+            os2.change_times(debug_exe, time.now(), time.now())
+        }
     }
 }
 

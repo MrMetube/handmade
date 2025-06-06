@@ -56,7 +56,9 @@ GlobalBlitTextureHandle: u32
 
 GlobalPause:                     b32
 GlobalDebugShowCursor:           b32 = INTERNAL
-GlobalRenderType:                RenderType
+GlobalChangeRenderType:          b32
+GlobalChangeRenderTypeDelay:     f32
+GlobalRenderType:                RenderType = .RenderSoftware_DisplayOpenGL
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
@@ -99,9 +101,9 @@ ReplayBuffer :: struct {
 }
 
 RenderType :: enum {
-    RenderOpenGL_DisplayOpenGL,
-    RenderSoftware_DisplayOpenGL,
-    RenderSoftware_DisplayGDI,
+    RenderOpenGL_DisplayOpenGL = 0,
+    RenderSoftware_DisplayOpenGL = 1,
+    RenderSoftware_DisplayGDI = 2,
 }
 
 main :: proc() {
@@ -349,19 +351,6 @@ main :: proc() {
     //  Game Loop
         
     for GlobalRunning {
-        
-        { debug_data_block("Platform")
-            game.debug_record_b32(&GlobalPause)
-            game.debug_record_b32(&GlobalDebugShowCursor)
-            game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
-            game.debug_record_b32(cast(^b32) &GlobalRenderType, "RenderType")
-            game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-            {debug_data_block("Environment")
-                game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
-                game.debug_record_b32(&GlobalDebugShowLightingSampling)
-            }
-        }
-        
         ////////////////////////////////////////////////   
         //  Input
         input_processed := game.begin_timed_block("input processed")
@@ -503,6 +492,40 @@ main :: proc() {
             }
         }
         
+        { debug_data_block("Platform")
+            game.debug_record_b32(&GlobalPause)
+            game.debug_record_b32(&GlobalDebugShowCursor)
+            game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
+            
+            {debug_data_block("RenderType")
+                @(static) GlobalChangeRenderTypeTo0: b32
+                @(static) GlobalChangeRenderTypeTo1: b32
+                @(static) GlobalChangeRenderTypeTo2: b32
+                if GlobalChangeRenderTypeTo0 {
+                    GlobalChangeRenderTypeTo0 = false
+                    GlobalRenderType = .RenderOpenGL_DisplayOpenGL
+                }
+                if GlobalChangeRenderTypeTo1 {
+                    GlobalChangeRenderTypeTo1 = false
+                    GlobalRenderType = .RenderSoftware_DisplayOpenGL
+                }
+                if GlobalChangeRenderTypeTo2 {
+                    GlobalChangeRenderTypeTo2 = false
+                    GlobalRenderType = .RenderSoftware_DisplayGDI
+                }
+                
+                game.debug_record_b32(&GlobalChangeRenderTypeTo0, "Change to RenderOpenGL DisplayOpenGL")
+                game.debug_record_b32(&GlobalChangeRenderTypeTo1, "Change to RenderSoftware DisplayOpenGL")
+                game.debug_record_b32(&GlobalChangeRenderTypeTo2, "Change to RenderSoftware DisplayGDI")
+            }
+            
+            game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
+            {debug_data_block("Environment")
+                game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
+                game.debug_record_b32(&GlobalDebugShowLightingSampling)
+            }
+        }
+                
         game.end_timed_block(input_processed)
         ////////////////////////////////////////////////
         //  Update and Render
@@ -734,19 +757,20 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
     
     if GlobalRenderType == .RenderOpenGL_DisplayOpenGL {
         gl_render_commands(commands, prep, window_width, window_height)
-        
-        { timed_block("SwapBuffers")
-            win.SwapBuffers(device_context)
-        }
     } else {
         offscreen_buffer := GlobalBackBuffer.bitmap
-        software_render_commands(render_queue, commands, prep, offscreen_buffer)
+        software_render_commands(render_queue, commands, prep, offscreen_buffer, arena)
         
         if GlobalRenderType == .RenderSoftware_DisplayGDI {
             display_bitmap_gdi(&GlobalBackBuffer, device_context, window_width, window_height)
         } else {
-            display_bitmap_gl(window_width, window_height, offscreen_buffer, device_context)
+            gl_display_bitmap(window_width, window_height, offscreen_buffer)
         }
+    }
+    
+    if GlobalRenderType != .RenderSoftware_DisplayGDI {
+        timed_block("SwapBuffers")
+        win.SwapBuffers(device_context)
     }
 }
 

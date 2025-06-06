@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 @(common="file")
@@ -373,10 +374,12 @@ print_string :: proc(ctx: ^FormatContext, s: union #no_nil {string, cstring}, ki
         bytes = (cast([^]u8) v)[:strlen]
     }
     
-    width, ok := info.width.?
-    total_width := kind == .Default ? strlen : strlen * 2
-    for i in strlen ..< width do append(&ctx.buffer, cast(u8) ' ')
     
+    if width, ok := info.width.?; ok {
+        total_width := kind == .Default ? strlen : strlen * 2
+        for _ in total_width ..< width do append(&ctx.buffer, cast(u8) ' ')
+    }
+        
     switch kind {
       case .Default:
         append(&ctx.buffer, bytes)
