@@ -388,17 +388,20 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
         fill_rect.max.x = align8(fill_rect.max.x)
     }
 
-    normal_x_axis_ := safe_ratio_0(x_axis, length_squared(x_axis))
-    normal_y_axis_ := safe_ratio_0(y_axis, length_squared(y_axis))
+    normal_x_axis_ := 1 / length_squared(x_axis) * x_axis
+    normal_y_axis_ := 1 / length_squared(y_axis) * y_axis
     
     normal_x_axis := vec_cast(f32x8, normal_x_axis_)
     normal_y_axis := vec_cast(f32x8, normal_y_axis_)
     
     delta := vec_cast(f32x8, fill_rect.min) - vec_cast(f32x8, origin) 
-    delta.x += { 0, 1, 2, 3, 4, 5, 6, 7}
+    delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
     
-    delta_y_n_x_axis_y := delta.y * normal_x_axis.y
-    delta_y_n_y_axis_y := delta.y * normal_y_axis.y
+    delta_n_x_axis := delta * normal_x_axis
+    delta_n_y_axis := delta * normal_y_axis
+    
+    delta_u_row := delta_n_x_axis.x + delta_n_x_axis.y
+    delta_v_row := delta_n_y_axis.x + delta_n_y_axis.y
     
     inv_255         :f32x8= 1.0 / 255.0
     max_color_value :f32x8= 255 * 255
@@ -416,13 +419,13 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
         // v := dot(delta, n_y_axis)
         
         y_index := cast(f32) (y - fill_rect.min.y)
-        u_row := delta.x * normal_x_axis.x + delta_y_n_x_axis_y + y_index * normal_x_axis.y
-        v_row := delta.x * normal_y_axis.x + delta_y_n_y_axis_y + y_index * normal_y_axis.y
+        u_row := delta_u_row + y_index * normal_x_axis.y
+        v_row := delta_v_row + y_index * normal_y_axis.y
         
         clip_mask = start_clip_mask
         for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
             defer {
-                if x + 16 < fill_rect.max.x {
+                if x + 8*2 < fill_rect.max.x {
                     clip_mask = maskFF
                 } else {
                     clip_mask = end_clip_mask
@@ -560,17 +563,20 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
         fill_rect.max.x = align8(fill_rect.max.x)
     }
 
-    normal_x_axis_ := safe_ratio_0(x_axis, length_squared(x_axis))
-    normal_y_axis_ := safe_ratio_0(y_axis, length_squared(y_axis))
+    normal_x_axis_ := 1 / length_squared(x_axis) * x_axis
+    normal_y_axis_ := 1 / length_squared(y_axis) * y_axis
     
     normal_x_axis := vec_cast(f32x8, normal_x_axis_)
     normal_y_axis := vec_cast(f32x8, normal_y_axis_)
     
     delta := vec_cast(f32x8, fill_rect.min) - vec_cast(f32x8, origin) 
-    delta.x += { 0, 1, 2, 3, 4, 5, 6, 7}
+    delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
     
-    delta_y_n_x_axis_y := delta.y * normal_x_axis.y
-    delta_y_n_y_axis_y := delta.y * normal_y_axis.y
+    delta_n_x_axis := delta * normal_x_axis
+    delta_n_y_axis := delta * normal_y_axis
+    
+    delta_u_row := delta_n_x_axis.x + delta_n_x_axis.y
+    delta_v_row := delta_n_y_axis.x + delta_n_y_axis.y
     
     inv_255         :f32x8= (1.0 / 255.0)
     max_color_value :f32x8= (255 * 255)
@@ -588,8 +594,8 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
         // u := dot(delta, n_x_axis)
         // v := dot(delta, n_y_axis)
         y_index := cast(f32) (y - fill_rect.min.y)
-        u_row := delta.x * normal_x_axis.x + delta_y_n_x_axis_y + y_index * normal_x_axis.y
-        v_row := delta.x * normal_y_axis.x + delta_y_n_y_axis_y + y_index * normal_y_axis.y
+        u_row := delta_u_row + y_index * normal_x_axis.y
+        v_row := delta_v_row + y_index * normal_y_axis.y
         
         clip_mask = start_clip_mask
         for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
@@ -629,8 +635,10 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
 }
 
 clear_render_target :: proc(dest: Bitmap, color: v4, clip_rect: Rectangle2i) {
-    inv_255 :f32x8= (1.0 / 255.0)
     color := vec_cast(f32x8, color)
+    // @note(viktor): linear to srgb
+    color.rgb = square_root(color.rgb)
+    color *= 255
     
     for y := clip_rect.min.y; y < clip_rect.max.y; y += 1 {
         for x := clip_rect.min.x; x < clip_rect.max.x; x += 8 {
@@ -643,11 +651,13 @@ clear_render_target :: proc(dest: Bitmap, color: v4, clip_rect: Rectangle2i) {
 
 blend_render_target :: proc(dest: Bitmap, alpha: f32, source: Bitmap, clip_rect: Rectangle2i) {
     inv_255 :f32x8= (1.0 / 255.0)
+    
     for y := clip_rect.min.y; y < clip_rect.max.y; y += 1 {
         for x := clip_rect.min.x; x < clip_rect.max.x; x += 8 {
             index := y * dest.width + x
-            
-            texel := cast(^u32x8) &source.memory[index]
+            // @todo(viktor): what about unaligned loads? why did we check those in the other routines and not here
+            texel_ := &source.memory[index]
+            texel := cast(^u32x8) texel_
             pixel := cast(^u32x8) &dest.memory[index]
             
             texelx8 := unpack_pixel(texel^)
@@ -659,10 +669,12 @@ blend_render_target :: proc(dest: Bitmap, alpha: f32, source: Bitmap, clip_rect:
             pixelx8 *= inv_255
             pixelx8.rgb = square(pixelx8.rgb)
             
-            blended := linear_blend(pixelx8, texelx8, alpha)
+            texel_alpha := alpha * texelx8.a
+            blended := linear_blend(pixelx8, texelx8, texel_alpha)
             
             // @note(viktor): linear to srgb
-            blended.rgb = 255 * square_root(blended.rgb)
+            blended.rgb = square_root(blended.rgb)
+            blended *= 255
             
             pixel^ = pack_pixel(blended)
         }
@@ -782,16 +794,12 @@ unscale_and_bias :: proc(normal: v4) -> (result: v4) {
 }
 
 // @note(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
-@(require_results)
 srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
-    result.r = square(srgb.r)
-    result.g = square(srgb.g)
-    result.b = square(srgb.b)
+    result.rgb = square(srgb.rgb)
     result.a = srgb.a
 
     return result
 }
-@(require_results)
 srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
     inv_255: f32 = 1.0 / 255.0
     result = srgb * inv_255
@@ -800,16 +808,12 @@ srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
     return result
 }
 
-@(require_results)
 linear_to_srgb :: proc(linear: v4) -> (result: v4) {
-    result.r = square_root(linear.r)
-    result.g = square_root(linear.g)
-    result.b = square_root(linear.b)
+    result.rgb = square_root(linear.rgb)
     result.a = linear.a
 
     return result
 }
-@(require_results)
 linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
     result = linear_to_srgb(linear)
     result *= 255

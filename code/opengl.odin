@@ -262,6 +262,8 @@ gl_display_bitmap :: proc(bitmap: Bitmap, window_size: [2]i32) {
     glLoadIdentity()
 
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
+    
+    gl.Enable(gl.BLEND)
 }
 
 gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_size: [2]i32) {
@@ -301,7 +303,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
           case .RenderEntryClip: // @note(viktor): clip rects are handled before rendering
           
           case .RenderEntryBlendRenderTargets: 
-            unimplemented()
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data

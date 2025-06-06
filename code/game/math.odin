@@ -68,13 +68,13 @@ square_root :: proc(x: $T) -> (result: T) where intrinsics.type_is_numeric(T) ||
     return result
  }
 
-linear_blend  :: proc{ linear_blend_f, linear_blend_v }
-linear_blend_f :: proc(from: $Value, to: Value, t: f32) -> Value {
+linear_blend  :: proc{ linear_blend_v_e, linear_blend_e }
+linear_blend_v_e :: proc(from: $V/[$N]$E, to: V, t: E) -> V {
     result := (1-t) * from + t * to
     
     return result
 }
-linear_blend_v :: proc(from: $Value, to: Value, t: $T) -> Value where intrinsics.type_is_array(T) {
+linear_blend_e :: proc(from: $T, to: T, t: T) -> T  {
     result := (1-t) * from + t * to
     
     return result

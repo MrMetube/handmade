@@ -241,7 +241,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     perspective(render_group, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     haze_color := DarkBlue
-    clear(render_group, haze_color)
+    clear(render_group, haze_color * {1,1,1,0})
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := rectangle_min_max(

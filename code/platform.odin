@@ -733,7 +733,7 @@ main :: proc() {
             
             window_width, window_height := get_window_dimension(window)
             
-            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, &frame_arena, render_prep)
+            render_to_window(&render_commands, &high_queue, device_context, [2]i32{window_width, window_height}, &frame_arena, render_prep)
             
             flip_counter = get_wall_clock()
         }
@@ -786,7 +786,7 @@ display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, wi
         }
     }
     
-    offset := window_size - [2]i32{buffer.width, buffer.height} / 2
+    offset := (window_size - [2]i32{buffer.width, buffer.height}) / 2
 
     win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y,         win.BLACKNESS )
     win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
