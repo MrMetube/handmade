@@ -668,6 +668,14 @@ main :: proc() {
 
         swap(&new_input, &old_input)
         ////////////////////////////////////////////////
+        prep_render := game.begin_timed_block("prepare render")
+        
+        temp := begin_temporary_memory(&frame_arena)
+        render_prep := prep_for_render(&render_commands, temp.arena)
+        defer end_temporary_memory(temp)
+        
+        game.end_timed_block(prep_render)
+        ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         
         {
@@ -725,7 +733,7 @@ main :: proc() {
             
             window_width, window_height := get_window_dimension(window)
             
-            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, &frame_arena)
+            render_to_window(&render_commands, &high_queue, device_context, window_width, window_height, &frame_arena, render_prep)
             
             flip_counter = get_wall_clock()
         }
@@ -741,14 +749,7 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_width, window_height: i32, arena: ^Arena) {
-    timed_function()
-    
-    temp := begin_temporary_memory(arena)
-    defer end_temporary_memory(temp)
-
-    prep := prep_for_render(commands, temp.arena)
-    
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_size: [2]i32, arena: ^Arena, prep: RenderPrep) {
     /* 
     if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
         render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
@@ -756,15 +757,15 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
     */
     
     if GlobalRenderType == .RenderOpenGL_DisplayOpenGL {
-        gl_render_commands(commands, prep, window_width, window_height)
+        gl_render_commands(commands, prep, window_size)
     } else {
         offscreen_buffer := GlobalBackBuffer.bitmap
         software_render_commands(render_queue, commands, prep, offscreen_buffer, arena)
         
         if GlobalRenderType == .RenderSoftware_DisplayGDI {
-            display_bitmap_gdi(&GlobalBackBuffer, device_context, window_width, window_height)
+            display_bitmap_gdi(&GlobalBackBuffer, device_context, window_size)
         } else {
-            gl_display_bitmap(window_width, window_height, offscreen_buffer)
+            gl_display_bitmap(offscreen_buffer, window_size)
         }
     }
     
@@ -774,7 +775,7 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
     }
 }
 
-display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, window_width, window_height: i32) {
+display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, window_size: [2]i32) {
     #no_bounds_check {
         for y in 0..<buffer.height {
             row := buffer.memory[y * buffer.width:][:buffer.width]
@@ -785,13 +786,13 @@ display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, wi
         }
     }
     
-    offset := [2]i32{window_width - buffer.width, window_height - buffer.height} / 2
+    offset := window_size - [2]i32{buffer.width, buffer.height} / 2
 
     win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y,         win.BLACKNESS )
     win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
     
-    win.PatBlt(device_context, buffer.width+offset.x, 0, window_width, window_height,             win.BLACKNESS )
-    win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_height, win.BLACKNESS )
+    win.PatBlt(device_context, buffer.width+offset.x, 0, window_size.x, window_size.y,            win.BLACKNESS )
+    win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_size.x, win.BLACKNESS )
     
     // @todo(viktor): aspect ratio correction
     // @todo(viktor): stretch to fill window once we are fine with our renderer

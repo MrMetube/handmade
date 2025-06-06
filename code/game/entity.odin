@@ -418,8 +418,8 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
 update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
     timed_function()
     
-    fade_top_end      := .95 * world.typical_floor_height
-    fade_top_start    := .3 * world.typical_floor_height
+    fade_top_end      := .9 * world.typical_floor_height
+    fade_top_start    := .5 * world.typical_floor_height
     fade_bottom_start := -1 * world.typical_floor_height
     fade_bottom_end   := -4 * world.typical_floor_height
     
@@ -427,16 +427,24 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
     MaximumLayer :: 1
     
     fog_amount: [MaximumLayer - MinimumLayer + 1] f32
-    test_alpha: [MaximumLayer - MinimumLayer + 1] f32
+    test_alpha: f32
     for &fog_amount, index in fog_amount {
-        alpha := &test_alpha[index]
         relative_layer_index := MinimumLayer + index
         camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
         
-        alpha     ^= clamp_01_to_range(fade_top_start,    camera_relative_ground_z, fade_top_end)
+        test_alpha = clamp_01_to_range(fade_top_end,      camera_relative_ground_z, fade_top_start)
         fog_amount = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
     }
     
+    alpha_render_target :u32= 1
+    normal_floor_clip_rect := render_group.current_clip_rect_index
+    alpha_floor_clip_rect := push_clip_rect(render_group, render_group.screen_area, alpha_render_target)
+    
+    defer {
+        render_group.current_clip_rect_index = normal_floor_clip_rect
+        push_blend_render_targets(render_group, alpha_render_target, test_alpha)
+    }
+
     current_absolute_layer := sim_region.entities.count > 0 ? slice(sim_region.entities)[0].z_layer : 0
     
     for &entity in slice(sim_region.entities) {
@@ -464,8 +472,8 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             
               case .AngleAttackSwipe:
                 if entity.t_movement < 1 {
-                    entity.angle_current = lerp(entity.angle_start, entity.angle_target, entity.t_movement)
-                    entity.angle_current_offset = lerp(entity.angle_base_offset, entity.angle_swipe_offset, sin_01(entity.t_movement))
+                    entity.angle_current = linear_blend(entity.angle_start, entity.angle_target, entity.t_movement)
+                    entity.angle_current_offset = linear_blend(entity.angle_base_offset, entity.angle_swipe_offset, sin_01(entity.t_movement))
                 } else  {
                     entity.movement_mode = .AngleOffset
                     
@@ -500,7 +508,7 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
                 if t_jump <= entity.t_movement {
                     t := clamp_01_to_range(t_jump, entity.t_movement, 1)
                     entity.t_bob = sin(t * Pi) * 0.1
-                    entity.p = lerp(came_from, occupying, entity.t_movement)
+                    entity.p = linear_blend(came_from, occupying, entity.t_movement)
                     entity.dp = 0
                     
                     pf := came_from
@@ -548,24 +556,18 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             transform.chunk_z = entity.z_layer
             
             if current_absolute_layer != entity.z_layer {
-                if relative_layer == MaximumLayer {
-                    // push_clip_rect(render_group, render_group.screen_area, 1)
-                }
                 assert(current_absolute_layer < entity.z_layer)
                 current_absolute_layer = entity.z_layer
-                
                 push_sort_barrier(render_group)
             }
             
-            if relative_layer == MaximumLayer || relative_layer == MaximumLayer-1 {
-                transform.t_color.a = test_alpha[relative_layer - MinimumLayer]
+            if relative_layer == MaximumLayer {
+                render_group.current_clip_rect_index = alpha_floor_clip_rect
             } else {
+                render_group.current_clip_rect_index = normal_floor_clip_rect
                 transform.color = haze_color
                 transform.t_color.rgb = fog_amount[relative_layer - MinimumLayer]
             }
-            
-            // _, offset_z := convert_to_relative_layer(world, transform.offset.z)
-            // transform.offset.z = offset_z
             
             shadow_transform := default_flat_transform()
             shadow_transform.offset = get_entity_ground_point(&entity) - camera_p
@@ -641,7 +643,6 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
                     debug_record_value(&entity.dp)
                 }
             }
-            
         }
     }
 }

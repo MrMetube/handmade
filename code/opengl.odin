@@ -228,13 +228,13 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
     
 }
 
-gl_display_bitmap :: proc(width, height: i32, bitmap: Bitmap) {
+gl_display_bitmap :: proc(bitmap: Bitmap, window_size: [2]i32) {
     gl.Disable(gl.SCISSOR_TEST)
     
-    gl.Viewport(0, 0, width, height)
+    gl.Viewport(0, 0, window_size.x, window_size.y)
     gl.Disable(gl.BLEND)
     
-    gl_set_screenspace(width, height)
+    gl_set_screenspace(window_size)
     
     gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
     defer gl.BindTexture(gl.TEXTURE_2D, 0)
@@ -264,11 +264,11 @@ gl_display_bitmap :: proc(width, height: i32, bitmap: Bitmap) {
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, width, height: i32) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_size: [2]i32) {
     timed_function()
     
     gl.Viewport(0, 0, commands.width, commands.height)
-    gl_set_screenspace(width, height)
+    gl_set_screenspace(window_size)
     
     gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.TEXTURE_2D)
@@ -298,8 +298,10 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, width, h
         
         switch header.type {
           case .None: unreachable()
-          case .RenderEntryClip:
-            // @note(viktor): clip rects are handled before rendering
+          case .RenderEntryClip: // @note(viktor): clip rects are handled before rendering
+          
+          case .RenderEntryBlendRenderTargets: 
+            unimplemented()
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -431,9 +433,9 @@ gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,
     glEnd()
 }
 
-gl_set_screenspace :: proc(width, height: i32) {
-    a := safe_ratio_1(2, cast(f32) width)
-    b := safe_ratio_1(2, cast(f32) height)
+gl_set_screenspace :: proc(size: [2]i32) {
+    a := safe_ratio_1(f32(2), cast(f32) size.x)
+    b := safe_ratio_1(f32(2), cast(f32) size.y)
     
     glMatrixMode(gl.TEXTURE)
     glLoadIdentity()

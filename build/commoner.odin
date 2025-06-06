@@ -47,6 +47,7 @@ extract_common_and_exports :: proc() -> (succes: b32) {
     if !extract_common_game_declarations(input_package, `D:\handmade\code`, `\generated.odin`, output_package) {
         return false
     }
+    
     return true
 }
 

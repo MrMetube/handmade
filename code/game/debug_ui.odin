@@ -439,7 +439,7 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
     
     scale := cast(f32) (cast(f64) arena.used / cast(f64) len(arena.storage))
     
-    split_point := lerp(rect.min.x, rect.max.x, scale)
+    split_point := linear_blend(rect.min.x, rect.max.x, scale)
     filled := rectangle_min_max(rect.min, v2{split_point, rect.max.y})
     unused := rectangle_min_max(v2{split_point, rect.min.y}, rect.max)
     push_rectangle(&debug.render_group, unused, debug.backing_transform, {0,0,0,0.7})
@@ -712,7 +712,7 @@ draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, d
         
         event_rect := rect
         event_rect.min.x = next_x
-        event_rect.max.x = lerp(rect.min.x, rect.max.x, t)
+        event_rect.max.x = linear_blend(rect.min.x, rect.max.x, t)
         next_x = event_rect.max.x
         
         draw_profile_lane(debug, graph_root, mouse_p, event_rect, event, lane_height, lane_height)

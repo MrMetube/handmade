@@ -131,6 +131,7 @@ RenderEntryType :: enum u8 {
     RenderEntryBitmap,
     RenderEntryRectangle,
     RenderEntryClip,
+    RenderEntryBlendRenderTargets,
 }
 
 @(common)
@@ -162,6 +163,12 @@ RenderEntryBitmap :: struct {
 RenderEntryRectangle :: struct {
     premultiplied_color: v4,
     rect:  Rectangle2,
+}
+
+@(common)
+RenderEntryBlendRenderTargets :: struct {
+    source_index: u32,
+    alpha:        f32
 }
 
 UsedBitmapDim :: struct {
@@ -236,7 +243,7 @@ orthographic :: proc(group: ^RenderGroup, meters_to_pixels: f32) {
 }
 
 store_color :: proc(transform: Transform, color: v4) -> (result: v4) {
-    result = lerp(color, transform.color, transform.t_color)
+    result = linear_blend(color, transform.color, transform.t_color)
     result.rgb *= result.a
     return result
 }
@@ -248,9 +255,10 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
 
     type: RenderEntryType
     switch typeid_of(T) {
-      case RenderEntryBitmap:    type = .RenderEntryBitmap
-      case RenderEntryRectangle: type = .RenderEntryRectangle
-      case RenderEntryClip:      unreachable()
+      case RenderEntryBitmap:             type = .RenderEntryBitmap
+      case RenderEntryRectangle:          type = .RenderEntryRectangle
+      case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
+      case RenderEntryClip:               unreachable()
     }
     assert(type != .None)
     
@@ -302,6 +310,16 @@ push_sort_sprite_bounds :: proc(commands: ^RenderCommands) -> (result: ^SortSpri
     }
     
     return result
+}
+
+push_blend_render_targets :: proc(group: ^RenderGroup, source_index: u32, alpha: f32) {
+    push_sort_barrier(group)
+    entry := push_render_element(group, RenderEntryBlendRenderTargets, {}, {})
+    entry ^= {
+        source_index = source_index,
+        alpha = alpha,
+    }
+    push_sort_barrier(group)
 }
 
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }

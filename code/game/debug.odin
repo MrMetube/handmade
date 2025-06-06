@@ -314,7 +314,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.shadow_transform.chunk_z  = 24_000
         debug.text_transform.chunk_z    = 28_000
 
-        debug.render_target_index = 1
+        debug.render_target_index = 2
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
@@ -345,6 +345,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     if !debug.paused {
         debug.viewed_frame_ordinal = debug.most_recent_frame_ordinal
     }
+    
+    push_blend_render_targets(&debug.render_group, debug.render_target_index, 1)
 }
 
 get_debug_state :: proc() -> (result: ^DebugState) {

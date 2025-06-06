@@ -13,6 +13,22 @@ import "core:time"
 
 import win "core:sys/windows"
 
+optimizations    := true ? ` -o:none ` : ` -o:speed `
+PedanticGame     :: false
+PedanticPlatform :: false
+
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon  -ignore-vs-search -use-single-module `
+debug    :: ` -debug `
+internal :: ` -define:INTERNAL=true ` // @cleanup
+pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 
+commoner :: ` -custom-attribute:common `
+
+src_path :: `.\build\`   
+exe_path :: `.\build\build.exe`
+
+build_dir :: `.\build\`
+data_dir  :: `.\data`
+
 /* 
     @study(viktor): 
     If the build does not change its faster to not build/rebuild and execute just the build.exe.
@@ -24,21 +40,6 @@ import win "core:sys/windows"
     - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
     - get rid of INTERNAL define
 */
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon  -ignore-vs-search -use-single-module `
-debug    :: ` -debug `
-internal :: ` -define:INTERNAL=true ` // @cleanup
-pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 
-commoner :: ` -custom-attribute:common `
-
-optimizations    :: ` -o:none ` when true else ` -o:speed `
-PedanticGame     :: false
-PedanticPlatform :: false
-
-src_path :: `.\build\`   
-exe_path :: `.\build\build.exe`
-
-build_dir :: `.\build\`
-data_dir  :: `.\data`
 
 main :: proc() {
     context.allocator = context.temp_allocator

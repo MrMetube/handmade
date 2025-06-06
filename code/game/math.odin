@@ -57,17 +57,36 @@ DegPerRad :: 360.0/Tau
 
 square :: proc(x: $T) -> T where intrinsics.type_is_numeric(T) || intrinsics.type_is_array(T) || intrinsics.type_is_simd_vector(T) { return x * x }
 
-square_root :: simd.sqrt
+square_root :: proc(x: $T) -> (result: T) where intrinsics.type_is_numeric(T) || intrinsics.type_is_array(T) || intrinsics.type_is_simd_vector(T) { 
+    when intrinsics.type_is_array(T) {
+        #unroll for i in 0..<len(T) {
+            result[i] = simd.sqrt(x[i])
+        }
+    } else {
+        result = simd.sqrt(x)
+    }
+    return result
+ }
 
-lerp  :: proc{ lerp_f, lerp_v }
-lerp_f :: proc(from: $Value, to: Value, t: f32) -> Value {
+linear_blend  :: proc{ linear_blend_f, linear_blend_v }
+linear_blend_f :: proc(from: $Value, to: Value, t: f32) -> Value {
     result := (1-t) * from + t * to
     
     return result
 }
-lerp_v :: proc(from: $Value, to: Value, t: $T) -> Value where intrinsics.type_is_array(T) {
+linear_blend_v :: proc(from: $Value, to: Value, t: $T) -> Value where intrinsics.type_is_array(T) {
     result := (1-t) * from + t * to
     
+    return result
+}
+
+bilinear_blend :: proc(a, b, c, d: $V/[$N]$E, t: [2]E) -> (result: V) {
+    la := (1-t.y) * (1-t.x)
+    lb := (1-t.y) *    t.x
+    lc :=    t.y  * (1-t.x)
+    ld :=    t.y  *    t.x
+    
+    result = la * a + lb * b + lc * c + ld * d
     return result
 }
 
@@ -76,44 +95,12 @@ sin_01 :: proc(t: $T) -> T {
     return result
 }
 
-safe_ratio_n :: proc { safe_ratio_n_1, safe_ratio_n_2, safe_ratio_n_3 }
-safe_ratio_n_1 :: proc(numerator, divisor, n: f32) -> f32 {
-    ratio := n
-
-    if divisor != 0 {
-        ratio = numerator / divisor
-    }
-
-    return ratio
+safe_ratio_n :: proc(numerator, divisor, n: $T) -> (result: T) {
+    result = divisor != 0 ? numerator / divisor : n
+    return result
 }
-safe_ratio_n_2 :: proc(numerator, divisor, n: v2) -> v2 {
-    ratio := n
-
-    if divisor != 0 {
-        ratio = numerator / divisor
-    }
-
-    return ratio
-}
-safe_ratio_n_3 :: proc(numerator, divisor, n: v3) -> v3 {
-    ratio := n
-
-    if divisor != 0 {
-        ratio = numerator / divisor
-    }
-
-    return ratio
-}
-
-safe_ratio_0 :: proc { safe_ratio_0_1, safe_ratio_0_2, safe_ratio_0_3 }
-safe_ratio_0_1 :: proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 0) }
-safe_ratio_0_2 :: proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 0) }
-safe_ratio_0_3 :: proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 0) }
-
-safe_ratio_1 :: proc { safe_ratio_1_1, safe_ratio_1_2, safe_ratio_1_3 }
-safe_ratio_1_1 :: proc(numerator, divisor: f32) -> f32 { return safe_ratio_n(numerator, divisor, 1) }
-safe_ratio_1_2 :: proc(numerator, divisor: v2)  -> v2  { return safe_ratio_n(numerator, divisor, 1) }
-safe_ratio_1_3 :: proc(numerator, divisor: v3)  -> v3  { return safe_ratio_n(numerator, divisor, 1) }
+safe_ratio_0 :: proc(numerator, divisor: $T) -> T { return safe_ratio_n(numerator, divisor, 0) }
+safe_ratio_1 :: proc(numerator, divisor: $T) -> T { return safe_ratio_n(numerator, divisor, 1) }
 
 clamp :: proc(value: $T, min, max: T) -> (result:T) {
     when intrinsics.type_is_simd_vector(T) {
@@ -128,20 +115,7 @@ clamp :: proc(value: $T, min, max: T) -> (result:T) {
 
     return result
 }
-
-clamp_01 :: proc(value: $T) -> (result:T) {
-    when intrinsics.type_is_simd_vector(T) {
-        result = simd.clamp(value, 0, 1)
-    } else when intrinsics.type_is_array(T) {
-        #unroll for i in 0..<len(T) {
-            result[i] = clamp_01(value[i])
-        }
-    } else {
-        result = clamp(value, 0, 1)
-    }
-
-    return result
-}
+clamp_01 :: proc(value: $T) -> T { return clamp(value, 0, 1) }
 
 clamp_01_to_range :: proc(min, t, max: f32) -> (result: f32) {
     range := max - min
@@ -155,15 +129,15 @@ sign :: proc{ sign_i, sign_f }
 sign_i  :: proc(i: i32) -> i32 { return i >= 0 ? 1 : -1 }
 sign_f  :: proc(x: f32) -> f32 { return x >= 0 ? 1 : -1 }
 
-modulus :: proc { mod_f, mod_vf, mod_v }
-mod_f :: proc(value: f32, divisor: f32) -> f32 {
+modulus :: proc { modulus_f, modulus_vf, modulus_v }
+modulus_f :: proc(value: f32, divisor: f32) -> f32 {
     return math.mod(value, divisor)
 }
-mod_vf :: proc(value: [$N]f32, divisor: f32) -> (result: [N]f32) where N > 1 {
+modulus_vf :: proc(value: [$N]f32, divisor: f32) -> (result: [N]f32) where N > 1 {
     #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor) 
     return result
 }
-mod_v :: proc(value: [$N]f32, divisor: [N]f32) -> (result: [N]f32) {
+modulus_v :: proc(value: [$N]f32, divisor: [N]f32) -> (result: [N]f32) {
     #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor[i]) 
     return result
 }
@@ -275,7 +249,7 @@ arm :: proc(angle: f32) -> (result: v2) {
     return result
 }
 
-dot :: proc(a, b: $V/[$N]f32) -> (result: f32) {
+dot :: proc(a, b: $V/[$N]$E) -> (result: E) {
     #unroll for i in 0..<N {
         result += a[i] * b[i]
     }
@@ -289,7 +263,7 @@ project :: proc(v, axis: $V) -> V {
 
 length :: proc(vec: $V) -> (result: f32) {
     length_squared := length_squared(vec)
-    result = math.sqrt(length_squared)
+    result = square_root(length_squared)
     return result
 }
 
@@ -304,47 +278,11 @@ normalize :: proc(vec: $V) -> (result: V) {
 normalize_or_zero :: proc(vec: $V) -> (result: V) {
     len_sq := length_squared(vec)
     if len_sq > square(f32(0.0001)) {
-        result = vec / math.sqrt(len_sq)
+        result = vec / square_root(len_sq)
     }
     return result
 }
 
-
-// @note(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
-@(require_results)
-srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
-    result.r = square(srgb.r)
-    result.g = square(srgb.g)
-    result.b = square(srgb.b)
-    result.a = srgb.a
-
-    return result
-}
-@(require_results)
-srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
-    inv_255: f32 = 1.0 / 255.0
-    result = srgb * inv_255
-    result = srgb_to_linear(result)
-
-    return result
-}
-
-@(require_results)
-linear_to_srgb :: proc(linear: v4) -> (result: v4) {
-    result.r = square_root(linear.r)
-    result.g = square_root(linear.g)
-    result.b = square_root(linear.b)
-    result.a = linear.a
-
-    return result
-}
-@(require_results)
-linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
-    result = linear_to_srgb(linear)
-    result *= 255
-
-    return result
-}
 
 // ---------------------- ---------------------- ----------------------
 // ---------------------- Rectangle operations
@@ -391,8 +329,8 @@ add_radius :: proc(rect: $R/Rectangle($T), radius: T) -> (result: R) {
 scale_radius :: proc(rect: $R/Rectangle($T), factor: T) -> (result: R) {
     result = rect
     center := get_center(rect)
-    result.min = lerp(center, result.min, factor)
-    result.max = lerp(center, result.max, factor)
+    result.min = linear_blend(center, result.min, factor)
+    result.max = linear_blend(center, result.max, factor)
     return result
 }
 
