@@ -266,7 +266,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         clear_render_target(target, commands.clear_color, clip_rect)
     }
     
-    target_index: u32
     target: Bitmap
     for sort_entry_index in prep.sorted_offsets {
         // :PointerArithmetic
@@ -279,8 +278,8 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             clip := prep.clip_rects.data[clip_rect_index]
             clip_rect = get_intersection(base_clip_rect, clip.rect)
             
-            target_index = clip.render_target_index
-            target = targets[clip.render_target_index]
+            target_index := clip.render_target_index
+            target = targets[target_index]
             assert(target.memory != nil)
         }
         

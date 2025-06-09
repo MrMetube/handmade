@@ -53,11 +53,11 @@ GlobalBlitTextureHandle: u32
 
 // Debug Variables
 
-GlobalPause:                     b32
-GlobalDebugShowCursor:           b32 = INTERNAL
-GlobalChangeRenderType:          b32
-GlobalChangeRenderTypeDelay:     f32
-GlobalRenderType:                RenderType = .RenderSoftware_DisplayOpenGL
+GlobalPause:                 b32
+GlobalDebugShowCursor:       b32 = INTERNAL
+GlobalChangeRenderType:      b32
+GlobalChangeRenderTypeDelay: f32
+GlobalRenderType:            RenderType
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable

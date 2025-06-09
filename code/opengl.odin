@@ -19,23 +19,28 @@ GlAttribs := [?]i32{
     0,
 }
 
-glBegin: proc(_: u32)
-glEnd: proc()
-glMatrixMode: proc(_: i32)
+glBegin:        proc(_: u32)
+glEnd:          proc()
+glMatrixMode:   proc(_: i32)
 glLoadIdentity: proc()
-glLoadMatrixf: proc(_:[^]f32)
-glTexCoord2f: proc(_,_:f32)
-glVertex2f: proc(_,_:f32)
-glVertex2fv: proc(_:[^]f32)
-glColor4f: proc(_,_,_,_:f32)
-glColor4fv: proc(_:[^]f32)
-glTexEnvi: proc(target: u32, pname: u32, param: u32)
+glLoadMatrixf:  proc(_:[^]f32)
+glTexCoord2f:   proc(_,_:f32)
+glVertex2f:     proc(_,_:f32)
+glVertex2fv:    proc(_:[^]f32)
+glColor4f:      proc(_,_,_,_:f32)
+glColor4fv:     proc(_:[^]f32)
+glTexEnvi:      proc(_: u32, _: u32, _: u32)
 
 OpenGlInfo :: struct {
     modern_context: b32,
     
-    vendor, renderer, version, shading_language_version, extensions: cstring,
-    GL_EXT_texture_sRGB: b32,
+    vendor, 
+    renderer,
+    version, 
+    shading_language_version, 
+    extensions: cstring,
+    
+    GL_EXT_texture_sRGB,
     GL_EXT_framebuffer_sRGB: b32,
 }
 
@@ -265,6 +270,9 @@ gl_display_bitmap :: proc(bitmap: Bitmap, window_size: [2]i32) {
     gl.Enable(gl.BLEND)
 }
 
+FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
+FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
+
 gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_size: [2]i32) {
     timed_function()
     
@@ -280,10 +288,37 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
     clear_color.r = square(clear_color.r)
     clear_color.g = square(clear_color.g)
     clear_color.b = square(clear_color.b)
-    gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
-    gl.Clear(gl.COLOR_BUFFER_BIT)
+    
+    // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
+    max_render_target_count := cast(i64) commands.max_render_target_index+1
+    assert(max_render_target_count < len(FramebufferHandles.data))
+    if max_render_target_count >= FramebufferHandles.count {
+        count := FramebufferHandles.count
+        new_count := max_render_target_count - count
+        
+        FramebufferHandles.count  += new_count
+        gl.GenFramebuffers(cast(i32) new_count, &FramebufferHandles.data[count])
+        
+        for render_target, index in slice(&FramebufferHandles)[count:] {
+            texture := append(&FramebufferTextures, allocate_texture(window_size.x, window_size.y, nil))
             
+            gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
+            gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture^, 0)
+
+            assert(gl.FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(gl.FRAMEBUFFER))
+        }
+    }
+    
+    for render_target in slice(&FramebufferHandles) {
+        gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
+        
+        gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
+        gl.Clear(gl.COLOR_BUFFER_BIT)
+    }
+    gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+    
     clip_rect_index := max(u16)
+    target_index: u32
     for sort_entry_offset in prep.sorted_offsets {
         offset := sort_entry_offset
         
@@ -293,7 +328,14 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
-            rect := prep.clip_rects.data[clip_rect_index].rect
+            clip := prep.clip_rects.data[clip_rect_index]
+            
+            target_index = clip.render_target_index
+            
+            gl.BindFramebuffer(gl.FRAMEBUFFER, FramebufferHandles.data[target_index])
+            gl_set_screenspace(window_size)
+            
+            rect := clip.rect
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
         }
         
@@ -301,7 +343,21 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
           case .None: unreachable()
           case .RenderEntryClip: // @note(viktor): clip rects are handled before rendering
           
-          case .RenderEntryBlendRenderTargets: 
+          case .RenderEntryBlendRenderTargets:
+            entry := cast(^RenderEntryBlendRenderTargets) entry_data
+            
+            dest := FramebufferHandles.data[entry.dest_index]
+            gl.BindFramebuffer(gl.FRAMEBUFFER, dest)
+
+            source := FramebufferTextures.data[entry.source_index]
+            gl.BindTexture(gl.TEXTURE_2D, source)
+            
+            gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+            gl_rectangle(0, vec_cast(f32, window_size), {1,1,1, entry.alpha}, 0, 1)
+            gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+            
+            gl.BindTexture(gl.TEXTURE_2D, 0)
+            gl.BindFramebuffer(gl.FRAMEBUFFER, FramebufferHandles.data[target_index])
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -372,7 +428,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
         }
     }
 }
-    
+
 draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
     bound := &bounds[index]
     if .DebugBox in bound.flags do return
@@ -407,6 +463,8 @@ draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
 }
 
 gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
+    timed_function()
+    
     glBegin(gl.TRIANGLES)
     
     glColor4f(color.r, color.g, color.b, color.a)
