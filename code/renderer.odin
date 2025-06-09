@@ -313,9 +313,6 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             )
         }
     }
-    
-    // blend_render_target(targets[0], 0.25, targets[1], clip_rect)
-    // blend_render_target(targets[0], 1, targets[2], clip_rect)
 }
 
 draw_rectangle :: proc { draw_rectangle_with_texture, draw_rectangle_fill_color, draw_rectangle_fill_color_axis_aligned }
@@ -351,7 +348,6 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
     fill_rect = get_intersection(fill_rect, clip_rect)
     
     if !has_area(fill_rect) do return
-    
     
     maskFF :: 0xffffffff
     maskFFx8 :u32x8: maskFF
@@ -390,15 +386,16 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
         end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
         fill_rect.max.x = align8(fill_rect.max.x)
     }
-
-    normal_x_axis_ := 1 / length_squared(x_axis) * x_axis
-    normal_y_axis_ := 1 / length_squared(y_axis) * y_axis
-    
-    normal_x_axis := vec_cast(f32x8, normal_x_axis_)
-    normal_y_axis := vec_cast(f32x8, normal_y_axis_)
     
     delta := vec_cast(f32x8, fill_rect.min) - vec_cast(f32x8, origin) 
     delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
+    
+    determinant := x_axis.x * y_axis.y - x_axis.y * y_axis.x
+    // @todo(viktor): Just don't draw if the axis are not independent
+    if determinant == 0 do determinant = 1
+    
+    normal_x_axis := vec_cast(f32x8, v2{ y_axis.y, -y_axis.x} / determinant)
+    normal_y_axis := vec_cast(f32x8, v2{-x_axis.y,  x_axis.x} / determinant)
     
     delta_n_x_axis := delta * normal_x_axis
     delta_n_y_axis := delta * normal_y_axis
@@ -408,7 +405,7 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
     
     inv_255         :f32x8= 1.0 / 255.0
     max_color_value :f32x8= 255 * 255
-
+    
     color := vec_cast(f32x8, color)
         
     texture_size := vec_cast(f32x8, texture.width, texture.height) - 2
@@ -418,9 +415,6 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
     for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
         // @note(viktor): iterative calculations will lead to arithmetic errors,
         // so we calculate always based of the index.
-        // u := dot(delta, n_x_axis)
-        // v := dot(delta, n_y_axis)
-        
         y_index := cast(f32) (y - fill_rect.min.y)
         u_row := delta_u_row + y_index * normal_x_axis.y
         v_row := delta_v_row + y_index * normal_y_axis.y
