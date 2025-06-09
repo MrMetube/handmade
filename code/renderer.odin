@@ -266,6 +266,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
         clear_render_target(target, commands.clear_color, clip_rect)
     }
     
+    target_index: u32
     target: Bitmap
     for sort_entry_index in prep.sorted_offsets {
         // :PointerArithmetic
@@ -278,6 +279,7 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             clip := prep.clip_rects.data[clip_rect_index]
             clip_rect = get_intersection(base_clip_rect, clip.rect)
             
+            target_index = clip.render_target_index
             target = targets[clip.render_target_index]
             assert(target.memory != nil)
         }
@@ -290,7 +292,8 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
             
             source := targets[entry.source_index]
-            blend_render_target(target, entry.alpha, source, clip_rect)
+            dest   := targets[entry.dest_index]
+            blend_render_target(dest, entry.alpha, source, clip_rect)
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -702,7 +705,6 @@ pack_pixel :: proc (value: [4]f32x8) -> (result: u32x8) {
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////
 
-// @todo(viktor): should sample return a pointer instead?
 sample :: proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
     texel := texture.memory[ p.y * texture.width +  p.x]
     result = vec_cast(f32, texel)

@@ -128,6 +128,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     total_asset_count: u32 = 1
     {
         file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
+        defer Platform.end_processing_all_files_of_type(&file_group)
         
         // @todo(viktor): which arena?
         assets.files = push(arena, AssetFile, file_group.file_count)
@@ -158,8 +159,6 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
                 unreachable() // @todo(viktor): Eventually, have some way of notifying users of bogus amogus files?
             }
         }
-        
-        Platform.end_processing_all_files_of_type(&file_group)
     }
     
     // @note(viktor): Allocate all metadata space

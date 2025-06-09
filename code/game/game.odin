@@ -13,7 +13,6 @@ SoundPitchingWithMouse:        b32
 FountainTest:                  b32
 ShowGrid:                      b32
 EnvironmentTest:               b32
-RenderSingleThreaded:          b32
 UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32
@@ -238,26 +237,22 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     ////////////////////////////////////////////////
     
     { debug_data_block("Game")
-        debug_record_value(&TimestepPercentage)
-        TimestepPercentage = clamp(TimestepPercentage, 0, 100)
-        
-        { debug_data_block("Assets")
-            debug_record_value(&LoadAssetsSingleThreaded)
-        }
-        
         { debug_data_block("Audio")
             debug_record_value(&SoundPanningWithMouse)
             debug_record_value(&SoundPitchingWithMouse)
         }
         
-        { debug_data_block("Entity")
-            debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
-        }
-        
-        { debug_data_block("Particles")
+        { debug_data_block("Tests")
             debug_record_value(&FountainTest)
             debug_record_value(&ShowGrid)
+            debug_record_value(&EnvironmentTest)
         }
+        
+        debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
+        debug_record_value(&LoadAssetsSingleThreaded)
+        
+        TimestepPercentage = clamp(TimestepPercentage, 0, 100)
+        debug_record_value(&TimestepPercentage)
     }
     
     { debug_data_block("Profile")
@@ -268,18 +263,13 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         debug_ui_element(FrameBarsGraph{})
         debug_ui_element(FrameInfo{})
     }
-    
-    { debug_data_block("Renderer")
-        debug_record_value(&EnvironmentTest)
-        debug_record_value(&RenderSingleThreaded)
+ 
+    { debug_data_block("Camera")
         debug_record_value(&ShowRenderAndSimulationBounds)
-        
-        { debug_data_block("Camera")
-            debug_record_value(&UseDebugCamera)
-            debug_record_value(&DebugCameraDistance)
-        }
+        debug_record_value(&UseDebugCamera)
+        debug_record_value(&DebugCameraDistance)
     }
-    
+
     if SoundPanningWithMouse {
         // @note(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5

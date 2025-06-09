@@ -168,7 +168,8 @@ RenderEntryRectangle :: struct {
 @(common)
 RenderEntryBlendRenderTargets :: struct {
     source_index: u32,
-    alpha:        f32
+    dest_index:   u32,
+    alpha:        f32,
 }
 
 UsedBitmapDim :: struct {

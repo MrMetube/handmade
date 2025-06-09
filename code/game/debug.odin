@@ -318,7 +318,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
-    // push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
+    push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
     
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
@@ -346,7 +346,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.viewed_frame_ordinal = debug.most_recent_frame_ordinal
     }
     
-    // push_blend_render_targets(&debug.render_group, debug.render_target_index, 1)
+    push_blend_render_targets(&debug.render_group, debug.render_target_index, 1.0)
 }
 
 get_debug_state :: proc() -> (result: ^DebugState) {

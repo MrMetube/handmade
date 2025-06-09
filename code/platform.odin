@@ -4,7 +4,6 @@ import win "core:sys/windows"
 
 /*
     @todo(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
-    - Hardware acceleration (OpenGL or Direct3D or Vulkan or BOTH ?? )
     - Blit speed improvements (BitBlt)
     
     - Saved game locations
@@ -410,6 +409,7 @@ main :: proc() {
             max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
             // @todo(viktor): Need to not poll disconnected controllers to avoid xinput frame rate hit
             // on older libraries.
+            // Is this still relevant?
             // @todo(viktor): should we poll this more frequently
             // @todo(viktor): only check connected controllers, catch messages on connect / disconnect
             controller_input := game.begin_timed_block("controller_input")
@@ -493,37 +493,46 @@ main :: proc() {
         }
         
         { debug_data_block("Platform")
-            game.debug_record_b32(&GlobalPause)
-            game.debug_record_b32(&GlobalDebugShowCursor)
-            game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
-            
-            {debug_data_block("RenderType")
-                @(static) GlobalChangeRenderTypeTo0: b32
-                @(static) GlobalChangeRenderTypeTo1: b32
-                @(static) GlobalChangeRenderTypeTo2: b32
-                if GlobalChangeRenderTypeTo0 {
-                    GlobalChangeRenderTypeTo0 = false
-                    GlobalRenderType = .RenderOpenGL_DisplayOpenGL
-                }
-                if GlobalChangeRenderTypeTo1 {
-                    GlobalChangeRenderTypeTo1 = false
-                    GlobalRenderType = .RenderSoftware_DisplayOpenGL
-                }
-                if GlobalChangeRenderTypeTo2 {
-                    GlobalChangeRenderTypeTo2 = false
-                    GlobalRenderType = .RenderSoftware_DisplayGDI
+            {debug_data_block("Renderer")
+                game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
+                game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
+                {debug_data_block("RenderType")
+                    @(static) GlobalChangeRenderTypeTo0: b32
+                    @(static) GlobalChangeRenderTypeTo1: b32
+                    @(static) GlobalChangeRenderTypeTo2: b32
+
+                    game.debug_record_b32(&GlobalChangeRenderTypeTo0, "Change to RenderOpenGL DisplayOpenGL")
+                    game.debug_record_b32(&GlobalChangeRenderTypeTo1, "Change to RenderSoftware DisplayOpenGL")
+                    game.debug_record_b32(&GlobalChangeRenderTypeTo2, "Change to RenderSoftware DisplayGDI")
+                    
+                    if GlobalChangeRenderTypeTo0 {
+                        GlobalChangeRenderTypeTo0 = false
+                        GlobalChangeRenderTypeTo1 = false
+                        GlobalChangeRenderTypeTo2 = false
+                        GlobalRenderType = .RenderOpenGL_DisplayOpenGL
+                    }
+                    if GlobalChangeRenderTypeTo1 {
+                        GlobalChangeRenderTypeTo0 = false
+                        GlobalChangeRenderTypeTo1 = false
+                        GlobalChangeRenderTypeTo2 = false
+                        GlobalRenderType = .RenderSoftware_DisplayOpenGL
+                    }
+                    if GlobalChangeRenderTypeTo2 {
+                        GlobalChangeRenderTypeTo0 = false
+                        GlobalChangeRenderTypeTo1 = false
+                        GlobalChangeRenderTypeTo2 = false
+                        GlobalRenderType = .RenderSoftware_DisplayGDI
+                    }
                 }
                 
-                game.debug_record_b32(&GlobalChangeRenderTypeTo0, "Change to RenderOpenGL DisplayOpenGL")
-                game.debug_record_b32(&GlobalChangeRenderTypeTo1, "Change to RenderSoftware DisplayOpenGL")
-                game.debug_record_b32(&GlobalChangeRenderTypeTo2, "Change to RenderSoftware DisplayGDI")
+                {debug_data_block("Environment")
+                    game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
+                    game.debug_record_b32(&GlobalDebugShowLightingSampling)
+                }
             }
             
-            game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-            {debug_data_block("Environment")
-                game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
-                game.debug_record_b32(&GlobalDebugShowLightingSampling)
-            }
+            game.debug_record_b32(&GlobalPause)
+            game.debug_record_b32(&GlobalDebugShowCursor)
         }
                 
         game.end_timed_block(input_processed)
@@ -670,9 +679,8 @@ main :: proc() {
         ////////////////////////////////////////////////
         prep_render := game.begin_timed_block("prepare render")
         
-        temp := begin_temporary_memory(&frame_arena)
-        render_prep := prep_for_render(&render_commands, temp.arena)
-        defer end_temporary_memory(temp)
+        render_memory := begin_temporary_memory(&frame_arena)
+        render_prep := prep_for_render(&render_commands, render_memory.arena)
         
         game.end_timed_block(prep_render)
         ////////////////////////////////////////////////
@@ -722,7 +730,7 @@ main :: proc() {
                 }
             }
         }
-        
+                
         game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
         frame_display := game.begin_timed_block("frame display")
@@ -738,8 +746,12 @@ main :: proc() {
             flip_counter = get_wall_clock()
         }
         
+        end_temporary_memory(render_memory)
+        
         game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
+        
+        check_arena(&frame_arena)
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))

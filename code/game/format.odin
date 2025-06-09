@@ -17,6 +17,7 @@ The higher goal should be to find all the kinds of ways to display data and make
     - Integer, Floating Point, Complex, Quaternion, Matrices
   - Bytes
     - Basis: Hex, Binary
+    
 - Collections
   - Structs
   - Arrays
@@ -54,6 +55,111 @@ Other flags:
 Flags are ignored by verbs that don't expect them.
 */
 
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+
+
+// FormatElement :: struct {
+//     using data: struct #raw_union {
+//         slice:   []u8,
+//         literal: u64,
+//     },
+    
+//     ////////////////////////////////////////////////
+    
+//     display_kind: enum {
+//         Text,
+//         Bits, 
+//         Integer,
+//         Float,
+//     },
+//     // Bits
+//     basis: enum { Binary = 2, Octal = 8, Decimal = 10, Duodecimal = 12, Hexadecimal = 16, Base64 = 64, Custom, },
+//     custom_basis: u8,
+//     uppercase_characters: b32,
+//     // Number
+//     always_show_sign: b32,
+//     // Float
+//     precision: enum { Default, Maximum, Custom },
+    
+//     custom_precision: u8,
+//     // Strings, Chars, Runes
+//     // @todo(viktor): Escaping
+    
+//     ////////////////////////////////////////////////
+//     // Formatting
+//     width:     u32,
+//     width_set: b32,
+    
+//     pad_from_right:    b32,
+//     indentation_depth: u32,
+    
+//     custom_padding_rune:      rune,
+//     use_custom_padding_rune:  b32,
+// }
+
+// /* 
+//     Data is just data.
+//     No special formatting syntax the user can just write a function to emit some Format Elements directly into the system.
+//  */
+// bar :: proc (inputs: ..any) {
+//     buffer := console_buffer[:]
+//     start: int
+//     arg_index: int
+//     skip: b32
+    
+//     scratch_space: [256]u8
+//     ctx := FormatContext {
+//         buffer  = { data = buffer }, 
+//         builder = { data = scratch_space[:] },
+//     }
+    
+//     temp: [128]FormatElement
+//     elements: Array(FormatElement)
+//     elements.data = temp[:]
+    
+//     for input in inputs {
+//         append(&elements, FormatElement{literal = '"', display_kind = .Text, })
+//         switch value in input {
+//             case bool, b8, b16, b32, b64:
+//                 boolean := any_cast(bool, value) ? "true" : "false"
+//                 append(&elements, FormatElement{slice = transmute([]u8) boolean, display_kind = .Text, })
+//             case string:
+//                 append(&elements, FormatElement{slice = transmute([]u8) value, display_kind = .Text, })
+//             case cstring:
+//                 str := (cast([^]u8) value)[:len(value)]
+//                 append(&elements, FormatElement{slice = transmute([]u8) str, display_kind = .Text, })
+//             case int:
+//                 append(&elements, FormatElement{literal = value, display_kind = .Integer, })
+//             case:
+//         }
+//         append(&elements, FormatElement{literal = '"', display_kind = .Text, })
+//         append(&elements, FormatElement{slice = transmute([]u8) string("\n"), display_kind = .Text, })
+//     }
+    
+//     for &element in slice(elements) {
+//         // append indentation
+//         // apppend padding left
+//         switch element.display_kind {
+//             case .Text:
+//                 if len(element.data.slice) == 0 {
+//                     cstr := cast(cstring) cast([^]u8) &element.data.literal
+//                     str := (cast([^]u8) cstr)[:len(cstr)]
+//                     append_array_many(&ctx.buffer, str)
+//                 } else {
+//                     append_array_many(&ctx.buffer, element.data.slice)
+//                 }
+//             case .Bits:
+//             case .Integer:
+//             case .Float:
+//         }
+//         // apppend padding right
+//     }
+
+//     fmt.fprint(os.stdout, cast(string) slice(ctx.buffer))
+// }
+
+////////////////////////////////////////////////
 ////////////////////////////////////////////////
 
 FormatInfo :: struct {
@@ -136,6 +242,7 @@ FloatFormatKind :: enum {
     MaximumPercision,
     Scientific_Lowercase, 
     Scientific_Uppercase,
+    
     Hexadecimal_Lowercase,
     Hexadecimal_Uppercase,
 }
@@ -639,7 +746,9 @@ when IsRunAsFile {
         }
         foo := Foo{987, false, -69.420, { {1, true, 99, {}} } }
         
-        // println("Hello World")
+        println("Hello World")
+        
+        bar(false, true, "Hello World", cstring("A C string"), 123)
         // println("Hello %\n", "World")
         // fmt.printfln("%m", 1024*1024*64)
         

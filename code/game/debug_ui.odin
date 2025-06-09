@@ -414,8 +414,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
         old_clip_rect := debug.render_group.current_clip_rect_index
-        clip_rect := rect
-        debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, clip_rect, debug.render_target_index, debug.backing_transform)
+        debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, rect, debug.render_target_index, debug.backing_transform)
         defer debug.render_group.current_clip_rect_index = old_clip_rect
         
         if contains(rect, mouse_p) {

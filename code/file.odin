@@ -53,6 +53,7 @@ open_next_file : PlatformOpenNextFile : proc(group: ^PlatformFileGroup) -> (resu
     
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
         // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
+        // @leak the file handles can only be freed once the load_work, which is threaded, completed
         file_handle, err := new(FileHandle)
 
         if err == nil {
