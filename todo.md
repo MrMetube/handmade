@@ -35,7 +35,8 @@
     - Hardware Rendering
         - Shaders?
         - Render-to-Texture?
-        
+    - Pixel Buffer Objects for texture downloads?
+    
 ## Architecture Exploration
 
 - Z ! :ZHandling

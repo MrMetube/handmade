@@ -96,7 +96,7 @@ DebugInteractionKind :: enum {
     
     Select,
     
-    SetValue,
+    SetValue, SetValueContinously,
 }
 
 ////////////////////////////////////////////////
@@ -516,7 +516,7 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
             if color == 0 do color = V4(Green.rgb, 0.7)
             
             id := DebugId{ value = {root_element, &frame} }
-            debug.next_hot_interaction = set_value_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
+            debug.next_hot_interaction = set_value_continously_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
             add_tooltip(debug, text)
         }
         
@@ -613,8 +613,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 longest_frame_span: f32
 d_longest_frame_span: f32
 draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
-    // @todo(viktor): the height changes based on the max value. 
-    // Let the user zoom and pan
+    // @todo(viktor): zooming and panning
     
     dim := get_dimension(rect)
     bar_width := dim.x / cast(f32) (MaxFrameCount-1)
@@ -634,6 +633,10 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     dd_longest_frame_span += -3 * d_longest_frame_span
     d_longest_frame_span += dd_longest_frame_span * dt
     longest_frame_span += d_longest_frame_span * dt + 0.5 * dd_longest_frame_span * dt * dt
+    
+    debug_record_value(&longest_frame_span)
+    debug_record_value(&d_longest_frame_span)
+    debug_record_value(&target_longest_frame_span)
     
     pixel_span := dim.y
     scale := safe_ratio_0(pixel_span, longest_frame_span)
@@ -915,6 +918,15 @@ set_value_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: De
     return result
 }
 
+set_value_continously_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
+    result.id = id
+    result.kind = .SetValueContinously
+    result.target = target
+    result.value = value
+    
+    return result
+}
+
 interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
     if interaction.kind != .None {
         result = debug.hot_interaction.id == interaction.id
@@ -947,6 +959,40 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
                 clear_selection(debug)
             }
             select(debug, interaction.id)
+            
+          case .SetValueContinously: // @copypasta from end_interaction
+            target := interaction.target
+            assert(target != nil)
+            switch value in interaction.value {
+              case DebugValue: 
+                target := cast(^DebugValue) target 
+                target ^= value
+              case i32: 
+                target := cast(^i32) target 
+                target ^= value
+              case b32: 
+                target := cast(^b32) target 
+                target ^= value
+              case DebugInteractionKind: 
+                target := cast(^DebugInteractionKind) target 
+                target ^= value
+            
+              case DebugGUID: 
+                target := cast(^DebugGUID) target 
+                target ^= value    
+              case ^b32: 
+                target := cast(^^b32) target 
+                target ^= value
+              case ^v2: 
+                target := cast(^^v2) target 
+                target ^= value
+              case ^DebugEventLink: 
+                target := cast(^^DebugEventLink) target 
+                target ^= value
+              case ^DebugTree: 
+                target := cast(^^DebugTree) target 
+                target ^= value
+            }
             
           case .DragValue:
             element := cast(^DebugElement) interaction.target
@@ -1062,7 +1108,7 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
       case .None: 
         unreachable()
       
-      case .NOP, .Move, .Resize, .Select, .AutoDetect, .DragValue, .Tear:
+      case .NOP, .Move, .Resize, .Select, .AutoDetect, .Tear, .DragValue, .SetValueContinously:
         // @note(viktor): nothing
       
       case .SetValue:

@@ -53,6 +53,8 @@ DebugState :: struct {
     
     root_group:    ^DebugEventLink,
     profile_group: ^DebugEventLink,
+    initialization_clock: i64,
+    
     
     view_hash:     [4096]^DebugView,
     tree_sentinel: DebugTree,
@@ -272,6 +274,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     
     if !debug.initialized {
         debug.initialized = true
+        
+        debug.initialization_clock = read_cycle_counter()
    
         // :PointerArithmetic
         total_memory := memory.debug_storage[size_of(DebugState):]
@@ -391,7 +395,9 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             
             root := collation_frame.profile_root
             if root != nil {
-                root.node.duration = collation_frame.end_clock - collation_frame.begin_clock
+                clock_basis := collation_frame.begin_clock
+                if clock_basis == 0 do clock_basis = debug.initialization_clock
+                root.node.duration = collation_frame.end_clock - clock_basis
             }
             
             debug.total_frame_count += 1
@@ -444,7 +450,10 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
             } else if parent_event == nil {
                 parent_event = store_event(debug, {}, debug.profile_root)
                 collation_frame.profile_root = parent_event
-                clock_basis = collation_frame.begin_clock
+            }
+            
+            if clock_basis == 0 {
+                clock_basis = debug.initialization_clock
             }
             
             stored_event := store_event(debug, event, element)

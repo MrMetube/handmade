@@ -106,8 +106,8 @@ Font :: struct {
 TextureOpQueue :: struct {
     mutex: TicketMutex,
     
-    first, last: ^TextureOp,
-    first_free:  ^TextureOp,
+    ops: Deque(TextureOp),
+    first_free: ^TextureOp,
 }
 
 @(common)
@@ -701,14 +701,7 @@ add_texture_op :: proc (queue: ^TextureOpQueue, source: TextureOp) {
     dest ^= source
     assert(dest.next == nil)
     
-    // :LinkedListAppend
-    if queue.last != nil {
-        queue.last.next = dest.next
-        queue.last = dest
-    } else {
-        queue.first = dest
-        queue.last  = dest
-    }
+    deque_prepend(&queue.ops, dest)
 }
 
 load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
@@ -748,7 +741,7 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
     }
     
     // @todo(viktor): when can we know that the texture is loaded
-    // work.asset.state = .Loaded
+    work.asset.state = .Loaded
 }
 
 do_load_asset_work : PlatformWorkQueueCallback : proc(data: pmm) {

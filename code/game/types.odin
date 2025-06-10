@@ -85,8 +85,8 @@ deque_prepend :: proc(deque: ^Deque($L), element: ^L) {
         deque.last  = element
         deque.first = element
     }  else {
-        deque.last.next = element
-        deque.last      = element
+        element.next = deque.last
+        deque.last   = element
     }
 }
 
@@ -196,7 +196,7 @@ list_pop_head_custom_member :: proc (head: ^^$T, $next: umm) -> (result: ^T, ok:
 ///////////////////////////////////////////////
 
 @(private="file") 
-get :: proc(type: ^$T, $offset: umm ) -> (result: ^^T) {
+get :: proc (type: ^$T, $offset: umm ) -> (result: ^^T) {
     raw_link := cast([^]u8) type
     slot := cast(^^T) &raw_link[offset]
     return slot

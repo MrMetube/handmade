@@ -383,7 +383,8 @@ push_bitmap :: proc(
         assert(bitmap != nil)
     }
     
-    if bitmap != nil {
+    // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
+    if bitmap != nil && bitmap.texture_handle != 0 {
         assert(bitmap.texture_handle != 0)
         push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment, x_axis, y_axis)
     } else {

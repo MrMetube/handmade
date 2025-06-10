@@ -59,6 +59,32 @@ Flags are ignored by verbs that don't expect them.
 ////////////////////////////////////////////////
 
 
+format_string :: proc (buffer: []u8, format: string, args: ..any) -> (result: string) {
+    dest := Array(u8) { data = buffer, }
+    
+    index: int
+    for index != len(format) {
+        if format[index] == '%' {
+            if index+1 < len(format) && format[index+1] == '%' {
+                append(&dest, '%')
+                index += 2
+            } else {
+                
+            }
+        } else {
+            append(&dest, format[index])
+            index += 1
+        }
+    }
+    
+    return cast(string) slice(dest)
+}
+
+
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+
+
 // FormatElement :: struct {
 //     using data: struct #raw_union {
 //         slice:   []u8,
@@ -659,6 +685,7 @@ print_integer :: proc(ctx: ^FormatContext, format_info: IntegerFormat) {
           case .Octal:                 ctx.verb = 'o'
           case .Decimal:               ctx.verb = 'd'
           case .Duodecimal:            ctx.verb = 'z'
+          
           case .Hexadecimal_Lowercase, .Hexadecimal_Uppercase:
             is_uppercase : b32 = kind == .Hexadecimal_Uppercase
             
@@ -696,22 +723,22 @@ print_integer :: proc(ctx: ^FormatContext, format_info: IntegerFormat) {
               case u64le:   print_hex(ctx, cast(u64) v, 64,  is_uppercase, false)
               case u64be:   print_hex(ctx, cast(u64) v, 64,  is_uppercase, false)
              
-              case i128:    
+              case i128:
                 print_hex(ctx, cast(u64) (v >> 64), 64, is_uppercase, false)
                 print_hex(ctx, cast(u64) v, 64, is_uppercase, true)
-              case i128le:  
+              case i128le:
                 print_hex(ctx, cast(u64) (v >> 64), 64, is_uppercase, false)
                 print_hex(ctx, cast(u64) v, 64, is_uppercase, true)
-              case i128be:  
+              case i128be:
                 print_hex(ctx, cast(u64) (v >> 64), 64, is_uppercase, false)
                 print_hex(ctx, cast(u64) v, 64, is_uppercase, true)
-              case u128:    
+              case u128:  
                 print_hex(ctx, cast(u64) (v >> 64), 64, is_uppercase, false)
                 print_hex(ctx, cast(u64) v, 64, is_uppercase, false)
-              case u128le:  
+              case u128le:
                 print_hex(ctx, cast(u64) (v >> 64), 64, is_uppercase, false)
                 print_hex(ctx, cast(u64) v, 64, is_uppercase, false)
-              case u128be:  
+              case u128be:
                 print_hex(ctx, cast(u64) (v >> 64), 64, is_uppercase, false)
                 print_hex(ctx, cast(u64) v, 64, is_uppercase, false)
             }
@@ -748,7 +775,11 @@ when IsRunAsFile {
         
         println("Hello World")
         
-        bar(false, true, "Hello World", cstring("A C string"), 123)
+        // bar(false, true, "Hello World", cstring("A C string"), 123)
+        
+        buffer:[2048]u8
+        println("%", format_string(buffer[:], "Hello %! 100%%", "World"))
+        
         // println("Hello %\n", "World")
         // fmt.printfln("%m", 1024*1024*64)
         

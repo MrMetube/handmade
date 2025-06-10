@@ -240,22 +240,22 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
 
 ////////////////////////////////////////////////
 
-gl_manage_textures :: proc(first: ^TextureOp) -> (last: ^TextureOp) {
-    for operation := first; operation != nil; operation = operation.next {
-        last = operation
-        
+gl_manage_textures :: proc(last: ^TextureOp) {
+    allocs, deallocs: u32
+    defer println("textures ops %, allocs % deallocs %", allocs + deallocs, allocs, deallocs)
+    for operation := last; operation != nil; operation = operation.next {
         switch &op in operation.value {
           case: unreachable()
         
           case TextureOpAllocate:
+            allocs += 1
             op.result ^= gl_allocate_texture(op.width, op.height, op.data)
             
           case TextureOpDeallocate:
+            deallocs += 1
             gl.DeleteTextures(1, &op.handle)
         }
     }
-    
-    return last
 }
 
 gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {

@@ -653,6 +653,25 @@ main :: proc() {
         render_memory := begin_temporary_memory(&frame_arena)
         render_prep := prep_for_render(&render_commands, render_memory.arena)
         
+        { timed_block("texture downloads")
+            begin_ticket_mutex(&texture_op_queue.mutex)
+                first := texture_op_queue.ops.first
+                last  := texture_op_queue.ops.last
+                texture_op_queue.ops = {}
+            end_ticket_mutex(&texture_op_queue.mutex)
+            
+            if last != nil {
+                assert(first != nil)
+                gl_manage_textures(last)
+                
+                begin_ticket_mutex(&texture_op_queue.mutex)
+                    
+                    first.next = texture_op_queue.first_free
+                    texture_op_queue.first_free = last
+                end_ticket_mutex(&texture_op_queue.mutex)
+            }
+        }
+        
         game.end_timed_block(prep_render)
         ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
@@ -705,22 +724,6 @@ main :: proc() {
         game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
         frame_display := game.begin_timed_block("frame display")
-        
-        {
-            begin_ticket_mutex(&texture_op_queue.mutex)
-                first := texture_op_queue.first
-                texture_op_queue.first = nil
-            end_ticket_mutex(&texture_op_queue.mutex)
-            
-            if first != nil {
-                last := gl_manage_textures(first)
-                
-                begin_ticket_mutex(&texture_op_queue.mutex)
-                    last.next = texture_op_queue.first_free
-                    texture_op_queue.first_free = first
-                end_ticket_mutex(&texture_op_queue.mutex)
-            }
-        }
         
         {
             device_context := win.GetDC(window)
