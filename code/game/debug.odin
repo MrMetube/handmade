@@ -105,8 +105,8 @@ DebugFrame :: struct {
     data_block_count:    u32,
 }
 
-DebugThread :: #type SingleLinkedList(DebugThreadLink)
-DebugThreadLink :: struct {
+DebugThread :: struct {
+    next: ^DebugThread,
     thread_index: u16,
     
     first_free_block:       ^DebugOpenBlock,
@@ -213,8 +213,8 @@ DebugElementFrame :: struct {
     events: Deque(DebugStoredEvent),
 }
 
-DebugElement :: #type SingleLinkedList(DebugElementLink)
-DebugElementLink :: struct {
+DebugElement :: struct {
+    next:   ^DebugElement,
     guid:   DebugGUID,
     type:   DebugValue,
     frames: [MaxFrameCount]DebugElementFrame,
@@ -233,7 +233,7 @@ DebugStoredEvent :: struct {
 }
 
 DebugProfileNode :: struct {
-    element: ^SingleLinkedList(DebugElementLink),
+    element: ^DebugElement,
     
     first_child:      ^DebugStoredEvent,
     next_same_parent: ^DebugStoredEvent,
@@ -371,7 +371,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
         debug.max_thread_count = max(debug.max_thread_count, thread_count)
         
         if thread == nil {
-            thread = list_pop(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
+            thread = list_pop_head(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
             thread ^= { thread_index = event.thread_index }
             
             list_push(&debug.thread, thread)
@@ -491,15 +491,7 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
     
     ok: b32
     for result == nil {
-        { // @note(viktor): inlined list_pop because polymorphic types kinda suck
-            head := &debug.first_free_stored_event
-            if head^ != nil {
-                result = head^
-                head^  = result.next
-                
-                ok = true
-            }
-        }
+        result, ok = list_pop_head(&debug.first_free_stored_event)
         
         if !ok {
             if arena_has_room(&debug.per_frame_arena, DebugStoredEvent) {
@@ -550,13 +542,7 @@ free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
             for frame.events.last != nil {
                 free_event := deque_remove_from_end(&frame.events)
                 freed_count += 1
-                { // @note(viktor): inlined list_push(&debug.first_free_stored_event, free_event) because ...
-                    head    := &debug.first_free_stored_event
-                    element := free_event
-                    
-                    element.next = head^
-                    head^        = element
-                }
+                list_push(&debug.first_free_stored_event, free_event)
             }
             
             frame ^= {}

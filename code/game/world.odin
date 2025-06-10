@@ -60,16 +60,16 @@ World :: struct {
 // @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 #assert( len(World{}.collision_rule_hash) & ( len(World{}.collision_rule_hash) - 1 ) == 0)
 
-Chunk :: #type SingleLinkedList(ChunkData)
-ChunkData :: struct {
+Chunk :: struct {
+    next: ^Chunk,
     chunk: [3]i32,
     
     first_block: ^WorldEntityBlock,
 }
 
 // @todo(viktor): Could make this just Chunk and then allow multiple tile chunks per X/Y/Z
-WorldEntityBlock :: #type SingleLinkedList(WorldEntityBlockData)
-WorldEntityBlockData :: struct {
+WorldEntityBlock :: struct {
+    next: ^WorldEntityBlock,
     entity_count: u32,
     // @note(viktor): entity_data'count =^= size_of(Entity) * entity_count  for now, because there is no compression
     entity_data: FixedArray(1 << 14, u8), // :DisjointArray of Entity Data and inlined member arrays or specialized :Arena
@@ -611,8 +611,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (res
         result = push(arena, Chunk)
         result.chunk = chunk_p
         
-        result.next = next_pointer_of_the_chunks_previous_chunk^
-        next_pointer_of_the_chunks_previous_chunk ^= result
+        list_push(next_pointer_of_the_chunks_previous_chunk, result) 
     }
     
     return result
@@ -646,7 +645,7 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entit
     pack_size := cast(i64) size_of(Entity)
     
     if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
-        new_block := list_pop(&world.first_free_block) or_else push(&world.arena, WorldEntityBlock, no_clear())
+        new_block := list_pop_head(&world.first_free_block) or_else push(&world.arena, WorldEntityBlock, no_clear())
         
         clear_world_entity_block(new_block)
         

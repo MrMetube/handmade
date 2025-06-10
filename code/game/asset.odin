@@ -1,10 +1,10 @@
 package game
 
-import "base:intrinsics"
 import hha "asset_builder"
 
 Assets :: struct {
     tran_state: ^TransientState,
+    texture_op_queue: ^TextureOpQueue,
     
     next_generation:            AssetGenerationId,
     in_flight_generation_count: u32,
@@ -48,8 +48,9 @@ Asset :: struct {
     state:  AssetState,
 }
 
-AssetMemoryHeader :: #type LinkedList(AssetMemoryHeaderData)
-AssetMemoryHeaderData :: struct {
+AssetMemoryHeader :: struct {
+    next, prev: ^AssetMemoryHeader,
+    
     asset_index: u32,
     
     generation_id: AssetGenerationId,
@@ -73,8 +74,8 @@ AssetMemoryBlockFlags :: bit_set[enum u64 {
     Used,
 }]
 
-AssetMemoryBlock :: #type LinkedList(AssetMemoryBlockData)
-AssetMemoryBlockData :: struct {
+AssetMemoryBlock :: struct {
+    prev, next: ^AssetMemoryBlock,
     size:  u64,
     flags: AssetMemoryBlockFlags,
 }
@@ -102,6 +103,14 @@ Font :: struct {
 ////////////////////////////////////////////////
 
 @(common)
+TextureOpQueue :: struct {
+    mutex: TicketMutex,
+    
+    first, last: ^TextureOp,
+    first_free:  ^TextureOp,
+}
+
+@(common)
 TextureOpAllocate :: struct {
     width, height: i32, 
     data: pmm,
@@ -115,14 +124,18 @@ TextureOpDeallocate :: struct {
 }
 
 @(common)
-TextureOp :: union {
-    TextureOpAllocate,
-    TextureOpDeallocate,
+TextureOp :: struct {
+    next: ^TextureOp,
+    
+    value: union {
+        TextureOpAllocate,
+        TextureOpDeallocate,
+    }
 }
 
 ////////////////////////////////////////////////
 
-make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
+make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState, texture_op_queue: ^TextureOpQueue) -> (assets: ^Assets) {
     assets = push(arena, Assets)
     
     list_init_sentinel(&assets.memory_sentinel)
@@ -131,6 +144,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     list_init_sentinel(&assets.loaded_asset_sentinel)
     
     assets.tran_state = tran_state
+    assets.texture_op_queue = texture_op_queue
     
     for &range in assets.tag_ranges {
         range = 1_000_000_000
@@ -148,7 +162,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     total_tag_count:   u32 = 1
     total_asset_count: u32 = 1
     {
-        file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
+            file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
         defer Platform.end_processing_all_files_of_type(&file_group)
         
         // @todo(viktor): which arena?
@@ -264,7 +278,7 @@ get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) ->
             result = asset.header
             
             list_remove(result)
-            list_insert_after(&assets.loaded_asset_sentinel, result)
+            list_prepend(&assets.loaded_asset_sentinel, result)
             
             if asset.header.generation_id < generation_id {
                 asset.header.generation_id = generation_id
@@ -509,7 +523,7 @@ generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (
 
 begin_asset_lock :: proc(assets: ^Assets) {
     for {
-        if _, ok := atomic_compare_exchange(&assets.memory_operation_lock, 0, 1); ok {
+        if ok, _ := atomic_compare_exchange(&assets.memory_operation_lock, 0, 1); ok {
             break
         }
     }
@@ -560,8 +574,7 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
                 if asset.state == .Loaded && generation_has_completed(assets, asset.header.generation_id) {
                     if bitmap, ok := &asset.header.value.(Bitmap); ok {
                         op := TextureOpDeallocate { handle = bitmap.texture_handle }
-                        
-                        // @todo(viktor): Platform.deallocate_texture(bitmap.texture_handle)
+                        add_texture_op(assets.texture_op_queue, { value = op })
                         
                         bitmap.texture_handle = 0
                     }
@@ -594,7 +607,7 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
         header.total_size  = size
         header.asset_index = cast(u32) asset_index
         
-        list_insert_after(&assets.loaded_asset_sentinel, header)
+        list_prepend(&assets.loaded_asset_sentinel, header)
     }
 
     return result
@@ -607,7 +620,7 @@ insert_block :: proc(previous: ^AssetMemoryBlock, memory: pmm, size: u64) -> (re
     
     result.flags = {}
     
-    list_insert_after(previous, result)
+    list_prepend(previous, result)
     
     return result
 }
@@ -647,6 +660,18 @@ merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> 
 ////////////////////////////////
 // Loading
 
+LoadAssetWork :: struct {
+    task:  ^TaskWithMemory,
+    asset: ^Asset,
+    texture_op_queue: ^TextureOpQueue,
+    
+    handle:           ^PlatformFileHandle,
+    position, amount: u64,
+    destination:      pmm,
+    
+    kind: AssetKind,
+}
+
 prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id)  }
 prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
 prefetch_font   :: proc(assets: ^Assets, id: FontId)   { load_font(assets,   id, false) }
@@ -665,15 +690,25 @@ get_file_handle_for :: proc(assets: ^Assets, file_index: u32) -> (result: ^Platf
     return result
 }
 
-LoadAssetWork :: struct {
-    task:        ^TaskWithMemory,
-    asset:       ^Asset,
+add_texture_op :: proc (queue: ^TextureOpQueue, source: TextureOp) {
+    begin_ticket_mutex(&queue.mutex)
+    defer end_ticket_mutex(&queue.mutex)
     
-    handle:           ^PlatformFileHandle,
-    position, amount: u64,
-    destination:      pmm,
+    // @todo(viktor): Can we devise a soft failure case for running out of ops?
+    assert(queue.first_free != nil)
     
-    kind: AssetKind,
+    dest := list_pop_head(&queue.first_free)
+    dest ^= source
+    assert(dest.next == nil)
+    
+    // :LinkedListAppend
+    if queue.last != nil {
+        queue.last.next = dest.next
+        queue.last = dest
+    } else {
+        queue.first = dest
+        queue.last  = dest
+    }
 }
 
 load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
@@ -694,7 +729,8 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
                 
                 result = &bitmap.texture_handle,
             }
-            // @todo(viktor): bitmap.texture_handle = Platform.allocate_texture(bitmap.width, bitmap.height, raw_data(bitmap.memory))
+            
+            add_texture_op(work.texture_op_queue, { value = op })
             
           case .Font: 
             font := work.asset.header.value.(Font)
@@ -711,7 +747,8 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
         zero(work.destination, work.amount)
     }
     
-    work.asset.state = .Loaded
+    // @todo(viktor): when can we know that the texture is loaded
+    // work.asset.state = .Loaded
 }
 
 do_load_asset_work : PlatformWorkQueueCallback : proc(data: pmm) {
@@ -729,7 +766,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
     
     if is_valid_asset(id) {
         asset := &assets.assets[id]
-        if _, ok := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
+        if ok, _ := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
             task: ^TaskWithMemory
             if !immediate {
                 task = begin_task_with_memory(assets.tran_state) 
@@ -740,6 +777,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
 
                 work := LoadAssetWork {
                     task = task,
+                    texture_op_queue = assets.texture_op_queue,
                     
                     handle = get_file_handle_for(assets, asset.file_index),
                     
@@ -759,7 +797,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
                     Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
                 }
             } else {
-                _, ok = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
+                ok, _ = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)
                 assert(ok)
             }
         } else if immediate {

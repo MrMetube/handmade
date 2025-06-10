@@ -86,21 +86,15 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
     
-    debug_storage:     []u8,
-    debug_table:       ^DebugTable,
-    
+    // when INTERNAL {
+        debug_storage:     []u8,
+        debug_table:       ^DebugTable,
+    // }
+        
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
     
-    Platform_api: PlatformAPI,
-} when INTERNAL else struct {
-    reloaded_executable: b32,
-    // @note(viktor): REQUIRED to be cleared to zero at startup
-    permanent_storage: []u8,
-    transient_storage: []u8,
-    
-    high_priority_queue: ^PlatformWorkQueue,
-    low_priority_queue:  ^PlatformWorkQueue,
+    platform_texture_op_queue: TextureOpQueue,
     
     Platform_api: PlatformAPI,
 }
@@ -212,7 +206,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             sub_arena(&task.arena, &tran_state.arena, 16 * Megabyte)
         }
         
-        tran_state.assets = make_assets(&tran_state.arena, 512 * Megabyte, tran_state)
+        tran_state.assets = make_assets(&tran_state.arena, 512 * Megabyte, tran_state, &memory.platform_texture_op_queue)
         
         state.mixer.master_volume = 0.1
         

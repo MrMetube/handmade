@@ -3,6 +3,8 @@ package game
 
 @(common="file")
 
+import "base:intrinsics"
+
 Array :: struct ($T: typeid) {
     data:  []T,
     count: i64,
@@ -72,7 +74,6 @@ rest_array :: proc(array: Array($T)) -> []T {
 }
 
 ////////////////////////////////////////////////
-
 // [First] <- [..] ... <- [..] <- [Last] 
 Deque :: struct($L: typeid) {
     first, last: ^L,
@@ -116,68 +117,87 @@ deque_remove_from_end :: proc(deque: ^Deque($L)) -> (result: ^L) {
 }
 
 ////////////////////////////////////////////////
-
+// Double Linked List
 // [Sentinel] -> <- [..] ->
 //  -> <- [..] -> ...    <-
-LinkedList :: struct($T: typeid) {
-    prev, next: ^LinkedList(T),
-    using data: T,
+
+list_init_sentinel :: proc { list_init_sentinel_custom_member, list_init_sentinel_prev_next }
+list_init_sentinel_prev_next     :: proc(sentinel: ^$T)                    { list_init_sentinel(sentinel, offset_of(sentinel.prev), offset_of(sentinel.next)) }
+list_init_sentinel_custom_member :: proc(sentinel: ^$T, $prev, $next: umm) {
+    get(sentinel, next) ^= sentinel
+    get(sentinel, prev) ^= sentinel
 }
 
-list_init_sentinel :: proc(sentinel: ^LinkedList($T)) {
-    sentinel.next = sentinel
-    sentinel.prev = sentinel
-}
-
-list_insert_before :: proc(list: ^$L/LinkedList($T), element: ^L) {
-    element.prev = list
-    element.next = list.next
+list_prepend :: proc { list_prepend_custom_member, list_prepend_prev_next }
+list_prepend_prev_next     :: proc(list: ^$T, element: ^T)                    { list_prepend(list, element, offset_of(list.prev), offset_of(list.next)) }
+list_prepend_custom_member :: proc(list: ^$T, element: ^T, $prev, $next: umm) {
+    element_next := get(element, next)
+    element_prev := get(element, prev)
     
-    element.next.prev = element
-    element.prev.next = element
+    element_prev^ = get(list, prev)^
+    element_next^ = list
+    
+    element_next^.prev = element
+    element_prev^.next = element
 }
 
-list_insert_after :: proc(list: ^$L/LinkedList($T), element: ^L) {
-    element.prev = list.prev
-    element.next = list
+list_append :: proc { list_append_custom_member, list_append_prev_next }
+list_append_prev_next     :: proc(list: ^$T, element: ^T)                    { list_append(list, element, offset_of(list.prev), offset_of(list.next)) }
+list_append_custom_member :: proc(list: ^$T, element: ^T, $prev, $next: umm) {
+    element_next := get(element, next)
+    element_prev := get(element, prev)
     
-    element.next.prev = element
-    element.prev.next = element
+    element_next^ = get(list, next)^
+    element_prev^ = list
+    
+    element_next^.prev = element
+    element_prev^.next = element
 }
 
-list_remove :: proc(element: ^LinkedList($T)) {
-    element.prev.next = element.next
-    element.next.prev = element.prev
+list_remove :: proc { list_remove_custom_member, list_remove_prev_next }
+list_remove_prev_next     :: proc(element: ^$T)                    { list_remove(element, offset_of(element.prev), offset_of(element.next)) }
+list_remove_custom_member :: proc(element: ^$T, $prev, $next: umm) {
+    element_next := get(element, next)
+    element_prev := get(element, prev)
     
-    element.next = nil
-    element.prev = nil
+    element_prev^.next = element_next^
+    element_next^.prev = element_prev^
+    
+    element_next^ = nil
+    element_prev^ = nil
+}
+
+///////////////////////////////////////////////
+// Single Linked List
+// [Head] -> [..] ... -> [..] -> [Tail]
+
+list_push :: proc { list_push_next, list_push_custom_member }
+list_push_next          :: proc (head: ^^$T, element: ^T)             { list_push(head, element, offset_of(T, next)) }
+list_push_custom_member :: proc (head: ^^$T, element: ^T, $next: umm) {
+    element_next := get(element, next) 
+    #assert(type_of(element_next^) == ^T)
+
+    element_next ^= head^
+    head         ^= element
+}
+
+list_pop_head :: proc { list_pop_head_custom_member, list_pop_head_next }
+list_pop_head_next          :: proc (head: ^^$T)             -> (result: ^T, ok: b32) #optional_ok { return list_pop_head(head, offset_of(head^.next)) }
+list_pop_head_custom_member :: proc (head: ^^$T, $next: umm) -> (result: ^T, ok: b32) #optional_ok {
+    if head^ != nil {
+        result = head^
+        head ^= get(result, next)^
+        
+        ok = true
+    }
+    return result, ok
 }
 
 ///////////////////////////////////////////////
 
-// [Head] -> [..] ... -> [..] -> [Tail]
-SingleLinkedList :: struct($T: typeid) {
-    using data: T,
-    next:       ^SingleLinkedList(T),
-}
-
-// @todo(viktor): codefy removal from the list whilst iterating over it
-// maybe a procedure is enough, please no iterator objects
-
-list_push :: proc(head: ^^SingleLinkedList($T), elements: ..^SingleLinkedList(T)) {
-    for element in elements {
-        element.next = head^
-        head        ^= element
-    }
-}
-
-list_pop :: proc(head: ^^SingleLinkedList($T)) -> (result: ^SingleLinkedList(T), ok: b32) #optional_ok {
-    if head^ != nil {
-        result = head^
-        head  ^= result.next
-        
-        ok = true
-    }
-    
-    return result, ok
+@(private="file") 
+get :: proc(type: ^$T, $offset: umm ) -> (result: ^^T) {
+    raw_link := cast([^]u8) type
+    slot := cast(^^T) &raw_link[offset]
+    return slot
 }

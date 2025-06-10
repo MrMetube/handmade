@@ -2,7 +2,6 @@ package main
 
 import "base:runtime"
 import "core:thread"
-import "base:intrinsics"
 import win "core:sys/windows"
 
 PlatformWorkQueue :: struct {
@@ -25,8 +24,6 @@ PlatformWorkQueueEntry :: struct {
 CreateThreadInfo :: struct {
     queue: ^PlatformWorkQueue,
     index: u32,
-    gl_context: win.HGLRC,
-    window_dc: win.HDC,
 }
 
 @(private="file") created_thread_count: u32 = 1
@@ -37,10 +34,9 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
     for &info in infos {
         info.queue = queue
         info.index = created_thread_count
-        
         created_thread_count += 1
         
-        // @note(viktor): When I use the windows call i can at most create 4 threads at once,
+        // @note(viktor): When I use the windows call I can at most create 4 threads at once,
         // any more calls to create thread in this call of the init function fail silently
         // A further call for the low_priority_queue then is able to create 4 more threads.
         //     result := win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
@@ -58,10 +54,10 @@ enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, callback: P
     entry.data     = data
     entry.callback = callback
     
-    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, queue.completion_goal+1)
+    ok, _ := atomic_compare_exchange(&queue.completion_goal, queue.completion_goal, queue.completion_goal+1)
     assert(ok)
     
-    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_write, old_next_entry, new_next_entry)
+    ok, _ = atomic_compare_exchange(&queue.next_entry_to_write, old_next_entry, new_next_entry)
     assert(ok)
     
     win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
@@ -72,9 +68,9 @@ complete_all_work : PlatformCompleteAllWork : proc(queue: ^PlatformWorkQueue) {
         do_next_work_queue_entry(queue)
     }
     
-    _, ok := intrinsics.atomic_compare_exchange_strong(&queue.completion_goal, queue.completion_goal, 0)
+    ok, _ := atomic_compare_exchange(&queue.completion_goal, queue.completion_goal, 0)
     assert(ok)
-    _, ok = intrinsics.atomic_compare_exchange_strong(&queue.completion_count, queue.completion_count, 0)
+    ok, _ = atomic_compare_exchange(&queue.completion_count, queue.completion_count, 0)
     assert(ok)
 }
 
@@ -83,7 +79,7 @@ do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b3
     
     if old_next_entry != queue.next_entry_to_write {
         new_next_entry := (old_next_entry + 1) % len(queue.entries)
-        index, ok := intrinsics.atomic_compare_exchange_strong(&queue.next_entry_to_read, old_next_entry, new_next_entry)
+        ok, index := atomic_compare_exchange(&queue.next_entry_to_read, old_next_entry, new_next_entry)
     
         if ok {
             assert(index == old_next_entry)
@@ -106,11 +102,6 @@ worker_thread :: proc (parameter: pmm) {
     info := cast(^CreateThreadInfo) parameter
     queue := info.queue
     context.user_index = cast(int) info.index
-    
-    if info.gl_context != nil {
-        ok := win.wglMakeCurrent(info.window_dc, info.gl_context)
-        assert(ok)
-    }
     
     for {
         if do_next_work_queue_entry(queue) { 

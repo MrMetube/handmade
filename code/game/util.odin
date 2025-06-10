@@ -2,9 +2,9 @@
 package game 
 
 @(common="file") 
+
 import "base:intrinsics"
 import "base:runtime"
-import "core:simd/x86"
 
 was_pressed :: proc(button: InputButton) -> b32 {
     return button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
@@ -78,34 +78,6 @@ pmm :: rawptr
 umm :: uintptr
 
 ////////////////////////////////////////////////
-// Atomics
-
-// @todo(viktor): this is shitty with if expressions even if there is syntax for if-value-ok
-atomic_compare_exchange :: proc "contextless" (dst: ^$T, old, new: T) -> (was: T, ok: b32) {
-    ok_: bool
-    was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
-    ok = cast(b32) ok_
-    return was, ok
-}
-
-volatile_load      :: intrinsics.volatile_load
-volatile_store     :: intrinsics.volatile_store
-atomic_add         :: intrinsics.atomic_add
-read_cycle_counter :: intrinsics.read_cycle_counter
-atomic_exchange    :: intrinsics.atomic_exchange
-
-// @todo(viktor): Is this correct? How can I validated this?
-@(enable_target_feature="sse2,sse")
-complete_previous_writes_before_future_writes :: proc "contextless" () {
-    x86._mm_sfence()
-    x86._mm_lfence()
-}
-@(enable_target_feature="sse2")
-complete_previous_reads_before_future_reads :: proc "contextless" () {
-    x86._mm_lfence()
-}
-
-////////////////////////////////////////////////
 
 
 Byte     :: 1
@@ -116,10 +88,9 @@ Terabyte :: 1024 * Gigabyte
 Petabyte :: 1024 * Terabyte
 Exabyte  :: 1024 * Petabyte
 
-align8  :: proc "contextless" (value: $T) -> T { return (value + (8-1)) &~ (8-1) }
-align16 :: proc "contextless" (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
+align8     :: proc "contextless" (value: $T) -> T { return (value + (8-1)) &~ (8-1) }
+align16    :: proc "contextless" (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
 align_pow2 :: proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
-
 
 safe_truncate :: proc{
     safe_truncate_u64,

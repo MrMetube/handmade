@@ -28,8 +28,9 @@ Sound :: struct {
     channels: [2][]i16, // 1 or 2 channels of [sample_count]samples
 }
 
-PlayingSound :: #type SingleLinkedList(PlayingSoundData)
-PlayingSoundData :: struct {
+PlayingSound :: struct {
+    next: ^PlayingSound,
+    
     id:   SoundId,
     
     samples_played: f32,
@@ -46,7 +47,7 @@ init_mixer :: proc(mixer: ^Mixer, parent_arena: ^Arena) {
 }
 
 play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
-    playing_sound := list_pop(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound, no_clear())
+    playing_sound := list_pop_head(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound, no_clear())
     
     // @todo(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound ^= {

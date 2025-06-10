@@ -102,7 +102,7 @@ safe_ratio_n :: proc(numerator, divisor, n: $T) -> (result: T) {
 safe_ratio_0 :: proc(numerator, divisor: $T) -> T { return safe_ratio_n(numerator, divisor, 0) }
 safe_ratio_1 :: proc(numerator, divisor: $T) -> T { return safe_ratio_n(numerator, divisor, 1) }
 
-clamp :: proc(value: $T, min, max: T) -> (result:T) {
+clamp :: proc(value: $T, min, max: T) -> (result: T) {
     when intrinsics.type_is_simd_vector(T) {
         result = simd.clamp(value, min, max)
     } else when intrinsics.type_is_array(T) {
@@ -152,7 +152,7 @@ round_v :: proc($T: typeid, v: [$N]f32) -> (result: [N]T) {
 }
 
 floor :: proc { floor_f, floor_v }
-floor_f :: proc($T: typeid, f: f32) -> (i:T) {
+floor_f :: proc($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.floor(f)
 }
 floor_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {
@@ -160,7 +160,7 @@ floor_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {
 }
 
 ceil :: proc { ceil_f, ceil_v }
-ceil_f :: proc($T: typeid, f: f32) -> (i:T) {
+ceil_f :: proc($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.ceil(f)
 }
 ceil_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {

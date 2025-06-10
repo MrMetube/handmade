@@ -1,12 +1,12 @@
 package game
 
 DebugEventLink :: struct {
-    next, prev: ^DebugEventLink,
     // @volatile sentinel() abuses the fact that first_child and last_child could be viewed as prev and next
+    next, prev:              ^DebugEventLink,
     first_child, last_child: ^DebugEventLink,
     
     name:     string,
-    element:  ^SingleLinkedList(DebugElementLink),
+    element:  ^DebugElement,
 }
 
 sentinel :: proc(from: ^DebugEventLink) -> (result: ^DebugEventLink) {
@@ -18,14 +18,14 @@ has_children :: proc(link: ^DebugEventLink) -> (result: b32) {
     return result
 }
 
-DebugTree :: #type LinkedList(DebugTreeData)
-DebugTreeData :: struct {
+DebugTree :: struct {
+    prev, next: ^DebugTree,
     p:    v2,
     root: ^DebugEventLink,
 }
 
-DebugView :: #type SingleLinkedList(DebugViewData)
-DebugViewData :: struct {
+DebugView :: struct {
+    next: ^DebugView,
     id:   DebugId,
     kind: union {
         DebugViewBlock,
@@ -1120,7 +1120,7 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^
         p = p,
     }
     
-    list_insert_after(&debug.tree_sentinel, result)
+    list_prepend(&debug.tree_sentinel, result)
     
     return result
 }
@@ -1148,7 +1148,7 @@ get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventLin
     
     if result == nil {
         result = create_link(debug, name)
-        add_link_to_group(debug, parent, result)
+        list_prepend(sentinel(parent), result)
     }
     
     return result
@@ -1168,20 +1168,11 @@ add_element_to_group :: proc(debug: ^DebugState, parent: ^DebugEventLink, elemen
     result = create_link(debug, "")
     
     if parent != nil {
-        add_link_to_group(debug, parent, result)
+        list_prepend(sentinel(parent), result)
     }
     result.element = element
     
     return result
-}
-
-add_link_to_group :: proc(debug: ^DebugState, parent: ^DebugEventLink, link: ^DebugEventLink) {
-    list, element := sentinel(parent), link
-    element.prev = list.prev
-    element.next = list
-    
-    element.next.prev = element
-    element.prev.next = element
 }
 
 clone_group :: proc (debug: ^DebugState, source: ^DebugEventLink) -> (result: ^DebugEventLink) {

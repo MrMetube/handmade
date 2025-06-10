@@ -81,8 +81,8 @@ HitPoint :: struct {
     filled_amount: u8,
 }
 
-PairwiseCollsionRule :: #type SingleLinkedList(PairwiseCollsionRuleData)
-PairwiseCollsionRuleData :: struct {
+PairwiseCollsionRule :: struct {
+    next: ^PairwiseCollsionRule,
     can_collide: b32,
     id_a, id_b:  EntityId,
 }
@@ -680,7 +680,7 @@ add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
     }
 
     if found == nil {
-        found = list_pop(&world.first_free_collision_rule) or_else push(&world.arena, PairwiseCollsionRule)
+        found = list_pop_head(&world.first_free_collision_rule) or_else push(&world.arena, PairwiseCollsionRule)
         list_push(&world.collision_rule_hash[hash_bucket], found)
     }
 

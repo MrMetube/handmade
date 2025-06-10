@@ -22,14 +22,16 @@ import win "core:sys/windows"
 ////////////////////////////////////////////////
 // Config
 
-// Resolution :: [2]i32 {2560, 1440}
-Resolution :: [2]i32 {1920, 1080}
-// Resolution :: [2]i32 {1280, 720}
+GlobalBackBuffer:=  Bitmap {
+    // width = 1280, height = 720,
+    width = 1920, height = 1080,
+    // width = 2560, height = 1440,
+}
 
 MonitorRefreshHz :: 120
 
 HighPriorityThreads :: 8
-LowPriorityThreads  :: 0
+LowPriorityThreads  :: 2
 
 FrameTempStorageSize :: 128 * Megabyte
 PermanentStorageSize :: 256 * Megabyte
@@ -40,8 +42,6 @@ DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 //  Globals
 
 GlobalRunning: b32
-
-GlobalBackBuffer:  Bitmap
 GlobalSoundBuffer: ^IDirectSoundBuffer
 
 GlobalPerformanceCounterFrequency: f64
@@ -119,8 +119,6 @@ main :: proc() {
         
         {
             buffer := &GlobalBackBuffer
-            buffer.width  = Resolution.x
-            buffer.height = Resolution.y
             
             bytes_per_pixel :: 4
             buffer_pitch := align16(buffer.width)
@@ -157,17 +155,17 @@ main :: proc() {
     ////////////////////////////////////////////////
     // Platform Setup
     
+    {
+        window_dc := win.GetDC(window)
+        defer win.ReleaseDC(window, window_dc)
+        
+        gl_context := init_opengl(window_dc)
+    }
+    
     high_queue, low_queue: PlatformWorkQueue
     high_infos: [HighPriorityThreads]CreateThreadInfo
     low_infos:  [LowPriorityThreads ]CreateThreadInfo
-    window_dc := win.GetDC(window)
-    gl_context := init_opengl(window_dc)
     
-    for &info in low_infos {
-        info.gl_context = win.wglCreateContextAttribsARB(window_dc, gl_context, &GlAttribs[0])
-        assert(info.gl_context != nil)
-        info.window_dc  = window_dc
-    }
     
     init_work_queue(&high_queue, high_infos[:])
     init_work_queue(&low_queue,  low_infos[:])
@@ -313,22 +311,20 @@ main :: proc() {
         }
         
         // :PointerArithmetic
-        game_memory.permanent_storage = storage_ptr[0 :][: PermanentStorageSize]
+        game_memory.permanent_storage = storage_ptr[                   0 :][: PermanentStorageSize]
         game_memory.transient_storage = storage_ptr[PermanentStorageSize :][: TransientStorageSize]
-        game_memory.debug_storage     = storage_ptr[TransientStorageSize :][: DebugStorageSize]
+        game_memory.debug_storage     = storage_ptr[TransientStorageSize :][: DebugStorageSize    ]
         
         game_memory.debug_table = cast(^DebugTable) allocate_memory(DebugTableSize)
         
-        when false && INTERNAL {
-            game_memory.Platform_api.debug = {
-                read_entire_file       = DEBUG_read_entire_file,
-                write_entire_file      = DEBUG_write_entire_file,
-                free_file_memory       = DEBUG_free_file_memory,
-                execute_system_command = DEBUG_execute_system_command,
-                get_process_state      = DEBUG_get_process_state,
-            }
+        texture_op_count := 1024
+        texture_ops := (cast([^]TextureOp) allocate_memory(texture_op_count * size_of(TextureOp)))[:texture_op_count]
+        for &op, index in texture_ops[:texture_op_count-1] {
+            op.next = &texture_ops[index + 1]
         }
+        game_memory.platform_texture_op_queue.first_free = &texture_ops[0]
     }
+    texture_op_queue := &game_memory.platform_texture_op_queue
     
     if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
         assert(false)
@@ -661,8 +657,6 @@ main :: proc() {
         ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         
-        complete_all_work(&low_queue)
-        
         {
             seconds_elapsed_for_frame := get_seconds_elapsed_until_now(last_counter)
             for seconds_elapsed_for_frame < target_seconds_per_frame {
@@ -711,6 +705,22 @@ main :: proc() {
         game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
         frame_display := game.begin_timed_block("frame display")
+        
+        {
+            begin_ticket_mutex(&texture_op_queue.mutex)
+                first := texture_op_queue.first
+                texture_op_queue.first = nil
+            end_ticket_mutex(&texture_op_queue.mutex)
+            
+            if first != nil {
+                last := gl_manage_textures(first)
+                
+                begin_ticket_mutex(&texture_op_queue.mutex)
+                    last.next = texture_op_queue.first_free
+                    texture_op_queue.first_free = first
+                end_ticket_mutex(&texture_op_queue.mutex)
+            }
+        }
         
         {
             device_context := win.GetDC(window)

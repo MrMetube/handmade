@@ -17,8 +17,8 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-SortGridEntry :: struct { // :LinkedList
-    next:     ^SortGridEntry,
+SortGridEntry :: struct {
+    next:           ^SortGridEntry,
     occupant_index: u16,
 }
 
@@ -158,6 +158,7 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
                 entry.occupant_index = auto_cast index_a
                 
                 slot := &grid[grid_x][grid_y]
+                // :ListPush why is this half-deferred ?
                 entry.next = slot^
                 defer slot ^= entry
                 

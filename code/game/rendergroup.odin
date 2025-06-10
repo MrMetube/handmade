@@ -19,8 +19,6 @@ package game
 
     5) All color values specified to the renderer as v4s are in
         _NON-premulitplied_ alpha.
-
-    @todo(viktor): :ZHandling
 */
 
 @(common) 
