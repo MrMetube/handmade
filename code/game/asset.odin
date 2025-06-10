@@ -101,6 +101,27 @@ Font :: struct {
 
 ////////////////////////////////////////////////
 
+@(common)
+TextureOpAllocate :: struct {
+    width, height: i32, 
+    data: pmm,
+    
+    result: ^u32,
+}
+
+@(common)
+TextureOpDeallocate :: struct {
+    handle: u32,
+}
+
+@(common)
+TextureOp :: union {
+    TextureOpAllocate,
+    TextureOpDeallocate,
+}
+
+////////////////////////////////////////////////
+
 make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState) -> (assets: ^Assets) {
     assets = push(arena, Assets)
     
@@ -538,7 +559,10 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
                 asset := &assets.assets[it.asset_index]
                 if asset.state == .Loaded && generation_has_completed(assets, asset.header.generation_id) {
                     if bitmap, ok := &asset.header.value.(Bitmap); ok {
-                        Platform.deallocate_texture(bitmap.texture_handle)
+                        op := TextureOpDeallocate { handle = bitmap.texture_handle }
+                        
+                        // @todo(viktor): Platform.deallocate_texture(bitmap.texture_handle)
+                        
                         bitmap.texture_handle = 0
                     }
                     list_remove(it)
@@ -662,7 +686,15 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
           case .Sound: // @note(viktor): nothing to do
           case .Bitmap:
             bitmap := &work.asset.header.value.(Bitmap)
-            bitmap.texture_handle = Platform.allocate_texture(bitmap.width, bitmap.height, raw_data(bitmap.memory))
+            
+            op := TextureOpAllocate {
+                width = bitmap.width, 
+                height = bitmap.height, 
+                data = raw_data(bitmap.memory),
+                
+                result = &bitmap.texture_handle,
+            }
+            // @todo(viktor): bitmap.texture_handle = Platform.allocate_texture(bitmap.width, bitmap.height, raw_data(bitmap.memory))
             
           case .Font: 
             font := work.asset.header.value.(Font)

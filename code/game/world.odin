@@ -235,9 +235,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     dt := input.delta_time * TimestepPercentage/100.0
     
     monitor_width_in_meters :: 0.635
-    meters_to_pixels_for_monitor := cast(f32) render_group.commands.width * monitor_width_in_meters
+    meters_to_pixels_for_monitor := cast(f32) render_group.commands.width / monitor_width_in_meters
     
-    focal_length, distance_above_ground : f32 = 0.6, 10
+    focal_length, distance_above_ground : f32 = 0.3, 10
     perspective(render_group, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
     
     haze_color := DarkBlue
@@ -647,6 +647,7 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entit
     
     if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
         new_block := list_pop(&world.first_free_block) or_else push(&world.arena, WorldEntityBlock, no_clear())
+        
         clear_world_entity_block(new_block)
         
         list_push(&chunk.first_block, new_block)

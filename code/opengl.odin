@@ -238,6 +238,45 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
     win.SetPixelFormat(dc, suggested_pixel_format_index, nil)
 }
 
+////////////////////////////////////////////////
+
+gl_manage_textures :: proc(ops: []TextureOp) {
+    for operation in ops {
+        switch &op in operation {
+          case: unreachable()
+        
+          case TextureOpAllocate:
+            op.result ^= gl_allocate_texture(op.width, op.height, op.data)
+            
+          case TextureOpDeallocate:
+            gl.DeleteTextures(1, &op.handle)
+        }
+    }
+}
+
+gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {
+    handle: u32
+    gl.GenTextures(1, &handle)
+    
+    gl.BindTexture(gl.TEXTURE_2D, handle)
+    
+    gl.TexImage2D(gl.TEXTURE_2D, 0, GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
+    
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
+    glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
+    
+    gl.BindTexture(gl.TEXTURE_2D, 0)
+    
+    result = handle
+    
+    return result
+}
+
+////////////////////////////////////////////////
+
 gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
     gl.Disable(gl.SCISSOR_TEST)
     gl.Disable(gl.BLEND)
@@ -272,7 +311,7 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
 
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
 }
-
+    
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
@@ -299,7 +338,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         gl.GenFramebuffers(cast(i32) new_count, &FramebufferHandles.data[count])
         
         for render_target in slice(&FramebufferHandles)[count:] {
-            texture := append(&FramebufferTextures, allocate_texture(draw_dim.x, draw_dim.y, nil))
+            texture := append(&FramebufferTextures, gl_allocate_texture(draw_dim.x, draw_dim.y, nil))
             
             gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
             gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture^, 0)
@@ -525,32 +564,4 @@ gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,
     glTexCoord2f(min_uv.x, max_uv.y)
     glVertex2f(min.x, max.y)
     glEnd()
-}
-
-////////////////////////////////////////////////
-// Exports to the game
-
-allocate_texture : PlatformAllocateTexture = proc(width, height: i32, data: pmm) -> (result: u32) {
-    handle: u32
-    gl.GenTextures(1, &handle)
-    
-    gl.BindTexture(gl.TEXTURE_2D, handle)
-    
-    gl.TexImage2D(gl.TEXTURE_2D, 0, GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
-    
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
-    glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
-    
-    gl.BindTexture(gl.TEXTURE_2D, 0)
-    
-    result = handle
-    return result
-}
-
-deallocate_texture : PlatformDeallocateTexture : proc(texture: u32) {
-    handle := texture
-    gl.DeleteTextures(1, &handle)
 }

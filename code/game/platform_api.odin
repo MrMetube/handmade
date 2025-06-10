@@ -5,9 +5,6 @@ package game
 PlatformAPI :: struct {
     enqueue_work:      PlatformEnqueueWork,
     complete_all_work: PlatformCompleteAllWork,
-    
-    allocate_texture:   PlatformAllocateTexture,
-    deallocate_texture: PlatformDeallocateTexture,
         
     begin_processing_all_files_of_type: PlatformBeginProcessingAllFilesOfType,
     end_processing_all_files_of_type:   PlatformEndProcessingAllFilesOfType,
@@ -19,9 +16,6 @@ PlatformAPI :: struct {
 @(common) PlatformWorkQueueCallback :: #type proc(data: pmm)
 @(common) PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm)
 @(common) PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
-
-@(common) PlatformAllocateTexture   :: #type proc(width, height: i32, data: pmm) -> u32
-@(common) PlatformDeallocateTexture :: #type proc(texture: u32)
 
 @(common) PlatformFileType   :: enum { AssetFile }
 @(common) PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }

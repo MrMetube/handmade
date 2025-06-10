@@ -28,7 +28,7 @@ Resolution :: [2]i32 {1920, 1080}
 
 MonitorRefreshHz :: 120
 
-HighPriorityThreads :: 10
+HighPriorityThreads :: 8
 LowPriorityThreads  :: 0
 
 FrameTempStorageSize :: 128 * Megabyte
@@ -132,7 +132,7 @@ main :: proc() {
         if win.RegisterClassW(&window_class) == 0 {
             return // @logging 
         }
-
+        
         window = win.CreateWindowExW(
             0, //win.WS_EX_TOPMOST | win.WS_EX_LAYERED,
             window_class.lpszClassName,
@@ -159,7 +159,7 @@ main :: proc() {
     
     high_queue, low_queue: PlatformWorkQueue
     high_infos: [HighPriorityThreads]CreateThreadInfo
-    low_infos:  [LowPriorityThreads]CreateThreadInfo
+    low_infos:  [LowPriorityThreads ]CreateThreadInfo
     window_dc := win.GetDC(window)
     gl_context := init_opengl(window_dc)
     
@@ -173,7 +173,7 @@ main :: proc() {
     init_work_queue(&low_queue,  low_infos[:])
     
     print("\033[2J") // Clear the terminal
-
+    
     state: PlatformState
     {
         exe_path_buffer: [win.MAX_PATH_WIDE]u16
@@ -277,9 +277,6 @@ main :: proc() {
             enqueue_work      = enqueue_work,
             complete_all_work = complete_all_work,
             
-            allocate_texture   = allocate_texture,
-            deallocate_texture = deallocate_texture,
-            
             begin_processing_all_files_of_type = begin_processing_all_files_of_type,
             end_processing_all_files_of_type   = end_processing_all_files_of_type,
             open_next_file                     = open_next_file,
@@ -349,7 +346,7 @@ main :: proc() {
         
     for GlobalRunning {
         ////////////////////////////////////////////////   
-        //  Input
+        // Input
         input_processed := game.begin_timed_block("input processed")
         
         init_render_commands(&render_commands, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
@@ -412,7 +409,7 @@ main :: proc() {
                 
                 process_pending_messages(&state, new_keyboard_controller)
             }
-
+            
             max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
             // @todo(viktor): Need to not poll disconnected controllers to avoid xinput frame rate hit
             // on older libraries.
@@ -544,7 +541,7 @@ main :: proc() {
             play_cursor, write_cursor: win.DWORD
             audio_counter := get_wall_clock()
             from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
-
+            
             if result := GlobalSoundBuffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
                 /*
                 Here is how sound output computation works.
@@ -639,7 +636,7 @@ main :: proc() {
             if executable_needs_to_be_reloaded {
                 // @todo(viktor): if this is too slow the audio and the whole game will lag
                 unload_game_lib()
-
+                
                 for _ in 0..<100 {
                     game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
                     if game_lib_is_valid do break
@@ -652,7 +649,7 @@ main :: proc() {
             
             game.end_timed_block(debug_colation)
         }
-
+        
         swap(&new_input, &old_input)
         ////////////////////////////////////////////////
         prep_render := game.begin_timed_block("prepare render")
@@ -664,9 +661,11 @@ main :: proc() {
         ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("frame end sleep")
         
+        complete_all_work(&low_queue)
+        
         {
             seconds_elapsed_for_frame := get_seconds_elapsed_until_now(last_counter)
-            for seconds_elapsed_for_frame < target_seconds_per_frame && !do_next_work_queue_entry(&low_queue) {
+            for seconds_elapsed_for_frame < target_seconds_per_frame {
                 seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
             }
             
@@ -708,7 +707,7 @@ main :: proc() {
                 }
             }
         }
-                
+        
         game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
         frame_display := game.begin_timed_block("frame display")
