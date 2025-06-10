@@ -59,6 +59,26 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     assert(count == auto_cast prep.clip_rects.count)
 }
 
+aspect_ratio_fit :: proc (render_size: [2]i32, window_size: [2]i32) -> (result: Rectangle2i) {
+    if render_size.x > 0 && render_size.y > 0 && window_size.x > 0 && window_size.y > 0 {
+        optimal_window_width  := round(i32, cast(f32) window_size.y * cast(f32) render_size.x / cast(f32) render_size.y)
+        optimal_window_height := round(i32, cast(f32) window_size.x * cast(f32) render_size.y / cast(f32) render_size.x)
+        
+        window_center := window_size / 2
+        optimal_window_size: [2]i32
+        if optimal_window_width > window_size.x {
+            // Top and Bottom black bars
+            optimal_window_size = {window_size.x, optimal_window_height}
+        } else {
+            // Left and Right black bars
+            optimal_window_size = {optimal_window_width, window_size.y}
+        }
+        result = rectangle_center_dimension(window_center, optimal_window_size)
+    }
+    
+    return result
+}
+
 sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
     timed_function()
     
@@ -128,7 +148,7 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
         index_a := cast(u16) index_a
         if !intersects(a.screen_bounds, screen_rect) do continue
         
-        grid_span := rectangle_min_max(truncate(inv_cell_size * a.screen_bounds.min), truncate(inv_cell_size * a.screen_bounds.max))
+        grid_span := rectangle_min_max(truncate(i32, inv_cell_size * a.screen_bounds.min), truncate(i32, inv_cell_size * a.screen_bounds.max))
         
         grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({Width, Height}-1) })
         
@@ -336,8 +356,8 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
     
     fill_rect := rectangle_inverted_infinity(Rectangle2i)
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
-        floorp := floor(testp, i32)
-        ceilp  := ceil(testp,  i32)
+        floorp := floor(i32, testp)
+        ceilp  := ceil(i32,  testp)
         
         fill_rect.min.x = min(fill_rect.min.x, floorp.x)
         fill_rect.min.y = min(fill_rect.min.y, floorp.y)
@@ -509,8 +529,8 @@ draw_rectangle_fill_color_axis_aligned :: proc(buffer: Bitmap, rect: Rectangle2,
 draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color: v4, clip_rect: Rectangle2i){
     fill_rect := rectangle_inverted_infinity(Rectangle2i)
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
-        floorp := floor(testp, i32)
-        ceilp  := ceil(testp, i32)
+        floorp := floor(i32, testp)
+        ceilp  := ceil(i32, testp)
      
         fill_rect.min.x = min(fill_rect.min.x, floorp.x)
         fill_rect.min.y = min(fill_rect.min.y, floorp.y)
@@ -732,7 +752,7 @@ sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughn
     assert(environment_map.LOD[0].memory != nil)
 
     // @note(viktor): pick which LOD to sample from
-    lod_index := round(roughness * cast(f32) (len(environment_map.LOD)-1), i32)
+    lod_index := round(i32, roughness * cast(f32) (len(environment_map.LOD)-1))
     lod := environment_map.LOD[lod_index]
     lod_size := vec_cast(f32, lod.width, lod.height)
 
@@ -834,13 +854,13 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     inv_y_len_squared := 1 / length_squared(y_axis)
 
     minimum := [2]i32{
-        floor(min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x), i32),
-        floor(min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y), i32),
+        floor(i32, min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
+        floor(i32, min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
 
     maximum := [2]i32{
-        ceil( max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x), i32),
-        ceil( max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y), i32),
+        ceil(i32, max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
+        ceil(i32, max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
 
     width_max      := buffer.width-1
@@ -885,7 +905,7 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
 
                 // @todo(viktor): formalize texture boundaries
                 t := v2{u,v} * vec_cast(f32, texture.width-2, texture.height-2)
-                s := floor(t, i32)
+                s := floor(i32, t)
                 f := t - vec_cast(f32, s)
 
                 assert(s.x >= 0 && s.x < texture.width)

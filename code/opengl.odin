@@ -232,13 +232,12 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
     
 }
 
-gl_display_bitmap :: proc(bitmap: Bitmap, window_size: [2]i32) {
+gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
     gl.Disable(gl.SCISSOR_TEST)
-    
-    gl.Viewport(0, 0, window_size.x, window_size.y)
     gl.Disable(gl.BLEND)
+    defer gl.Enable(gl.BLEND)
     
-    gl_set_screenspace(window_size)
+    gl_bind_frame_buffer(0, draw_region)
     
     gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
     defer gl.BindTexture(gl.TEXTURE_2D, 0)
@@ -253,7 +252,7 @@ gl_display_bitmap :: proc(bitmap: Bitmap, window_size: [2]i32) {
     
     gl.Enable(gl.TEXTURE_2D)
 
-    gl.ClearColor(0, 0, 0, 0)
+    gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
     gl.Clear(gl.COLOR_BUFFER_BIT)
 
     glMatrixMode(gl.TEXTURE)
@@ -267,27 +266,22 @@ gl_display_bitmap :: proc(bitmap: Bitmap, window_size: [2]i32) {
 
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
     
-    gl.Enable(gl.BLEND)
 }
 
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_size: [2]i32) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, clear_color: v4) {
     timed_function()
     
-    gl.Viewport(0, 0, commands.width, commands.height)
-    gl_set_screenspace(window_size)
+    window_size := get_dimension(draw_region)
+    gl_bind_frame_buffer(0, draw_region)
+    defer gl_bind_frame_buffer(0, draw_region)
     
     gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.TEXTURE_2D)
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-            
-    clear_color := commands.clear_color
-    clear_color.r = square(clear_color.r)
-    clear_color.g = square(clear_color.g)
-    clear_color.b = square(clear_color.b)
     
     // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
     max_render_target_count := cast(i64) commands.max_render_target_index+1
@@ -299,23 +293,25 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
         FramebufferHandles.count  += new_count
         gl.GenFramebuffers(cast(i32) new_count, &FramebufferHandles.data[count])
         
-        for render_target, index in slice(&FramebufferHandles)[count:] {
+        for render_target in slice(&FramebufferHandles)[count:] {
             texture := append(&FramebufferTextures, allocate_texture(window_size.x, window_size.y, nil))
             
             gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
             gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture^, 0)
-
+            
             assert(gl.FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(gl.FRAMEBUFFER))
         }
     }
     
-    for render_target in slice(&FramebufferHandles) {
-        gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
+    for index in 0..< FramebufferHandles.count {
+        gl_bind_frame_buffer(cast(u32) index, draw_region)
         
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
         gl.Clear(gl.COLOR_BUFFER_BIT)
     }
+    
     gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+    gl_set_screenspace({commands.width, commands.height})
     
     clip_rect_index := max(u16)
     target_index: u32
@@ -331,9 +327,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
             clip := prep.clip_rects.data[clip_rect_index]
             
             target_index = clip.render_target_index
-            
-            gl.BindFramebuffer(gl.FRAMEBUFFER, FramebufferHandles.data[target_index])
-            gl_set_screenspace(window_size)
+            gl_bind_frame_buffer(target_index, draw_region)
             
             rect := clip.rect
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
@@ -346,18 +340,19 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
             
-            dest := FramebufferHandles.data[entry.dest_index]
-            gl.BindFramebuffer(gl.FRAMEBUFFER, dest)
-
+            // @important @todo(viktor): The blending does not handle different aspect ratios correctly.
+            // Currently the drawn buffer is misplaced and misscaled, when only rendering a rectangle with no texture it is correct.
+            
+            gl_bind_frame_buffer(entry.dest_index, draw_region)
+            defer gl.BindFramebuffer(gl.FRAMEBUFFER, FramebufferHandles.data[target_index])
+            
+            gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+            defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+            
             source := FramebufferTextures.data[entry.source_index]
             gl.BindTexture(gl.TEXTURE_2D, source)
             
-            gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-            gl_rectangle(0, vec_cast(f32, window_size), {1,1,1, entry.alpha}, 0, 1)
-            gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-            
-            gl.BindTexture(gl.TEXTURE_2D, 0)
-            gl.BindFramebuffer(gl.FRAMEBUFFER, FramebufferHandles.data[target_index])
+            gl_rectangle(0, vec_cast(f32, commands.width, commands.height), v4{1,1,1, entry.alpha}, 0, 1)
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -398,6 +393,8 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, window_s
     }
 
     if GlobalDebugShowRenderSortGroups {
+        timed_block("show render sort groups")
+        
         // @todo(viktor): this broke since the separation of the layers with sort barriers
         if commands.render_entry_count != 0 {
             bounds := slice(commands.sort_entries)
@@ -433,7 +430,7 @@ draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
     bound := &bounds[index]
     if .DebugBox in bound.flags do return
     bound.flags += { .DebugBox }
-            
+    
     bound_center := get_center(bound.screen_bounds)
     for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
         assert(edge.front == index)
@@ -462,9 +459,40 @@ draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
     glVertex2f(min.x, min.y)
 }
 
-gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
-    timed_function()
+gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i) {
+    render_target := FramebufferHandles.data[render_target_index]
+    gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
     
+    window_size := get_dimension(draw_region)
+    if render_target_index == 0 {
+        gl.Viewport(draw_region.min.x, draw_region.min.y, window_size.x, window_size.y)
+    } else {
+        gl.Viewport(0, 0, window_size.x, window_size.y)
+    }
+}
+
+gl_set_screenspace :: proc(size: [2]i32) {
+    a := safe_ratio_1(f32(2), cast(f32) size.x)
+    b := safe_ratio_1(f32(2), cast(f32) size.y)
+    
+    glMatrixMode(gl.TEXTURE)
+    glLoadIdentity()
+    
+    glMatrixMode(gl.MODELVIEW)
+    glLoadIdentity()
+    
+    transform := m4 {
+        a, 0, 0, -1,
+        0, b, 0, -1,
+        0, 0, 1,  0,
+        0, 0, 0,  1,
+    }
+    
+    glMatrixMode(gl.PROJECTION)
+    glLoadMatrixf(&transform[0,0])
+}
+
+gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
     glBegin(gl.TRIANGLES)
     
     glColor4f(color.r, color.g, color.b, color.a)
@@ -489,27 +517,6 @@ gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,
     glTexCoord2f(min_uv.x, max_uv.y)
     glVertex2f(min.x, max.y)
     glEnd()
-}
-
-gl_set_screenspace :: proc(size: [2]i32) {
-    a := safe_ratio_1(f32(2), cast(f32) size.x)
-    b := safe_ratio_1(f32(2), cast(f32) size.y)
-    
-    glMatrixMode(gl.TEXTURE)
-    glLoadIdentity()
-    
-    glMatrixMode(gl.MODELVIEW)
-    glLoadIdentity()
-    
-    transform := m4 {
-        a, 0, 0, -1,
-        0, b, 0, -1,
-        0, 0, 1,  0,
-        0, 0, 0,  1,
-    }
-    
-    glMatrixMode(gl.PROJECTION)
-    glLoadMatrixf(&transform[0,0])
 }
 
 ////////////////////////////////////////////////

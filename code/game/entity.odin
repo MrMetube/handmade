@@ -495,8 +495,8 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
                 }
                         
               case .Hopping:
-                t_jump :: 0.1
-                t_thrust :: 0.8
+                t_jump :f32: 0.1
+                t_thrust :f32: 0.8
                 if entity.t_movement < t_thrust {
                     entity.ddt_bob -= 60
                 }

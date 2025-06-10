@@ -148,8 +148,8 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 // assert(len(sound.channels[0]) & 3 == 0) 
                 samples_in_sound := cast(i32) len(sound.channels[0])
                 
-                real_chunks_remaining_in_sound := cast(f32) (samples_in_sound - round(playing_sound.samples_played, i32)) / d_sample_chunk
-                chunks_remaining_in_sound := round(real_chunks_remaining_in_sound, i32)
+                real_chunks_remaining_in_sound := cast(f32) (samples_in_sound - round(i32, playing_sound.samples_played)) / d_sample_chunk
+                chunks_remaining_in_sound := round(i32, real_chunks_remaining_in_sound)
                 if chunks_to_mix > chunks_remaining_in_sound {
                     chunks_to_mix = chunks_remaining_in_sound
                 }
@@ -158,7 +158,7 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
                 for &ends_at, index in volume_ends_at {
                     if d_volume_chunk[index] != 0 {
                         volume_delta := playing_sound.target_volume[index] - volume[index]
-                        volume_chunk_count := round(0.125 * volume_delta / d_volume_chunk[index], i32)
+                        volume_chunk_count := round(i32, 0.125 * volume_delta / d_volume_chunk[index])
                         if chunks_to_mix > volume_chunk_count {
                             chunks_to_mix = volume_chunk_count
                             ends_at = chunks_to_mix

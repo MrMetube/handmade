@@ -1,5 +1,6 @@
 package main
 
+import "base:runtime"
 import win "core:sys/windows"
 
 /*
@@ -40,14 +41,12 @@ DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
 GlobalRunning: b32
 
-GlobalBackBuffer:  OffscreenBuffer
+GlobalBackBuffer:  Bitmap
 GlobalSoundBuffer: ^IDirectSoundBuffer
 
 GlobalPerformanceCounterFrequency: f64
 
-
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
-
 
 GlobalBlitTextureHandle: u32
 
@@ -57,7 +56,7 @@ GlobalPause:                 b32
 GlobalDebugShowCursor:       b32 = INTERNAL
 GlobalChangeRenderType:      b32
 GlobalChangeRenderTypeDelay: f32
-GlobalRenderType:            RenderType
+GlobalUseSoftwareRenderer:   b32
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
@@ -73,11 +72,6 @@ SoundOutput :: struct {
     buffer_size:          u32,
     running_sample_index: u32,
     safety_bytes:         u32,
-}
-
-OffscreenBuffer :: struct {
-    info:         win.BITMAPINFO,
-    using bitmap: Bitmap,
 }
 
 PlatformState :: struct {
@@ -97,12 +91,6 @@ ReplayBuffer :: struct {
     filehandle:   win.HANDLE,
     memory_map:   win.HANDLE,
     memory_block: []u8,
-}
-
-RenderType :: enum {
-    RenderOpenGL_DisplayOpenGL = 0,
-    RenderSoftware_DisplayOpenGL = 1,
-    RenderSoftware_DisplayGDI = 2,
 }
 
 main :: proc() {
@@ -129,7 +117,17 @@ main :: proc() {
             // hIcon =,
         }
         
-        resize_DIB_section(&GlobalBackBuffer, Resolution.x, Resolution.y)
+        {
+            buffer := &GlobalBackBuffer
+            buffer.width  = Resolution.x
+            buffer.height = Resolution.y
+            
+            bytes_per_pixel :: 4
+            buffer_pitch := align16(buffer.width)
+            assert(buffer_pitch == buffer.width)
+            bitmap_memory_size := cast(uint) (buffer_pitch * buffer.height * bytes_per_pixel)
+            buffer.memory = slice_from_parts(Color, win.VirtualAlloc(nil, bitmap_memory_size, win.MEM_COMMIT, win.PAGE_READWRITE), buffer.width*buffer.height)
+        }
         
         if win.RegisterClassW(&window_class) == 0 {
             return // @logging 
@@ -354,6 +352,11 @@ main :: proc() {
         //  Input
         input_processed := game.begin_timed_block("input processed")
         
+        init_render_commands(&render_commands, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
+        
+        window_dim := get_window_dimension(window)
+        draw_region := aspect_ratio_fit({render_commands.width, render_commands.height}, window_dim)
+        
         {
             new_input.delta_time = target_seconds_per_frame
             
@@ -371,11 +374,15 @@ main :: proc() {
             { // Mouse Input 
                 timed_block("mouse_input")
                 
-                mouse: win.POINT
-                win.GetCursorPos(&mouse)
-                win.ScreenToClient(window, &mouse)
+                mouse_in_window_y_down: win.POINT
+                win.GetCursorPos(&mouse_in_window_y_down)
+                win.ScreenToClient(window, &mouse_in_window_y_down)
                 
-                new_input.mouse.p = vec_cast(f32, mouse.x, GlobalBackBuffer.height - 1 - mouse.y)
+                mouse_in_window_y_up := vec_cast(f32, mouse_in_window_y_down.x, window_dim.y - 1 - mouse_in_window_y_down.y)
+                draw_region := rec_cast(f32, draw_region)
+                mouse_in_draw_region := vec_cast(f32, render_commands.width, render_commands.height) * clamp_01_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
+                
+                new_input.mouse.p = mouse_in_draw_region
                 for &button, index in new_input.mouse.buttons {
                     button.ended_down = old_input.mouse.buttons[index].ended_down
                     button.half_transition_count = 0
@@ -496,34 +503,7 @@ main :: proc() {
             {debug_data_block("Renderer")
                 game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
                 game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
-                {debug_data_block("RenderType")
-                    @(static) GlobalChangeRenderTypeTo0: b32
-                    @(static) GlobalChangeRenderTypeTo1: b32
-                    @(static) GlobalChangeRenderTypeTo2: b32
-
-                    game.debug_record_b32(&GlobalChangeRenderTypeTo0, "Change to RenderOpenGL DisplayOpenGL")
-                    game.debug_record_b32(&GlobalChangeRenderTypeTo1, "Change to RenderSoftware DisplayOpenGL")
-                    game.debug_record_b32(&GlobalChangeRenderTypeTo2, "Change to RenderSoftware DisplayGDI")
-                    
-                    if GlobalChangeRenderTypeTo0 {
-                        GlobalChangeRenderTypeTo0 = false
-                        GlobalChangeRenderTypeTo1 = false
-                        GlobalChangeRenderTypeTo2 = false
-                        GlobalRenderType = .RenderOpenGL_DisplayOpenGL
-                    }
-                    if GlobalChangeRenderTypeTo1 {
-                        GlobalChangeRenderTypeTo0 = false
-                        GlobalChangeRenderTypeTo1 = false
-                        GlobalChangeRenderTypeTo2 = false
-                        GlobalRenderType = .RenderSoftware_DisplayOpenGL
-                    }
-                    if GlobalChangeRenderTypeTo2 {
-                        GlobalChangeRenderTypeTo0 = false
-                        GlobalChangeRenderTypeTo1 = false
-                        GlobalChangeRenderTypeTo2 = false
-                        GlobalRenderType = .RenderSoftware_DisplayGDI
-                    }
-                }
+                game.debug_record_b32(&GlobalUseSoftwareRenderer)
                 
                 {debug_data_block("Environment")
                     game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
@@ -539,8 +519,6 @@ main :: proc() {
         ////////////////////////////////////////////////
         //  Update and Render
         game_updated := game.begin_timed_block("game updated")
-        
-        init_render_commands(&render_commands, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
         
         if !GlobalPause {
             if state.input_record_index != 0 {
@@ -739,9 +717,7 @@ main :: proc() {
             device_context := win.GetDC(window)
             defer win.ReleaseDC(window, device_context)
             
-            window_width, window_height := get_window_dimension(window)
-            
-            render_to_window(&render_commands, &high_queue, device_context, [2]i32{window_width, window_height}, &frame_arena, render_prep)
+            render_to_window(&render_commands, &high_queue, device_context, draw_region, &frame_arena, render_prep)
             
             flip_counter = get_wall_clock()
         }
@@ -761,62 +737,28 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, window_size: [2]i32, arena: ^Arena, prep: RenderPrep) {
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep) {
     /* 
     if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
         render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
     }
     */
     
-    if GlobalRenderType == .RenderOpenGL_DisplayOpenGL {
-        gl_render_commands(commands, prep, window_size)
+    clear_color := commands.clear_color
+    clear_color.r = square(clear_color.r)
+    clear_color.g = square(clear_color.g)
+    clear_color.b = square(clear_color.b)
+    
+    if GlobalUseSoftwareRenderer {
+        software_render_commands(render_queue, commands, prep, GlobalBackBuffer, arena)
+        gl_display_bitmap(GlobalBackBuffer, draw_region, clear_color)
     } else {
-        offscreen_buffer := GlobalBackBuffer.bitmap
-        software_render_commands(render_queue, commands, prep, offscreen_buffer, arena)
-        
-        if GlobalRenderType == .RenderSoftware_DisplayGDI {
-            display_bitmap_gdi(&GlobalBackBuffer, device_context, window_size)
-        } else {
-            gl_display_bitmap(offscreen_buffer, window_size)
-        }
+        gl_render_commands(commands, prep, draw_region, clear_color)
     }
     
-    if GlobalRenderType != .RenderSoftware_DisplayGDI {
-        timed_block("SwapBuffers")
+    { timed_block("SwapBuffers")
         win.SwapBuffers(device_context)
     }
-}
-
-display_bitmap_gdi :: proc(buffer: ^OffscreenBuffer, device_context: win.HDC, window_size: [2]i32) {
-    #no_bounds_check {
-        for y in 0..<buffer.height {
-            row := buffer.memory[y * buffer.width:][:buffer.width]
-            for &useful_color in row {
-                // @note(viktor): Windows expects the color to be ordered like this: struct{ b, g, r, pad: u8 }
-                swap(&useful_color.r, &useful_color.b)
-            }
-        }
-    }
-    
-    offset := (window_size - [2]i32{buffer.width, buffer.height}) / 2
-
-    win.PatBlt(device_context, 0, 0, buffer.width+offset.x*2, offset.y,         win.BLACKNESS )
-    win.PatBlt(device_context, 0, offset.y, offset.x, buffer.height+offset.y*2, win.BLACKNESS )
-    
-    win.PatBlt(device_context, buffer.width+offset.x, 0, window_size.x, window_size.y,            win.BLACKNESS )
-    win.PatBlt(device_context, 0, buffer.height+offset.y, buffer.width+offset.x*2, window_size.x, win.BLACKNESS )
-    
-    // @todo(viktor): aspect ratio correction
-    // @todo(viktor): stretch to fill window once we are fine with our renderer
-    win.StretchDIBits(
-        device_context,
-        offset.x, offset.y, buffer.width, buffer.height,
-        0, 0, buffer.width, buffer.height,
-        raw_data(buffer.memory),
-        &buffer.info,
-        win.DIB_RGB_COLORS,
-        win.SRCCOPY,
-    )
 }
 
 ////////////////////////////////////////////////
@@ -912,7 +854,7 @@ end_replaying_input :: proc(state: ^PlatformState) {
 }
 
 ////////////////////////////////////////////////   
-//  Sound Buffer
+// Sound Buffer
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     region1, region2: pmm
@@ -984,45 +926,16 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 ////////////////////////////////////////////////   
 //  Window Drawing
 
-get_window_dimension :: proc "system" (window: win.HWND) -> (width, height: i32) {
+get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> (dimension: [2]i32) {
     client_rect: win.RECT
-    win.GetClientRect(window, &client_rect)
-    width  = client_rect.right  - client_rect.left
-    height = client_rect.bottom - client_rect.top
-    return width, height
-}
-
-resize_DIB_section :: proc "system" (buffer: ^OffscreenBuffer, width, height: i32) {
-    // @todo(viktor): Bulletproof this.
-    // Maybe don't free first, free after, then free first if that fails.
-    if buffer.memory != nil {
-        win.VirtualFree(raw_data(buffer.memory), 0, win.MEM_RELEASE)
+    if get_window_rect {
+        win.GetWindowRect(window, &client_rect)
+    } else {
+        win.GetClientRect(window, &client_rect)
     }
-    
-    buffer.width  = width
-    buffer.height = height
-    
-    /* When the biHeight field is negative, this is the clue to
-    Windows to treat this bitmap as top-down, not bottom-up, meaning that
-    the first three bytes of the image are the color for the top left pixel
-    in the bitmap, not the bottom left! */
-    buffer.info = win.BITMAPINFO{
-        bmiHeader = {
-            biSize          = size_of(buffer.info.bmiHeader),
-            biWidth         = buffer.width,
-            biHeight        = buffer.height,
-            biPlanes        = 1,
-            biBitCount      = 32,
-            biCompression   = win.BI_RGB,
-        },
-    }
-    
-    bytes_per_pixel :: 4
-    buffer_pitch := align16(buffer.width)
-    bitmap_memory_size := buffer_pitch * buffer.height * bytes_per_pixel
-    buffer.memory = slice_from_parts(Color, win.VirtualAlloc(nil, win.SIZE_T(bitmap_memory_size), win.MEM_COMMIT, win.PAGE_READWRITE), buffer.width*buffer.height)
-    
-    // @todo(viktor): probably clear this to black
+    dimension.x = client_rect.right  - client_rect.left
+    dimension.y = client_rect.bottom - client_rect.top
+    return dimension
 }
 
 toggle_fullscreen :: proc(window: win.HWND) {
@@ -1053,13 +966,40 @@ toggle_fullscreen :: proc(window: win.HWND) {
 //  Windows Messages
 
 main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
+    context = runtime.default_context()
     switch message {
       case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
-        assert_contextless(false, "keyboard-event came in through a non-dispatched event")
+        assert(false, "keyboard-event came in through a non-dispatched event")
+        
       case win.WM_CLOSE: // @todo(viktor): Handle this with a message to the user
         GlobalRunning = false
+        
       case win.WM_DESTROY: // @todo(viktor): handle this as an error - recreate window?
         GlobalRunning = false
+        
+      case win.WM_WINDOWPOSCHANGING:
+        new_pos := cast(^win.WINDOWPOS) cast(pmm) cast(umm) l_param
+        
+        if cast(u16) win.GetKeyState(win.VK_SHIFT) & 0x8000 != 0 {
+            window_dim := get_window_dimension(window, true) 
+            client_dim := get_window_dimension(window)
+            
+            added := window_dim - client_dim
+            
+            render_dim := [2]i32 {GlobalBackBuffer.width, GlobalBackBuffer.height}
+            
+            new_cx := (new_pos.cy * (render_dim.x - added.x)) / render_dim.y
+            new_cy := (new_pos.cx * (render_dim.y - added.y)) / render_dim.x
+            
+            if abs(new_pos.cx - new_cx) < abs(new_pos.cy - new_cy) {
+                new_pos.cx = new_cx + added.x
+            } else {
+                new_pos.cy = new_cy + added.y
+            }
+        }
+            
+        result = win.DefWindowProcA(window, message, w_param, l_param)
+        
       case win.WM_ACTIVATEAPP:
         LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
         LWA_COLORKEY :: 0x00000001 // Use crKey as the transparency color.
@@ -1074,7 +1014,8 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         paint: win.PAINTSTRUCT
         device_context := win.BeginPaint(window, &paint)
         unused(device_context)
-        when false { // This has rotten quite a bit
+        when false { 
+            // @todo(viktor): This has rotten quite a bit
             window_width, window_height := get_window_dimension(window)
             render_to_window(&GlobalBackBuffer, device_context, window_width, window_height)
         }
@@ -1086,6 +1027,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         }
         
       case:
+        timed_block("win.DefWindowProcA")
         result = win.DefWindowProcA(window, message, w_param, l_param)
     }
     return result
@@ -1101,7 +1043,7 @@ process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
 process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^InputController) {
     message: win.MSG
     for {
-        peek_message := game.begin_timed_block("peek_message")
+        peek_message := game.begin_timed_block("win.PeekMessageW")
         has_message := win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE)
         game.end_timed_block(peek_message)
         
@@ -1110,6 +1052,7 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
         switch message.message {
           case win.WM_QUIT:
             GlobalRunning = false
+            
           case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
             timed_block("key_message")
             
@@ -1157,6 +1100,7 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                     if is_down && alt_down do toggle_fullscreen(message.hwnd)
                 }
             }
+            
           case:
             timed_block("default_message_handler")
             

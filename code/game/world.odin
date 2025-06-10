@@ -377,8 +377,8 @@ fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
             grid_origin:= v3{-0.5 * grid_scale * ParticleCellSize, 0, 0}
             for particle in world.particles {
                 p := ( particle.p - grid_origin ) / grid_scale
-                x := truncate(p.x)
-                y := truncate(p.y)
+                x := truncate(i32, p.x)
+                y := truncate(i32, p.y)
                 
                 x = clamp(x, 1, ParticleCellSize-2)
                 y = clamp(y, 1, ParticleCellSize-2)
@@ -403,8 +403,8 @@ fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
             
             for &particle in world.particles {
                 p := ( particle.p - grid_origin ) / grid_scale
-                x := truncate(p.x)
-                y := truncate(p.y)
+                x := truncate(i32, p.x)
+                y := truncate(i32, p.y)
                 
                 x = clamp(x, 1, ParticleCellSize-2)
                 y = clamp(y, 1, ParticleCellSize-2)
@@ -430,7 +430,7 @@ fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
                 // @todo(viktor): should we just clamp colors in the renderer?
                 color := clamp_01(particle.color)
                 if color.a > 0.9 {
-                    color.a = 0.9 * clamp_01_to_range(1, color.a, 0.9)
+                    color.a = 0.9 * clamp_01_to_range(f32(1), color.a, 0.9)
                 }
 
                 if particle.p.y < 0 {
@@ -552,7 +552,7 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {
     result := center
     result.offset += offset
     
-    rounded_offset := round(result.offset / world.chunk_dim_meters, i32)
+    rounded_offset := round(i32, result.offset / world.chunk_dim_meters)
     result.chunk   =  result.chunk + rounded_offset
     result.offset  -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
     

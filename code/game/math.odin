@@ -117,7 +117,7 @@ clamp :: proc(value: $T, min, max: T) -> (result:T) {
 }
 clamp_01 :: proc(value: $T) -> T { return clamp(value, 0, 1) }
 
-clamp_01_to_range :: proc(min, t, max: f32) -> (result: f32) {
+clamp_01_to_range :: proc(min: $T, t, max: T ) -> (result: T) {
     range := max - min
     if range != 0 {
         result = clamp_01((t-min) / range)
@@ -143,38 +143,37 @@ modulus_v :: proc(value: [$N]f32, divisor: [N]f32) -> (result: [N]f32) {
 }
 
 round :: proc { round_f, round_v }
-round_f :: proc(f: f32, $T: typeid) -> T {
+round_f :: proc($T: typeid, f: f32) -> T {
     return  cast(T) (f < 0 ? -math.round(-f) : math.round(f))
 }
-round_v :: proc(v: [$N]f32, $T: typeid) -> (result: [N]T) {
+round_v :: proc($T: typeid, v: [$N]f32) -> (result: [N]T) {
     #unroll for i in 0..<N do result[i] = cast(T) math.round(v[i]) 
     return result
 }
 
 floor :: proc { floor_f, floor_v }
-floor_f :: proc(f: f32, $T: typeid) -> (i:T) {
+floor_f :: proc($T: typeid, f: f32) -> (i:T) {
     return cast(T) math.floor(f)
 }
-floor_v :: proc(fs: [$N]f32, $T: typeid) -> [N]T {
+floor_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {
     return vec_cast(T, simd.to_array(simd.floor(simd.from_array(fs))))
 }
 
 ceil :: proc { ceil_f, ceil_v }
-ceil_f :: proc(f: f32, $T: typeid) -> (i:T) {
+ceil_f :: proc($T: typeid, f: f32) -> (i:T) {
     return cast(T) math.ceil(f)
 }
-ceil_v :: proc(fs: [$N]f32, $T: typeid) -> [N]T {
+ceil_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {
     return vec_cast(T, simd.to_array(simd.ceil(simd.from_array(fs))))
 }
 
 truncate :: proc { truncate_f32, truncate_f32s }
-truncate_f32 :: proc(f: f32) -> i32 {
-    return cast(i32) f
+truncate_f32 :: proc($T: typeid, f: f32) -> T {
+    return cast(T) f
 }
-truncate_f32s :: proc(fs: [$N]f32) -> [N]i32 where N > 1 {
-    return vec_cast(i32, fs)
+truncate_f32s :: proc($T: typeid, fs: [$N]f32) -> [N]T where N > 1 {
+    return vec_cast(T, fs)
 }
-
 
 sin :: proc { sin_f }
 sin_f :: proc(angle: f32) -> f32 {
@@ -292,16 +291,16 @@ rectangle_min_max  :: proc(min, max: $T) -> Rectangle(T) {
     return { min, max }
 }
 rectangle_min_dimension  :: proc { rectangle_min_dimension_2, rectangle_min_dimension_v }
-rectangle_min_dimension_2  :: proc(x, y, w, h: $E) -> Rectangle([2]E) {
+rectangle_min_dimension_2  :: proc(x: $E, y, w, h: E) -> Rectangle([2]E) {
     return min_dimension_v([2]E{x, y}, [2]E{w, h})
 }
-rectangle_min_dimension_v  :: proc(min, dimension: $T) -> Rectangle(T) {
+rectangle_min_dimension_v  :: proc(min: $T, dimension: T) -> Rectangle(T) {
     return { min, min + dimension }
 }
-rectangle_center_dimension :: proc(center, dimension: $T) -> Rectangle(T) {
+rectangle_center_dimension :: proc(center: $T, dimension: T) -> Rectangle(T) {
     return { center - (dimension / 2), center + (dimension / 2) }
 }
-rectangle_center_half_dimension :: proc(center, half_dimension: $T) -> Rectangle(T) {
+rectangle_center_half_dimension :: proc(center: $T, half_dimension: T) -> Rectangle(T) {
     return { center - half_dimension, center + half_dimension }
 }
 

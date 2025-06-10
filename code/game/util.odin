@@ -240,7 +240,7 @@ where intrinsics.type_is_float(T) {
 }
         
 format_percentage :: proc(value: f32) -> FloatFormat {
-    return { v = round(value * 100, f32) * 0.01, info = { precision = 2, width = 5 } }
+    return { v = round(f32, value * 100) * 0.01, info = { precision = 2, width = 5 } }
 }
 
 slice_from_parts :: proc { slice_from_parts_cast, slice_from_parts_direct }
