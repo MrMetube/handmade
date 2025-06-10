@@ -717,7 +717,7 @@ main :: proc() {
             device_context := win.GetDC(window)
             defer win.ReleaseDC(window, device_context)
             
-            render_to_window(&render_commands, &high_queue, device_context, draw_region, &frame_arena, render_prep)
+            render_to_window(&render_commands, &high_queue, device_context, draw_region, &frame_arena, render_prep, window_dim)
             
             flip_counter = get_wall_clock()
         }
@@ -737,7 +737,7 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep) {
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: [2]i32) {
     /* 
     if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
         render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
@@ -753,7 +753,7 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
         software_render_commands(render_queue, commands, prep, GlobalBackBuffer, arena)
         gl_display_bitmap(GlobalBackBuffer, draw_region, clear_color)
     } else {
-        gl_render_commands(commands, prep, draw_region, clear_color)
+        gl_render_commands(commands, prep, draw_region, windows_dim, clear_color)
     }
     
     { timed_block("SwapBuffers")

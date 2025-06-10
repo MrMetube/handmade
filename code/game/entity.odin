@@ -436,7 +436,7 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
         fog_amount = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
     }
     
-    alpha_render_target :u32= 1
+    alpha_render_target :u32= 2
     normal_floor_clip_rect := render_group.current_clip_rect_index
     alpha_floor_clip_rect := push_clip_rect(render_group, render_group.screen_area, alpha_render_target)
     

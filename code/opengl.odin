@@ -48,9 +48,9 @@ OpenGlInfo :: struct {
 
 init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
     framebuffer_supports_srgb := load_wgl_extensions()
+    set_pixel_format(dc, framebuffer_supports_srgb)
     
     if win.wglCreateContextAttribsARB != nil {
-        set_pixel_format(dc, framebuffer_supports_srgb)
         gl_context = win.wglCreateContextAttribsARB(dc, nil, raw_data(GlAttribs[:]))
     }
     
@@ -185,11 +185,19 @@ opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
         }
     }
     
+    major: i32 = 1
+    minor: i32 = 0
+    gl.GetIntegerv(gl.MAJOR_VERSION, &major)
+    gl.GetIntegerv(gl.MINOR_VERSION, &minor)
+    
+    if major > 2 || major == 2 && minor >= 1 {
+        result.GL_EXT_texture_sRGB = true
+    }
+    
     return result
 }
 
 set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
-    suggested_pixel_format: win.PIXELFORMATDESCRIPTOR
     suggested_pixel_format_index: i32
     extended_pick: u32
     
@@ -197,11 +205,11 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
         TRUE :: 1
         
         int_attribs := [?]i32{
-            win.WGL_DRAW_TO_WINDOW_ARB, TRUE,
-            win.WGL_ACCELERATION_ARB, win.WGL_FULL_ACCELERATION_ARB,
-            win.WGL_SUPPORT_OPENGL_ARB, TRUE,
-            win.WGL_DOUBLE_BUFFER_ARB, TRUE,
-            win.WGL_PIXEL_TYPE_ARB, win.WGL_TYPE_RGBA_ARB,
+            win.WGL_DRAW_TO_WINDOW_ARB,           TRUE,
+            win.WGL_ACCELERATION_ARB,             win.WGL_FULL_ACCELERATION_ARB,
+            win.WGL_SUPPORT_OPENGL_ARB,           TRUE,
+            win.WGL_DOUBLE_BUFFER_ARB,            TRUE,
+            win.WGL_PIXEL_TYPE_ARB,               win.WGL_TYPE_RGBA_ARB,
             win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
             0,
         }
@@ -227,9 +235,7 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
         suggested_pixel_format_index = win.ChoosePixelFormat(dc, &desired_pixel_format)
     }
     
-    win.DescribePixelFormat(dc, suggested_pixel_format_index, size_of(suggested_pixel_format), &suggested_pixel_format)
-    win.SetPixelFormat(dc, suggested_pixel_format_index, &suggested_pixel_format)
-    
+    win.SetPixelFormat(dc, suggested_pixel_format_index, nil)
 }
 
 gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
@@ -265,16 +271,15 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
     glLoadIdentity()
 
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
-    
 }
 
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, clear_color: v4) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: [2]i32, clear_color: v4) {
     timed_function()
     
-    window_size := get_dimension(draw_region)
+    draw_dim := get_dimension(draw_region)
     gl_bind_frame_buffer(0, draw_region)
     defer gl_bind_frame_buffer(0, draw_region)
     
@@ -294,7 +299,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         gl.GenFramebuffers(cast(i32) new_count, &FramebufferHandles.data[count])
         
         for render_target in slice(&FramebufferHandles)[count:] {
-            texture := append(&FramebufferTextures, allocate_texture(window_size.x, window_size.y, nil))
+            texture := append(&FramebufferTextures, allocate_texture(draw_dim.x, draw_dim.y, nil))
             
             gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
             gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture^, 0)
@@ -305,16 +310,20 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     
     for index in 0..< FramebufferHandles.count {
         gl_bind_frame_buffer(cast(u32) index, draw_region)
+        if index == 0 {
+            gl.Scissor(0, 0, window_dim.x, window_dim.y)
+        } else {
+            gl.Scissor(0, 0, draw_dim.x, draw_dim.y)
+        }
         
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
         gl.Clear(gl.COLOR_BUFFER_BIT)
     }
     
-    gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
     gl_set_screenspace({commands.width, commands.height})
     
-    clip_rect_index := max(u16)
-    target_index: u32
+    clip_rect_index      := max(u16)
+    current_target_index := max(u32)
     for sort_entry_offset in prep.sorted_offsets {
         offset := sort_entry_offset
         
@@ -326,10 +335,12 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             clip_rect_index = header.clip_rect_index
             clip := prep.clip_rects.data[clip_rect_index]
             
-            target_index = clip.render_target_index
-            gl_bind_frame_buffer(target_index, draw_region)
+            if current_target_index != clip.render_target_index {
+                current_target_index = clip.render_target_index
+                gl_bind_frame_buffer(current_target_index, draw_region)
+            }
             
-            rect := clip.rect
+            rect := current_target_index == 0 ? add_offset(clip.rect, draw_region.min) : clip.rect
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
         }
         
@@ -340,19 +351,16 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
             
-            // @important @todo(viktor): The blending does not handle different aspect ratios correctly.
-            // Currently the drawn buffer is misplaced and misscaled, when only rendering a rectangle with no texture it is correct.
-            
             gl_bind_frame_buffer(entry.dest_index, draw_region)
-            defer gl.BindFramebuffer(gl.FRAMEBUFFER, FramebufferHandles.data[target_index])
+            defer gl_bind_frame_buffer(current_target_index, draw_region)
             
             gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
             
-            source := FramebufferTextures.data[entry.source_index]
-            gl.BindTexture(gl.TEXTURE_2D, source)
-            
+            gl.BindTexture(gl.TEXTURE_2D, FramebufferTextures.data[entry.source_index])
             gl_rectangle(0, vec_cast(f32, commands.width, commands.height), v4{1,1,1, entry.alpha}, 0, 1)
+            // gl.BindTexture(gl.TEXTURE_2D, 0)
+            // gl_rectangle(0, vec_cast(f32, commands.width, commands.height), v4{current_target_index == 2 ? 1 : 0,0,current_target_index == 1 ? 1 : 0, 0.2}, 0, 1)
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -463,11 +471,11 @@ gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i)
     render_target := FramebufferHandles.data[render_target_index]
     gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
     
-    window_size := get_dimension(draw_region)
+    draw_dim := get_dimension(draw_region)
     if render_target_index == 0 {
-        gl.Viewport(draw_region.min.x, draw_region.min.y, window_size.x, window_size.y)
+        gl.Viewport(draw_region.min.x, draw_region.min.y, draw_dim.x, draw_dim.y)
     } else {
-        gl.Viewport(0, 0, window_size.x, window_size.y)
+        gl.Viewport(0, 0, draw_dim.x, draw_dim.y)
     }
 }
 

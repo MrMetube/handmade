@@ -1,7 +1,7 @@
 package game
 
 /*
-    ////////////////////////////////////////////////
+////////////////////////////////////////////////
     
     - Anywhere in the code debug events can be cheaply registered
     - This is a thread safe operation
@@ -314,7 +314,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
         debug.shadow_transform.chunk_z  = 24_000
         debug.text_transform.chunk_z    = 28_000
 
-        debug.render_target_index = 2
+        debug.render_target_index = 1
     }
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)

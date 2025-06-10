@@ -282,8 +282,14 @@ do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
     clip_rect := base_clip_rect
     clip_rect_index := max(u16)
     
-    for target in targets {
-        clear_render_target(target, commands.clear_color, clip_rect)
+    for target, index in targets {
+        clear_color := commands.clear_color
+        if index == 0 {
+            clear_color.a = clear_color.a
+        } else {
+            clear_color.a = 0
+        }
+        clear_render_target(target, clear_color, clip_rect)
     }
     
     target: Bitmap
