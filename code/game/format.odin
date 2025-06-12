@@ -9,7 +9,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 
-// @Cleanup
+// @Cleanup once the foo.fourth[0].fourth issue is resolved
 IsRunAsFile :: #config(IsRunAsFile, false)
 
 // @volatile This breaks if in the midst of a print we start another print on the same thread
@@ -634,7 +634,7 @@ format_struct :: proc(ctx: ^FormatContext, struct_type: typeid, data: pmm, varia
         field_offset := variant.offsets[index]
         field_type   := variant.types[index]
         
-        // @todo(viktor): 
+        // @todo(viktor): what the hell
         if _, ok := field_type.variant.(runtime.Type_Info_Slice); ok {
             fmt.println("Unimplemented: members that are a slice type")
             continue
@@ -718,8 +718,9 @@ format_type :: proc(ctx: ^FormatContext, type_info: ^runtime.Type_Info) {
         }
     }
     
-    if type_info == nil do append_format_string(ctx, "nil")
-    else {
+    if type_info == nil {
+        append_format_string(ctx, "nil")
+    } else {
         switch info in type_info.variant {
           case runtime.Type_Info_Integer:
             if type_info.id == int {
