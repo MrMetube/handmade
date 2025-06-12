@@ -79,12 +79,12 @@ read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandl
     file_handle := cast(^FileHandle) handle._platform
     if Platform_no_file_errors(handle) {
         overlap_info := win.OVERLAPPED{
-            Offset     = safe_truncate_u64(position),
-            OffsetHigh = safe_truncate_u64(position >> 32),
+            Offset     = safe_truncate(position, u32),
+            OffsetHigh = safe_truncate(position >> 32, u32),
         }
         
         bytes_read: u32
-        amount_32 := safe_truncate(amount)
+        amount_32 := safe_truncate(amount, u32)
         if win.ReadFile(file_handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount {
             // @note(viktor): File read succeded
         } else {

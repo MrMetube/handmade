@@ -161,7 +161,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     end_layout(&debug.mouse_text_layout)
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
-    debug.root_group.name = print(debug.root_info, "% %s", format_order_of_magnitude_float(most_recent_frame.seconds_elapsed, { precision = 3 }))
+    debug.root_group.name = print(debug.root_info, "% %s", format_order_of_magnitude(most_recent_frame.seconds_elapsed, format_float(precision = 3)))
     
     interact(debug, input, mouse_p)
 }
@@ -187,8 +187,6 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
         draw_element(layout, id_from_link(tree, link), link.element)
     } else {
         timed_block("draw event group")
-        
-        _ = print(DebugPrintBuffer[:], "%", IntegerFormat{v =cast(u32)0x12345678, kind = .Hexadecimal_Lowercase})
         
         id := id_from_link(tree, link)
         view := get_view_for_variable(debug, id)
@@ -312,12 +310,12 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         
       case FrameInfo:
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
-        
+        format := format_float(precision = 0, width = 0)
         text := print(DebugPrintBuffer[:], "Viewed Frame: % %s, % % events, % % data_blocks, % % profile_blocks",
-            format_order_of_magnitude_float(viewed_frame.seconds_elapsed), 
-            format_order_of_magnitude_int(viewed_frame.stored_event_count), 
-            format_order_of_magnitude_int(viewed_frame.data_block_count), 
-            format_order_of_magnitude_int(viewed_frame.profile_block_count), 
+            format_order_of_magnitude(viewed_frame.seconds_elapsed, format), 
+            format_order_of_magnitude(viewed_frame.stored_event_count, format), 
+            format_order_of_magnitude(viewed_frame.data_block_count, format), 
+            format_order_of_magnitude(viewed_frame.profile_block_count, format), 
         )
         basic_text_element(layout, text)
         
@@ -338,7 +336,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             begin_ui_row(layout)
                 boolean_button(layout, "Occupancy", is_occupancy, set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}))
                 arena := graph.arena
-                // @todo(viktor): %m format helper
+                
                 text := print(DebugPrintBuffer[:], "%, % % / % %", element.guid.name, format_memory_size(arena.used), format_memory_size(len(arena.storage)))
                 action_button(layout, text, {}, backdrop_color = {})
             end_ui_row(layout)
@@ -580,10 +578,10 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         entry := entries[sort_entry.index]
         running_sum += entry.stats.sum
         
-        info := FormatInfo{ precision = 0, width = 4 }
-
+        info_int   := format_integer(width = 4)
+        info_float := format_float(width = 4, precision = 0)
         text := print(DebugPrintBuffer[:], "total % %cy - % %% / % %%  - %",
-            format_order_of_magnitude_int(cast(u64) entry.stats.sum, info),
+            format_order_of_magnitude(cast(u64) entry.stats.sum, info_int),
             format_percentage(entry.stats.sum * total_time_percentage),
             format_percentage(running_sum * total_time_percentage),
             entry.element.guid.name,
@@ -596,8 +594,8 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         region_rect = add_offset(region_rect, p)
         if contains(region_rect, mouse_p) {
             tooltip := print(DebugPrintBuffer[:], "average % %cy - % %hits",
-                format_order_of_magnitude_float(entry.stats.avg, info),
-                format_order_of_magnitude_int(cast(u64) entry.stats.count), 
+                format_order_of_magnitude(entry.stats.avg, info_float),
+                format_order_of_magnitude(cast(u64) entry.stats.count), 
             )
             add_tooltip(debug, tooltip)
         }
@@ -676,7 +674,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             }
             
             if contains(region_rect, mouse_p) {
-                text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude_int(node.duration))
+                text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude(node.duration))
                 add_tooltip(debug, text)
                 
                 // @copypasta with draw_profile
@@ -760,7 +758,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         }
         
         if contains(region_rect, mouse_p) {
-            text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude_int(node.duration))
+            text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude(node.duration))
             add_tooltip(debug, text)
             
             if node.first_child != nil {

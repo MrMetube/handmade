@@ -695,11 +695,11 @@ main :: proc() {
                 if test_seconds_elapsed > target_seconds_per_frame {
                     // @logging sleep missed
                     if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                        info := FormatInfo{ precision = 3 }
+                        info := format_float(precision = 3, width = 7)
                         println("Missed sleep - % %s / % %s - % %s", 
-                            format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
-                            format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
-                            format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
+                            format_order_of_magnitude(seconds_elapsed_for_frame, info),
+                            format_order_of_magnitude(seconds_elapsed_for_frame, info),
+                            format_order_of_magnitude(seconds_elapsed_for_frame, info),
                         )
                     }
                 }
@@ -711,11 +711,11 @@ main :: proc() {
             } else {
                 // @logging Missed frame, maybe because window was moved
                 if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                    info := FormatInfo{ precision = 3 }
-                    println("Missed sleep - % %s / % %s - % %s", 
-                        format_order_of_magnitude_float(seconds_elapsed_for_frame, info),
-                        format_order_of_magnitude_float(target_seconds_per_frame, info),
-                        format_order_of_magnitude_float(seconds_elapsed_for_frame - target_seconds_per_frame, info),
+                    info := format_float(precision = 3, width = 7)
+                    println("Missed frame - % %s / % %s - % %s", 
+                        format_order_of_magnitude(seconds_elapsed_for_frame, info),
+                        format_order_of_magnitude(target_seconds_per_frame, info),
+                        format_order_of_magnitude(seconds_elapsed_for_frame - target_seconds_per_frame, info),
                     )
                 }
             }

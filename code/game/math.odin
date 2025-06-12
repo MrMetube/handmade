@@ -143,10 +143,12 @@ modulus_v :: proc(value: [$N]f32, divisor: [N]f32) -> (result: [N]f32) {
 }
 
 round :: proc { round_f, round_v }
-round_f :: proc($T: typeid, f: f32) -> T {
+round_f :: proc($T: typeid, f: $F) -> T 
+where !intrinsics.type_is_array(F)
+{
     return  cast(T) (f < 0 ? -math.round(-f) : math.round(f))
 }
-round_v :: proc($T: typeid, v: [$N]f32) -> (result: [N]T) {
+round_v :: proc($T: typeid, v: [$N]$F) -> (result: [N]T) {
     #unroll for i in 0..<N do result[i] = cast(T) math.round(v[i]) 
     return result
 }

@@ -9,12 +9,13 @@ Array :: struct ($T: typeid) {
     data:  []T,
     count: i64,
 }
+StringBuilder :: Array(u8)
 FixedArray :: struct ($N: i64, $T: typeid) {
     data:  [N]T,
     count: i64,
 }
 
-append :: proc { append_fixed_array, append_array, append_array_, append_array_many, append_fixed_array_many }
+append :: proc { append_fixed_array, append_array, append_array_, append_array_many, append_fixed_array_many, append_string }
 @(require_results) append_array_ :: proc(a: ^Array($T)) -> (result: ^T) {
     result = &a.data[a.count]
     a.count += 1
@@ -52,6 +53,10 @@ append_fixed_array_many :: proc(a: ^FixedArray($N, $T), values: []T) -> (result:
     return result
 }
 
+append_string :: proc(a: ^StringBuilder, value: string) -> (result: string) {
+    return cast(string) append_array_many(a, transmute([]u8) value)
+}
+
 make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
     result.data = push_slice(arena, T, len, params)
     return result
@@ -63,6 +68,10 @@ slice_fixed_array :: proc(array: ^FixedArray($N, $T)) -> []T {
 }
 slice_array :: proc(array: Array($T)) -> []T {
     return array.data[:array.count]
+}
+
+to_string :: proc(array: StringBuilder) -> string {
+    return cast(string) array.data[:array.count]
 }
 
 rest :: proc{ rest_fixed_array, rest_array }

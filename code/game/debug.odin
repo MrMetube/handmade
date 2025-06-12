@@ -25,7 +25,7 @@ GlobalDebugTable:  ^DebugTable
 DebugMaxEventCount :: 500_000 when DebugEnabled else 0
 MaxFrameCount :: 512
 
-DebugPrintBuffer: [512]u8
+DebugPrintBuffer: [1024]u8
 
 ////////////////////////////////////////////////
 

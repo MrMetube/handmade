@@ -56,6 +56,7 @@ main :: proc() {
     if len(os.args) == 1 {
         build_game()
         build_platform()
+        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\format.odin -file -out:.\format.exe -ignore-unknown-attributes -define:IsRunAsFile=true -debug `)
     } else {
         for arg in os.args[1:] {
             switch arg {

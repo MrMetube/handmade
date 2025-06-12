@@ -399,11 +399,9 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             
             gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-            
+            // @todo(viktor): If the window has black bars the rectangle will be offset incorrectly. thanks global variables!
             gl.BindTexture(gl.TEXTURE_2D, FramebufferTextures.data[entry.source_index])
             gl_rectangle(0, vec_cast(f32, commands.width, commands.height), v4{1,1,1, entry.alpha}, 0, 1)
-            // gl.BindTexture(gl.TEXTURE_2D, 0)
-            // gl_rectangle(0, vec_cast(f32, commands.width, commands.height), v4{current_target_index == 2 ? 1 : 0,0,current_target_index == 1 ? 1 : 0, 0.2}, 0, 1)
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -426,6 +424,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             if bitmap.width != 0 && bitmap.height != 0 {
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
+                // @todo(viktor): skewing with x_axis and y_axis is missing
                 texel_x := 1 / cast(f32) bitmap.width
                 texel_y := 1 / cast(f32) bitmap.height
                 

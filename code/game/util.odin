@@ -92,23 +92,13 @@ align8     :: proc "contextless" (value: $T) -> T { return (value + (8-1)) &~ (8
 align16    :: proc "contextless" (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
 align_pow2 :: proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
 
-safe_truncate :: proc{
-    safe_truncate_u64,
-    safe_truncate_i64,
+safe_truncate :: proc(value: $T, $R: typeid) -> R
+where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is_integer(R){
+    assert(value <= cast(T) max(R))
+    return cast(R) value
 }
 
-safe_truncate_u64 :: proc(value: u64) -> u32 {
-    assert(value <= 0xFFFFFFFF)
-    return cast(u32) value
-}
-
-safe_truncate_i64 :: proc(value: i64) -> i32 {
-    assert(value <= 0x7FFFFFFF)
-    return cast(i32) value
-}
-
-rec_cast :: proc { rcast_2 }
-@(require_results) rcast_2 :: proc($T: typeid, rec: $R/Rectangle([2]$E)) -> Rectangle([2]T) where T != E {
+@(require_results) rec_cast :: proc($T: typeid, rec: $R/Rectangle([$N]$E)) -> Rectangle([N]T) where T != E {
     return { vec_cast(T, rec.min), vec_cast(T, rec.max)}
 }
 vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
@@ -155,7 +145,6 @@ unused :: proc "contextless" (_: $T) {}
 @(disabled=ODIN_DISABLE_ASSERT)
 assert :: proc(condition: $B, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(B) {
     if !condition {
-        // @todo(viktor): We are not a console application
         print("% %", loc, prefix)
         if len(message) > 0 {
             println(": %", message)
@@ -167,51 +156,6 @@ assert :: proc(condition: $B, message := #caller_expression(condition), loc := #
             runtime.trap()
         }
     }
-}
-
-order_of_magnitude :: proc(value: $T) -> (T, string) {
-    when intrinsics.type_is_float(T) {
-        if value < 1e-9  { return value * 1e12, "p"}
-        if value < 1e-6  { return value * 1e9,  "n"}
-        if value < 1e-3  { return value * 1e6,  "μ"} // @todo(viktor): fix the debug console encoding or font or whatever to actually display 'μ' correctly
-        if value < 1e0   { return value * 1e3,  "m"}
-    }
-    
-    if value < 1e3   { return value,        " "}
-    if value < 1e6   { return value / 1e3,  "k"}
-    if value < 1e9   { return value / 1e6,  "M"}
-    
-    when size_of(T) >= 8 {
-        if value < 1e12  { return value / 1e9,  "G"}
-        if value < 1e15  { return value / 1e12, "T"}
-    }
-    
-    return value, "?"
-}
-
-
-format_memory_size :: proc(#any_int value: u64) -> (u64, string) {
-    if value < Kilobyte  { return value,            " b"}
-    if value < Megabyte  { return value / Kilobyte, "kb"}
-    if value < Gigabyte  { return value / Megabyte, "Mb"}
-    if value < Terabyte  { return value / Gigabyte, "Gb"}
-    return value / Terabyte , "Tb"
-}
-
-
-format_order_of_magnitude_int :: proc(value: $T, info: FormatInfo = {}) -> (IntegerFormat, string) 
-where intrinsics.type_is_integer(T) {
-    v, magnitude := order_of_magnitude(value)
-    return IntegerFormat{ v = v, info = info}, magnitude
-}
-format_order_of_magnitude_float :: proc(value: $T, info: FormatInfo = {}) -> (FloatFormat, string)
-where intrinsics.type_is_float(T) {
-    v, magnitude := order_of_magnitude(value)
-    return FloatFormat{ v = v, info = info}, magnitude
-}
-        
-format_percentage :: proc(value: f32) -> FloatFormat {
-    return { v = round(f32, value * 100) * 0.01, info = { precision = 2, width = 5 } }
 }
 
 slice_from_parts :: proc { slice_from_parts_cast, slice_from_parts_direct }
