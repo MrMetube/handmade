@@ -79,6 +79,7 @@ extract_exports_and_generate_api :: proc(pkg: ^ast.Package, output_dir, output_f
     no_stubs: map[string]b32
     no_stubs["output_sound_samples"] = true
     no_stubs["update_and_render"] = true
+    no_stubs["debug_frame_end"] = true
     
     fmt.fprint(out, `
 import win "core:sys/windows"

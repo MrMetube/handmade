@@ -255,6 +255,7 @@ main :: proc() {
     temp_dll_name := build_exe_path(state, "game_temp.dll")
     lock_name     := build_exe_path(state, "lock.temp")
     game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
+    game.debug_set_event_recording(game_lib_is_valid)
     
     // @todo(viktor): make this like sixty seconds?
     // @todo(viktor): pool with bitmap alloc
@@ -614,7 +615,7 @@ main :: proc() {
         game.end_timed_block(audio_update)
         ////////////////////////////////////////////////
         when INTERNAL {
-            debug_colation := game.begin_timed_block("debug colation")
+            debug_collation := game.begin_timed_block("debug collation")
             
             game_memory.reloaded_executable = false
             executable_needs_to_be_reloaded := get_last_write_time(game_dll_name) != game_dll_write_time
@@ -628,7 +629,7 @@ main :: proc() {
             }
             
             game.debug_frame_end(&game_memory, new_input^, &render_commands)
-                        
+            
             if executable_needs_to_be_reloaded {
                 // @todo(viktor): if this is too slow the audio and the whole game will lag
                 unload_game_lib()
@@ -643,12 +644,12 @@ main :: proc() {
                 game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
             }
             
-            game.end_timed_block(debug_colation)
+            game.end_timed_block(debug_collation)
         }
-        
-        swap(&new_input, &old_input)
         ////////////////////////////////////////////////
         prep_render := game.begin_timed_block("prepare render")
+        
+        swap(&new_input, &old_input)
         
         render_memory := begin_temporary_memory(&frame_arena)
         render_prep := prep_for_render(&render_commands, render_memory.arena)
@@ -739,7 +740,7 @@ main :: proc() {
         game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
         
-        check_arena(&frame_arena)
+        check_arena(&frame_arena)  
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))

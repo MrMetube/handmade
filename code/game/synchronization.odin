@@ -40,9 +40,12 @@ TicketMutex :: struct {
     serving: u64,
 }
 
+@(enable_target_feature="sse2")
 begin_ticket_mutex :: proc (mutex: ^TicketMutex) {
     ticket := atomic_add(&mutex.ticket, 1)
-    for ticket != volatile_load(&mutex.serving) {}
+    for ticket != volatile_load(&mutex.serving) {
+        x86._mm_pause()
+    }
 }
 
 end_ticket_mutex :: proc (mutex: ^TicketMutex) {

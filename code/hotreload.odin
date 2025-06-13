@@ -26,7 +26,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
         if game_lib != nil {
             load_game_api(game_lib)
             
-            is_valid = game.update_and_render != nil && game.output_sound_samples != nil
+            is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
         } else {
             // @logging 
             println("Failed to initialize game api")
