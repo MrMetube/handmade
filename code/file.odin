@@ -104,7 +104,7 @@ end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(gr
 
 mark_file_error : PlatformMarkFileError : proc(handle: ^PlatformFileHandle, error_message: string) {
     when INTERNAL {
-        println("FILE ERROR:", error_message)
+        println("FILE ERROR: %", error_message)
         
         error_code := win.GetLastError()
         buffer: [1024]u16

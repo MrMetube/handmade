@@ -21,7 +21,7 @@ flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon  -ig
 debug    :: ` -debug `
 internal :: ` -define:INTERNAL=true ` // @cleanup
 pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 
-commoner :: ` -custom-attribute:common `
+commoner :: ` -custom-attribute:common,printlike `
 
 src_path :: `.\build\`   
 exe_path :: `.\build\build.exe`
@@ -93,7 +93,7 @@ build_platform :: proc() {
             os.exit(1)
         }
         
-        if !run_command(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations , (pedantic when PedanticPlatform else "")) {
+        if !run_command(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations, commoner , (pedantic when PedanticPlatform else "")) {
             
             // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
             os2.change_times(debug_exe, time.now(), time.now())

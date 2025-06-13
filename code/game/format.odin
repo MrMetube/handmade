@@ -16,12 +16,14 @@ IsRunAsFile :: #config(IsRunAsFile, false)
 @(thread_local) console_buffer: [32 * Kilobyte]u8
 
 print :: proc { format_string, print_to_console }
+@(printlike)
 print_to_console :: proc (format: string, args: ..any, flags: FormatContextFlags = {}) {
     result := print(buffer = console_buffer[:], format = format, args = args, flags = flags)
     fmt.fprint(os.stdout, result)
 }
+@(printlike)
 println :: proc(format: string, args: ..any, flags: FormatContextFlags = {}) {
-    print_to_console(format = format, args = args, flags = { .AppendNewlineToResult })
+    print_to_console(format = format, args = args, flags = flags + { .AppendNewlineToResult })
 }
 
 
@@ -181,6 +183,7 @@ temp_buffer:  [1024]u8
 @(private="file")
 temp_buffer2: [1024]u8
 
+@(printlike)
 format_string :: proc (buffer: []u8, format: string, args: ..any, flags := FormatContextFlags{}) -> (result: string) {
     timed_function()
     
@@ -197,17 +200,17 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
         
         start_of_text: int
         arg_index: u32
+        // :PrintlikeChecking @volatile the loop structure is copied in the metaprogram to check the arg count, any changes here
+        // need to be propagated to there
         for index: int; index < len(format); index += 1 {
             if format[index] == '%' {
                 append_format_string(&ctx, format[start_of_text:index])
-                
                 start_of_text = index+1
                 
                 if index+1 < len(format) && format[index+1] == '%' {
                     index += 1
                     // @note(viktor): start_of_text now points at the percent sign and will append it next time saving processing one element
                 } else {
-                    // @todo(viktor): dont crash here and also report unused args. Can this be done at compile time?
                     arg := args[arg_index]
                     arg_index += 1
                     
@@ -221,12 +224,7 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
         }
         append_format_string(&ctx, format[start_of_text:])
         
-        for arg in args[arg_index:] {
-            append_format_string(&ctx, "(Unused argument of type: ")
-            raw := transmute(RawAny) arg
-            format_type(&ctx, type_info_of(raw.id))
-            append_format_string(&ctx, ") ")
-        }
+        assert(arg_index == auto_cast len(args))
         
         if .AppendNewlineToResult in flags {
             append_format_character(&ctx, '\n')
@@ -1146,7 +1144,7 @@ when IsRunAsFile {
         multi1: [^]u32
         multi2: [^]i32 = raw_data(dynamic_array)
         
-        println("%", format_string(buffer[:], 
+        println(
 `string:  
 Hello %! 100%% %, 
 
@@ -1192,8 +1190,11 @@ matrix:
 %
           
 enums:    % % % @todo:
-
-unused:   `, 
+          
+types:    %
+          % 
+          %
+`, 
             "World", cstring("Handmade"),
             
             bool(true), bool(false), b32(true), b32(false),
@@ -1230,11 +1231,10 @@ unused:   `,
             
                           
             FormatElementKind.String, FormatElementKind{}, enum { AValue }.AValue,
-            FormatElementKind.Outdent, 
             
-            Bar{}, 
-            #row_major    matrix[3,4]i32 {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-            struct {
+            typeid_of(Bar), 
+            typeid_of(#row_major    matrix[3,4]i32),
+            typeid_of(struct {
                 kind: FormatElementKind,
                 using data: struct #raw_union {
                     slice:   []u8,
@@ -1252,10 +1252,10 @@ unused:   `,
                 // General
                 width:     u32,
                 width_set: b32,
-                
-                
-            }{},
-        ))
+            }),
+        )
+        
+        print("abc %", 123, flags = FormatContextFlags{})
     }
     
     StringBuilder :: Array(u8)
