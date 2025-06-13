@@ -242,7 +242,7 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
 
 gl_manage_textures :: proc(last: ^TextureOp) {
     allocs, deallocs: u32
-    defer println("textures ops %, allocs % deallocs %", allocs + deallocs, allocs, deallocs)
+    
     for operation := last; operation != nil; operation = operation.next {
         switch &op in operation.value {
           case: unreachable()
@@ -256,9 +256,14 @@ gl_manage_textures :: proc(last: ^TextureOp) {
             gl.DeleteTextures(1, &op.handle)
         }
     }
+    
+    // @todo(viktor): Display in debug system
+    println("texture ops %, allocs % deallocs %", allocs + deallocs, allocs, deallocs)
 }
 
 gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {
+    timed_function()
+    
     handle: u32
     gl.GenTextures(1, &handle)
     

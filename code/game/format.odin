@@ -3,10 +3,10 @@ package game
 
 @(common="file")
 
-import "base:builtin"
-import "base:intrinsics"
+import "base:builtin" // @Cleanup
+import "core:fmt"     // @Cleanup
+
 import "base:runtime"
-import "core:fmt"
 import "core:os"
 
 // @Cleanup once the foo.fourth[0].fourth issue is resolved
@@ -30,14 +30,12 @@ println :: proc(format: string, args: ..any, flags: FormatContextFlags = {}) {
 
 // @todo(viktor): as hex, endianess for hex, thousands dividers,
 
+- Add some Docs and Usage
+- Compile Time Check Formats by including this code in the build system and extracting only the parsing and checking of arg count
+
 ALL THE FORMATS should equal their syntax in odin code. Its stupid to have to ways where the default is less useful.
 The %w flag sometimes hides types or other info we have in the course of formatting. just set the default to be as close to the 
 original as possible.
-
-The higher goal should be to find all the kinds of ways to display data and make them orthogonal to the inputs shape
-- Units
-  - Numbers
-    - Floating Point
 */
 
 ////////////////////////////////////////////////
@@ -115,6 +113,7 @@ format_number :: proc (value: $T) -> (result: FormatElement) {
 }
 
 // @todo(viktor): this could also take an enum which is then interpreted as a float
+// @todo(viktor): this could also take complex numbers and quaternions
 format_float :: proc(width: i16 = -1, precision: i8 = -1, flags: FormatNumberFlags = {}, kind := FormatFloatKind.Default) -> (result: FormatElement) {
     result.flags = flags
     result.float_kind = kind
@@ -132,7 +131,7 @@ format_float :: proc(width: i16 = -1, precision: i8 = -1, flags: FormatNumberFla
     return result
 }
 
-// @todo(viktor):  int as (Character, Rune,) Unicode_Format
+// @todo(viktor): int as (Character, Rune,) Unicode_Format
 // @todo(viktor): this could also take a pointer or an enum which are then interpreted as an integer
 format_integer :: proc(width: i16 = -1, #any_int basis:i8=-1, flags: FormatNumberFlags = {}) -> (result: FormatElement) {
     result.flags = flags
@@ -163,7 +162,6 @@ FormatContext :: struct {
 
 ////////////////////////////////////////////////
 
-
 /* 
 _print 
   1M
@@ -172,6 +170,7 @@ formatstring
   800k dont clear temp
   1.1M reenable odins floats
   1M compact FormatElement 84 -> 32 bytes
+  750k bad floats
 */
 @(private="file")
 _elements: [2048]FormatElement
@@ -239,12 +238,6 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
         DoubleQuoted_Escaped,
     */
     
-    pad :: proc(dest: ^StringBuilder, count: i32) {
-        for _ in 0..<count {
-            append(dest, ' ')
-        }
-    }
-    
     { 
         // timed_block("printing")
         
@@ -255,13 +248,16 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
               case .Indent:
                 assert(.Multiline in ctx.flags)
                 ctx.indentation_depth += 1
+                
               case .Outdent:
                 assert(.Multiline in ctx.flags)
                 ctx.indentation_depth -= 1
+                
               case .Linebreak:
                 assert(.Multiline in ctx.flags)
                 append(&ctx.dest, "\n")
                 for _ in 0..<ctx.indentation_depth do append(&ctx.dest, ctx.indentation)
+                
                 
               case .Bytes:
                 unimplemented()
@@ -282,47 +278,25 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
                 format_signed_integer(&temp, value, &element)
                 
               case .Float:
-                builder := StringBuilder { data = temp_buffer2[:] }
-                // @todo(viktor): 
-                // switch format.kind {
-                //   case .Hexadecimal_Lowercase: verb = 'h'
-                //   case .Hexadecimal_Uppercase: verb = 'H'
-                // }
-                append(&builder, '%')
-                if element.precision_set {
-                    append(&builder, '.')
-                    buffer: [MaxF64Precision]u8
-                    append(&builder, fmt.bprintf(buffer[:], "%d", element.precision))
-                }
-                if .PrependBaseSpecifier in element.flags do append(&builder, '#')
-                
-                verb: u8
-                switch element.float_kind {
-                  case .Default: verb = 'f'
-                  case .MaximumPercision: verb = 'f'
-                  case .Scientific: verb = .Uppercase in element.flags ? 'E' : 'e'
-                }
-                
-                append(&builder, verb)
-                
+                // @todo(viktor): endianess relevant?
+                // This is wrong when we use the format_integer subroutine element.flags += {.LeadingZero}
                 switch element.bytes {
                   case 2:
-                    float := transmute(f16) element.literal16
-                    s := fmt.bprintf(rest(temp), to_string(builder), float)
-                    temp.count += auto_cast len(s)
-                    
+                    value := transmute(f16) element.literal16
+                    format_float_badly(&temp, value, &element)
                   case 4:
-                    float := transmute(f32) element.literal32
-                    s := fmt.bprintf(rest(temp), to_string(builder), float)
-                    temp.count += auto_cast len(s)
-                    
-                  case 8: 
-                    float := transmute(f64) element.literal64
-                    s := fmt.bprintf(rest(temp), to_string(builder), float)
-                    temp.count += auto_cast len(s)
-                    
+                    value := transmute(f32) element.literal32
+                    format_float_badly(&temp, value, &element)
+                  case 8:
+                    value := transmute(f64) element.literal64
+                    format_float_badly(&temp, value, &element)
                   case: unreachable()
                 }
+                // @todo(viktor): 
+                // NaN Inf+- 
+                // base specifier
+                // scientific and max precision
+                // as hexadecimal 0h
             }
             
             padding := max(0, cast(i32) element.width - cast(i32) temp.count)
@@ -334,6 +308,12 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
     }
 
     return to_string(ctx.dest)
+}
+
+pad :: proc(dest: ^StringBuilder, count: i32) {
+    for _ in 0..<count {
+        append(dest, ' ')
+    }
 }
 
 format_any :: proc(ctx: ^FormatContext, arg: any) {
@@ -544,9 +524,32 @@ format_pointer :: proc(ctx: ^FormatContext, data: pmm, target_type: ^runtime.Typ
     }
 }
 
+DigitsUppercase := "0123456789abcdefghijklmnopqrstuvwxyz"
+DigitsLowercase := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+format_float_badly :: proc(dest: ^StringBuilder, float: $F, element: ^FormatElement) {
+    value, integer := fractional(float)
+    
+    format_signed_integer(dest, cast(i64) integer, element)
+    
+    append(dest, '.')
+    
+    digits := .Uppercase in element.flags ? DigitsUppercase : DigitsLowercase
+    
+    precision :u8= 3
+    if element.precision_set do precision = element.precision
+    // @todo(viktor): use MaxFloatPrecision?
+    val: i32
+    for _ in 0..<precision {
+        value, val = fractional(value * 10)
+        if val >= 0 && val < auto_cast len(digits) {
+            append(dest, digits[val])
+        } else { /* ??? */ }
+    }
+}
+
 format_signed_integer :: proc(dest: ^StringBuilder, integer: i64, element: ^FormatElement) {
-    negative := integer < 0
-    if negative {
+    if integer < 0 {
         append(dest, '-')
     } else if element.positive_sign == .Plus {
         append(dest, '+')
@@ -560,7 +563,7 @@ format_signed_integer :: proc(dest: ^StringBuilder, integer: i64, element: ^Form
 }
 
 format_unsigned_integer :: proc(dest: ^StringBuilder, integer: u64, element: ^FormatElement) {
-    digits := .Uppercase in element.flags ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "0123456789abcdefghijklmnopqrstuvwxyz"
+    digits := .Uppercase in element.flags ? DigitsUppercase : DigitsLowercase
     
     basis :u64= 10
     if element.basis_set do basis = cast(u64) element.basis
@@ -1089,6 +1092,12 @@ when IsRunAsFile {
     timed_block :: proc(s: string) {}
     begin_timed_block :: proc(s:string) -> string { return "" }
     end_timed_block :: proc(s: string) {}
+    
+    fractional :: proc(x: $F) -> (fractional: F, integer: i32) {
+        integer = cast(i32) x
+        fractional = x - cast(F) integer
+        return 
+    }
     
     MaxF64Precision :: 16
     

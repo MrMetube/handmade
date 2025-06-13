@@ -194,6 +194,12 @@ atan2_f :: proc(y, x: f32) -> f32 {
     return math.atan2(y, x)
 }
 
+fractional :: proc(x: $F) -> (fractional: F, integer: i32) {
+    integer = cast(i32) x
+    fractional = x - cast(F) integer
+    return 
+}
+
 ////////////////////////////////////////////////
 // Vector operations
 
