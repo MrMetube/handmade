@@ -1,5 +1,4 @@
 # @todo
-- why does the world arena get filled with chunks from get_chunk_3_internal? it just keeps growing even if nothing is happening in the game
 - "contextless" is annoying
 - Since the correction to unproject_with_transform the sim region bounds are too small
     - Still relevant?

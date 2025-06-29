@@ -787,7 +787,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
                 } else {
                     task_work := push(&task.arena, LoadAssetWork, no_clear())
                     task_work ^= work
-                    Platform.enqueue_work(assets.tran_state.low_priority_queue, do_load_asset_work, task_work)
+                    Platform.enqueue_work(assets.tran_state.low_priority_queue, task_work, do_load_asset_work)
                 }
             } else {
                 ok, _ = atomic_compare_exchange(&asset.state, AssetState.Queued, AssetState.Unloaded)

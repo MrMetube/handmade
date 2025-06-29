@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 @(common="file")
@@ -30,8 +31,8 @@ DefaultPushParams :: PushParams {
 }
 
 no_clear       :: proc () -> PushParams { return { DefaultAlignment, {} }}
-align_no_clear :: proc (#any_int alignment: u32, clear_to_zero :b32= false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
-align_clear    :: proc (#any_int alignment: u32, clear_to_zero :b32= true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+align_no_clear :: proc (#any_int alignment: u32, clear_to_zero: b32 = false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+align_clear    :: proc (#any_int alignment: u32, clear_to_zero: b32 = true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 
 init_arena :: proc(arena: ^Arena, storage: []u8) {
     arena.storage = storage

@@ -82,6 +82,20 @@ rest_array :: proc(array: Array($T)) -> []T {
     return array.data[array.count:]
 }
 
+array_clear :: proc(a: ^Array($T)) {
+    a.count = 0
+}
+
+ordered_remove :: proc(a: ^Array($T), #any_int index: i64) {
+    data := slice(a^)
+    copy(data[index:], data[index+1:])
+    a.count -= 1
+}
+unordered_remove :: proc(a: ^Array($T), #any_int index: i64) {
+    swap(&a.data[index], &a.data[a.count-1])
+    a.count -= 1
+}
+
 ////////////////////////////////////////////////
 // [First] <- [..] ... <- [..] <- [Last] 
 Deque :: struct($L: typeid) {
@@ -130,50 +144,33 @@ deque_remove_from_end :: proc(deque: ^Deque($L)) -> (result: ^L) {
 // [Sentinel] -> <- [..] ->
 //  -> <- [..] -> ...    <-
 
-list_init_sentinel :: proc { list_init_sentinel_custom_member, list_init_sentinel_prev_next }
-list_init_sentinel_prev_next     :: proc(sentinel: ^$T)                    { list_init_sentinel(sentinel, offset_of(sentinel.prev), offset_of(sentinel.next)) }
-list_init_sentinel_custom_member :: proc(sentinel: ^$T, $prev, $next: umm) {
-    get(sentinel, next) ^= sentinel
-    get(sentinel, prev) ^= sentinel
+list_init_sentinel :: proc(sentinel: ^$T) {
+    sentinel.next = sentinel
+    sentinel.prev = sentinel
 }
 
-list_prepend :: proc { list_prepend_custom_member, list_prepend_prev_next }
-list_prepend_prev_next     :: proc(list: ^$T, element: ^T)                    { list_prepend(list, element, offset_of(list.prev), offset_of(list.next)) }
-list_prepend_custom_member :: proc(list: ^$T, element: ^T, $prev, $next: umm) {
-    element_next := get(element, next)
-    element_prev := get(element, prev)
+list_prepend :: proc(list: ^$T, element: ^T) {
+    element.prev = list.prev
+    element.next = list
     
-    element_prev^ = get(list, prev)^
-    element_next^ = list
-    
-    element_next^.prev = element
-    element_prev^.next = element
+    element.next.prev = element
+    element.prev.next = element
 }
 
-list_append :: proc { list_append_custom_member, list_append_prev_next }
-list_append_prev_next     :: proc(list: ^$T, element: ^T)                    { list_append(list, element, offset_of(list.prev), offset_of(list.next)) }
-list_append_custom_member :: proc(list: ^$T, element: ^T, $prev, $next: umm) {
-    element_next := get(element, next)
-    element_prev := get(element, prev)
+list_append :: proc(list: ^$T, element: ^T) {
+    element.next = list.next
+    element.prev = list
     
-    element_next^ = get(list, next)^
-    element_prev^ = list
-    
-    element_next^.prev = element
-    element_prev^.next = element
+    element.next.prev = element
+    element.prev.next = element
 }
 
-list_remove :: proc { list_remove_custom_member, list_remove_prev_next }
-list_remove_prev_next     :: proc(element: ^$T)                    { list_remove(element, offset_of(element.prev), offset_of(element.next)) }
-list_remove_custom_member :: proc(element: ^$T, $prev, $next: umm) {
-    element_next := get(element, next)
-    element_prev := get(element, prev)
+list_remove :: proc(element: ^$T) {
+    element.prev.next = element.next
+    element.next.prev = element.prev
     
-    element_prev^.next = element_next^
-    element_next^.prev = element_prev^
-    
-    element_next^ = nil
-    element_prev^ = nil
+    element.next = nil
+    element.prev = nil
 }
 
 ///////////////////////////////////////////////

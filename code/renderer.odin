@@ -267,7 +267,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
             if GlobalDebugRenderSingleThreaded {
                 do_tile_render_work(work)
             } else {
-                enqueue_work(queue, do_tile_render_work, work)
+                enqueue_work(queue, work, do_tile_render_work)
             }
         }
     }

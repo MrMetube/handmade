@@ -30,7 +30,7 @@ GlobalBackBuffer:=  Bitmap {
 
 MonitorRefreshHz :: 120
 
-HighPriorityThreads :: 8
+HighPriorityThreads :: 9
 LowPriorityThreads  :: 2
 
 FrameTempStorageSize :: 128 * Megabyte
@@ -163,12 +163,8 @@ main :: proc() {
     }
     
     high_queue, low_queue: PlatformWorkQueue
-    high_infos: [HighPriorityThreads]CreateThreadInfo
-    low_infos:  [LowPriorityThreads ]CreateThreadInfo
-    
-    
-    init_work_queue(&high_queue, high_infos[:])
-    init_work_queue(&low_queue,  low_infos[:])
+    init_work_queue(&high_queue, HighPriorityThreads)
+    init_work_queue(&low_queue,  LowPriorityThreads )
     
     print("\033[2J") // Clear the terminal
     
@@ -694,13 +690,11 @@ main :: proc() {
                 
                 test_seconds_elapsed := get_seconds_elapsed_until_now(last_counter)
                 if test_seconds_elapsed > target_seconds_per_frame {
-                    // @logging sleep missed
                     if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                        info := format_float(precision = 3, width = 7)
                         println("Missed sleep - % %s / % %s - % %s", 
-                            format_order_of_magnitude(seconds_elapsed_for_frame, info),
-                            format_order_of_magnitude(seconds_elapsed_for_frame, info),
-                            format_order_of_magnitude(seconds_elapsed_for_frame, info),
+                            view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
+                            view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
+                            view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
                         )
                     }
                 }
@@ -712,11 +706,10 @@ main :: proc() {
             } else {
                 // @logging Missed frame, maybe because window was moved
                 if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                    info := format_float(precision = 3, width = 7)
                     println("Missed frame - % %s / % %s - % %s", 
-                        format_order_of_magnitude(seconds_elapsed_for_frame, info),
-                        format_order_of_magnitude(target_seconds_per_frame, info),
-                        format_order_of_magnitude(seconds_elapsed_for_frame - target_seconds_per_frame, info),
+                        view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
+                        view_order_of_magnitude(target_seconds_per_frame, precision = 3, width = 7),
+                        view_order_of_magnitude(seconds_elapsed_for_frame - target_seconds_per_frame, precision = 3, width = 7),
                     )
                 }
             }

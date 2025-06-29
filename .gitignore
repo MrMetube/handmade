@@ -1,9 +1,6 @@
 *.hha
-*.exe
-*.pdb
 *.test
 *.input
-*.raddbg*
 
 /code/*generated*.odin
 

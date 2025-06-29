@@ -24,7 +24,7 @@ order_of_magnitude :: proc(value: $T) -> (f64, string) {
 }
 
 
-format_memory_size :: proc(#any_int value: u64) -> (u64, string) {
+view_memory_size :: proc(#any_int value: u64) -> (u64, string) {
     if value < Kilobyte do return value,            " b"
     if value < Megabyte do return value / Kilobyte, "kb"
     if value < Gigabyte do return value / Megabyte, "Mb"
@@ -35,44 +35,22 @@ format_memory_size :: proc(#any_int value: u64) -> (u64, string) {
     return value , "?"
 }
 
-format_order_of_magnitude :: proc(value: $T, format: FormatElement = {}) -> (result: FormatElement, magnitude: string) {
+view_order_of_magnitude :: proc(value: $T, width: Maybe(u16) = 5, precision: Maybe(u8) = 2) -> (result: View, magnitude: string) {
     v: f64
     v, magnitude = order_of_magnitude(value)
     
-    result = format
-    result.kind = .Float
-    
     when intrinsics.type_is_integer(T) {
         v = round(f64, v * 100) * 0.01
-        if !result.precision_set {
-            result.precision_set = true
-            result.precision = 2
-        }
     }
-    
-    if !result.width_set {
-        result.width_set = true
-        result.width = 5
-    }
-    
-    number := format_number(v)
-    result.data = number.data
-    result.bytes = number.bytes
+
+    result = view_float(v, width = width, precision = precision)
     
     return result, magnitude
 }
-                
-format_percentage :: proc(value: f32) -> (result: FormatElement) {
-    result.kind = .Float
-    
-    number := format_number(value)
-    result.data = number.data
-    result.bytes = number.bytes
-    
-    result.precision = 2
-    result.precision_set = true
-    result.width = 5
-    result.width_set = true
-    
+
+view_percentage :: proc { view_percentage_parts, view_percentage_ratio }
+view_percentage_parts :: proc(a, b: $N)   -> (result: View) { return view_percentage(cast(f64) a / cast(f64) b) }
+view_percentage_ratio :: proc(value: $F) -> (result: View) {
+    result = view_float(value * 100, precision = 0, width = 2)
     return result
 }

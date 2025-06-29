@@ -4,31 +4,34 @@ package build
 import "base:intrinsics"
 
 import "core:fmt"
-import "core:log"
 import "core:os"
 import "core:os/os2"
-import "base:runtime"
 import "core:strings"
 import "core:time"
 
 import win "core:sys/windows"
 
-optimizations    := true ? ` -o:none ` : ` -o:speed `
+optimizations    := false ? ` -o:speed ` : ` -o:none `
 PedanticGame     :: false
 PedanticPlatform :: false
 
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -vet-semicolon  -ignore-vs-search -use-single-module `
+flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -ignore-vs-search -use-single-module -microarch:native -target:windows_amd64 `
 debug    :: ` -debug `
 internal :: ` -define:INTERNAL=true ` // @cleanup
-pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-unused-variables -vet-style -vet-packages:main,game,hha -vet-unused-procedures` 
+pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-semicolon -vet-unused-variables -vet-style -vet-packages:main -vet-unused-procedures` 
 commoner :: ` -custom-attribute:common,printlike `
 
-src_path :: `.\build\`   
-exe_path :: `.\build\build.exe`
+build_src_path :: `.\build\`   
+build_exe_path :: `.\build\build.exe`
 
 build_dir :: `.\build\`
 data_dir  :: `.\data`
 
+odin               :: `C:\tools\odin\odin.exe` // @cleanup Could this be ODIN_COMPILER or whatever its called?
+code_dir           :: `..\code` 
+game_dir           :: `..\code\game` 
+asset_builder_dir  :: `..\code\game\asset_builder` 
+ 
 /* 
     @study(viktor): 
     If the build does not change its faster to not build/rebuild and execute just the build.exe.
@@ -43,8 +46,6 @@ data_dir  :: `.\data`
 
 main :: proc() {
     context.allocator = context.temp_allocator
-    context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
-    context.logger.lowest_level = .Info
     
     go_rebuild_yourself()
     
@@ -53,19 +54,30 @@ main :: proc() {
     err := os.set_current_directory(build_dir)
     assert(err == nil)
     
+    if !check_printlikes(code_dir) do os.exit(1)
+    
     if len(os.args) == 1 {
         build_game()
         build_platform()
-        run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\format.odin -file -out:.\format.exe -ignore-unknown-attributes -define:IsRunAsFile=true -debug `)
     } else {
         for arg in os.args[1:] {
             switch arg {
-              case `AssetBuilder`: run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game\asset_builder -out:.\asset_builder.exe`, flags, debug, commoner, pedantic)
-              case `Game`:         build_game()
-              case `Platform`:     build_platform()
+              case `Game`:     build_game()
+              case `Platform`: build_platform()
+              
+              case `AssetBuilder`: 
+                args: [dynamic]string
+                odin_build(&args, asset_builder_dir, `..\build\asset_builder.exe`)
+                append(&args, flags)
+                append(&args, debug)
+                append(&args, commoner)
+                append(&args, pedantic)
+                run_command_or_exit(odin, args[:])
             }
         }
     }
+    
+    fmt.println("\nDone.\n")
 }
 
 build_game :: proc() {
@@ -75,7 +87,7 @@ build_game :: proc() {
     // @note(viktor): the platform checks for this lock file when hot-reloading
     lock_path := `.\lock.tmp` 
     lock, err := os.open(lock_path, mode = os.O_CREATE)
-    if err != nil do log.error(os.error_string(err))
+    if err != nil do fmt.print("ERROR: ", os.error_string(err))
     defer {
         os.close(lock)
         os.remove(lock_path)
@@ -83,18 +95,38 @@ build_game :: proc() {
     fmt.fprint(lock, "WAITING FOR PDB")
     
     pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
-    run_command_or_exit(`C:\Odin\odin.exe`, `odin build ..\code\game -build-mode:dll -out:`, out, pdb, flags, debug, internal, commoner, optimizations, (pedantic when PedanticGame else ""))
+    
+    args: [dynamic]string
+    odin_build(&args, game_dir, out)
+    append(&args, " -build-mode:dll ")
+    append(&args, pdb)
+    append(&args, flags)
+    append(&args, debug)
+    append(&args, internal)
+    append(&args, commoner)
+    append(&args, optimizations)
+    if PedanticGame do append(&args, pedantic)
+    run_command_or_exit(odin, args[:])
 }
 
 build_platform :: proc() {
-    debug_exe := "debug.exe" 
-    if !is_running(debug_exe) {
+    debug_exe :: `debug.exe`
+    if handle_running_exe_gracefully(debug_exe, .Skip) {
         if !extract_common_and_exports() {
+            fmt.println("ERROR: Could not extract declarations marked with @common or @export")
             os.exit(1)
         }
         
-        if !run_command(`C:\Odin\odin.exe`, `odin build ..\code -out:.\`, debug_exe, flags, debug, internal, optimizations, commoner , (pedantic when PedanticPlatform else "")) {
-            
+        args: [dynamic]string
+        odin_build(&args, code_dir, `.\`+debug_exe)
+        append(&args, flags)
+        append(&args, debug)
+        append(&args, internal)
+        append(&args, optimizations)
+        append(&args, commoner)
+        if PedanticPlatform do append(&args, pedantic)
+        
+        if !run_command(odin, args[:]) {
             // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
             os2.change_times(debug_exe, time.now(), time.now())
         }
@@ -119,11 +151,56 @@ build_platform :: proc() {
 
 
 
+Handle_Running_Exe :: enum {
+    Skip,
+    Abort, 
+    Rename,
+    Kill,
+}
+
+handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running_Exe) -> (ok: b32) {
+    if ok, pid := is_running(exe_name); ok {
+        switch handling {
+          case .Skip:
+            fmt.printfln("INFO: Tried to build '%v', but the program is already running. Skipping build.", exe_name)
+            return false
+            
+          case .Abort: 
+            fmt.printfln("INFO: Tried to build '%v', but the program is already running. Aborting build!", exe_name)
+            os.exit(0)
+            
+          case .Kill: 
+            fmt.printfln("INFO: Tried to build '%v', but the program is already running. Killing running instance in order to build.", exe_name)
+            handle := win.OpenProcess(win.PROCESS_TERMINATE, false, pid, )
+            if handle != nil {
+                win.TerminateProcess(handle, 0)
+                win.CloseHandle(handle)
+            }
+            return true
+            
+          case .Rename:
+            // @todo(viktor): cleanup the renamed exes when they close
+            new_name := fmt.tprintf(`%v-%d.exe`, exe_name, random_number())
+            fmt.printfln("INFO: Tried to build '%v', but the program is already running. Renaming running instance to '%v' in order to build.", exe_name, new_name)
+            _ = os2.rename(exe_name, new_name)
+            return true
+        }
+    }
+    
+    return true
+}
+
+odin_build :: proc(args: ^[dynamic]string, dir: string, out: string) {
+    append(args, `odin build `)
+    append(args, dir)
+    append(args, ` -out:`)
+    append(args, out)
+    append(args, ` `)
+}
+
 Error :: union { os2.Error, os.Error }
 
 go_rebuild_yourself :: proc() -> Error {
-    log.Level_Headers = { 0..<50 = "" }
-    
     if strings.ends_with(os.get_current_directory(), "build") {
         os.set_current_directory("..") or_return
     }
@@ -135,13 +212,13 @@ go_rebuild_yourself :: proc() -> Error {
     }
     
     needs_rebuild := false
-    build_exe_info, err := os.stat(exe_path)
+    build_exe_info, err := os.stat(build_exe_path)
     if err != nil {
         needs_rebuild = true
     }
     
     if !needs_rebuild {
-        src_dir := os2.read_all_directory_by_path(src_path, context.allocator) or_return
+        src_dir := os2.read_all_directory_by_path(build_src_path, context.allocator) or_return
         for file in src_dir {
             if strings.ends_with(file.name, ".odin") {
                 if time.diff(file.modification_time, build_exe_info.modification_time) < 0 {
@@ -153,16 +230,21 @@ go_rebuild_yourself :: proc() -> Error {
     }
     
     if needs_rebuild {
-        log.info("Rebuilding!")
+        fmt.println("Rebuilding!") 
         
-        pdb_path, _ := strings.replace_all(exe_path, ".exe", ".pdb")
+        pdb_path, _ := strings.replace_all(build_exe_path, ".exe", ".pdb")
         remove_if_exists(pdb_path)
+        // @todo(viktor): do we still need the old one? 
+        old_path := fmt.tprintf("%s-old", build_exe_path)
+        os.rename(build_exe_path, old_path) or_return
         
-        old_path := fmt.tprintf("%s-old", exe_path)
-        os.rename(exe_path, old_path) or_return
-        
-        if !run_command(`C:\Odin\odin.exe`, "odin run ", src_path, " -out:", exe_path, debug, pedantic) {
-            os.rename(old_path, exe_path) or_return
+        args: [dynamic]string
+        odin_build(&args, build_src_path, build_exe_path)
+        append(&args, debug)
+        append(&args, flags)
+        append(&args, pedantic)
+        if !run_command(odin, args[:]) {
+            os.rename(old_path, build_exe_path) or_return
         }
         
         remove_if_exists(old_path)
@@ -196,9 +278,9 @@ delete_all_like :: proc(pattern: string) {
     }
 }
 
-is_running :: proc(exe_name: string) -> (running: b32) {
+is_running :: proc(exe_name: string) -> (running: b32, pid: u32) {
     snapshot := win.CreateToolhelp32Snapshot(win.TH32CS_SNAPALL, 0)
-    log.assert(snapshot != win.INVALID_HANDLE_VALUE, "could not take a snapshot of the running programms")
+    assert(snapshot != win.INVALID_HANDLE_VALUE, "could not take a snapshot of the running programms")
     defer win.CloseHandle(snapshot)
 
     process_entry := win.PROCESSENTRY32W{ dwSize = size_of(win.PROCESSENTRY32W)}
@@ -206,9 +288,9 @@ is_running :: proc(exe_name: string) -> (running: b32) {
     if win.Process32FirstW(snapshot, &process_entry) {
         for {
             test_name, err := win.utf16_to_utf8(process_entry.szExeFile[:])
-            log.assert(err == nil)
+            assert(err == nil)
             if exe_name == test_name {
-                return true
+                return true, process_entry.th32ProcessID
             }
             if !win.Process32NextW(snapshot, &process_entry) {
                 break
@@ -216,16 +298,16 @@ is_running :: proc(exe_name: string) -> (running: b32) {
         }
     }
 
-    return false
+    return false, 0
 }
 
-run_command_or_exit :: proc(program: string, args: ..string) {
-    if !run_command(program, ..args) {
+run_command_or_exit :: proc(program: string, args: []string) {
+    if !run_command(program, args) {
         os.exit(1)
     }
 }
 
-run_command :: proc(program: string, args: ..string) -> (success: b32) {
+run_command :: proc(program: string, args: []string) -> (success: b32) {
     startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }
     process_info := win.PROCESS_INFORMATION{}
     
@@ -233,17 +315,9 @@ run_command :: proc(program: string, args: ..string) -> (success: b32) {
     working_directory := win.utf8_to_wstring(os.get_current_directory())
     joined_args := strings.join(args, "")
     
-    log.info("CMD:", program, " - ", joined_args)
+    fmt.println("CMD:", program, " - ", joined_args)
     
-    if win.CreateProcessW(
-        win.utf8_to_wstring(program), 
-        win.utf8_to_wstring(joined_args), 
-        nil, nil, 
-        win.TRUE, 0, 
-        nil, working_directory, 
-        &startup_info, &process_info,
-    ) {
-        
+    if win.CreateProcessW(win.utf8_to_wstring(program), win.utf8_to_wstring(joined_args), nil, nil, win.TRUE, 0, nil, working_directory, &startup_info, &process_info) {
         win.WaitForSingleObject(process_info.hProcess, win.INFINITE)
         
         exit_code: win.DWORD
@@ -253,7 +327,7 @@ run_command :: proc(program: string, args: ..string) -> (success: b32) {
         win.CloseHandle(process_info.hProcess)
         win.CloseHandle(process_info.hThread)
     } else {
-        log.errorf("Failed to execute the command: %s %s with error %s", program, args, os.error_string(os.get_last_error()))
+        fmt.printfln("ERROR: Command `%s %s` failed with error %s", program, args, os.error_string(os.get_last_error()))
         success = false
     }
     return
