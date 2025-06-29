@@ -608,8 +608,10 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (res
     result = next_pointer_of_the_chunks_previous_chunk^
         
     if arena != nil && result == nil {
-        result = push(arena, Chunk)
-        result.chunk = chunk_p
+        result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk)
+        result ^= {
+            chunk = chunk_p
+        }
         
         list_push(next_pointer_of_the_chunks_previous_chunk, result) 
     }

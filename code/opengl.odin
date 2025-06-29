@@ -375,7 +375,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     for sort_entry_offset in prep.sorted_offsets {
         offset := sort_entry_offset
         
-        //:PointerArithmetic
+        // :PointerArithmetic 
         header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
         entry_data := &commands.push_buffer[offset + size_of(RenderEntryHeader)]
         

@@ -26,15 +26,16 @@ CreateThreadInfo :: struct {
     index: u32,
 }
 
-@(private="file") created_thread_count: u32 = 1
+@(private="file") next_thread_index: u32 = 1
+@(private="file") infos: [1024]CreateThreadInfo
 
-init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
-    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast len(infos), nil)
+init_work_queue :: proc(queue: ^PlatformWorkQueue, count: u32) {
+    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast count, nil)
     
-    for &info in infos {
+    for &info in infos[next_thread_index:][:count] {
         info.queue = queue
-        info.index = created_thread_count
-        created_thread_count += 1
+        info.index = next_thread_index
+        next_thread_index += 1
         
         // @note(viktor): When I use the windows call I can at most create 4 threads at once,
         // any more calls to create thread in this call of the init function fail silently
@@ -45,10 +46,18 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, infos: []CreateThreadInfo) {
     }
 }
 
-enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm) {
+enqueue_work_or_do_immediatly :: proc(queue: ^PlatformWorkQueue, data: pmm, callback: PlatformWorkQueueCallback) {
+    if queue != nil {
+        enqueue_work(queue, data, callback)
+    } else {
+        callback(data)
+    }
+}
+
+enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, data: pmm, callback: PlatformWorkQueueCallback) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
-    assert(new_next_entry != queue.next_entry_to_read) 
+    assert(new_next_entry != queue.next_entry_to_read, "too many units of work enqueued") 
 
     entry := &queue.entries[old_next_entry] 
     entry.data     = data
@@ -63,7 +72,9 @@ enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, callback: P
     win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
 }
 
-complete_all_work : PlatformCompleteAllWork : proc(queue: ^PlatformWorkQueue) {
+complete_all_work :: proc(queue: ^PlatformWorkQueue) {
+    if queue == nil do return
+    
     for queue.completion_count != queue.completion_goal {
         do_next_work_queue_entry(queue)
     }
@@ -105,7 +116,7 @@ worker_thread :: proc (parameter: pmm) {
     
     for {
         if do_next_work_queue_entry(queue) { 
-            INFINITE :: transmute(win.DWORD) i32(-1)
+            INFINITE :: transmute(win.DWORD) cast(i32) -1
             win.WaitForSingleObjectEx(queue.semaphore_handle, INFINITE, false)
         }
     }

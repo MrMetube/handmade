@@ -14,7 +14,7 @@ PlatformAPI :: struct {
 }
 
 @(common) PlatformWorkQueueCallback :: #type proc(data: pmm)
-@(common) PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, callback: PlatformWorkQueueCallback, data: pmm)
+@(common) PlatformEnqueueWork       :: #type proc(queue: ^PlatformWorkQueue, data: pmm, callback: PlatformWorkQueueCallback)
 @(common) PlatformCompleteAllWork   :: #type proc(queue: ^PlatformWorkQueue)
 
 @(common) PlatformFileType   :: enum { AssetFile }

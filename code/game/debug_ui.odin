@@ -161,7 +161,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     end_layout(&debug.mouse_text_layout)
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
-    debug.root_group.name = print(debug.root_info, "% %s", format_order_of_magnitude(most_recent_frame.seconds_elapsed, format_float(precision = 3)))
+    debug.root_group.name = print(debug.root_info, "% %s", view_order_of_magnitude(most_recent_frame.seconds_elapsed, precision = 3))
     
     interact(debug, input, mouse_p)
 }
@@ -310,12 +310,11 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         
       case FrameInfo:
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
-        format := format_float(precision = 0, width = 0)
         text := print(DebugPrintBuffer[:], "Viewed Frame: % %s, % % events, % % data_blocks, % % profile_blocks",
-            format_order_of_magnitude(viewed_frame.seconds_elapsed, format), 
-            format_order_of_magnitude(viewed_frame.stored_event_count, format), 
-            format_order_of_magnitude(viewed_frame.data_block_count, format), 
-            format_order_of_magnitude(viewed_frame.profile_block_count, format), 
+            view_order_of_magnitude(viewed_frame.seconds_elapsed,     precision = 0), 
+            view_order_of_magnitude(viewed_frame.stored_event_count,  precision = 0), 
+            view_order_of_magnitude(viewed_frame.data_block_count,    precision = 0), 
+            view_order_of_magnitude(viewed_frame.profile_block_count, precision = 0), 
         )
         basic_text_element(layout, text)
         
@@ -337,7 +336,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
                 boolean_button(layout, "Occupancy", is_occupancy, set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}))
                 arena := graph.arena
                 
-                text := print(DebugPrintBuffer[:], "%, % % / % %", element.guid.name, format_memory_size(arena.used), format_memory_size(len(arena.storage)))
+                text := print(DebugPrintBuffer[:], "%, % % / % %", element.guid.name, view_memory_size(arena.used), view_memory_size(len(arena.storage)))
                 action_button(layout, text, {}, backdrop_color = {})
             end_ui_row(layout)
             
@@ -578,12 +577,10 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         entry := entries[sort_entry.index]
         running_sum += entry.stats.sum
         
-        info_int   := format_integer(width = 4)
-        info_float := format_float(width = 4, precision = 0)
         text := print(DebugPrintBuffer[:], "total % %cy - % %% / % %%  - %",
-            format_order_of_magnitude(cast(u64) entry.stats.sum, info_int),
-            format_percentage(entry.stats.sum * total_time_percentage),
-            format_percentage(running_sum * total_time_percentage),
+            view_order_of_magnitude(cast(u64) entry.stats.sum, width = 4),
+            view_percentage(entry.stats.sum * total_time_percentage),
+            view_percentage(running_sum * total_time_percentage),
             entry.element.guid.name,
         )
         color_wheel := color_wheel
@@ -594,8 +591,8 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         region_rect = add_offset(region_rect, p)
         if contains(region_rect, mouse_p) {
             tooltip := print(DebugPrintBuffer[:], "average % %cy - % %hits",
-                format_order_of_magnitude(entry.stats.avg, info_float),
-                format_order_of_magnitude(cast(u64) entry.stats.count), 
+                view_order_of_magnitude(entry.stats.avg, width = 4),
+                view_order_of_magnitude(cast(u64) entry.stats.count), 
             )
             add_tooltip(debug, tooltip)
         }
@@ -631,10 +628,6 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     dd_longest_frame_span += -3 * d_longest_frame_span
     d_longest_frame_span += dd_longest_frame_span * dt
     longest_frame_span += d_longest_frame_span * dt + 0.5 * dd_longest_frame_span * dt * dt
-    
-    debug_record_value(&longest_frame_span)
-    debug_record_value(&d_longest_frame_span)
-    debug_record_value(&target_longest_frame_span)
     
     pixel_span := dim.y
     scale := safe_ratio_0(pixel_span, longest_frame_span)
@@ -674,7 +667,7 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             }
             
             if contains(region_rect, mouse_p) {
-                text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude(node.duration))
+                text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, view_order_of_magnitude(node.duration))
                 add_tooltip(debug, text)
                 
                 // @copypasta with draw_profile
@@ -758,7 +751,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         }
         
         if contains(region_rect, mouse_p) {
-            text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, format_order_of_magnitude(node.duration))
+            text := print(DebugPrintBuffer[:], "% - % % cycles", element.guid.name, view_order_of_magnitude(node.duration))
             add_tooltip(debug, text)
             
             if node.first_child != nil {
