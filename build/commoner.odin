@@ -53,11 +53,11 @@ Header ::
 `#+vet !unused-procedures
 package %v
 ///////////////////////////////////////////////
-//////////////////@important///////////////////
+//                @important                 //
 ///////////////////////////////////////////////
-////                                       ////
-////  THIS CODE IS GENERATED. DO NOT EDIT  ////
-////                                       ////
+//                                           //
+//    THIS CODE IS GENERATED. DO NOT EDIT!   //
+//                                           //
 ///////////////////////////////////////////////
  
 `
@@ -259,7 +259,7 @@ visit_and_extract_commons :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^as
         end := decl.end
         
         collect_common_files(attributes)
-        name, name_and_body, attribute := collect_declarations_with_attribute(&attribute_names, _CommonTag, attributes, pos, end)
+        name, name_and_body, attribute := collect_declarations_with_attribute(_CommonTag, attributes, pos, end, &attribute_names)
         
         if attribute != nil {
             builder: string
@@ -280,7 +280,7 @@ visit_and_extract_commons :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^as
         end := decl.end
         
         collect_common_files(attributes)
-        name, name_and_body, attribute := collect_declarations_with_attribute(&attribute_names, _CommonTag, attributes, pos, end)
+        name, name_and_body, attribute := collect_declarations_with_attribute(_CommonTag, attributes, pos, end, &attribute_names)
         
         // @Copypasta
         if attribute != nil {

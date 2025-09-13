@@ -429,8 +429,8 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
     delta_u_row := delta_n_x_axis.x + delta_n_x_axis.y
     delta_v_row := delta_n_y_axis.x + delta_n_y_axis.y
     
-    inv_255         :f32x8= 1.0 / 255.0
-    max_color_value :f32x8= 255 * 255
+    inv_255:         f32x8 = 1.0 / 255.0
+    max_color_value: f32x8 = 255 * 255
     
     color := vec_cast(f32x8, color)
         

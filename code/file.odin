@@ -110,7 +110,7 @@ mark_file_error : PlatformMarkFileError : proc(handle: ^PlatformFileHandle, erro
         buffer: [1024]u16
         length := win.FormatMessageW(win.FORMAT_MESSAGE_FROM_SYSTEM, nil, error_code, 0, &buffer[0], len(buffer), nil, )
         message, _ := win.utf16_to_utf8(buffer[:length])
-        println("ERROR: %", string(message))
+        println("ERROR: %", message)
     }
     handle.no_errors = false
 }

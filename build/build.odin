@@ -1,80 +1,183 @@
-#+private
+
 package build
 
 import "base:intrinsics"
-
 import "core:fmt"
 import "core:os"
 import "core:os/os2"
 import "core:strings"
 import "core:time"
-
 import win "core:sys/windows"
 
-optimizations    := false ? ` -o:speed ` : ` -o:none `
+optimizations    := false ? `-o:speed` : `-o:none`
 PedanticGame     :: false
 PedanticPlatform :: false
 
-flags    :: ` -error-pos-style:unix -vet-cast -vet-shadowing -ignore-vs-search -use-single-module -microarch:native -target:windows_amd64 `
-debug    :: ` -debug `
-internal :: ` -define:INTERNAL=true ` // @cleanup
-pedantic :: ` -warnings-as-errors -vet-unused-imports -vet-semicolon -vet-unused-variables -vet-style -vet-packages:main -vet-unused-procedures` 
-commoner :: ` -custom-attribute:common,printlike `
+flags    := [] string {`-error-pos-style:unix`,`-vet-cast`,`-vet-shadowing`,`-microarch:native`,`-target:windows_amd64`}
+
+debug    :: `-debug`
+internal :: `-define:INTERNAL=true` // @cleanup
+
+pedantic := [] string {
+    `-warnings-as-errors`,`-vet-unused-imports`,`-vet-semicolon`,`-vet-unused-variables`,`-vet-style`,
+    `-vet-packages:main`,`-vet-unused-procedures`
+}
+
+check_and_commoner :: `-custom-attribute:common,printlike`
+
+////////////////////////////////////////////////
 
 build_src_path :: `.\build\`   
-build_exe_path :: `.\build\build.exe`
+build_exe_name :: `build.exe`
 
-build_dir :: `.\build\`
-data_dir  :: `.\data`
-
-odin               :: `C:\tools\odin\odin.exe` // @cleanup Could this be ODIN_COMPILER or whatever its called?
-code_dir           :: `..\code` 
+build_dir   :: `.\build\`
+data_dir    :: `.\data`
+code_dir    :: `..\code` 
 game_dir           :: `..\code\game` 
 asset_builder_dir  :: `..\code\game\asset_builder` 
+
+////////////////////////////////////////////////
+
+raddbg      :: `raddbg.exe`
+raddbg_path :: `C:\tools\raddbg\`+ raddbg
+
+debug_exe :: `debug.exe`
+debug_exe_path :: `.\`+debug_exe
  
 /* 
-    @study(viktor): 
-    If the build does not change its faster to not build/rebuild and execute just the build.exe.
-    But if the amount of times the build changes increases, then it would be simpler to just odin run it directly.
-    Currently the saved time is ~35% i.e. 0,52 seconds for each build.
+ @todo(viktor): 
+ - Find a better way to share common code without a bunch of modules, than copypasta
+ - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
+ - get rid of INTERNAL define
+ */
+ 
+////////////////////////////////////////////////
 
-    @todo(viktor): 
-    - Find a better way to share common code without a bunch of modules, than copypasta
-    - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
-    - get rid of INTERNAL define
-*/
+Task :: enum {
+    help,
+    
+    game,
+    platform,
+    asset_builder,
+    
+    debugger, 
+    run,
+    renderdoc,
+}
+Tasks :: bit_set [Task]
+BuildTasks := Tasks { .game, .platform, .asset_builder }
+
+tasks: Tasks
 
 main :: proc() {
     context.allocator = context.temp_allocator
+
+    for arg, index in os.args[1:] {
+        switch arg {
+          case "run":           tasks += { .run }
+          case "game":          tasks += { .game }
+          case "platform":      tasks += { .platform }
+          case "asset_builder": tasks += { .asset_builder }
+          case "debugger":      tasks += { .debugger }
+          case "help":          tasks += { .help }
+          case "renderdoc":     tasks += { .renderdoc }
+          case:                 tasks += { .help }
+        }
+    }
     
-    go_rebuild_yourself()
+    if .help in tasks {
+        usage()
+        os.exit(1)
+    }
     
     make_directory_if_not_exists(data_dir)
-    
     err := os.set_current_directory(build_dir)
     assert(err == nil)
     
     if !check_printlikes(code_dir) do os.exit(1)
     
-    if len(os.args) == 1 {
-        build_game()
-        build_platform()
-    } else {
-        for arg in os.args[1:] {
-            switch arg {
-              case `Game`:     build_game()
-              case `Platform`: build_platform()
-              
-              case `AssetBuilder`: 
-                args: [dynamic]string
-                odin_build(&args, asset_builder_dir, `..\build\asset_builder.exe`)
-                append(&args, flags)
-                append(&args, debug)
-                append(&args, commoner)
-                append(&args, pedantic)
-                run_command_or_exit(odin, args[:])
-            }
+    cmd: Cmd
+    if .debugger in tasks {
+        if ok, pid := is_running(raddbg); ok {
+            fmt.printfln("INFO: Killing running debugger in order to build.")
+            kill(pid)
         }
+    }
+    
+    build := true
+    if (tasks & {.debugger, .renderdoc }) != {} {
+        if !did_change(debug_exe_path, code_dir) {
+            fmt.println("INFO: No changes detected. Skipping build.")
+            build = false
+        }
+    }
+    
+    if build {
+        if tasks & BuildTasks == {} do tasks += { .game, .platform }
+        if .platform in tasks do build_platform()
+        if .game     in tasks do build_game()
+        if .asset_builder in tasks {
+            odin_build(&cmd, asset_builder_dir, `..\build\asset_builder.exe`)
+            append(&cmd, ..flags)
+            append(&cmd, debug)
+            append(&cmd, check_and_commoner)
+            append(&cmd, ..pedantic)
+            run_command(&cmd)
+        }
+    }
+    
+    fmt.println("INFO: Build done.\n")
+    
+    procs: Procs
+    if .renderdoc in tasks {
+        fmt.println("INFO: Starting the Program with RenderDoc attached.")
+        renderdoc_cmd := `C:\Program Files\RenderDoc\renderdoccmd.exe`
+        renderdoc_gui := `C:\Program Files\RenderDoc\qrenderdoc.exe`
+        
+        os.change_directory("..")
+        append(&cmd, renderdoc_cmd, `capture`, `-d`, data_dir, `-c`, `.\capture`, build_dir + debug_exe_path)
+        run_command(&cmd)
+        
+        os.change_directory(data_dir)
+        captures := all_like("capture*")
+        // @todo(viktor): What if we had multiple captures?
+        if len(captures) == 1 {
+            append(&cmd, renderdoc_gui, captures[0])
+            run_command(&cmd)
+            // @todo(viktor): Ask if old should be deleted?
+            fmt.printfln("INFO: Cleanup old captures")
+            for capture in captures {
+                os.remove(capture)
+            }
+        } else if len(captures) == 0 {
+            fmt.printfln("INFO: No captures made, not starting RenderDoc.")
+        } else {
+            fmt.printfln("INFO: More than one capture made, please select for yourself.")
+            append(&cmd, "cmd", "/c", "start", ".")
+            run_command(&cmd)
+        }
+    }
+    
+    if .debugger in tasks {
+        fmt.println("INFO: Starting the Rad Debugger.")
+        // @study(viktor): raddbg -ipc usage
+        append(&cmd, raddbg_path)
+        if .run in tasks {
+            append(&cmd, "--auto_run")
+        }
+        run_command(&cmd, async = &procs)
+    } else {
+        if .run in tasks {
+            fmt.println("INFO: Starting the Program.")
+            os.change_directory("..")
+            os.change_directory(data_dir)
+            append(&cmd, debug_exe)
+            run_command(&cmd, async = &procs)
+        }
+    }
+    
+    if len(cmd) != 0 {
+        fmt.println("INFO: cmd was not cleared: ", strings.join(cmd[:], " "))
     }
     
     fmt.println("\nDone.\n")
@@ -83,6 +186,7 @@ main :: proc() {
 build_game :: proc() {
     out := `.\game.dll`
     delete_all_like(`.\game*.pdb`)
+    delete_all_like(`.\game*.rdi`)
     
     // @note(viktor): the platform checks for this lock file when hot-reloading
     lock_path := `.\lock.tmp` 
@@ -94,19 +198,19 @@ build_game :: proc() {
     }
     fmt.fprint(lock, "WAITING FOR PDB")
     
-    pdb := fmt.tprintf(` -pdb-name:.\game-%d.pdb`, random_number())
+    pdb := fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number())
     
-    args: [dynamic]string
-    odin_build(&args, game_dir, out)
-    append(&args, " -build-mode:dll ")
-    append(&args, pdb)
-    append(&args, flags)
-    append(&args, debug)
-    append(&args, internal)
-    append(&args, commoner)
-    append(&args, optimizations)
-    if PedanticGame do append(&args, pedantic)
-    run_command_or_exit(odin, args[:])
+    cmd: Cmd
+    odin_build(&cmd, game_dir, out)
+    append(&cmd, "-build-mode:dll")
+    append(&cmd, pdb)
+    append(&cmd, ..flags)
+    append(&cmd, debug)
+    append(&cmd, internal)
+    append(&cmd, check_and_commoner)
+    append(&cmd, optimizations)
+    if PedanticGame do append(&cmd, ..pedantic)
+    run_command(&cmd)
 }
 
 build_platform :: proc() {
@@ -117,21 +221,47 @@ build_platform :: proc() {
             os.exit(1)
         }
         
-        args: [dynamic]string
-        odin_build(&args, code_dir, `.\`+debug_exe)
-        append(&args, flags)
-        append(&args, debug)
-        append(&args, internal)
-        append(&args, optimizations)
-        append(&args, commoner)
-        if PedanticPlatform do append(&args, pedantic)
+        cmd: Cmd
+        odin_build(&cmd, code_dir, `.\`+debug_exe)
+        append(&cmd, ..flags)
+        append(&cmd, debug)
+        append(&cmd, internal)
+        append(&cmd, optimizations)
+        append(&cmd, check_and_commoner)
+        if PedanticPlatform do append(&cmd, ..pedantic)
         
-        if !run_command(odin, args[:]) {
+        if !run_command(&cmd) {
             // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
             os2.change_times(debug_exe, time.now(), time.now())
         }
     }
 }
+
+usage :: proc () {
+    fmt.printf(`Usage:
+  %v [<options>]
+Options:
+`, os.args[0])
+    infos :            = [Task] string {
+        .help          = "Print this usage information.",
+        .run           = "Run the game.",
+        
+        .game          = "Rebuild the game. If it is running it will be hotreloaded.",
+        .platform      = "Rebuild the platform, if the game isn't running.",
+        .asset_builder = "Rebuild the asset builder.",
+        
+        .debugger      = "Start/Restart the debugger.",
+        .renderdoc     = "Run the program with renderdoc attached and launch renderdoc with the capture after the program closes.",
+    }
+    // Ughh..
+    width: int
+    for task in Task do width = max(len(fmt.tprint(task)), width)
+    format := fmt.tprintf("  %%-%vv - %%v\n", width)
+    for text, task in infos do fmt.printf(format, task, text)
+}
+
+Procs :: [dynamic] os2.Process
+Cmd   :: [dynamic] string
 
 
 
@@ -159,7 +289,9 @@ Handle_Running_Exe :: enum {
 }
 
 handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running_Exe) -> (ok: b32) {
-    if ok, pid := is_running(exe_name); ok {
+    pid: u32
+    ok, pid = is_running(exe_name)
+    if ok {
         switch handling {
           case .Skip:
             fmt.printfln("INFO: Tried to build '%v', but the program is already running. Skipping build.", exe_name)
@@ -170,12 +302,9 @@ handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running
             os.exit(0)
             
           case .Kill: 
-            fmt.printfln("INFO: Tried to build '%v', but the program is already running. Killing running instance in order to build.", exe_name)
-            handle := win.OpenProcess(win.PROCESS_TERMINATE, false, pid, )
-            if handle != nil {
-                win.TerminateProcess(handle, 0)
-                win.CloseHandle(handle)
-            }
+            fmt.printfln("INFO: Tried to build '%v', but the program is already running.", exe_name)
+            fmt.printfln("INFO: Killing running instance in order to build.")
+            kill(pid)
             return true
             
           case .Rename:
@@ -190,69 +319,56 @@ handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running
     return true
 }
 
-odin_build :: proc(args: ^[dynamic]string, dir: string, out: string) {
-    append(args, `odin build `)
-    append(args, dir)
-    append(args, ` -out:`)
-    append(args, out)
-    append(args, ` `)
+odin_build :: proc(cmd: ^[dynamic]string, dir: string, out: string) {
+    append(cmd, "odin")
+    append(cmd, "build")
+    append(cmd, dir)
+    append(cmd, fmt.tprintf("-out:%v", out))
 }
 
-Error :: union { os2.Error, os.Error }
 
-go_rebuild_yourself :: proc() -> Error {
-    if strings.ends_with(os.get_current_directory(), "build") {
-        os.set_current_directory("..") or_return
-    }
-    
-    gitignore := fmt.tprint(build_dir, `\.gitignore`, sep="")
-    if !os.exists(gitignore) {
-        contents := "*\n!*.odin"
-        os.write_entire_file(gitignore, transmute([]u8) contents)
-    }
-    
-    needs_rebuild := false
-    build_exe_info, err := os.stat(build_exe_path)
+
+
+
+
+
+
+
+did_change :: proc (output_path: string, inputs: .. string, extension: string = ".odin") -> (result: bool) {
+    output_info, err := os.stat(output_path)
     if err != nil {
-        needs_rebuild = true
-    }
-    
-    if !needs_rebuild {
-        src_dir := os2.read_all_directory_by_path(build_src_path, context.allocator) or_return
-        for file in src_dir {
-            if strings.ends_with(file.name, ".odin") {
-                if time.diff(file.modification_time, build_exe_info.modification_time) < 0 {
-                    needs_rebuild = true
-                    break
+        result = true
+    } else {
+        search: for input in inputs {
+            files : [] os2.File_Info
+            error: os2.Error
+            if os.is_dir(input) {
+                files, error = os2.read_all_directory_by_path(input, context.allocator)
+                if error != nil {
+                    fmt.printfln("ERROR: failed to read directory '%v' when checking for changes", input, error)
+                    break search
+                }
+            } else {
+                file, stat_error := os2.stat(input, context.allocator)
+                files = { file }
+                if stat_error != nil {
+                    fmt.printfln("ERROR: failed to read file '%v' when checking for changes", input, error)
+                    break search
+                }
+            }
+            
+            for file in files {
+                if extension == "" || strings.ends_with(file.name, extension) {
+                    if time.diff(file.modification_time, output_info.modification_time) < 0 {
+                        result = true
+                        break search
+                    }
                 }
             }
         }
     }
     
-    if needs_rebuild {
-        fmt.println("Rebuilding!") 
-        
-        pdb_path, _ := strings.replace_all(build_exe_path, ".exe", ".pdb")
-        remove_if_exists(pdb_path)
-        // @todo(viktor): do we still need the old one? 
-        old_path := fmt.tprintf("%s-old", build_exe_path)
-        os.rename(build_exe_path, old_path) or_return
-        
-        args: [dynamic]string
-        odin_build(&args, build_src_path, build_exe_path)
-        append(&args, debug)
-        append(&args, flags)
-        append(&args, pedantic)
-        if !run_command(odin, args[:]) {
-            os.rename(old_path, build_exe_path) or_return
-        }
-        
-        remove_if_exists(old_path)
-        
-        os.exit(0)
-    }
-    
-    return nil
+    return result
 }
 
 remove_if_exists :: proc(path: string) {
@@ -260,31 +376,41 @@ remove_if_exists :: proc(path: string) {
 }
 
 delete_all_like :: proc(pattern: string) {
-    find_data := win.WIN32_FIND_DATAW{}
+    for file in all_like(pattern) {
+        os.remove(file)
+    }
+}
 
+all_like :: proc(pattern: string, allocator := context.temp_allocator) -> (result: [] string) {
+    files: [dynamic] string
+    files.allocator = allocator
+    
+    find_data := win.WIN32_FIND_DATAW{}
     handle := win.FindFirstFileW(win.utf8_to_wstring(pattern), &find_data)
-    if handle == win.INVALID_HANDLE_VALUE do return
+    if handle == win.INVALID_HANDLE_VALUE do return files[:]
     defer win.FindClose(handle)
     
     for {
         file_name, err := win.utf16_to_utf8(find_data.cFileName[:])
         assert(err == nil)
         file_path := fmt.tprintf(`.\%v`, file_name)
+        append(&files, file_path)
         
-        os.remove(file_path)
         if !win.FindNextFileW(handle, &find_data){
             break 
         }
     }
+    
+    return files[:]
 }
 
 is_running :: proc(exe_name: string) -> (running: b32, pid: u32) {
     snapshot := win.CreateToolhelp32Snapshot(win.TH32CS_SNAPALL, 0)
     assert(snapshot != win.INVALID_HANDLE_VALUE, "could not take a snapshot of the running programms")
     defer win.CloseHandle(snapshot)
-
+    
     process_entry := win.PROCESSENTRY32W{ dwSize = size_of(win.PROCESSENTRY32W)}
-
+    
     if win.Process32FirstW(snapshot, &process_entry) {
         for {
             test_name, err := win.utf16_to_utf8(process_entry.szExeFile[:])
@@ -297,40 +423,62 @@ is_running :: proc(exe_name: string) -> (running: b32, pid: u32) {
             }
         }
     }
-
+    
     return false, 0
 }
 
-run_command_or_exit :: proc(program: string, args: []string) {
-    if !run_command(program, args) {
-        os.exit(1)
+run_command :: proc (cmd: ^Cmd, or_exit := true, keep := false, stdout: ^string = nil, stderr: ^string = nil, async: ^Procs = nil) -> (success: bool) {
+    fmt.printfln(`CMD: %v`, strings.join(cmd[:], ` `))
+    
+    process_description := os2.Process_Desc { command = cmd[:] }
+    process: os2.Process
+    state:   os2.Process_State
+	output:  []byte
+	error:   []byte
+    err2:    os2.Error
+    if async == nil {
+        state, output, error, err2 = os2.process_exec(process_description, context.allocator)
+    } else {
+        process, err2 = os2.process_start(process_description)
+        append(async, process)
     }
+    
+    if err2 != nil {
+        fmt.printfln("ERROR: Failed to run command : %v", err2)
+        return false
+    }
+    
+    if async == nil {
+        if output != nil {
+            if stdout != nil do stdout ^= string(output)
+            else do fmt.println(string(output))
+        }
+        
+        if error != nil {
+            if stderr != nil do stderr ^= string(error)
+            else do fmt.println(string(error))
+            
+            if or_exit do os.exit(state.exit_code)
+        }
+        
+        if or_exit && !state.success do os.exit(state.exit_code)
+        
+        success = state.success
+    } else {
+        success = true
+    }
+    
+    if !keep do clear(cmd)
+    
+    return success
 }
 
-run_command :: proc(program: string, args: []string) -> (success: b32) {
-    startup_info := win.STARTUPINFOW{ cb = size_of(win.STARTUPINFOW) }
-    process_info := win.PROCESS_INFORMATION{}
-    
-    
-    working_directory := win.utf8_to_wstring(os.get_current_directory())
-    joined_args := strings.join(args, "")
-    
-    fmt.println("CMD:", program, " - ", joined_args)
-    
-    if win.CreateProcessW(win.utf8_to_wstring(program), win.utf8_to_wstring(joined_args), nil, nil, win.TRUE, 0, nil, working_directory, &startup_info, &process_info) {
-        win.WaitForSingleObject(process_info.hProcess, win.INFINITE)
-        
-        exit_code: win.DWORD
-        win.GetExitCodeProcess(process_info.hProcess, &exit_code)
-        success = exit_code == 0
-        
-        win.CloseHandle(process_info.hProcess)
-        win.CloseHandle(process_info.hThread)
-    } else {
-        fmt.printfln("ERROR: Command `%s %s` failed with error %s", program, args, os.error_string(os.get_last_error()))
-        success = false
+kill :: proc (pid: u32) {
+    handle := win.OpenProcess(win.PROCESS_TERMINATE, false, pid)
+    if handle != nil {
+        win.TerminateProcess(handle, 0)
+        win.CloseHandle(handle)
     }
-    return
 }
 
 make_directory_if_not_exists :: proc(path: string) -> (result: b32) {
@@ -341,6 +489,6 @@ make_directory_if_not_exists :: proc(path: string) -> (result: b32) {
     return result
 }
 
-random_number :: proc() -> (result: u32) {
-    return cast(u32) intrinsics.read_cycle_counter() % 255
+random_number :: proc() -> (result: u8) {
+    return cast(u8) intrinsics.read_cycle_counter()
 }
