@@ -143,7 +143,8 @@ extract_common_game_declarations :: proc(pkg: ^ast.Package, output_dir, output_f
 Error: A generated file was modifed:
   Generated: '%s'
   Original:  '%s'
-  Migrate your changes or delete the generated file to proceed.`, path, key)
+  Migrate your changes or delete the generated file to proceed.
+  You can delete all generated files by passing the "clean" flag to the build.`, path, key)
             return false
         }
     }

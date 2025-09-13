@@ -60,6 +60,8 @@ Task :: enum {
     platform,
     asset_builder,
     
+    clean,
+    
     debugger, 
     run,
     renderdoc,
@@ -75,9 +77,13 @@ main :: proc() {
     for arg, index in os.args[1:] {
         switch arg {
           case "run":           tasks += { .run }
+          
           case "game":          tasks += { .game }
           case "platform":      tasks += { .platform }
           case "asset_builder": tasks += { .asset_builder }
+          
+          case "clean":         tasks += { .clean }
+          
           case "debugger":      tasks += { .debugger }
           case "help":          tasks += { .help }
           case "renderdoc":     tasks += { .renderdoc }
@@ -110,6 +116,14 @@ main :: proc() {
             fmt.println("INFO: No changes detected. Skipping build.")
             build = false
         }
+    }
+    
+    if .clean in tasks {
+        fmt.println("INFO: Deleting all generated files")
+        os.change_directory(code_dir)
+        delete_all_like(`*generated.odin`)
+        os.change_directory("..")
+        os.change_directory(build_dir)
     }
     
     if build {
@@ -230,7 +244,7 @@ build_platform :: proc() {
         append(&cmd, check_and_commoner)
         if PedanticPlatform do append(&cmd, ..pedantic)
         
-        if !run_command(&cmd) {
+        if !run_command(&cmd, or_exit = false) {
             // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
             os2.change_times(debug_exe, time.now(), time.now())
         }
@@ -249,6 +263,8 @@ Options:
         .game          = "Rebuild the game. If it is running it will be hotreloaded.",
         .platform      = "Rebuild the platform, if the game isn't running.",
         .asset_builder = "Rebuild the asset builder.",
+        
+        .clean         = "Delete all generated files before building. This will override the check for modifications in any generated files.",
         
         .debugger      = "Start/Restart the debugger.",
         .renderdoc     = "Run the program with renderdoc attached and launch renderdoc with the capture after the program closes.",
@@ -376,9 +392,12 @@ remove_if_exists :: proc(path: string) {
 }
 
 delete_all_like :: proc(pattern: string) {
-    for file in all_like(pattern) {
+    files := all_like(pattern)
+    for file in files {
+        fmt.printfln("INFO: deleting %v", file)
         os.remove(file)
     }
+    fmt.printfln("INFO: deleted %v files with pattern '%v'", len(files), pattern)
 }
 
 all_like :: proc(pattern: string, allocator := context.temp_allocator) -> (result: [] string) {
