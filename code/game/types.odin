@@ -8,20 +8,25 @@ import "base:intrinsics"
 import "base:runtime"
 
 Array :: struct ($T: typeid) {
-    data:  []T,
+    data:  [] T,
     count: i64,
 }
 String_Builder :: Array(u8)
 FixedArray :: struct ($N: i64, $T: typeid) {
-    data:  [N]T,
+    data:  [N] T,
     count: i64,
 }
 
 append :: proc { 
-    append_fixed_array, append_array, append_array_, append_array_many, append_fixed_array_many, append_string, 
+    append_fixed_array, append_array, append_array_, append_fixed_array_, append_array_many, append_fixed_array_many, append_string, 
     builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
 }
 @(require_results) append_array_ :: proc(a: ^Array($T)) -> (result: ^T) {
+    result = &a.data[a.count]
+    a.count += 1
+    return result
+}
+@(require_results) append_fixed_array_ :: proc(a: ^FixedArray($N, $T)) -> (result: ^T) {
     result = &a.data[a.count]
     a.count += 1
     return result
@@ -60,7 +65,7 @@ append_fixed_array_many :: proc(a: ^FixedArray($N, $T), values: []T) -> (result:
 
 append_string :: proc(a: ^String_Builder, value: string) -> (result: string) {
     append(a, (transmute([]u8) value))
-    return cast(string) a.data[:]
+    return cast(string) a.data[:a.count]
 }
 
 make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
@@ -116,7 +121,7 @@ set_len :: proc (array: ^[dynamic] $T, len: int) {
 }
 
 clear :: proc { array_clear, builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array }
-array_clear :: proc(a: ^Array($T)) {
+array_clear :: proc(a: ^$A) {
     a.count = 0
 }
 

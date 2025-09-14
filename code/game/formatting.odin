@@ -34,9 +34,11 @@ default_views :: proc "contextless" () {
 ////////////////////////////////////////////////
 
 // @todo(viktor): make precision and width parameters
-view_percentage :: proc(a, b: $N)  -> (result: View) { return view_percentage(cast(f64) a / cast(f64) b) }
-view_percentage_ratio :: proc(value: $F) -> (result: View) {
-    result = view_float(value * 100, precision = 2, width = 2)
+view_percentage :: proc(a, b: $N)  -> (result: Temp_Views) { return view_percentage(cast(f64) a / cast(f64) b) }
+view_percentage_ratio :: proc(value: $F) -> (result: Temp_Views) {
+    begin_temp_views()
+    append_temp_view(view_float(value * 100, precision = 2, width = 2))
+    result = end_temp_views()
     return result
 }
 
@@ -103,7 +105,12 @@ view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), scale, limit: in
                 append_temp_view(view_float(rest, precision = precision))
                 append_temp_view(magnitude.symbol)
             } else {
-                append_temp_view(view_integer(value))
+                when intrinsics.type_is_integer(T) {
+                    append_temp_view(view_integer(value))
+                } else {
+                    #assert(intrinsics.type_is_float(T))
+                    append_temp_view(view_float(value, precision = 0))
+                }
                 append_temp_view(magnitude.symbol)
             }
             break
@@ -225,7 +232,7 @@ view_magnitude :: proc (value: $T, scale := Integer_Amount.unit, limit := Intege
     result = view_magnitude_raw(value, integer_table[:], scale = auto_cast scale, limit = auto_cast limit, precision = precision)
     return result
 }
-view_magnitude_decimal :: proc (value: $T, scale := Integer_Amount.unit, limit := Integer_Amount.quetta, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_float(T) {
+view_magnitude_decimal :: proc (value: $T, scale := Decimal_Amount.unit, limit := Decimal_Amount.quetta, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_float(T) {
     @(static, rodata)
     decimal_table := [?] Magnitude (T) {
         {1000, "q"}, // quecto

@@ -442,30 +442,50 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
     push_rectangle(&debug.render_group, filled, debug.ui_transform, Green)
 }
 
-add_tooltip :: proc(debug: ^DebugState, text: string, color := Isabelline) {
-    layout := &debug.mouse_text_layout
-    text_bounds := measure_text(debug, text)
-    size := v2{ get_dimension(text_bounds).x, layout.line_advance }
+add_tooltip :: proc(debug: ^DebugState, text: string) {
+    // @todo(viktor): we could return this buffer and let the caller fill it, to not need to copy it
+    assert(len(text) < len(debug.tooltips.data[0]))
     
-    element := begin_ui_element_rectangle(layout, &size)
-    end_ui_element(&element, false)
+    slot: ^[256]u8
+    if debug.tooltips.count == auto_cast len(debug.tooltips.data) {
+        slot = &debug.tooltips.data[debug.tooltips.count-1]
+    } else {
+        slot = append(&debug.tooltips)
+    }
+    copy_slice(slot[:len(text)], transmute([] u8) text)
+}
+
+draw_tooltips :: proc(debug: ^DebugState) {
+    for &tooltip in slice(&debug.tooltips) {
+        text: string = cast(string) transmute(cstring) &tooltip
+        color := Isabelline
+        
+        layout := &debug.mouse_text_layout
+        text_bounds := measure_text(debug, text)
+        size := v2{ get_dimension(text_bounds).x, layout.line_advance }
+        
+        element := begin_ui_element_rectangle(layout, &size)
+        end_ui_element(&element, false)
+        
+        render_group := &debug.render_group
+        old_clip_rect := render_group.current_clip_rect_index
+        render_group.current_clip_rect_index = debug.default_clip_rect
+        defer render_group.current_clip_rect_index = old_clip_rect
+        
+        p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
+        text_bounds = add_offset(text_bounds, p)
+        text_bounds = add_radius(text_bounds, 4)
+        
+        before := debug.text_transform
+        defer debug.text_transform = before
+        
+        debug.text_transform.chunk_z += 1000
+        push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
+        debug.text_transform.chunk_z += 1000
+        push_text(debug, text, p, color)
+    }
     
-    render_group := &debug.render_group
-    old_clip_rect := render_group.current_clip_rect_index
-    render_group.current_clip_rect_index = debug.default_clip_rect
-    defer render_group.current_clip_rect_index = old_clip_rect
-    
-    p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
-    text_bounds = add_offset(text_bounds, p)
-    text_bounds = add_radius(text_bounds, 4)
-    
-    before := debug.text_transform
-    defer debug.text_transform = before
-    
-    debug.text_transform.chunk_z += 1000
-    push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
-    debug.text_transform.chunk_z += 1000
-    push_text(debug, text, p, color)
+    clear(&debug.tooltips)
 }
 
 get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
@@ -579,8 +599,8 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         
         text := debug_print("total %cy - % %% / % %% - %",
             view_magnitude(cast(u64) entry.stats.sum),
-            view_percentage_ratio(entry.stats.sum * total_time_percentage),
-            view_percentage_ratio(running_sum * total_time_percentage),
+            view_float(entry.stats.sum * total_time_percentage, width = 2, precision = 2),
+            view_float(running_sum * total_time_percentage, width = 2, precision = 2),
             entry.element.guid.name,
         )
         color_wheel := color_wheel
@@ -629,6 +649,8 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
     d_longest_frame_span += dd_longest_frame_span * dt
     longest_frame_span += d_longest_frame_span * dt + 0.5 * dd_longest_frame_span * dt * dt
     
+    transform := debug.ui_transform
+    
     pixel_span := dim.y
     scale := safe_ratio_0(pixel_span, longest_frame_span)
     for &frame, frame_ordinal in root_element.frames {
@@ -654,7 +676,6 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
             color := color_wheel[color_index]
             
             if bar_width >= 1 && y_max - y_min >= 1 {
-                transform := debug.ui_transform
                 border_color := color * {.2,.2,.2, 1}
                 if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
                     border_color = 1
@@ -892,10 +913,10 @@ basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInte
     end_ui_element(&element, false)
     
     p := v2{element.bounds.min.x + padding.x, element.bounds.max.y - padding.y - debug.ascent * debug.font_scale}
-    push_text(debug, text, p, color)
     if backdrop_color.a > 0 {
         push_rectangle(&debug.render_group, element.bounds, debug.backing_transform, backdrop_color)
     }
+    push_text(debug, text, p, color)
 }
 
 ////////////////////////////////////////////////
@@ -1307,8 +1328,8 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         switch operation {
           case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
                 push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,0}, Black)
+                push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
             }
           case .Measure:
             bitmap := get_bitmap(group.assets, bitmap_id, group.generation_id)

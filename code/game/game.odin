@@ -86,10 +86,8 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
     
-    // when INTERNAL {
-        debug_storage:     []u8,
-        debug_table:       ^DebugTable,
-    // }
+    debug_storage: ([]u8        when INTERNAL else struct {}),
+    debug_table:   (^DebugTable when INTERNAL else struct {}),
         
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
@@ -126,7 +124,7 @@ TransientState :: struct {
     high_priority_queue: ^PlatformWorkQueue,
     low_priority_queue:  ^PlatformWorkQueue,
     
-    env_size: [2]i32,
+    env_size: v2i,
     envs: [3]EnvironmentMap,
 }
 
@@ -210,7 +208,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         
         state.mixer.master_volume = 0.1
         
-        test_size: [2]i32= 256
+        test_size: v2i= 256
         tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
         tran_state.test_normal  = make_empty_bitmap(&tran_state.arena, test_size, false)
         make_sphere_normal_map(tran_state.test_normal, 0)
@@ -443,7 +441,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
     }
 }
 
-make_empty_bitmap :: proc(arena: ^Arena, dim: [2]i32, clear_to_zero: b32 = true) -> (result: Bitmap) {
+make_empty_bitmap :: proc(arena: ^Arena, dim: v2i, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
         memory = push(arena, Color, (dim.x * dim.y), align_clear(32, clear_to_zero)),
         width  = dim.x,

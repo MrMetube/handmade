@@ -1,6 +1,4 @@
 # @todo
-- Disable sorting for the debug view
-
 - "contextless" should be minimized
 - Font Rendering Robustness
     - Kerning

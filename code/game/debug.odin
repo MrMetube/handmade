@@ -75,6 +75,7 @@ DebugState :: struct {
     default_clip_rect: u16,
     render_target_index: u32,
     
+    // @todo(viktor): remove all these as they are no longer necessary
     text_transform:    Transform,
     shadow_transform:  Transform,
     ui_transform:      Transform,
@@ -92,6 +93,8 @@ DebugState :: struct {
     // Per-frame storage management
     per_frame_arena:         Arena,
     first_free_stored_event: ^DebugStoredEvent,
+    
+    tooltips: FixedArray(16, [256] u8),
 }
 
 DebugFrame :: struct {
@@ -324,6 +327,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
     push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
     
+    push_sort_barrier(&debug.render_group, true)
+    
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
         debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
@@ -349,6 +354,8 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     if !debug.paused {
         debug.viewed_frame_ordinal = debug.most_recent_frame_ordinal
     }
+    
+    draw_tooltips(debug)
     
     push_blend_render_targets(&debug.render_group, debug.render_target_index, 1.0)
 }

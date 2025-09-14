@@ -6,7 +6,7 @@ Brain :: struct {
     // @note(viktor): As the entity also needs to know its brain's kind, we cant fold the kind into the raw_union and make data a union 
     kind: BrainKind,
     using parts : struct #raw_union {
-        slots:    [^] ^Entity,
+        slots:    [^] Entity,
         hero:     BrainHero,
         snake:    BrainSnake,
         monster:  BrainMonster,
@@ -50,7 +50,7 @@ BrainFamiliar :: struct {
 }
 
 BrainSnake :: struct {
-    segments: [8]^Entity,
+    segments: [8] ^Entity,
 }
 
 BrainMonster :: struct {
@@ -62,18 +62,21 @@ brain_slot_for :: proc($base: typeid, $member: string, index: u32 = 0) -> BrainS
     return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) + index }
 }
 
+brain_slots :: proc (brain: ^Brain) -> (result: [] ^Entity) {
+    result = slice_from_parts(^Entity, &brain.parts, BrainSlotMaxCount)
+    return result
+}
+
 mark_brain_active :: proc (brain: ^Brain) {
     is_active := false
-    for index in 0 ..< BrainSlotMaxCount {
-        part := brain.slots[index]
+    for part in brain_slots(brain) {
         if part != nil && .active in part.flags {
             is_active = true
         }
     }
     
     if is_active {
-        for index in 0 ..< BrainSlotMaxCount {
-            part := brain.slots[index]
+        for part in brain_slots(brain) {
             if part != nil {
                 part.flags += { .active }
             }

@@ -117,7 +117,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     ////////////////////////////////////////////////
     
-    tiles_per_screen :: [2]i32{17,9}
+    tiles_per_screen :: v2i{17,9}
     
     tile_size_in_meters :f32= 1.5
     world.null_collision     = make_null_collision(world)
@@ -477,7 +477,7 @@ enviroment_test :: proc() {
         
         for it, it_index in tran_state.envs {
             lod := it.LOD[0]
-            checker_dim: [2]i32 = 32
+            checker_dim: v2i = 32
             
             row_on: b32
             for y: i32; y < lod.height; y += checker_dim.y {

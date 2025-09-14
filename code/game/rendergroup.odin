@@ -361,10 +361,11 @@ push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, ren
     return result
 }
 
-push_sort_barrier :: proc(group: ^RenderGroup) {
+push_sort_barrier :: proc(group: ^RenderGroup, turn_of_sorting := false) {
     sort_entry := push_sort_sprite_bounds(group.commands)
     sort_entry ^= {
         offset = SpriteBarrierValue,
+        flags  = turn_of_sorting ? transmute(type_of(sort_entry.flags)) cast(u16) SpriteBarrierTurnsOffSorting : {}
     }
 }
 
@@ -374,7 +375,7 @@ push_clear :: proc(group: ^RenderGroup, color: v4) {
 
 push_bitmap :: proc(
     group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1,1,1,1}, use_alignment: b32 =true, x_axis := v2{1,0}, y_axis := v2{0,1},
+    offset := v3{}, color := v4{1,1,1,1}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
 ) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     if group.renders_in_background && bitmap == nil {
@@ -550,8 +551,8 @@ unproject_with_transform :: proc(camera: Camera, transform: Transform, pixel_p: 
 
 ////////////////////////////////////////////////
 
-@(common)
-SpriteBarrierValue :: 0xFFFFFFFF
+@(common) SpriteBarrierValue           :: 0xFFFFFFFF
+@(common) SpriteBarrierTurnsOffSorting :: 0xFF00
 
 @(common)
 SortSpriteBounds :: struct {
@@ -562,7 +563,7 @@ SortSpriteBounds :: struct {
     first_edge_with_me_as_the_front: ^SpriteEdge,
     
     generation_count: u16,
-    flags: bit_set[enum u16{Visited, Drawn,    DebugBox, Cycle }],
+    flags: bit_set[enum u16{ Visited, Drawn,    DebugBox, Cycle }; u16],
 }
 
 @(common)

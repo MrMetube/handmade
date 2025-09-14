@@ -124,7 +124,8 @@ main :: proc() {
             buffer_pitch := align16(buffer.width)
             assert(buffer_pitch == buffer.width)
             bitmap_memory_size := cast(uint) (buffer_pitch * buffer.height * bytes_per_pixel)
-            buffer.memory = slice_from_parts(Color, win.VirtualAlloc(nil, bitmap_memory_size, win.MEM_COMMIT, win.PAGE_READWRITE), buffer.width*buffer.height)
+            
+            buffer.memory = slice_from_parts(Color, allocate_memory(bitmap_memory_size), buffer.width*buffer.height)
         }
         
         if win.RegisterClassW(&window_class) == 0 {
@@ -743,7 +744,7 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: [2]i32) {
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
     /* 
     if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes 224 57:16 */ {
         render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
@@ -930,7 +931,7 @@ clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
 ////////////////////////////////////////////////   
 //  Window Drawing
 
-get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> (dimension: [2]i32) {
+get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> (dimension: v2i) {
     client_rect: win.RECT
     if get_window_rect {
         win.GetWindowRect(window, &client_rect)
@@ -990,7 +991,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             
             added := window_dim - client_dim
             
-            render_dim := [2]i32 {GlobalBackBuffer.width, GlobalBackBuffer.height}
+            render_dim := v2i {GlobalBackBuffer.width, GlobalBackBuffer.height}
             
             new_cx := (new_pos.cy * (render_dim.x - added.x)) / render_dim.y
             new_cy := (new_pos.cx * (render_dim.y - added.y)) / render_dim.x

@@ -59,13 +59,13 @@ linearize_clip_rects :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     assert(count == auto_cast prep.clip_rects.count)
 }
 
-aspect_ratio_fit :: proc (render_size: [2]i32, window_size: [2]i32) -> (result: Rectangle2i) {
+aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectangle2i) {
     if render_size.x > 0 && render_size.y > 0 && window_size.x > 0 && window_size.y > 0 {
         optimal_window_width  := round(i32, cast(f32) window_size.y * cast(f32) render_size.x / cast(f32) render_size.y)
         optimal_window_height := round(i32, cast(f32) window_size.x * cast(f32) render_size.y / cast(f32) render_size.x)
         
         window_center := window_size / 2
-        optimal_window_size: [2]i32
+        optimal_window_size: v2i
         if optimal_window_width > window_size.x {
             // Top and Bottom black bars
             optimal_window_size = {window_size.x, optimal_window_height}
@@ -89,27 +89,44 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     offsets := make_array(arena, u32, len(nodes))
     
     barrier_count: i64
+    should_sort := true
     for start: i32; start < auto_cast len(nodes); {
-        count, hit_barrier := build_sprite_graph(nodes[start:], arena, vec_cast(f32, commands.width, commands.height))
+        count: i32
+        hit_barrier: b32
+        if should_sort {
+            count, hit_barrier = build_sprite_graph(nodes[start:], arena, vec_cast(f32, commands.width, commands.height))
+            
+            if hit_barrier {
+                assert(nodes[start:][count-1].offset == SpriteBarrierValue)
+                barrier_count += 1
+            }
+            
+            sub_nodes := nodes[start:][: count - (hit_barrier ? 1 : 0)]
+            walk := SpriteGraphWalk { sub_nodes, &offsets, false }
+            for at, index in walk.nodes {
+                assert(at.offset != SpriteBarrierValue)
+                
+                walk.hit_cycle = false
+                if at.offset == SpriteBarrierValue {
+                    assert(false)
+                    continue
+                }
+                walk_sprite_graph_front_to_back(&walk, auto_cast index)
+            }
+        } else {
+            sub_nodes := nodes[start:]
+            walk := SpriteGraphWalk { sub_nodes, &offsets, false }
+            count, hit_barrier = unsorted_output(&walk, sub_nodes)
+            
+            if hit_barrier {
+                barrier_count += 1
+            }
+        }
         
         if hit_barrier {
-            assert(nodes[start+count-1].offset == SpriteBarrierValue)
-            barrier_count += 1
+            terminator := &nodes[start:][count-1]
+            should_sort = (transmute(u16) terminator.flags & SpriteBarrierTurnsOffSorting) == 0
         }
-        
-        sub_nodes := nodes[start :][: count - (hit_barrier ? 1 : 0)]
-        walk := SpriteGraphWalk { sub_nodes, &offsets, false }
-        for at, index in walk.nodes {
-            assert(at.offset != SpriteBarrierValue)
-            
-            walk.hit_cycle = false
-            if at.offset == SpriteBarrierValue {
-                assert(false)
-                continue
-            }
-            walk_sprite_graph_front_to_back(&walk, auto_cast index)
-        }
-        
         start += count
     }
     
@@ -132,9 +149,7 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
     Width  :: 8*16
     Height :: 8*9
     
-    bucketing := game.begin_timed_block("bucketing")
-    
-    grid: [Width][Height]^SortGridEntry
+    grid: [Width] [Height] ^SortGridEntry
     inv_cell_size := v2{Width, Height} / screen_size
     screen_rect := rectangle_min_dimension(v2{}, screen_size)
     
@@ -187,7 +202,25 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
             }
         }
     }
-    game.end_timed_block(bucketing)
+    
+    return count, hit_barrier
+}
+
+unsorted_output :: proc (walk: ^SpriteGraphWalk, nodes: [] SortSpriteBounds) -> (count: i32, hit_barrier: b32) {
+    timed_function()
+    
+    assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
+    if len(nodes) == 0 do return
+    
+    for &a, index_a in nodes {
+        count = cast(i32) index_a+1
+        if a.offset == SpriteBarrierValue {
+            hit_barrier = true
+            break
+        }
+        
+        append(walk.offsets, a.offset)
+    }
     
     return count, hit_barrier
 }
@@ -205,7 +238,6 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
         walk_sprite_graph_front_to_back(walk, edge.behind)
     }
     
-    // @note(viktor): Do work here!
     append(walk.offsets, at.offset)
     
     if !walk.hit_cycle {
@@ -234,10 +266,10 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
         - Re-test some of our instruction choices
     */
     
-    tile_count :: [2]i32{4, 4}
+    tile_count :: v2i{4, 4}
     works: [tile_count.x * tile_count.y]TileRenderWork
     
-    tile_size  := [2]i32{base_target.width, base_target.height} / tile_count
+    tile_size  := v2i{base_target.width, base_target.height} / tile_count
     tile_size.x = ((tile_size.x + (3)) / 4) * 4
     
     work_index: i32
@@ -658,33 +690,34 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
 }
 
 clear_render_target :: proc(dest: Bitmap, color: v4, clip_rect: Rectangle2i) {
-    color := vec_cast(f32x8, color)
+    color := color
+    
     // @note(viktor): linear to srgb
     color.rgb = square_root(color.rgb)
     color *= 255
     
     for y := clip_rect.min.y; y < clip_rect.max.y; y += 1 {
-        for x := clip_rect.min.x; x < clip_rect.max.x; x += 8 {
+        for x := clip_rect.min.x; x < clip_rect.max.x; x += 1 {
             index := y * dest.width + x
-            pixel := cast(^u32x8) &dest.memory[index]
-            pixel^ = pack_pixel(color)
+            pixel := &dest.memory[index]
+            pixel^ = v4_to_rgba(color)
         }
     }
 }
 
 blend_render_target :: proc(dest: Bitmap, alpha: f32, source: Bitmap, clip_rect: Rectangle2i) {
-    inv_255 :f32x8= (1.0 / 255.0)
-    
+    // @todo(viktor): simd-ize this but remember to check for unaligned loads and stores like in the other routines
+    inv_255: f32 = (1.0 / 255.0)
+    // @todo(viktor): the alpha is not handled correctly, the debug ui is way to transparent
     for y := clip_rect.min.y; y < clip_rect.max.y; y += 1 {
-        for x := clip_rect.min.x; x < clip_rect.max.x; x += 8 {
+        for x := clip_rect.min.x; x < clip_rect.max.x; x += 1 {
             index := y * dest.width + x
-            // @todo(viktor): what about unaligned loads? why did we check those in the other routines and not here
-            texel_ := &source.memory[index]
-            texel := cast(^u32x8) texel_
-            pixel := cast(^u32x8) &dest.memory[index]
             
-            texelx8 := unpack_pixel(texel^)
-            pixelx8 := unpack_pixel(pixel^)
+            texel := &source.memory[index]
+            pixel := &dest.memory[index]
+            
+            texelx8 := rgba_to_v4(texel^)
+            pixelx8 := rgba_to_v4(pixel^)
             
             // @note(viktor): srgb to linear
             texelx8 *= inv_255
@@ -699,7 +732,7 @@ blend_render_target :: proc(dest: Bitmap, alpha: f32, source: Bitmap, clip_rect:
             blended.rgb = square_root(blended.rgb)
             blended *= 255
             
-            pixel^ = pack_pixel(blended)
+            pixel^ = v4_to_rgba(blended)
         }
     }
 }
@@ -725,14 +758,14 @@ pack_pixel :: proc (value: [4]f32x8) -> (result: u32x8) {
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////
 
-sample :: proc(texture: Bitmap, p: [2]i32) -> (result: v4) {
+sample :: proc(texture: Bitmap, p: v2i) -> (result: v4) {
     texel := texture.memory[ p.y * texture.width +  p.x]
     result = vec_cast(f32, texel)
 
     return result
 }
 
-sample_bilinear :: proc(texture: Bitmap, p: [2]i32) -> (s00, s01, s10, s11: v4) {
+sample_bilinear :: proc(texture: Bitmap, p: v2i) -> (s00, s01, s10, s11: v4) {
     s00 = sample(texture, p + {0, 0})
     s01 = sample(texture, p + {1, 0})
     s10 = sample(texture, p + {0, 1})
@@ -860,12 +893,12 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     inv_x_len_squared := 1 / length_squared(x_axis)
     inv_y_len_squared := 1 / length_squared(y_axis)
 
-    minimum := [2]i32{
+    minimum := v2i{
         floor(i32, min(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
         floor(i32, min(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
 
-    maximum := [2]i32{
+    maximum := v2i{
         ceil(i32, max(origin.x, (origin+x_axis).x, (origin + y_axis).x, (origin + x_axis + y_axis).x)),
         ceil(i32, max(origin.y, (origin+x_axis).y, (origin + y_axis).y, (origin + x_axis + y_axis).y)),
     }
@@ -880,8 +913,8 @@ draw_rectangle_slowly :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, textur
     origin_y     := (origin + 0.5*x_axis + 0.5*y_axis).y
     fixed_cast_y := inv_height_max * origin_y
 
-    maximum = clamp(maximum, [2]i32{0,0}, [2]i32{width_max, height_max})
-    minimum = clamp(minimum, [2]i32{0,0}, [2]i32{width_max, height_max})
+    maximum = clamp(maximum, v2i{0,0}, v2i{width_max, height_max})
+    minimum = clamp(minimum, v2i{0,0}, v2i{width_max, height_max})
 
     for y in minimum.y..=maximum.y {
         for x in minimum.x..=maximum.x {

@@ -324,7 +324,7 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: [2]i32, clear_color: v4) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i, clear_color: v4) {
     timed_function()
     
     draw_dim := get_dimension(draw_region)
@@ -526,7 +526,7 @@ gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i)
     }
 }
 
-gl_set_screenspace :: proc(size: [2]i32) {
+gl_set_screenspace :: proc(size: v2i) {
     a := safe_ratio_1(f32(2), cast(f32) size.x)
     b := safe_ratio_1(f32(2), cast(f32) size.y)
     
