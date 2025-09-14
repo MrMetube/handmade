@@ -418,6 +418,28 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             
             gl.Disable(gl.TEXTURE_2D)
             gl_rectangle(entry.rect.min, entry.rect.max, color)
+                
+            when true {
+                min := entry.rect.min
+                max := entry.rect.max
+                glBegin(gl.LINES)
+                color.rgb = 0
+                glColor4fv(&color[0])
+                    glVertex2f(min.x, min.y)
+                    glVertex2f(max.x, min.y)
+                    
+                    glVertex2f(max.x, min.y)
+                    glVertex2f(max.x, max.y)
+                    
+                    glVertex2f(max.x, max.y)
+                    glVertex2f(min.x, max.y)
+
+                    glVertex2f(min.x, max.y)
+                    glVertex2f(min.x, min.y)
+
+                glEnd()
+            }
+                        
             gl.Enable(gl.TEXTURE_2D)
             
           case .RenderEntryBitmap:

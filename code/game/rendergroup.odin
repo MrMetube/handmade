@@ -93,16 +93,18 @@ RenderGroup :: struct {
 Transform :: struct {
     chunk_z: i32,
     
-    offset:     v3,  
-    scale:      f32,
-    is_upright: b32,
+    is_upright:   b32,
+    floor_z:      f32,
+    next_floor_z: f32,
+    
+    offset:       v3,  
+    scale:        f32,
     
     color:   v4,
     t_color: v4,
-    
     manual_sort_key: ManualSortKey,
 }
-
+    
 Camera :: struct {
     mode: TransformMode,
     
@@ -513,15 +515,22 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
             distance_above_target *= DebugCameraDistance
         }
         
-        base_z: f32
-        distance_to_p_z := distance_above_target - p.z
+        apron :: 0.1
+        t := clamp_01_map_to_range(transform.next_floor_z - apron, p.z - transform.floor_z, transform.next_floor_z)
+        floor_z := linear_blend(transform.floor_z, transform.next_floor_z, t)
+        
+        distance_to_p_z := distance_above_target - floor_z
         // @todo(viktor): transform.scale is unused
         if distance_to_p_z > near_clip_plane {
+            height_off_floor: f32 = p.z - transform.floor_z
+            ortho_y_from_z: f32 = 1
             raw := V3(p.xy, 1)
+            raw.y += height_off_floor * ortho_y_from_z
             projected := camera.focal_length * raw / distance_to_p_z
             
-            result.scale = projected.z  * camera.meters_to_pixels_for_monitor  
-            result.p     = projected.xy * camera.meters_to_pixels_for_monitor + camera.screen_center  + v2{0, result.scale * base_z}
+            result.scale = projected.z  * camera.meters_to_pixels_for_monitor
+            
+            result.p     = projected.xy * camera.meters_to_pixels_for_monitor + camera.screen_center
             result.valid = true
         }
         

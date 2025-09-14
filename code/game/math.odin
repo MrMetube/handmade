@@ -150,7 +150,7 @@ clamp :: proc(value: $T, min, max: T) -> (result: T) {
 }
 clamp_01 :: proc(value: $T) -> T { return clamp(value, 0, 1) }
 
-clamp_01_to_range :: proc(min: $T, t, max: T ) -> (result: T) {
+clamp_01_map_to_range :: proc(min: $T, t, max: T ) -> (result: T) {
     range := max - min
     if range != 0 {
         percent := (t-min) / range

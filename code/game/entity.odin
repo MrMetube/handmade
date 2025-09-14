@@ -426,13 +426,14 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
     MaximumLayer :: 1
     
     fog_amount: [MaximumLayer - MinimumLayer + 1] f32
+    camera_relative_ground_z: [len(fog_amount)] f32
     test_alpha: f32
     for &fog_amount, index in fog_amount {
         relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z := world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
+        camera_relative_ground_z[index] = world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
         
-        test_alpha = clamp_01_to_range(fade_top_end,      camera_relative_ground_z, fade_top_start)
-        fog_amount = clamp_01_to_range(fade_bottom_start, camera_relative_ground_z, fade_bottom_end)
+        test_alpha = clamp_01_map_to_range(fade_top_end,      camera_relative_ground_z[index], fade_top_start)
+        fog_amount = clamp_01_map_to_range(fade_bottom_start, camera_relative_ground_z[index], fade_bottom_end)
     }
     
     alpha_render_target :u32= 2
@@ -505,7 +506,7 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
                 pt := occupying
                 
                 if t_jump <= entity.t_movement {
-                    t := clamp_01_to_range(t_jump, entity.t_movement, 1)
+                    t := clamp_01_map_to_range(t_jump, entity.t_movement, 1)
                     entity.t_bob = sin(t * Pi) * 0.1
                     entity.p = linear_blend(came_from, occupying, entity.t_movement)
                     entity.dp = 0
@@ -553,6 +554,8 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             transform.offset = get_entity_ground_point(&entity) - camera_p
             transform.manual_sort_key = entity.manual_sort_key
             transform.chunk_z = entity.z_layer
+            transform.floor_z = camera_relative_ground_z[relative_layer - MinimumLayer]
+            transform.next_floor_z = transform.floor_z + world.typical_floor_height
             
             if current_absolute_layer != entity.z_layer {
                 assert(current_absolute_layer < entity.z_layer)

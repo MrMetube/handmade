@@ -199,7 +199,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_gr
                         head_distance := length(head_delta)
                         
                         max_head_distance :f32= 0.4
-                        t_head_distance := clamp_01_to_range(f32(0), head_distance, max_head_distance)
+                        t_head_distance := clamp_01_map_to_range(f32(0), head_distance, max_head_distance)
                         body.ddt_bob = t_head_distance * -30
                         
                         if traversable != body.occupying {
@@ -323,7 +323,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_gr
                     
                     if abs(distance) < 1.5 {
                         max_distance :f32= 0.4
-                        t_distance := clamp_01_to_range(f32(0), distance, max_distance)
+                        t_distance := clamp_01_map_to_range(f32(0), distance, max_distance)
                         body.ddt_bob = t_distance * -30
                         
                         if traversable != body.occupying {
@@ -361,7 +361,7 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_gr
                     
                     if index != 0 || abs(distance) < 0.4 {
                         max_distance :f32= 0.4
-                        t_distance := clamp_01_to_range(f32(0), distance, max_distance)
+                        t_distance := clamp_01_map_to_range(f32(0), distance, max_distance)
                         segment.ddt_bob = t_distance * -30
                         
                         if traversable != segment.occupying {

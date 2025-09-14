@@ -452,7 +452,7 @@ fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
                 // @todo(viktor): should we just clamp colors in the renderer?
                 color := clamp_01(particle.color)
                 if color.a > 0.9 {
-                    color.a = 0.9 * clamp_01_to_range(f32(1), color.a, 0.9)
+                    color.a = 0.9 * clamp_01_map_to_range(f32(1), color.a, 0.9)
                 }
 
                 if particle.p.y < 0 {

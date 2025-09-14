@@ -153,36 +153,36 @@ end_sim :: proc(region: ^SimRegion) {
             
             delta -= offset
             if delta.y >  half_room_apron.y {
-                t := clamp_01_to_range(half_room_apron.y, delta.y, half_room_delta.y)
+                t := clamp_01_map_to_range(half_room_apron.y, delta.y, half_room_delta.y)
                 region.world.camera_offset.y = t*half_room_delta.y
                 region.world.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.y < -half_room_apron.y {
-                t := clamp_01_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
+                t := clamp_01_map_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
                 region.world.camera_offset.y = t*-half_room_delta.y
                 region.world.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.x >  half_room_apron.x {
-                t := clamp_01_to_range(half_room_apron.x, delta.x, half_room_delta.x)
+                t := clamp_01_map_to_range(half_room_apron.x, delta.x, half_room_delta.x)
                 region.world.camera_offset.x = t*half_room_delta.x
                 region.world.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.x < -half_room_apron.x {
-                t := clamp_01_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
+                t := clamp_01_map_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
                 region.world.camera_offset.x = t*-half_room_delta.x
                 region.world.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.z >  half_room_apron.z {
-                t := clamp_01_to_range(half_room_apron.z, delta.z, half_room_delta.z)
+                t := clamp_01_map_to_range(half_room_apron.z, delta.z, half_room_delta.z)
                 region.world.camera_offset.z = t*half_room_delta.z
             }
             
             if delta.z < -half_room_apron.z {
-                t := clamp_01_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
+                t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
                 region.world.camera_offset.z = t*-half_room_delta.z
             }
         }
