@@ -260,7 +260,7 @@ gl_manage_textures :: proc(last: ^TextureOp) {
     }
     
     // @todo(viktor): Display in debug system
-    println("texture ops %, allocs % deallocs %", allocs + deallocs, allocs, deallocs)
+    print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
 }
 
 gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {

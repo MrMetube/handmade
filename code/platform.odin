@@ -113,7 +113,7 @@ main :: proc() {
             lpszClassName = win.L("HandmadeWindowClass"),
             style = win.CS_HREDRAW | win.CS_VREDRAW | win.CS_OWNDC,
             lpfnWndProc = main_window_callback,
-            hCursor = win.LoadCursorW(nil, win.MAKEINTRESOURCEW(32512)),
+            hCursor = win.LoadCursorW(nil, cast(cstring16) win.MAKEINTRESOURCEW(32512)),
             // hIcon =,
         }
         
@@ -132,7 +132,7 @@ main :: proc() {
         }
         
         window = win.CreateWindowExW(
-            0, //win.WS_EX_TOPMOST | win.WS_EX_LAYERED,
+            0,
             window_class.lpszClassName,
             win.L("Handmade"),
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
@@ -170,9 +170,9 @@ main :: proc() {
     
     state: PlatformState
     {
-        exe_path_buffer: [win.MAX_PATH_WIDE]u16
+        exe_path_buffer: [win.MAX_PATH_WIDE] u16
         size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
-        exe_path_and_name := win.wstring_to_utf8(raw_data(exe_path_buffer[:size_of_filename]), cast(int) size_of_filename) or_else ""
+        exe_path_and_name := win.wstring_to_utf8(cast(cstring16) raw_data(exe_path_buffer[:size_of_filename]), cast(int) size_of_filename) or_else ""
         on_last_slash: u32
         for r, i in exe_path_and_name {
             if r == '\\' {
@@ -691,10 +691,10 @@ main :: proc() {
                 test_seconds_elapsed := get_seconds_elapsed_until_now(last_counter)
                 if test_seconds_elapsed > target_seconds_per_frame {
                     if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                        println("Missed sleep - % %s / % %s - % %s", 
-                            view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
-                            view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
-                            view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
+                        print("Missed sleep - % / % - %\n", 
+                            view_seconds(seconds_elapsed_for_frame, precision = 3),
+                            view_seconds(target_seconds_per_frame, precision = 3),
+                            view_seconds(test_seconds_elapsed - desired_scheduler_ms, precision = 3),
                         )
                     }
                 }
@@ -706,10 +706,10 @@ main :: proc() {
             } else {
                 // @logging Missed frame, maybe because window was moved
                 if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                    println("Missed frame - % %s / % %s - % %s", 
-                        view_order_of_magnitude(seconds_elapsed_for_frame, precision = 3, width = 7),
-                        view_order_of_magnitude(target_seconds_per_frame, precision = 3, width = 7),
-                        view_order_of_magnitude(seconds_elapsed_for_frame - target_seconds_per_frame, precision = 3, width = 7),
+                    print("Missed frame - % / % - %\n", 
+                        view_seconds(seconds_elapsed_for_frame, precision = 3),
+                        view_seconds(target_seconds_per_frame, precision = 3),
+                        view_seconds(seconds_elapsed_for_frame - target_seconds_per_frame, precision = 3),
                     )
                 }
             }
@@ -745,7 +745,7 @@ main :: proc() {
 
 render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: [2]i32) {
     /* 
-    if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes */ {
+    if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes 224 57:16 */ {
         render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
     }
     */
@@ -801,7 +801,7 @@ get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
 
 get_record_replay_filepath :: proc(state: PlatformState, index:i32) -> win.wstring {
     buffer: [64]u8
-    return build_exe_path(state, print(buffer[:], "editloop_%.input", index))
+    return build_exe_path(state, format_string(buffer[:], "editloop_%.input", index))
 }
 
 begin_recording_input :: proc(state: ^PlatformState, input_recording_index: i32) {
@@ -1119,6 +1119,6 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
 build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
     buffer: [256]u8
     filename := filename
-    path := print(buffer[:], "%\\%", state.exe_path, filename)
+    path := format_string(buffer[:], "%\\%", state.exe_path, filename)
     return win.utf8_to_wstring(path)
 }

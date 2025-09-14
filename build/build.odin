@@ -1,4 +1,4 @@
-
+#+vet unused shadowing cast
 package build
 
 import "base:intrinsics"
@@ -27,14 +27,12 @@ check_and_commoner :: `-custom-attribute:common,printlike`
 
 ////////////////////////////////////////////////
 
-build_src_path :: `.\build\`   
-build_exe_name :: `build.exe`
+build_dir :: `.\build\`
+data_dir  :: `.\data`
 
-build_dir   :: `.\build\`
-data_dir    :: `.\data`
-code_dir    :: `..\code` 
-game_dir           :: `..\code\game` 
-asset_builder_dir  :: `..\code\game\asset_builder` 
+code_dir          :: `..\code` 
+game_dir          :: `..\code\game` 
+asset_builder_dir :: `..\code\game\asset_builder` 
 
 ////////////////////////////////////////////////
 
@@ -47,7 +45,7 @@ debug_exe_path :: `.\`+debug_exe
 /* 
  @todo(viktor): 
  - Find a better way to share common code without a bunch of modules, than copypasta
- - once we have out own "sin()" we can get rid of the c-runtime with "-no-crt"
+ - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
  - get rid of INTERNAL define
  */
  
@@ -74,7 +72,7 @@ tasks: Tasks
 main :: proc() {
     context.allocator = context.temp_allocator
 
-    for arg, index in os.args[1:] {
+    for arg in os.args[1:] {
         switch arg {
           case "run":           tasks += { .run }
           
@@ -101,6 +99,7 @@ main :: proc() {
     assert(err == nil)
     
     if !check_printlikes(code_dir) do os.exit(1)
+    if !check_printlikes(game_dir) do os.exit(1)
     
     cmd: Cmd
     if .debugger in tasks {
@@ -110,20 +109,20 @@ main :: proc() {
         }
     }
     
-    build := true
-    if (tasks & {.debugger, .renderdoc }) != {} {
-        if !did_change(debug_exe_path, code_dir) {
-            fmt.println("INFO: No changes detected. Skipping build.")
-            build = false
-        }
-    }
-    
     if .clean in tasks {
         fmt.println("INFO: Deleting all generated files")
         os.change_directory(code_dir)
         delete_all_like(`*generated.odin`)
         os.change_directory("..")
         os.change_directory(build_dir)
+    }
+    
+    build := true
+    if (tasks & {.debugger, .renderdoc }) != {} {
+        if !did_change(debug_exe_path, code_dir) && !did_change(debug_exe_path, game_dir) {
+            fmt.println("INFO: No changes detected. Skipping build.")
+            build = false
+        }
     }
     
     if build {
@@ -140,7 +139,7 @@ main :: proc() {
         }
     }
     
-    fmt.println("INFO: Build done.\n")
+    fmt.println("INFO: Build done.")
     
     procs: Procs
     if .renderdoc in tasks {
@@ -194,7 +193,7 @@ main :: proc() {
         fmt.println("INFO: cmd was not cleared: ", strings.join(cmd[:], " "))
     }
     
-    fmt.println("\nDone.\n")
+    fmt.println("Done.")
 }
 
 build_game :: proc() {
@@ -224,7 +223,8 @@ build_game :: proc() {
     append(&cmd, check_and_commoner)
     append(&cmd, optimizations)
     if PedanticGame do append(&cmd, ..pedantic)
-    run_command(&cmd)
+    silence: string
+    run_command(&cmd, stdout = &silence)
 }
 
 build_platform :: proc() {
@@ -247,6 +247,7 @@ build_platform :: proc() {
         if !run_command(&cmd, or_exit = false) {
             // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
             os2.change_times(debug_exe, time.now(), time.now())
+            os.exit(1)
         }
     }
 }
@@ -394,7 +395,7 @@ remove_if_exists :: proc(path: string) {
 delete_all_like :: proc(pattern: string) {
     files := all_like(pattern)
     for file in files {
-        fmt.printfln("INFO: deleting %v", file)
+        // fmt.printfln("INFO: deleting %v", file)
         os.remove(file)
     }
     fmt.printfln("INFO: deleted %v files with pattern '%v'", len(files), pattern)

@@ -14,7 +14,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
     } else {
         if !win.FreeLibrary(game_lib) {
             // @logging 
-            println("Failed to load game.dll")
+            print("Failed to load game.dll\n")
         }
     }
     
@@ -29,8 +29,8 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) ->
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
         } else {
             // @logging 
-            println("Failed to initialize game api")
-            println(os.error_string(os.get_last_error()))
+            print("Failed to initialize game api\n")
+            print("%\n", os.error_string(os.get_last_error()))
         }
     }
 

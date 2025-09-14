@@ -1,4 +1,5 @@
 #+vet !unused-procedures
+#+no-instrumentation
 package game
 
 @(common="file")
@@ -14,41 +15,48 @@ import "core:simd"
 v2 :: [2]f32
 v3 :: [3]f32
 v4 :: [4]f32
-
-LaneWidth :: 8
-
-when LaneWidth != 1 {
-    lane_f32 :: #simd [LaneWidth]f32
-    lane_u32 :: #simd [LaneWidth]u32
-    lane_i32 :: #simd [LaneWidth]i32
-
-    lane_v2 :: [2]lane_f32
-    lane_v3 :: [3]lane_f32
-    lane_v4 :: [4]lane_f32
-
-    lane_pmm :: #simd [LaneWidth]pmm
-    lane_umm :: #simd [LaneWidth]umm
-    lane_f64 :: #simd [LaneWidth]f64
-} else {
-    lane_f32 :: f32
-    lane_u32 :: u32
-    lane_i32 :: i32
-
-    lane_v2 :: [2]lane_f32
-    lane_v3 :: [3]lane_f32
-    lane_v4 :: [4]lane_f32
-
-    lane_pmm :: pmm
-    lane_umm :: umm
-    lane_f64 :: f64
-}
+v2i :: [2]i32
+v3i :: [3]i32
+v4i :: [4]i32
 
 m4 :: matrix[4,4]f32
 
 Rectangle   :: struct($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
-Rectangle2i :: Rectangle([2]i32)
+Rectangle2i :: Rectangle(v2i)
+
+f32x8 :: #simd[8]f32
+u32x8 :: #simd[8]u32
+i32x8 :: #simd[8]i32
+
+f32x4 :: #simd[4]f32
+i32x4 :: #simd[4]i32
+
+LaneWidth :: 8
+
+when LaneWidth != 1 {
+    lane_f32 :: #simd [LaneWidth] f32
+    lane_u32 :: #simd [LaneWidth] u32
+    lane_i32 :: #simd [LaneWidth] i32
+
+    lane_pmm :: #simd [LaneWidth] pmm
+    lane_umm :: #simd [LaneWidth] umm
+    lane_f64 :: #simd [LaneWidth] f64
+} else {
+    lane_f32 :: f32
+    lane_u32 :: u32
+    lane_i32 :: i32
+
+    
+    lane_pmm :: pmm
+    lane_umm :: umm
+    lane_f64 :: f64
+}
+
+lane_v2 :: [2] lane_f32
+lane_v3 :: [3] lane_f32
+lane_v4 :: [4] lane_f32
 
 ////////////////////////////////////////////////
 // Constants
@@ -57,10 +65,6 @@ Tau :: 6.28318530717958647692528676655900576
 Pi  :: 3.14159265358979323846264338327950288
 
 E   :: 2.71828182845904523536
-
-τ :: Tau
-π :: Pi
-e :: E
 
 SqrtTwo   :: 1.41421356237309504880168872420969808
 SqrtThree :: 1.73205080756887729352744634150587236
@@ -73,13 +77,11 @@ MaxF64Precision :: 16 // Maximum number of meaningful digits after the decimal p
 MaxF32Precision ::  8 // Maximum number of meaningful digits after the decimal point for 'f32'
 MaxF16Precision ::  4 // Maximum number of meaningful digits after the decimal point for 'f16'
 
-NegativeInfinity   :: math.NEG_INF_F32
-NegativeInfinity64 :: math.NEG_INF_F64
-PositiveInfinity   :: math.INF_F32
-PositiveInfinity64 :: math.INF_F64
+Infinity   :: math.INF_F32
+Infinity64 :: math.INF_F64
 
-RadPerDeg :: Tau/360.0
-DegPerRad :: 360.0/Tau
+RadiansPerDegree :: Tau / 360.0
+DegreesPerRadian :: 360.0 / Tau
 
 ////////////////////////////////////////////////
 // Scalar operations
@@ -215,10 +217,26 @@ fractional :: proc(x: $F) -> (fractional: F, integer: i32) {
     return 
 }
 
-sin   :: math.sin
-cos   :: math.cos
-acos  :: math.acos
-atan2 :: math.atan2
+distance :: proc (to: $T, from: T) -> (result: T) {
+    return abs(a - b)
+}
+
+log2 :: math.log2
+sin  :: math.sin
+cos  :: math.cos
+tan  :: math.tan
+acos :: proc (x: $T) -> (result: T) {
+    when intrinsics.type_is_simd_vector(T) {
+        a := simd.to_array(x)
+        #unroll for i in 0..<len(T) do a[i] = acos(a[i])
+        result = simd.from_array(a)
+    } else {
+        result = math.acos(x)
+    }
+    return result
+}
+atan2     :: proc { math.atan2_f64, math.atan2_f32, atan2_vec }
+atan2_vec :: proc (v: [2] $T) -> (result: T) { return math.atan2(v.y, v.x) }
 
 ////////////////////////////////////////////////
 // Vector operations
@@ -232,37 +250,47 @@ Rect3 :: proc(xy: $R/Rectangle([2]$E), z_min, z_max: E) -> Rectangle([3]E) {
 }
 
 V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
-V4_x_yzw  :: proc(x: $T, yzw: [3]T) -> (result: [4]T) {
+V4_x_yzw  :: proc "contextless" (x: $T, yzw: [3]T) -> (result: [4]T) {
     result.x = x
     result.yzw = yzw
     return result
 }
-V4_xy_zw  :: proc(xy: [2]$T, zw: [2]T) -> (result: [4]T) {
+V4_xy_zw  :: proc "contextless" (xy: [2]$T, zw: [2]T) -> (result: [4]T) {
     result.xy = xy
     result.zw = zw
     return result
 }
-V4_xyz_w  :: proc(xyz: [3]$T, w: T) -> (result: [4]T) {
+V4_xyz_w  :: proc "contextless" (xyz: [3]$T, w: T) -> (result: [4]T) {
     result.xyz = xyz
     result.w = w
     return result
 }
-V4_x_y_zw :: proc(x: $T, y: T, zw: [2]T) -> (result: [4]T) {
+V4_x_y_zw :: proc "contextless" (x: $T, y: T, zw: [2]T) -> (result: [4]T) {
     result.x = x
     result.y = y
     result.zw = zw
     return result
 }
-V4_x_yz_w :: proc(x: $T, yz: [2]T, w:T) -> (result: [4]T) {
+V4_x_yz_w :: proc "contextless" (x: $T, yz: [2]T, w:T) -> (result: [4]T) {
     result.x = x
     result.yz = yz
     result.w = w
     return result
 }
-V4_xy_z_w :: proc(xy: [2]$T, z, w: T) -> (result: [4]T) {
+V4_xy_z_w :: proc "contextless" (xy: [2]$T, z, w: T) -> (result: [4]T) {
     result.xy = xy
     result.z = z
     result.w = w
+    return result
+}
+
+v4_to_rgba :: proc "contextless" (rgba: v4) -> (result: [4]u8) {
+    result = vec_cast(u8, rgba * 255)
+    return result
+}
+rgba_to_v4 :: proc "contextless" (rgba: [4]u8) -> (result: v4) {
+    result = vec_cast(f32, rgba)
+    result /= 255
     return result
 }
 
@@ -276,9 +304,20 @@ arm :: proc(angle: $T) -> (result: [2]T) {
     return result
 }
 
-dot :: proc(a, b: $V/[$N]$E) -> (result: E) {
-    #unroll for i in 0..<N {
-        result += a[i] * b[i]
+rotate :: proc (v: $V/[$N]$T, angle: T) -> (result: V) {
+    rotor := arm(angle)
+    result.x = v.x * rotor.x + v.y * -rotor.y
+    result.y = v.x * rotor.y + v.y *  rotor.x
+    return result
+}
+
+dot :: proc(a, b: $V) -> (result: element_type(V)) {
+    when intrinsics.type_is_simd_vector(V) {
+        result = simd.reduce_add_pairs(a * b)
+    } else {
+        #unroll for i in 0..<len(V) {
+            result += a[i] * b[i]
+        }
     }
     
     return result
@@ -286,12 +325,17 @@ dot :: proc(a, b: $V/[$N]$E) -> (result: E) {
 
 cross2 :: proc(a, b: $V/[2]$E) -> (result: E) {
     // just the z term, 
-    // isn't this also just the determinant?
-    result = a.x*b.y - a.y*b.x
+    // isn't this also just the determinant? Yes!
+    result = a.x * b.y - a.y * b.x
     return result
 }
 cross :: proc(a, b: $V/[3]$E) -> (result: V) {
-    result = a.yzx * b.zxy - a.zxy * b.yzx
+    result = {
+        a.y*b.z - a.z*b.y,
+        a.z*b.x - a.x*b.z,
+        a.x*b.y - a.y*b.x,
+    }
+    
     return result
 }
 
@@ -302,14 +346,15 @@ project :: proc(v, axis: $V) -> V {
     return v - 1 * dot(v, axis) * axis
 }
 
-length :: proc(vec: $V/[$N]$T) -> (result: T) {
+length :: proc(vec: $V) -> (result: element_type(V)) {
     length_squared := length_squared(vec)
     result = square_root(length_squared)
     return result
 }
 
-length_squared :: proc(vec: $V/[$N]$T) -> T {
-    return dot(vec, vec)
+length_squared :: proc(vec: $V) -> (result: element_type(V)) {
+    result = dot(vec, vec)
+    return result
 }
 
 normalize :: proc(vec: $V) -> (result: V) {
@@ -329,7 +374,7 @@ normalize_or_zero :: proc(vec: $V/[$N]$T) -> (result: V) {
     return result
 }
 
-exact_linear_to_srgb :: proc(l: v3) -> (s: v3) {
+linear_to_srgb_exact :: proc(l: v3) -> (s: v3) {
     l := l
     l = clamp_01(l)
     #unroll for i in 0..<len(l) {
@@ -462,7 +507,23 @@ add_offset :: proc(rect: $R/Rectangle($T), offset: T) -> (result: R) {
 contains :: proc(rect: Rectangle($T), point: T) -> (result: b32) {
     result = true
     #unroll for i in 0..<len(T) {
-        result &&= rect.min[i] < point[i] && point[i] < rect.max[i] 
+        result &&= rect.min[i] <= point[i] && point[i] < rect.max[i] 
+    }
+    return result
+}
+
+contains_inclusive :: proc(rect: Rectangle($T), point: T) -> (result: b32) {
+    result = true
+    #unroll for i in 0..<len(T) {
+        result &&= rect.min[i] <= point[i] && point[i] <= rect.max[i] 
+    }
+    return result
+}
+
+dimension_contains :: proc(dimension: $V/[$N]$T, point: V) -> (result: b32) {
+    result = true
+    #unroll for i in 0..<N {
+        result &&= 0 <= point[i] && point[i] < dimension[i] 
     }
     return result
 }
@@ -514,6 +575,14 @@ get_xy :: proc(rect: Rectangle3) -> (result: Rectangle2) {
     return result
 }
 
+rectangle_modulus :: proc (rect: $R/Rectangle($T), p: T) -> (result: T) {
+    dim := get_dimension(rect)
+    offset := p - rect.min
+    result = (((offset % dim) + dim) % dim) + rect.min
+    assert(contains(rect, result))
+    return result
+}
+
 // @note(viktor): Area without the points at the maximum
 get_volume_or_zero :: get_area_or_zero
 get_area_or_zero :: proc(rect: $R/Rectangle($T)) -> (result: T) {
@@ -547,3 +616,7 @@ has_area_inclusive :: proc(rect: $R/Rectangle($T)) -> (result: b32) {
     result = area != 0
     return result
 }
+
+////////////////////////////////////////////////
+
+element_type :: intrinsics.type_elem_type

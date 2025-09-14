@@ -3,19 +3,24 @@ package game
 
 @(common="file")
 
+import "base:builtin"
 import "base:intrinsics"
+import "base:runtime"
 
 Array :: struct ($T: typeid) {
     data:  []T,
     count: i64,
 }
-StringBuilder :: Array(u8)
+String_Builder :: Array(u8)
 FixedArray :: struct ($N: i64, $T: typeid) {
     data:  [N]T,
     count: i64,
 }
 
-append :: proc { append_fixed_array, append_array, append_array_, append_array_many, append_fixed_array_many, append_string }
+append :: proc { 
+    append_fixed_array, append_array, append_array_, append_array_many, append_fixed_array_many, append_string, 
+    builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
+}
 @(require_results) append_array_ :: proc(a: ^Array($T)) -> (result: ^T) {
     result = &a.data[a.count]
     a.count += 1
@@ -53,46 +58,77 @@ append_fixed_array_many :: proc(a: ^FixedArray($N, $T), values: []T) -> (result:
     return result
 }
 
-append_string :: proc(a: ^StringBuilder, value: string) -> (result: string) {
-    return cast(string) append_array_many(a, transmute([]u8) value)
+append_string :: proc(a: ^String_Builder, value: string) -> (result: string) {
+    append(a, (transmute([]u8) value))
+    return cast(string) a.data[:]
 }
 
+make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
+make_string_builder_buffer :: proc(buffer: []u8) -> (result: String_Builder) {
+    result.data = buffer
+    return result
+}
+make_string_builder_arena :: proc(arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
+    buffer := push_slice(arena, u8, len, params)
+    result = make_string_builder_buffer(buffer)
+    return result
+}
 make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
     result.data = push_slice(arena, T, len, params)
     return result
 }
 
-slice :: proc{ slice_fixed_array, slice_array }
+peek :: proc (a: [dynamic] $T) -> (result: ^T) { 
+    assert(len(a) != 0)
+    #no_bounds_check result = &a[len(a)-1]
+    return result
+}
+
+slice :: proc{ slice_fixed_array, slice_array, slice_array_pointer }
 slice_fixed_array :: proc(array: ^FixedArray($N, $T)) -> []T {
     return array.data[:array.count]
 }
 slice_array :: proc(array: Array($T)) -> []T {
     return array.data[:array.count]
 }
-
-to_string :: proc(array: StringBuilder) -> string {
-    return cast(string) array.data[:array.count]
+slice_array_pointer :: proc(array: ^Array($T)) -> []T {
+    return array.data[:array.count]
 }
 
-rest :: proc{ rest_fixed_array, rest_array }
+to_string :: proc(sb: String_Builder) -> string {
+    return cast(string) sb.data[:sb.count]
+}
+
+rest :: proc{ rest_fixed_array, rest_array, rest_dynamic_array }
 rest_fixed_array :: proc(array: ^FixedArray($N, $T)) -> []T {
     return array.data[array.count:]
 }
 rest_array :: proc(array: Array($T)) -> []T {
     return array.data[array.count:]
 }
+rest_dynamic_array :: proc(array: [dynamic] $T) -> []T {
+    return slice_from_parts(raw_data(array), cap(array))
+}
 
+set_len :: proc (array: ^[dynamic] $T, len: int) {
+    raw := cast(^Raw_Dynamic_Array) array
+    raw.len = len
+}
+
+clear :: proc { array_clear, builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array }
 array_clear :: proc(a: ^Array($T)) {
     a.count = 0
 }
 
-ordered_remove :: proc(a: ^Array($T), #any_int index: i64) {
+ordered_remove :: proc { builtin.ordered_remove, ordered_remove_array }
+ordered_remove_array :: proc(a: ^Array($T), #any_int index: i64) {
     data := slice(a^)
     copy(data[index:], data[index+1:])
     a.count -= 1
 }
-unordered_remove :: proc(a: ^Array($T), #any_int index: i64) {
-    swap(&a.data[index], &a.data[a.count-1])
+unordered_remove :: proc { builtin.unordered_remove, unordered_remove_array }
+unordered_remove_array :: proc(a: ^Array($T), #any_int index: i64) {
+    a.data[index] = a.data[a.count-1]
     a.count -= 1
 }
 

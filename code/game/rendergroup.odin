@@ -368,7 +368,7 @@ push_sort_barrier :: proc(group: ^RenderGroup) {
     }
 }
 
-clear :: proc(group: ^RenderGroup, color: v4) {
+push_clear :: proc(group: ^RenderGroup, color: v4) {
     group.commands.clear_color = store_color({}, color)
 }
 
@@ -619,9 +619,9 @@ begin_aggregate_sort_key :: proc(group: ^RenderGroup) {
     group.is_aggregating = true
     
     group.aggregate_bounds = {
-        y_max = NegativeInfinity,
-        y_min = PositiveInfinity,
-        z_max = NegativeInfinity,
+        y_max = -Infinity,
+        y_min = +Infinity,
+        z_max = -Infinity,
     }
     group.first_aggregate_at = group.commands.sort_entries.count
 }
