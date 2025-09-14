@@ -419,7 +419,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             gl.Disable(gl.TEXTURE_2D)
             gl_rectangle(entry.rect.min, entry.rect.max, color)
                 
-            when true {
+            when false {
                 min := entry.rect.min
                 max := entry.rect.max
                 glBegin(gl.LINES)

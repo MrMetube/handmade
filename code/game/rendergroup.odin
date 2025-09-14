@@ -95,7 +95,6 @@ Transform :: struct {
     
     is_upright:   b32,
     floor_z:      f32,
-    next_floor_z: f32,
     
     offset:       v3,  
     scale:        f32,
@@ -515,17 +514,17 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
             distance_above_target *= DebugCameraDistance
         }
         
-        apron :: 0.1
-        t := clamp_01_map_to_range(transform.next_floor_z - apron, p.z - transform.floor_z, transform.next_floor_z)
-        floor_z := linear_blend(transform.floor_z, transform.next_floor_z, t)
         
+        floor_z := transform.floor_z
         distance_to_p_z := distance_above_target - floor_z
         // @todo(viktor): transform.scale is unused
         if distance_to_p_z > near_clip_plane {
-            height_off_floor: f32 = p.z - transform.floor_z
+            height_off_floor: f32 = p.z - floor_z
             ortho_y_from_z: f32 = 1
+            
             raw := V3(p.xy, 1)
             raw.y += height_off_floor * ortho_y_from_z
+            
             projected := camera.focal_length * raw / distance_to_p_z
             
             result.scale = projected.z  * camera.meters_to_pixels_for_monitor

@@ -485,6 +485,9 @@ draw_tooltips :: proc(debug: ^DebugState) {
         push_text(debug, text, p, color)
     }
     
+    for &tooltip in slice(&debug.tooltips) {
+        zero(tooltip[:])
+    }
     clear(&debug.tooltips)
 }
 

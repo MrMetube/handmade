@@ -95,6 +95,7 @@ ReplayBuffer :: struct {
 
 main :: proc() {
     unused(draw_rectangle_slowly)
+    unused(deallocate_memory)
     
     {
         frequency: win.LARGE_INTEGER
@@ -160,7 +161,7 @@ main :: proc() {
         window_dc := win.GetDC(window)
         defer win.ReleaseDC(window, window_dc)
         
-        gl_context := init_opengl(window_dc)
+        init_opengl(window_dc)
     }
     
     high_queue, low_queue: PlatformWorkQueue
@@ -371,7 +372,7 @@ main :: proc() {
                 
                 mouse_in_window_y_up := vec_cast(f32, mouse_in_window_y_down.x, window_dim.y - 1 - mouse_in_window_y_down.y)
                 draw_region := rec_cast(f32, draw_region)
-                mouse_in_draw_region := vec_cast(f32, render_commands.width, render_commands.height) * clamp_01_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
+                mouse_in_draw_region := vec_cast(f32, render_commands.width, render_commands.height) * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
                 
                 new_input.mouse.p = mouse_in_draw_region
                 for &button, index in new_input.mouse.buttons {

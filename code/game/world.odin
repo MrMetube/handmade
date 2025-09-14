@@ -117,6 +117,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     ////////////////////////////////////////////////
     
+    // :RoomSize
     tiles_per_screen :: v2i{17,9}
     
     tile_size_in_meters :f32= 1.5
@@ -137,29 +138,25 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     
     screen_base: [3]i32
     
-    new_camera_p := chunk_position_from_tile_positon(
-        world,
-        screen_base.x * tiles_per_screen.x + tiles_per_screen.x/2,
-        screen_base.y * tiles_per_screen.y + tiles_per_screen.y/2,
-        screen_base.z,
-    )
-    
-    world.camera_p = new_camera_p
-    
     screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
     created_stair: b32
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
-    for _ in u32(0) ..< 4 {
+    
+    previous_room: StandartRoom
+    room_count: u32 = 4
+    last: v3i
+    for screen_index in 0 ..< room_count {
+        last = {screen_row, screen_col, tile_z}
         when !true {
             choice := random_choice(&world.game_entropy, 2)
         } else {
-            choice := 2
+            choice := 3
         }
         
         created_stair = false
-        switch(choice) {
+        switch choice {
           case 0: door_right  = true
           case 1: door_top    = true
           case 2: stair_down  = true
@@ -173,8 +170,24 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         room_x := screen_col * tiles_per_screen.x
         room_y := screen_row * tiles_per_screen.y
         
+        left_hole := screen_index % 2 == 0
+        right_hole := !left_hole
+        if screen_index == 0 {
+            left_hole  = false
+            right_hole = false
+        }
+        
+        
+        target: TraversableReference
+        if left_hole {
+            target = previous_room.ground[-3+8][1+4]
+        } else if right_hole {
+            target = previous_room.ground[ 3+8][1+4]
+        }
+        
         p := chunk_position_from_tile_positon(world, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, tile_z)
-        room := add_standart_room(world, p) 
+        room := add_standart_room(world, p, left_hole, right_hole, target)
+        defer previous_room = room
         
         for tile_y in 0..< len(room.p[0]) {
             tile_x :: 0
@@ -201,8 +214,8 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
             }
         }
         
-        add_monster(world,  room.p[3][4], room.ground[3][4])
-        add_familiar(world, room.p[2][5], room.ground[2][5])
+        // add_monster(world,  room.p[3][4], room.ground[3][4])
+        // add_familiar(world, room.p[2][5], room.ground[2][5])
         
         snake_brain := add_brain(world)
         for piece_index in u32(0)..<len(BrainSnake{}.segments) {
@@ -218,7 +231,7 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         stair_up   = false
         stair_down = false
         
-        switch(choice) {
+        switch choice {
           case 0: screen_col += 1
           case 1: screen_row += 1
           case 2: tile_z -= 1
@@ -227,6 +240,16 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
           case 5: screen_row -= 1
         }
     }
+    
+    
+    new_camera_p := chunk_position_from_tile_positon(
+        world,
+        last.x * tiles_per_screen.x + tiles_per_screen.x/2,
+        last.y * tiles_per_screen.y + tiles_per_screen.y/2,
+        last.z,
+    )
+    
+    world.camera_p = new_camera_p
 }
 
 update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
@@ -692,6 +715,8 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entit
     
     pack_traversable_reference(region, &entity.came_from)
     pack_traversable_reference(region, &entity.occupying)
+    
+    pack_traversable_reference(region, &entity.auto_boost_to)
 }
 
 pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {

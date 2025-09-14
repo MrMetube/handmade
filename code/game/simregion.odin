@@ -328,6 +328,8 @@ connect_entity_references :: proc(region: ^SimRegion) {
         
         load_traversable_reference(region, &entity.came_from)
         load_traversable_reference(region, &entity.occupying)
+        load_traversable_reference(region, &entity.auto_boost_to)
+        
         if entity.occupying.entity.pointer != nil {
             entity.occupying.entity.pointer.traversables.data[entity.occupying.index].occupant = &entity
         }

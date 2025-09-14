@@ -130,7 +130,7 @@ TextureOp :: struct {
     value: union {
         TextureOpAllocate,
         TextureOpDeallocate,
-    }
+    },
 }
 
 ////////////////////////////////////////////////

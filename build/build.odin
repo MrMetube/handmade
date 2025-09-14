@@ -9,9 +9,9 @@ import "core:strings"
 import "core:time"
 import win "core:sys/windows"
 
-optimizations    := false ? `-o:speed` : `-o:none`
-PedanticGame     :: false
-PedanticPlatform :: false
+optimizations    := !false ? `-o:speed` : `-o:none`
+PedanticGame     :: !false
+PedanticPlatform :: !false
 
 flags    := [] string {`-error-pos-style:unix`,`-vet-cast`,`-vet-shadowing`,`-microarch:native`,`-target:windows_amd64`}
 

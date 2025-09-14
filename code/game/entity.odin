@@ -51,6 +51,8 @@ Entity :: struct {
     traversables: Array(TraversablePoint),
     
     pieces: FixedArray(4, VisiblePiece),
+    
+    auto_boost_to: TraversableReference,
 }
 
 EntityId :: distinct u32
@@ -360,13 +362,13 @@ add_familiar :: proc(world: ^World, p: WorldPosition, occupying: TraversableRefe
     })
 }
 
-StandartRoom :: struct {
-    p:      [17][9]WorldPosition,
-    ground: [17][9]TraversableReference,
+StandartRoom :: struct { // :RoomSize
+    p:      [17][9] WorldPosition,
+    ground: [17][9] TraversableReference,
 }
 
-add_standart_room :: proc(world: ^World, p: WorldPosition) -> (result: StandartRoom) {
-    // @volatile
+add_standart_room :: proc(world: ^World, p: WorldPosition, left_hole, right_hole: bool, target: TraversableReference) -> (result: StandartRoom) {
+    // @volatile :RoomSize
     h_width  :i32= 17/2
     h_height :i32=  9/2
     tile_size_in_meters :: 1.5
@@ -376,29 +378,26 @@ add_standart_room :: proc(world: ^World, p: WorldPosition) -> (result: StandartR
             p := p
             p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
+            result.p[offset_x+8][offset_y+4] = p
             
-            if offset_x >= -4 && offset_x <= -1 && offset_y >= -1 && offset_y <= 1 {
-                continue
-            }
-            
-            when false {
-                p.offset.x += random_bilateral(&world.game_entropy, f32) * 0.2
-                p.offset.y += random_bilateral(&world.game_entropy, f32) * 0.2
-            }
-            
-            if offset_x == 3  && offset_y >= -3 && offset_y <= 3 {
-                p.offset.z += 0.4 * cast(f32) (offset_y - -3)
-            }
-            entity := begin_grounded_entity(world, world.floor_collision)
+            if left_hole && (offset_x >= -3 && offset_x <= -2 && offset_y >= -1 && offset_y <= 1) {
+                // @note(viktor): hole down to floor below
+            } else if right_hole && (offset_x >= 2 && offset_x <= 3 && offset_y >= -1 && offset_y <= 1) {
+                // @note(viktor): hole down to floor below
+            } else {
+                
+                entity := begin_grounded_entity(world, world.floor_collision)
                 entity.traversables = make_array(&world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
-            end_entity(world, entity, p)
-            
-            occupying: TraversableReference
-            occupying.entity.id = entity.id
-            
-            result.p[offset_x+8][offset_y+4] = p
-            result.ground[offset_x+8][offset_y+4] = occupying
+                if (right_hole && offset_x == -3 && offset_y == 0) || (left_hole && offset_x == 3 && offset_y == 0) {
+                    entity.auto_boost_to = target
+                }
+                end_entity(world, entity, p)
+                
+                occupying: TraversableReference
+                occupying.entity.id = entity.id
+                result.ground[offset_x+8][offset_y+4] = occupying
+            }
         }
     }
     
@@ -555,7 +554,6 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             transform.manual_sort_key = entity.manual_sort_key
             transform.chunk_z = entity.z_layer
             transform.floor_z = camera_relative_ground_z[relative_layer - MinimumLayer]
-            transform.next_floor_z = transform.floor_z + world.typical_floor_height
             
             if current_absolute_layer != entity.z_layer {
                 assert(current_absolute_layer < entity.z_layer)
@@ -612,14 +610,16 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             draw_hitpoints(render_group, &entity, 0.5, transform)
             
             if RenderCollisionOutlineAndTraversablePoints {
-                color := Green
-                color.rgb *= 0.4
                 flat_transform := transform
                 flat_transform.is_upright = false
                 
                 for traversable in slice(entity.traversables) {
                     rect := rectangle_center_dimension(traversable.p, 1.5)
-                    push_rectangle(render_group, rect, flat_transform, traversable.occupant != nil ? Red : Green)
+                    color := traversable.occupant != nil ? Red : Green
+                    if get_traversable(entity.auto_boost_to) != nil {
+                        color = Blue
+                    }
+                    push_rectangle(render_group, rect, flat_transform, color)
                 }
             }
             
