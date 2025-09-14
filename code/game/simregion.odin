@@ -93,7 +93,9 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             dest.manual_sort_key = {}
                             dest.z_layer = chunk_z
                             
-                            dest.updatable = entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume)
+                            if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {
+                                dest.flags += { .active }
+                            }
                             
                             if dest.brain_id != 0 {
                                 brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)

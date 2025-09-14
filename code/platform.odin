@@ -751,9 +751,7 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
     */
     
     clear_color := commands.clear_color
-    clear_color.r = square(clear_color.r)
-    clear_color.g = square(clear_color.g)
-    clear_color.b = square(clear_color.b)
+    clear_color.rgb = square(clear_color.rgb)
     
     if GlobalUseSoftwareRenderer {
         software_render_commands(render_queue, commands, prep, GlobalBackBuffer, arena)

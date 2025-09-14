@@ -219,12 +219,12 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
         stair_down = false
         
         switch(choice) {
-        case 0: screen_col += 1
-        case 1: screen_row += 1
-        case 2: tile_z -= 1
-        case 3: tile_z += 1
-        case 4: screen_col -= 1
-        case 5: screen_row -= 1
+          case 0: screen_col += 1
+          case 1: screen_row += 1
+          case 2: tile_z -= 1
+          case 3: tile_z += 1
+          case 4: screen_col -= 1
+          case 5: screen_row -= 1
         }
     }
 }
@@ -299,6 +299,9 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     
     execute_brains := begin_timed_block("execute_brains")
     for &brain in slice(sim_region.brains) {
+        mark_brain_active(&brain)
+    }
+    for &brain in slice(sim_region.brains) {
         execute_brain(input, world, sim_region, render_group, &brain)
     }
     end_timed_block(execute_brains)
@@ -338,7 +341,26 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 ////////////////////////////////////////////////
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+
+
+
 
 fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
     if FountainTest { 

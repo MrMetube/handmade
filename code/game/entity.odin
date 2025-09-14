@@ -15,9 +15,7 @@ Entity :: struct {
     ////////////////////////////////////////////////
     // @note(viktor): Everything below here is not worked out
 
-    updatable: b32,
-        
-    flags: EntityFlags,
+    flags: Entity_Flags,
     
     p, dp: v3,
     ddp: v3, // @transient 
@@ -57,11 +55,12 @@ Entity :: struct {
 
 EntityId :: distinct u32
 
-EntityFlag :: enum {
+Entity_Flag :: enum {
     Collides,
     MarkedForDeletion,
+    active
 }
-EntityFlags :: bit_set[EntityFlag]
+Entity_Flags :: bit_set[Entity_Flag]
 
 VisiblePiece :: struct {
     asset:  AssetTypeId,
@@ -458,7 +457,7 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
         }
         
         // @cleanup is this still relevant
-        if entity.updatable { // @todo(viktor):  move this out into entity.odin
+        if .active in entity.flags { // @todo(viktor):  move this out into entity.odin
             ////////////////////////////////////////////////
             // Physics
             if entity.movement_mode == .Planted {

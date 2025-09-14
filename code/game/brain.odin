@@ -6,12 +6,15 @@ Brain :: struct {
     // @note(viktor): As the entity also needs to know its brain's kind, we cant fold the kind into the raw_union and make data a union 
     kind: BrainKind,
     using parts : struct #raw_union {
+        slots:    [^] ^Entity,
         hero:     BrainHero,
         snake:    BrainSnake,
         monster:  BrainMonster,
         familiar: BrainFamiliar,
     },
 }
+
+BrainSlotMaxCount :: size_of(Brain{}.parts) / size_of(^Entity)
 
 BrainId :: distinct EntityId
 
@@ -57,6 +60,25 @@ BrainMonster :: struct {
 brain_slot_for :: proc($base: typeid, $member: string, index: u32 = 0) -> BrainSlot {
     // @study(viktor): can this be done better by using enumerated arrays?
     return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) + index }
+}
+
+mark_brain_active :: proc (brain: ^Brain) {
+    is_active := false
+    for index in 0 ..< BrainSlotMaxCount {
+        part := brain.slots[index]
+        if part != nil && .active in part.flags {
+            is_active = true
+        }
+    }
+    
+    if is_active {
+        for index in 0 ..< BrainSlotMaxCount {
+            part := brain.slots[index]
+            if part != nil {
+                part.flags += { .active }
+            }
+        }
+    }
 }
 
 execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
