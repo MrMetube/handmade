@@ -158,7 +158,7 @@ update_and_render_entities :: proc(input: Input, world_mode: ^World_Mode, sim_re
     test_alpha: f32
     for &fog_amount, index in fog_amount {
         relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z[index] = world_mode.typical_floor_height * cast(f32) relative_layer_index - world_mode.camera_offset.z
+        camera_relative_ground_z[index] = world_mode.typical_floor_height * cast(f32) relative_layer_index - camera_p.z
         
         test_alpha = clamp_01_map_to_range(fade_top_end,      camera_relative_ground_z[index], fade_top_start)
         fog_amount = clamp_01_map_to_range(fade_bottom_start, camera_relative_ground_z[index], fade_bottom_end)
@@ -271,7 +271,8 @@ update_and_render_entities :: proc(input: Input, world_mode: ^World_Mode, sim_re
                     entity.p = pt
                     entity.came_from = entity.occupying
                     
-                    spawn_fire(world_mode.particle_cache, entity.p)
+                    camera_relative_ground_z := world_mode.typical_floor_height * cast(f32) (entity.z_layer - sim_region.origin.chunk.z) - camera_p.z
+                    spawn_fire(world_mode.particle_cache, entity.p, camera_relative_ground_z, entity.z_layer)
                 }
                 
                 hop_duration :f32: 0.2

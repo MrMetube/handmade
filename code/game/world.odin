@@ -96,9 +96,9 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     
     camera_p := world_mode.camera_offset + world_distance(world_mode.world, world_mode.camera_p, sim_origin)
     
-    world_transform := default_flat_transform()
-    world_transform.offset -= camera_p
     if ShowRenderAndSimulationBounds {
+        world_transform := default_flat_transform()
+        world_transform.offset -= camera_p 
         world_transform.chunk_z = 10000
         push_rectangle_outline(render_group, screen_bounds,               world_transform, Orange, 0.1)
         push_rectangle_outline(render_group, sim_region.bounds,           world_transform, Blue,   0.2)
@@ -152,7 +152,7 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     
     update_and_render_entities(input, world_mode, sim_region, render_group, camera_p, dt, haze_color)
     
-    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt, world_transform)
+    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt, camera_p)
     
     ////////////////////////////////////////////////
     

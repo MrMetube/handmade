@@ -5,19 +5,22 @@ Particle_Cache :: struct {
     fire_system: Particle_System,
 }
 
-Particle_System :: struct {
+Particle_System :: struct #align(align_of(lane_Particle)) {
     particles: [4096 / LaneWidth] lane_Particle,
     
     next_lane_particle: u32,
     bitmap_id: BitmapId,
 }
 
-lane_Particle :: struct {
+lane_Particle :: struct #align(align_of(lane_f32)) {
     p:      lane_v3,
     dp:     lane_v3,
     ddp:    lane_v3,
     color:  lane_v4,
     dcolor: lane_v4,
+    
+    floor_z: f32,
+    chunk_z: i32,
 }
 
 ////////////////////////////////////////////////
@@ -28,32 +31,14 @@ init_particle_cache :: proc (cache: ^Particle_Cache, assets: ^Assets) {
     cache.fire_system.bitmap_id = first_bitmap_from(assets, .Head)
 }
 
-update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group: ^RenderGroup, dt: f32, transform: Transform) {
-    update_and_render_fire(&cache.fire_system, render_group, dt, transform)
+update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group: ^RenderGroup, dt: f32, camera_p: v3) {
+    update_and_render_fire(&cache.fire_system, render_group, dt, camera_p)
 }
 
-spawn_fire :: proc (cache: ^Particle_Cache, at: v3) {
-    system  := &cache.fire_system
-    entropy := &cache.entropy
-    
-    at := vec_cast(lane_f32, at)
-    
-    index := system.next_lane_particle
-    system.next_lane_particle += 1
-    if system.next_lane_particle >= len(system.particles) {
-        system.next_lane_particle = 0
-    }
-    
-    particle := &system.particles[index]
-    particle.p      = at + {random_bilateral(entropy, lane_f32)*0.1, 0, 0}
-    particle.dp     = {random_bilateral(entropy, lane_f32)*0, (random_unilateral(entropy, lane_f32)*0.4)+7, 0}
-    particle.ddp    = {0, -9.8, 0}
-    particle.color  = V4(random_unilateral(entropy, lane_v3), 1)
-    particle.dcolor = {0,0,0,-0.2}
-}
-
-update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, transform: Transform) {
+update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, camera_p: v3) {
     timed_function()
+    
+    transform := default_upright_transform()
     
     when false {
         for &row in world.cells {
@@ -137,6 +122,8 @@ update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGr
         // }
         
         // @note(viktor): render the particles
+        transform.floor_z = particle.floor_z - camera_p.z
+        transform.chunk_z = particle.chunk_z
         for i in 0..<LaneWidth {
             // @todo(viktor): make a utility for this
             color := v4 {
@@ -151,9 +138,34 @@ update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGr
                 (transmute([LaneWidth] f32) particle.p.z)[i],
             }
             
+            transform.offset = -camera_p
+            
             if color.a > 0 {
                 push_bitmap(render_group, system.bitmap_id, transform, 0.4, p, color)
             }
         }
     }
+}
+
+spawn_fire :: proc (cache: ^Particle_Cache, at: v3, floor_z: f32, chunk_z: i32) {
+    system  := &cache.fire_system
+    entropy := &cache.entropy
+    
+    at := vec_cast(lane_f32, at)
+    
+    index := system.next_lane_particle
+    system.next_lane_particle += 1
+    if system.next_lane_particle >= len(system.particles) {
+        system.next_lane_particle = 0
+    }
+    
+    particle := &system.particles[index]
+    particle.p      = at + {random_bilateral(entropy, lane_f32)*0.1, 0, 0}
+    particle.dp     = {random_bilateral(entropy, lane_f32)*0, (random_unilateral(entropy, lane_f32)*0.4)+7, 0}
+    particle.ddp    = {0, -9.8, 0}
+    particle.color  = V4(random_unilateral(entropy, lane_v3), 1)
+    particle.dcolor = {0,0,0,-0.2}
+    
+    particle.floor_z = floor_z
+    particle.chunk_z = chunk_z
 }

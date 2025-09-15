@@ -43,6 +43,10 @@ init_arena :: proc(arena: ^Arena, storage: []u8) {
 push :: proc { push_slice, push_struct, push_size, copy_string }
 @(require_results)
 push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
+    params := params
+    if params.alignment == DefaultAlignment {
+        params.alignment = align_of(Element)
+    }
     size := size_of(Element) * count
     result = slice_from_parts(Element, push_size(arena, size, params), count)
     
@@ -51,6 +55,10 @@ push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params 
 
 @(require_results)
 push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
+    params := params
+    if params.alignment == DefaultAlignment {
+        params.alignment = align_of(T)
+    }
     result = cast(^T) push_size(arena, size_of(T), params)
     
     return result
@@ -124,7 +132,7 @@ zero :: proc { zero_size, zero_slice }
 zero_size :: proc(memory: pmm, size: u64) {
     bytes := slice_from_parts(u8, memory, size)
     for &b in bytes {
-        b = {}
+        b = 0
     }
 }
 zero_slice :: proc(data: []$T){
