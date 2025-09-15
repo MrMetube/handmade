@@ -187,8 +187,8 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_gr
                 con_ddp *= 1 / square_root(ddp_length_squared)
             }
             
-            speed :f32= 60
-            drag :f32= 8
+            speed: f32 = 60
+            drag: f32 = 8
             con_ddp *= speed
             
             traversable, ok := get_closest_traversable(region, head.p)
@@ -211,14 +211,14 @@ execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_gr
                         }
                     }
                 
-                    traversable := get_sim_space_traversable(traversable)
+                    traversable := get_sim_space_traversable(body.occupying)
                     closest_p := traversable.p
                 
                     con_hero.recenter_t = max(0, con_hero.recenter_t - dt)
                     
                     timer_is_up := con_hero.recenter_t == 0
                     no_push := length_squared(con_ddp) < 0.1
-                    cp :f32= no_push ? 300 : 25
+                    cp: f32 = no_push ? 300 : 25
                     
                     recenter: [3]b32
                     for i in 0..<3 {

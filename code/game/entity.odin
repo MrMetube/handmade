@@ -385,11 +385,10 @@ add_standart_room :: proc(world: ^World, p: WorldPosition, left_hole, right_hole
             } else if right_hole && (offset_x >= 2 && offset_x <= 3 && offset_y >= -1 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
             } else {
-                
                 entity := begin_grounded_entity(world, world.floor_collision)
                 entity.traversables = make_array(&world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
-                if (right_hole && offset_x == -3 && offset_y == 0) || (left_hole && offset_x == 3 && offset_y == 0) {
+                if (right_hole && offset_x == 1 && offset_y == 0) || (left_hole && offset_x == -1 && offset_y == 0) {
                     entity.auto_boost_to = target
                 }
                 end_entity(world, entity, p)
@@ -456,10 +455,25 @@ update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^Sim
             debug_end_data_block()
         }
         
-        // @cleanup is this still relevant
-        if .active in entity.flags { // @todo(viktor):  move this out into entity.odin
+        if .active in entity.flags {
+            // @todo(viktor): Should non-active entities not do simmy stuff?
+            boost_to := get_traversable(entity.auto_boost_to)
+            if boost_to != nil {
+                for traversable in slice(entity.traversables) {
+                    occupant := traversable.occupant
+                    if occupant != nil && occupant.movement_mode == .Planted {
+                        occupant.came_from = occupant.occupying
+                        if transactional_occupy(occupant, &occupant.occupying, entity.auto_boost_to) {
+                            occupant.movement_mode = .Hopping
+                            occupant.t_movement = 0
+                        }
+                    }
+                }
+            }
+            
             ////////////////////////////////////////////////
             // Physics
+            
             if entity.movement_mode == .Planted {
                 if entity.occupying.entity.pointer != nil {
                     entity.p = get_sim_space_traversable(entity.occupying).p
