@@ -5,22 +5,26 @@ Brain :: struct {
     
     // @note(viktor): As the entity also needs to know its brain's kind, we cant fold the kind into the raw_union and make data a union 
     kind: BrainKind,
-    using parts : struct #raw_union {
-        slots:    [^] Entity,
-        hero:     BrainHero,
-        snake:    BrainSnake,
-        monster:  BrainMonster,
-        familiar: BrainFamiliar,
+    using blah: struct #raw_union {
+        slots: [BrainSlotMaxCount] ^Entity,
+        using parts: BrainParts
     },
 }
 
-BrainSlotMaxCount :: size_of(Brain{}.parts) / size_of(^Entity)
+BrainParts :: struct #raw_union {
+    hero:     BrainHero,
+    snake:    BrainSnake,
+    monster:  BrainMonster,
+    familiar: BrainFamiliar,
+}
+
+BrainSlotMaxCount :: size_of(BrainParts) / size_of(^Entity)
 
 BrainId :: distinct EntityId
 
 ReservedBrainId :: enum BrainId {
     FirstHero = 1,
-    LastHero = FirstHero + len(Input{}.controllers)-1,
+    LastHero  = FirstHero + len(Input{}.controllers)-1,
     
     FirstFree,
 }
@@ -62,21 +66,16 @@ brain_slot_for :: proc($base: typeid, $member: string, index: u32 = 0) -> BrainS
     return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) + index }
 }
 
-brain_slots :: proc (brain: ^Brain) -> (result: [] ^Entity) {
-    result = slice_from_parts(^Entity, &brain.parts, BrainSlotMaxCount)
-    return result
-}
-
 mark_brain_active :: proc (brain: ^Brain) {
     is_active := false
-    for part in brain_slots(brain) {
+    for part in brain.slots {
         if part != nil && .active in part.flags {
             is_active = true
         }
     }
     
     if is_active {
-        for part in brain_slots(brain) {
+        for part in brain.slots {
             if part != nil {
                 part.flags += { .active }
             }
@@ -84,7 +83,7 @@ mark_brain_active :: proc (brain: ^Brain) {
     }
 }
 
-execute_brain :: proc(input: Input, world: ^World, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
+execute_brain :: proc(input: Input, world: ^World_Mode, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
     dt := input.delta_time
     
     switch brain.kind {

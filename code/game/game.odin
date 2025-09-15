@@ -103,7 +103,7 @@ State :: struct {
     mode_arena: Arena,
     
     mixer: Mixer,
-    world: World,
+    world: World_Mode,
     
     // @note(viktor): This is for testing the changing of volume and pitch and should not persist.
     music: ^PlayingSound,
@@ -176,13 +176,16 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     ////////////////////////////////////////////////
 
+    do_init_world := false 
+    
     assert(size_of(State) <= len(memory.permanent_storage))
     state := cast(^State) raw_data(memory.permanent_storage)
     if !state.is_initialized {
         init_arena(&state.mode_arena, memory.permanent_storage[size_of(State):])
         
+        do_init_world = true
+        
         init_mixer(&state.mixer, &state.mode_arena)
-        init_world(&state.world, &state.mode_arena)
         
         when DebugEnabled {
             debug_set_event_recording(true)
@@ -224,6 +227,10 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
         
         tran_state.is_initialized = true
+    }
+    
+    if do_init_world {
+        play_world(&state.world, &state.mode_arena, tran_state)
     }
 
     ////////////////////////////////////////////////
@@ -297,7 +304,15 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     render_group: RenderGroup
     init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
     
-    update_and_render_world(&state.world, tran_state, &render_group, input)
+    // @todo(viktor): :CutsceneEpisodes rerun
+    rerun := false
+    
+    for {
+        // switch state.game_mode
+        /* rerun = */update_and_render_world(&state.world, tran_state, &render_group, input)
+        
+        if !rerun do break
+    }
     
     // @todo(viktor): We should probably pull the generation stuff, because
     // if we don't do ground chunks its a huge waste of effort

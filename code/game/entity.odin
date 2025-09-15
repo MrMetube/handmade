@@ -53,6 +53,9 @@ Entity :: struct {
     pieces: FixedArray(4, VisiblePiece),
     
     auto_boost_to: TraversableReference,
+    
+    has_particle_system: bool,
+    particle_spec:       Particle_Spec,
 }
 
 EntityId :: distinct u32
@@ -140,7 +143,7 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-begin_entity :: proc(world: ^World) -> (result: ^Entity) {
+begin_entity :: proc(world: ^World_Mode) -> (result: ^Entity) {
     assert(world.creation_buffer_index < len(world.creation_buffer))
     world.creation_buffer_index += 1
     
@@ -158,7 +161,7 @@ begin_entity :: proc(world: ^World) -> (result: ^Entity) {
     return result
 }
 
-end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
+end_entity :: proc(world: ^World_Mode, entity: ^Entity, p: WorldPosition) {
     assert(world.creation_buffer_index > 0)
     world.creation_buffer_index -= 1
     entity.p = p.offset
@@ -167,14 +170,14 @@ end_entity :: proc(world: ^World, entity: ^Entity, p: WorldPosition) {
 }
 
 // @cleanup
-begin_grounded_entity :: proc(world: ^World, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
+begin_grounded_entity :: proc(world: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
     result = begin_entity(world)
     result.collision = collision
     
     return result
 }
 
-add_brain :: proc(world: ^World) -> (result: BrainId) {
+add_brain :: proc(world: ^World_Mode) -> (result: BrainId) {
     world.last_used_entity_id += 1
     for world.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
         world.last_used_entity_id += 1
@@ -190,7 +193,7 @@ mark_for_deletion :: proc(entity: ^Entity) {
     }
 }
 
-add_wall :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
+add_wall :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world, world.wall_collision)
     defer end_entity(world, entity, p)
     
@@ -203,7 +206,7 @@ add_wall :: proc(world: ^World, p: WorldPosition, occupying: TraversableReferenc
     })
 }
 
-add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
+add_hero :: proc(world: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
     p := map_into_worldspace(world, region.origin, get_sim_space_traversable(occupying).p)
     
     body := begin_grounded_entity(world, world.hero_body_collision)
@@ -281,7 +284,7 @@ add_hero :: proc(world: ^World, region: ^SimRegion, occupying: TraversableRefere
     end_entity(world, glove, p)
 }
 
-add_snake_piece :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
+add_snake_piece :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
     entity := begin_grounded_entity(world, world.monstar_collision)
     defer end_entity(world, entity, p)
     
@@ -309,7 +312,7 @@ add_snake_piece :: proc(world: ^World, p: WorldPosition, occupying: TraversableR
     init_hitpoints(entity, 3)
 }
 
-add_monster :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
+add_monster :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world, world.monstar_collision)
     defer end_entity(world, entity, p)
     
@@ -337,7 +340,7 @@ add_monster :: proc(world: ^World, p: WorldPosition, occupying: TraversableRefer
     init_hitpoints(entity, 3)
 }
 
-add_familiar :: proc(world: ^World, p: WorldPosition, occupying: TraversableReference) {
+add_familiar :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world, world.familiar_collision)
     defer end_entity(world, entity, p)
     
@@ -367,7 +370,7 @@ StandartRoom :: struct { // :RoomSize
     ground: [17][9] TraversableReference,
 }
 
-add_standart_room :: proc(world: ^World, p: WorldPosition, left_hole, right_hole: bool, target: TraversableReference) -> (result: StandartRoom) {
+add_standart_room :: proc(world: ^World_Mode, p: WorldPosition, left_hole, right_hole: bool, target: TraversableReference) -> (result: StandartRoom) {
     // @volatile :RoomSize
     h_width  :i32= 17/2
     h_height :i32=  9/2
@@ -412,8 +415,10 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
     }
 }
 
-update_and_render_entities :: proc(input: Input, world: ^World, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
+update_and_render_entities :: proc(input: Input, world: ^World_Mode, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
     timed_function()
+    
+    particle_cache := world.particle_cache
     
     fade_top_end      := .9 * world.typical_floor_height
     fade_top_start    := .5 * world.typical_floor_height
@@ -680,7 +685,7 @@ draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, tran
 }
 
 // @cleanup
-add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
+add_collision_rule :: proc(world:^World_Mode, a, b: EntityId, should_collide: b32) {
     timed_function()
     // @todo(viktor): collapse this with should_collide
     a, b := a, b
@@ -708,7 +713,7 @@ add_collision_rule :: proc(world:^World, a, b: EntityId, should_collide: b32) {
 }
 
 // @cleanup
-clear_collision_rules :: proc(world: ^World, entity_id: EntityId) {
+clear_collision_rules :: proc(world: ^World_Mode, entity_id: EntityId) {
     timed_function()
     // @todo(viktor): need to make a better data structute that allows for
     // the removal of collision rules without searching the entire table

@@ -1,7 +1,7 @@
 package game
 
 SimRegion :: struct {
-    world: ^World,
+    world: ^World_Mode,
     
     origin: WorldPosition, 
     bounds, updatable_bounds: Rectangle3,
@@ -29,7 +29,7 @@ EntityHash :: struct {
 
 ////////////////////////////////////////////////
 
-begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
+begin_sim :: proc(sim_arena: ^Arena, world: ^World_Mode, origin: WorldPosition, bounds: Rectangle3, dt: f32, particle_cache: ^Particle_Cache) -> (region: ^SimRegion) {
     timed_function()
     
     region = push(sim_arena, SimRegion)
@@ -95,6 +95,10 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World, origin: WorldPosition, bound
                             
                             if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {
                                 dest.flags += { .active }
+                                if particle_cache != nil && source.has_particle_system {
+                                    particle_system := get_or_create_particle_system(particle_cache, dest.id, source.particle_spec, true)
+                                    consider_particle_system_active(particle_cache, particle_system)
+                                }
                             }
                             
                             if dest.brain_id != 0 {
@@ -539,7 +543,7 @@ entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
     return result
 }
 
-can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
+can_collide :: proc(world: ^World_Mode, a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
         if a.id > b.id do a, b = b, a
@@ -561,7 +565,7 @@ can_collide :: proc(world: ^World, a, b: ^Entity) -> (result: b32) {
 }
 
 
-handle_collision :: proc(world: ^World, a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc(world: ^World_Mode, a, b: ^Entity) -> (stops_on_collision: b32) {
     when false {
         a, b := a, b
     

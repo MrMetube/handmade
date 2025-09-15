@@ -1,16 +1,23 @@
 package game
 
-World :: struct {
+World_ :: struct {
     arena: Arena,
     
-    ////////////////////////////////////////////////
-    // World specific    
     chunk_dim_meters: v3,
     
     // @todo(viktor): chunk_hash should probably switch to pointers IF
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
-    chunk_hash: [4096]^Chunk,
+    chunk_hash: [4096] ^Chunk,
     first_free: ^WorldEntityBlock,
+
+    first_free_chunk: ^Chunk,
+    first_free_block: ^WorldEntityBlock,
+}
+
+World_Mode :: struct {
+    ////////////////////////////////////////////////
+    // World specific
+    using world: World_,
     
     ////////////////////////////////////////////////
     // General
@@ -21,9 +28,9 @@ World :: struct {
     camera_p :           WorldPosition,
     camera_offset:       v3,
     // @todo(viktor): Should which players joined be part of the general state?
-    controlled_heroes: [len(Input{}.controllers)]ControlledHero,
+    controlled_heroes: [len(Input{}.controllers)] ControlledHero,
     
-    collision_rule_hash:       [256]^PairwiseCollsionRule,
+    collision_rule_hash:       [256] ^PairwiseCollsionRule,
     first_free_collision_rule: ^PairwiseCollsionRule,
     
     null_collision, 
@@ -45,20 +52,19 @@ World :: struct {
     creation_buffer:       [4]Entity,
     last_used_entity_id:   EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
     
-    game_entropy: RandomSeries,
+    game_entropy:    RandomSeries,
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
     
-    first_free_chunk: ^Chunk,
-    first_free_block: ^WorldEntityBlock,
-    
-    // @note(viktor): Particle System tests
+    // @cleanup Particle System tests
     next_particle: u32,
-    particles:     [256]Particle,
-    cells:         [ParticleCellSize][ParticleCellSize]ParticleCell,
+    particles:     [256] Particle,
+    cells:         [ParticleCellSize] [ParticleCellSize] ParticleCell,
+    
+    particle_cache: ^Particle_Cache,
 }
 
 // @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-#assert( len(World{}.collision_rule_hash) & ( len(World{}.collision_rule_hash) - 1 ) == 0)
+#assert( len(World_Mode{}.collision_rule_hash) & ( len(World_Mode{}.collision_rule_hash) - 1 ) == 0)
 
 Chunk :: struct {
     next: ^Chunk,
@@ -85,7 +91,7 @@ WorldPosition :: struct {
     offset: v3,
 }
 
-chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
+chunk_position_from_tile_positon :: proc(world: ^World_Mode, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
     // @volatile
     tile_size_in_meters  :: 1.5
     tile_depth_in_meters := world.typical_floor_height
@@ -99,12 +105,12 @@ chunk_position_from_tile_positon :: proc(world: ^World, tile_x, tile_y, tile_z: 
     return result
 }
 
-init_world :: proc(world: ^World, parent_arena: ^Arena) {
+play_world :: proc(world: ^World_Mode, parent_arena: ^Arena, tran_state: ^TransientState) {
     sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
 
     world.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
     
-    world.game_entropy = seed_random_series(123)
+    world.game_entropy    = seed_random_series(123)
     world.effects_entropy = seed_random_series(500)
     
     pixels_to_meters :: 1.0 / 42.0
@@ -250,9 +256,12 @@ init_world :: proc(world: ^World, parent_arena: ^Arena) {
     )
     
     world.camera_p = new_camera_p
+    
+    world.particle_cache = push(&tran_state.arena, Particle_Cache, no_clear())
+    init_particle_cache(world.particle_cache)
 }
 
-update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
+update_and_render_world :: proc(world: ^World_Mode, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
     timed_function()
 
     dt := input.delta_time * TimestepPercentage/100.0
@@ -277,7 +286,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
     // @todo(viktor): do we want to simulate upper floors, etc?
     sim_bounds := add_radius(camera_bounds, v3{30, 30, 20})
     sim_origin := world.camera_p
-    sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt)
+    sim_region := begin_sim(&tran_state.arena, world, sim_origin, sim_bounds, dt, world.particle_cache)
     
     camera_p := world.camera_offset + world_distance(world, world.camera_p, sim_origin)
     
@@ -337,6 +346,8 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
     update_and_render_entities(input, world, sim_region, render_group, camera_p, dt, haze_color)
     
+    update_and_render_particle_systems(world.particle_cache, render_group, dt)
+    
     ////////////////////////////////////////////////
     
     fountain_test(render_group, world, dt)
@@ -385,7 +396,7 @@ update_and_render_world :: proc(world: ^World, tran_state: ^TransientState, rend
 
 
 
-fountain_test :: proc(render_group: ^RenderGroup, world: ^World, dt: f32) {
+fountain_test :: proc(render_group: ^RenderGroup, world: ^World_Mode, dt: f32) {
     if FountainTest { 
         ////////////////////////////////////////////////
         // @note(viktor): Particle system test
@@ -562,14 +573,14 @@ enviroment_test :: proc() {
 
 ////////////////////////////////////////////////
 
-make_null_collision :: proc(world: ^World) -> (result: ^EntityCollisionVolumeGroup) {
+make_null_collision :: proc(world: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {}
     
     return result
 }
 
-make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_grounded_collision :: proc(world: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
@@ -581,7 +592,7 @@ make_simple_grounded_collision :: proc(world: ^World, size: v3, offset_z:f32=0) 
     return result
 }
 
-make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_floor_collision :: proc(world: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(&world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
@@ -593,7 +604,7 @@ make_simple_floor_collision :: proc(world: ^World, size: v3) -> (result: ^Entity
 }
 
 
-map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
+map_into_worldspace :: proc(world: ^World_, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
     result := center
     result.offset += offset
     
@@ -606,7 +617,7 @@ map_into_worldspace :: proc(world: ^World, center: WorldPosition, offset: v3 = {
     return result
 }
 
-world_distance :: proc(world: ^World, a, b: WorldPosition) -> (result: v3) {
+world_distance :: proc(world: ^World_, a, b: WorldPosition) -> (result: v3) {
     chunk_delta  := vec_cast(f32, a.chunk) - vec_cast(f32, b.chunk)
     offset_delta := a.offset - b.offset
     result = chunk_delta * world.chunk_dim_meters
@@ -614,7 +625,7 @@ world_distance :: proc(world: ^World, a, b: WorldPosition) -> (result: v3) {
     return result
 }
 
-is_canonical :: proc(world: ^World, offset: v3) -> b32 {
+is_canonical :: proc(world: ^World_, offset: v3) -> b32 {
     epsilon: f32 = 0.0001
     half_size := 0.5 * world.chunk_dim_meters + epsilon
     return -half_size.x <= offset.x && offset.x <= half_size.x &&
@@ -622,10 +633,10 @@ is_canonical :: proc(world: ^World, offset: v3) -> b32 {
            -half_size.z <= offset.z && offset.z <= half_size.z
 }
 
-get_chunk :: proc (arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
+get_chunk :: proc (arena: ^Arena = nil, world: ^World_, point: WorldPosition) -> ^Chunk {
     return get_chunk_3(arena, world, point.chunk)
 }
-get_chunk_3_internal :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^^Chunk) {
+get_chunk_3_internal :: proc(world: ^World_, chunk_p: [3]i32) -> (result: ^^Chunk) {
     ChunkSafeMargin :: 256
     
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -648,7 +659,7 @@ get_chunk_3_internal :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^^Chunk
     
     return result
 }
-get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
+get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World_, chunk_p: [3]i32) -> (result: ^Chunk) {
     next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
     result = next_pointer_of_the_chunks_previous_chunk^
         
@@ -666,7 +677,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: [3]i32) -> (res
 
 ////////////////////////////////////////////////
 
-extract_chunk :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
+extract_chunk :: proc(world: ^World_, chunk_p: [3]i32) -> (result: ^Chunk) {
     next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
     result = next_pointer_of_the_chunks_previous_chunk^
     
@@ -677,7 +688,7 @@ extract_chunk :: proc(world: ^World, chunk_p: [3]i32) -> (result: ^Chunk) {
     return result
 }
 
-pack_entity_into_world :: proc(region: ^SimRegion, world: ^World, source: ^Entity, p: WorldPosition) {
+pack_entity_into_world :: proc(region: ^SimRegion, world: ^World_, source: ^Entity, p: WorldPosition) {
     chunk := get_chunk(&world.arena, world, p)
     assert(chunk != nil)
     
@@ -686,7 +697,7 @@ pack_entity_into_world :: proc(region: ^SimRegion, world: ^World, source: ^Entit
     pack_entity_into_chunk(region, world, source, chunk)
 }
 
-pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World, source: ^Entity, chunk: ^Chunk) {
+pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World_, source: ^Entity, chunk: ^Chunk) {
     assert(chunk != nil)
     
     pack_size := cast(i64) size_of(Entity)
