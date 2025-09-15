@@ -9,21 +9,21 @@ import "core:strings"
 import "core:time"
 import win "core:sys/windows"
 
-optimizations    := false ? `-o:speed` : `-o:none`
+optimizations    := false ? "-o:speed" : "-o:none"
 PedanticGame     :: false
 PedanticPlatform :: false
 
-flags    := [] string {`-error-pos-style:unix`,`-vet-cast`,`-vet-shadowing`,`-microarch:native`,`-target:windows_amd64`}
+flags    := [] string {"-error-pos-style:unix","-vet-cast","-vet-shadowing","-microarch:native","-target:windows_amd64"}
 
-debug    :: `-debug`
-internal :: `-define:INTERNAL=true` // @cleanup
+debug    :: "-debug"
+internal :: "-define:INTERNAL=true" // @cleanup
 
 pedantic := [] string {
-    `-warnings-as-errors`,`-vet-unused-imports`,`-vet-semicolon`,`-vet-unused-variables`,`-vet-style`,
-    `-vet-packages:main`,`-vet-unused-procedures`
+    "-warnings-as-errors","-vet-unused-imports","-vet-semicolon","-vet-unused-variables","-vet-style",
+    "-vet-packages:main","-vet-unused-procedures"
 }
 
-check_and_commoner :: `-custom-attribute:common,printlike`
+check_and_commoner :: "-custom-attribute:common,printlike"
 
 ////////////////////////////////////////////////
 
@@ -43,7 +43,7 @@ debug_exe :: `debug.exe`
 debug_exe_path :: `.\`+debug_exe
  
 /* 
- @todo(viktor): 
+ @todo(viktor):
  - Find a better way to share common code without a bunch of modules, than copypasta
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
  - get rid of INTERNAL define

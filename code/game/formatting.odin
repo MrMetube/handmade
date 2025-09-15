@@ -97,6 +97,7 @@ view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), scale, limit: in
     
     before: T
     value := value
+    
     for magnitude, index in section {
         if index == len(section)-1 || abs(value) < magnitude.upper_bound {
             if precision != 0 && scale + index != 0 {
@@ -145,7 +146,7 @@ amount_table_short := [?] Magnitude (u64) {
     {   0, "Q"},
 }
 
-// @todo(viktor): actually use it and see if this is correct
+// @todo(viktor): this doesnt work, as view_magnitude only searches for the first entry that is larger and then maybe appends the decimal expansion. We would need a second view_xxx proc that, like view_time, shows all magnitudes with the relevant symbol
 divider_table := [?] Magnitude (f64) {
     {1000, "."}, // quecto
     {1000, "."}, // ronto

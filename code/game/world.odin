@@ -9,7 +9,7 @@ World_ :: struct {
     // tile_entity_blocks continue to be stored en masse in the tile chunk!
     chunk_hash: [4096] ^Chunk,
     first_free: ^WorldEntityBlock,
-
+    
     first_free_chunk: ^Chunk,
     first_free_block: ^WorldEntityBlock,
 }
@@ -62,13 +62,13 @@ chunk_position_from_tile_positon :: proc(world_mode: ^World_Mode, tile_x, tile_y
     result = map_into_worldspace(world_mode.world, result, offset + additional_offset)
     
     assert(is_canonical(world_mode.world, result.offset))
-
+    
     return result
 }
 
 update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
     timed_function()
-
+    
     dt := input.delta_time * TimestepPercentage/100.0
     
     monitor_width_in_meters :: 0.635
@@ -91,17 +91,18 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     // @todo(viktor): do we want to simulate upper floors, etc?
     sim_bounds := add_radius(camera_bounds, v3{30, 30, 20})
     sim_origin := world_mode.camera_p
+    
     sim_region := begin_sim(&tran_state.arena, world_mode, sim_origin, sim_bounds, dt, world_mode.particle_cache)
     
     camera_p := world_mode.camera_offset + world_distance(world_mode.world, world_mode.camera_p, sim_origin)
     
+    world_transform := default_flat_transform()
+    world_transform.offset -= camera_p
     if ShowRenderAndSimulationBounds {
-        transform := default_flat_transform()
-        transform.offset -= camera_p
-        transform.chunk_z = 10000
-        push_rectangle_outline(render_group, screen_bounds,               transform, Orange, 0.1)
-        push_rectangle_outline(render_group, sim_region.bounds,           transform, Blue,   0.2)
-        push_rectangle_outline(render_group, sim_region.updatable_bounds, transform, Green,  0.2)
+        world_transform.chunk_z = 10000
+        push_rectangle_outline(render_group, screen_bounds,               world_transform, Orange, 0.1)
+        push_rectangle_outline(render_group, sim_region.bounds,           world_transform, Blue,   0.2)
+        push_rectangle_outline(render_group, sim_region.updatable_bounds, world_transform, Green,  0.2)
     }
     
     ////////////////////////////////////////////////
@@ -148,10 +149,10 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     // @todo(viktor): :TransientClipRect
     old_clip_rect_index := render_group.current_clip_rect_index
     defer render_group.current_clip_rect_index = old_clip_rect_index
-
+    
     update_and_render_entities(input, world_mode, sim_region, render_group, camera_p, dt, haze_color)
     
-    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt)
+    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt, world_transform)
     
     ////////////////////////////////////////////////
     
@@ -179,7 +180,7 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
 
 ////////////////////////////////////////////////
 
-map_into_worldspace :: proc(world: ^World_, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
+map_into_worldspace :: proc (world: ^World_, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
     result := center
     result.offset += offset
     
@@ -192,7 +193,7 @@ map_into_worldspace :: proc(world: ^World_, center: WorldPosition, offset: v3 = 
     return result
 }
 
-world_distance :: proc(world: ^World_, a, b: WorldPosition) -> (result: v3) {
+world_distance :: proc (world: ^World_, a, b: WorldPosition) -> (result: v3) {
     chunk_delta  := vec_cast(f32, a.chunk) - vec_cast(f32, b.chunk)
     offset_delta := a.offset - b.offset
     result = chunk_delta * world.chunk_dim_meters
@@ -237,7 +238,7 @@ get_chunk_3_internal :: proc(world: ^World_, chunk_p: v3i) -> (result: ^^Chunk) 
 get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World_, chunk_p: v3i) -> (result: ^Chunk) {
     next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
     result = next_pointer_of_the_chunks_previous_chunk^
-        
+    
     if arena != nil && result == nil {
         result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk)
         result ^= {

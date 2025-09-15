@@ -53,9 +53,6 @@ Entity :: struct {
     pieces: FixedArray(4, VisiblePiece),
     
     auto_boost_to: TraversableReference,
-    
-    has_particle_system: bool,
-    particle_spec:       Particle_Spec,
 }
 
 EntityId :: distinct u32
@@ -273,6 +270,8 @@ update_and_render_entities :: proc(input: Input, world_mode: ^World_Mode, sim_re
                     entity.dt_bob = -3
                     entity.p = pt
                     entity.came_from = entity.occupying
+                    
+                    spawn_fire(world_mode.particle_cache, entity.p)
                 }
                 
                 hop_duration :f32: 0.2

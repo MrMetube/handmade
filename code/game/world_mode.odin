@@ -11,7 +11,7 @@ World_Mode :: struct {
     
     // @todo(viktor): Should we allow split-screen?
     camera_following_id: EntityId,
-    camera_p :           WorldPosition,
+    camera_p:            WorldPosition,
     camera_offset:       v3,
     
     collision_rule_hash:       [256] ^PairwiseCollsionRule,
@@ -40,9 +40,9 @@ World_Mode :: struct {
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
     
     // @cleanup Particle System tests
-    next_particle: u32,
-    particles:     [256] Particle,
-    cells:         [ParticleCellSize] [ParticleCellSize] ParticleCell,
+    _next_particle: u32,
+    _particles:     [256] Particle,
+    _cells:         [ParticleCellSize] [ParticleCellSize] ParticleCell,
     
     particle_cache: ^Particle_Cache,
 }
@@ -222,8 +222,8 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     
     world_mode.camera_p = new_camera_p
     
-    world_mode.particle_cache = push(&tran_state.arena, Particle_Cache, no_clear())
-    init_particle_cache(world_mode.particle_cache)
+    world_mode.particle_cache = push(&tran_state.arena, Particle_Cache)
+    init_particle_cache(world_mode.particle_cache, tran_state.assets)
 }
 
 ////////////////////////////////////////////////

@@ -601,7 +601,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         running_sum += entry.stats.sum
         
         text := debug_print("total %cy - % %% / % %% - %",
-            view_magnitude(cast(u64) entry.stats.sum),
+            view_magnitude(cast(u32) entry.stats.sum),
             view_float(entry.stats.sum * total_time_percentage, width = 2, precision = 2),
             view_float(running_sum * total_time_percentage, width = 2, precision = 2),
             entry.element.guid.name,

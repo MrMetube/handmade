@@ -10,7 +10,6 @@ package game
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
-FountainTest:                  b32 = true
 ShowGrid:                      b32
 EnvironmentTest:               b32
 UseDebugCamera:                b32
@@ -243,7 +242,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
         
         { debug_data_block("Tests")
-            debug_record_value(&FountainTest)
             debug_record_value(&ShowGrid)
             debug_record_value(&EnvironmentTest)
         }
@@ -256,8 +254,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Profile")
-        debug_ui_element(ArenaOccupancy{ &state.mode_arena }, "Mode Arena")
-        debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transitive State Arena")
+        debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transient State Arena")
         debug_ui_element(FrameSlider{})
         debug_ui_element(FrameBarsGraph{})
         debug_ui_element(FrameInfo{})

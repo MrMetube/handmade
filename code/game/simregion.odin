@@ -95,10 +95,6 @@ begin_sim :: proc(sim_arena: ^Arena, world_mode: ^World_Mode, origin: WorldPosit
                             
                             if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {
                                 dest.flags += { .active }
-                                if particle_cache != nil && source.has_particle_system {
-                                    particle_system := get_or_create_particle_system(particle_cache, dest.id, source.particle_spec, true)
-                                    consider_particle_system_active(particle_cache, particle_system)
-                                }
                             }
                             
                             if dest.brain_id != 0 {
