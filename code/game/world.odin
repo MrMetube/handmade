@@ -92,8 +92,10 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     sim_bounds := add_radius(camera_bounds, v3{30, 30, 20})
     sim_origin := world_mode.camera_p
     
-    sim_region := begin_sim(&tran_state.arena, world_mode, sim_origin, sim_bounds, dt, world_mode.particle_cache)
+    sim_region := begin_sim(sim_memory.arena, world_mode, sim_origin, sim_bounds, dt, world_mode.particle_cache)
     
+    frame_to_frame_camera_delta := world_distance(world_mode.world, world_mode.last_camera_p, world_mode.camera_p)
+    world_mode.last_camera_p = world_mode.camera_p
     camera_p := world_mode.camera_offset + world_distance(world_mode.world, world_mode.camera_p, sim_origin)
     
     if ShowRenderAndSimulationBounds {
@@ -152,7 +154,7 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     
     update_and_render_entities(input, world_mode, sim_region, render_group, camera_p, dt, haze_color)
     
-    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt, camera_p)
+    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt, frame_to_frame_camera_delta, camera_p)
     
     ////////////////////////////////////////////////
     
@@ -264,19 +266,17 @@ extract_chunk :: proc(world: ^World_, chunk_p: v3i) -> (result: ^Chunk) {
     return result
 }
 
-pack_entity_into_world :: proc(region: ^SimRegion, world: ^World_, source: ^Entity, p: WorldPosition) {
+use_space_in_world :: proc(world: ^World_, pack_size: i64, p: WorldPosition) -> (result: ^Entity) {
     chunk := get_chunk(&world.arena, world, p)
     assert(chunk != nil)
     
-    source.p = p.offset
-
-    pack_entity_into_chunk(region, world, source, chunk)
+    result = use_space_in_chunk(world, pack_size, chunk)
+    
+    return result
 }
 
-pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World_, source: ^Entity, chunk: ^Chunk) {
+use_space_in_chunk :: proc(world: ^World_, pack_size: i64, chunk: ^Chunk) -> (result: ^Entity) {
     assert(chunk != nil)
-    
-    pack_size := cast(i64) size_of(Entity)
     
     if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
         new_block := list_pop_head(&world.first_free_block) or_else push(&world.arena, WorldEntityBlock, no_clear())
@@ -290,38 +290,11 @@ pack_entity_into_chunk :: proc(region: ^SimRegion, world: ^World_, source: ^Enti
     block := chunk.first_block
     
     // :PointerArithmetic
-    entity := cast(^Entity)  &block.entity_data.data[block.entity_data.count]
+    result = cast(^Entity)  &block.entity_data.data[block.entity_data.count]
     block.entity_data.count += pack_size
     block.entity_count += 1
     
-    entity ^= source^
-    
-    // @volatile see Entity definition @metaprogram
-    entity.ddp = 0
-    entity.ddt_bob = 0
-    
-    pack_traversable_reference(region, &entity.came_from)
-    pack_traversable_reference(region, &entity.occupying)
-    
-    pack_traversable_reference(region, &entity.auto_boost_to)
-}
-
-pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
-    if ref.pointer != nil {
-        if .MarkedForDeletion in ref.pointer.flags {
-            ref.id = 0
-        } else {
-            ref.id = ref.pointer.id
-        }
-    } else if ref.id != 0 {
-        if region != nil && get_entity_hash_from_id(region, ref.id) != nil {
-            ref.id = 0
-        }
-    }
-}
-
-pack_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReference) {
-    pack_entity_reference(region, &ref.entity)
+    return result
 }
 
 clear_world_entity_block :: proc(block: ^WorldEntityBlock) {

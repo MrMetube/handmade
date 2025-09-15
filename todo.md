@@ -29,7 +29,6 @@
 ### Implement multiple sim regions per frame
   - per-entity clocking
   - sim region merging?  for multiple players?
-  - simple zoomed out view for testing
 ### AI
   - AI "storage"    
 

@@ -15,6 +15,8 @@ SimRegion :: struct {
     // @todo(viktor): Do I really want a hash for this?
     entity_hash: [4096]EntityHash,
     brain_hash:  [128]BrainHash,
+    
+    null_entity: Entity,
 }
 
 BrainHash :: struct {
@@ -66,42 +68,42 @@ begin_sim :: proc(sim_arena: ^Arena, world_mode: ^World_Mode, origin: WorldPosit
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
                     chunk_delta := world_distance(region.world, chunk_world_p, region.origin)
+                    
                     block := chunk.first_block
                     for block != nil {
+                        
                         entities := slice_from_parts(Entity, &block.entity_data.data, block.entity_count)
                         for &source in entities {
                             // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
                             assert(source.id != 0)
                             
-                            hash := get_entity_hash_from_id(region, source.id)
-                            assert(hash != nil)
-                            assert(hash.pointer == nil)
-                            
-                            dest := append(&region.entities)
-                            
-                            assert(hash.id == 0 || hash.id == source.id)
-                            hash.id = source.id
-                            hash.pointer = dest
-                            
-                            // @todo(viktor): this should really be a decompression not a copy
-                            dest ^= source
-                            
-                            dest.id = source.id
-                            dest.p += chunk_delta
-                            
-                            // @todo(viktor): @transient marked members should not be unpacked
-                            dest.manual_sort_key = {}
-                            dest.z_layer = chunk_z
-                            
-                            if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {
-                                dest.flags += { .active }
-                            }
-                            
-                            if dest.brain_id != 0 {
-                                brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
+                            if region.entities.count < auto_cast len(region.entities.data) {
+                                dest := append(&region.entities)
                                 
-                                base := slice_from_parts(^Entity, &brain.parts, size_of(brain.parts) / size_of(^Entity))
-                                base[dest.brain_slot.index] = dest
+                                // @todo(viktor): this should really be a decompression not a copy
+                                dest ^= source
+                                
+                                dest.id = source.id
+                                dest.p += chunk_delta
+                                
+                                // @todo(viktor): @transient marked members should not be unpacked
+                                dest.manual_sort_key = {}
+                                dest.z_layer = chunk_z
+                                
+                                add_entity_to_hash(region, dest)
+                                
+                                if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {
+                                    dest.flags += { .active }
+                                }
+                                
+                                if dest.brain_id != 0 {
+                                    brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
+                                    
+                                    base := slice_from_parts(^Entity, &brain.parts, size_of(brain.parts) / size_of(^Entity))
+                                    base[dest.brain_slot.index] = dest
+                                }
+                            } else {
+                                unreachable()
                             }
                         }
                         
@@ -188,8 +190,64 @@ end_sim :: proc(region: ^SimRegion, world_mode: ^World_Mode) {
         }
         
         entity.p += chunk_delta
+        
+        dest := use_space_in_world(region.world, size_of(Entity), entity_p)
+        entity.p = entity_p.offset
+        
+        dest ^= entity
+        
+        // @volatile see Entity definition @metaprogram
+        dest.ddp = 0
+        dest.ddt_bob = 0
+        
+        pack_traversable_reference(region, &dest.came_from)
+        pack_traversable_reference(region, &dest.occupying)
+        
+        pack_traversable_reference(region, &dest.auto_boost_to)
+    }
+}
 
-        pack_entity_into_world(region, region.world, &entity, entity_p)
+////////////////////////////////////////////////
+
+pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
+    if ref.pointer != nil {
+        if .MarkedForDeletion in ref.pointer.flags {
+            ref.id = 0
+        } else {
+            ref.id = ref.pointer.id
+        }
+    } else if ref.id != 0 {
+        if region != nil && get_entity_hash_from_id(region, ref.id) != nil {
+            ref.id = 0
+        }
+    }
+}
+
+pack_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReference) {
+    pack_entity_reference(region, &ref.entity)
+}
+
+////////////////////////////////////////////////
+
+create_entity :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity) {
+    result = &region.null_entity
+    if region.entities.count < auto_cast len(region.entities.data) {
+        result = append(&region.entities)
+    } else {
+        unreachable()
+    }
+    
+    // @todo(viktor): worry about this taking a while once the entity is large (sparse clear?)
+    result ^= { id = id }
+    
+    add_entity_to_hash(region, result)
+    
+    return result
+}
+
+mark_for_deletion :: proc(entity: ^Entity) {
+    if entity != nil {
+        entity.flags += { .MarkedForDeletion }
     }
 }
 
@@ -303,6 +361,15 @@ get_entity_hash_from_id :: proc(region: ^SimRegion, id: EntityId) -> (result: ^E
     return result
 }
 
+add_entity_to_hash :: proc (region: ^SimRegion, entity: ^Entity) {
+    hash := get_entity_hash_from_id(region, entity.id)
+    assert(hash != nil)
+    assert(hash.pointer == nil)
+    assert(hash.id == 0 || hash.id == entity.id)
+    hash.id = entity.id
+    hash.pointer = entity
+}
+
 get_or_add_brain :: proc(region: ^SimRegion, id: BrainId, kind: BrainKind) -> (result: ^Brain) {
     hash := get_brain_hash_from_id(region, id)
     result = hash.pointer
@@ -347,6 +414,8 @@ load_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReferenc
     load_entity_reference(region, &ref.entity)
 }
 
+////////////////////////////////////////////////
+
 get_traversable :: proc { get_traversable_ref, get_traversable_raw }
 get_traversable_ref :: proc(ref: TraversableReference) -> (result: ^TraversablePoint) {
     return get_traversable_raw(ref.entity.pointer, ref.index)
@@ -389,6 +458,8 @@ transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, d
     
     return result
 }
+
+////////////////////////////////////////////////
 
 move_entity :: proc(world_mode: ^World_Mode, region: ^SimRegion, entity: ^Entity, dt: f32) {
     timed_function()

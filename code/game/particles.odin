@@ -31,13 +31,14 @@ init_particle_cache :: proc (cache: ^Particle_Cache, assets: ^Assets) {
     cache.fire_system.bitmap_id = first_bitmap_from(assets, .Head)
 }
 
-update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group: ^RenderGroup, dt: f32, camera_p: v3) {
-    update_and_render_fire(&cache.fire_system, render_group, dt, camera_p)
+update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group: ^RenderGroup, dt: f32, frame_displacement: v3, camera_p: v3) {
+    update_and_render_fire(&cache.fire_system, render_group, dt, frame_displacement, camera_p)
 }
 
-update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, camera_p: v3) {
+update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, frame_displacement: v3, camera_p: v3) {
     timed_function()
     
+    frame_displacement := vec_cast(lane_f32, frame_displacement)
     transform := default_upright_transform()
     
     when false {
@@ -105,6 +106,7 @@ update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGr
         
         // @note(viktor): simulate particle forward in time
         particle.p     += particle_ddp * 0.5 * square(dt) + particle.dp * dt
+        particle.p     += frame_displacement
         particle.dp    += particle_ddp * dt
         particle.color += particle.dcolor * dt
         // @todo(viktor): should we just clamp colors in the renderer?

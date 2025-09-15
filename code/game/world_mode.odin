@@ -12,6 +12,7 @@ World_Mode :: struct {
     // @todo(viktor): Should we allow split-screen?
     camera_following_id: EntityId,
     camera_p:            WorldPosition,
+    last_camera_p:       WorldPosition,
     camera_offset:       v3,
     
     collision_rule_hash:       [256] ^PairwiseCollsionRule,
@@ -30,11 +31,7 @@ World_Mode :: struct {
     // @note(viktor): Only for testing, use Input.delta_time and your own t-values.
     time: f32,
     
-    // @todo(viktor): This could just be done in temporary memory.
-    // @todo(viktor): This should catch bugs, remove once satisfied.
-    creation_buffer_index: u32,
-    creation_buffer:       [4]Entity,
-    last_used_entity_id:   EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
+    last_used_entity_id: EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
     
     game_entropy:    RandomSeries,
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
@@ -44,7 +41,8 @@ World_Mode :: struct {
     _particles:     [256] Particle,
     _cells:         [ParticleCellSize] [ParticleCellSize] ParticleCell,
     
-    particle_cache: ^Particle_Cache,
+    particle_cache:  ^Particle_Cache,
+    creation_region: ^SimRegion,
 }
 
 ParticleCellSize :: 16
@@ -106,6 +104,9 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     
     ////////////////////////////////////////////////
     // "World Gen"
+    
+    creation_memory := begin_temporary_memory(&tran_state.arena)
+    world_mode.creation_region = begin_sim(creation_memory.arena, world_mode, {}, {}, 0, nil)
     
     screen_base: v3i
     
@@ -212,6 +213,9 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
         }
     }
     
+    end_sim(world_mode.creation_region, world_mode)
+    world_mode.creation_region = nil
+    end_temporary_memory(creation_memory)
     
     new_camera_p := chunk_position_from_tile_positon(
         world_mode,
@@ -228,17 +232,13 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
 
 ////////////////////////////////////////////////
 
-begin_entity :: proc(world: ^World_Mode) -> (result: ^Entity) {
-    assert(world.creation_buffer_index < len(world.creation_buffer))
-    world.creation_buffer_index += 1
-    
-    result = &world.creation_buffer[world.creation_buffer_index]
+begin_entity :: proc(world_mode: ^World_Mode) -> (result: ^Entity) {
+    result = create_entity(world_mode.creation_region, allocate_entity_id(world_mode))
+ 
     // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
-    result ^= {}
+    result ^= { id = result.id }
     
-    world.last_used_entity_id += 1
-    result.id = world.last_used_entity_id
-    result.collision = world.null_collision
+    result.collision = world_mode.null_collision
     
     result.x_axis = {1, 0}
     result.y_axis = {0, 1}
@@ -246,12 +246,15 @@ begin_entity :: proc(world: ^World_Mode) -> (result: ^Entity) {
     return result
 }
 
+allocate_entity_id :: proc (world_mode: ^World_Mode) -> (result: EntityId) {
+    world_mode.last_used_entity_id += 1
+    result = world_mode.last_used_entity_id
+ 
+    return result
+}
+
 end_entity :: proc(world_mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
-    assert(world_mode.creation_buffer_index > 0)
-    world_mode.creation_buffer_index -= 1
-    entity.p = p.offset
-    
-    pack_entity_into_world(nil, world_mode.world, entity, p)
+    entity.p = world_distance(world_mode.world, p, world_mode.creation_region.origin)
 }
 
 // @cleanup
@@ -272,12 +275,6 @@ add_brain :: proc(world_mode: ^World_Mode) -> (result: BrainId) {
     return result
 }
 
-mark_for_deletion :: proc(entity: ^Entity) {
-    if entity != nil {
-        entity.flags += { .MarkedForDeletion }
-    }
-}
-
 add_wall :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(world_mode, world_mode.wall_collision)
     defer end_entity(world_mode, entity, p)
@@ -292,6 +289,9 @@ add_wall :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Traversab
 }
 
 add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
+    world_mode.creation_region = region
+    defer world_mode.creation_region = nil
+    
     p := map_into_worldspace(world_mode.world, region.origin, get_sim_space_traversable(occupying).p)
     
     body := begin_grounded_entity(world_mode, world_mode.hero_body_collision)
