@@ -473,7 +473,7 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
-        result = random_between_u32(series, type.first_asset_index, type.one_past_last_index-1)
+        result = random_between(series, u32, type.first_asset_index, type.one_past_last_index-1)
     }
     
     return result
@@ -762,7 +762,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
         if ok, _ := atomic_compare_exchange(&asset.state, AssetState.Unloaded, AssetState.Queued); ok {
             task: ^TaskWithMemory
             if !immediate {
-                task = begin_task_with_memory(assets.tran_state) 
+                task = begin_task_with_memory(assets.tran_state, true) 
             }
             
             if immediate || task != nil {

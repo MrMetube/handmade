@@ -4,7 +4,7 @@ package game
 @(common="file")
 
 Arena :: struct {
-    storage:    []u8, // :Array
+    storage:    []u8,
     used:       u64,
     temp_count: i32,
 }
@@ -35,7 +35,9 @@ align_no_clear :: proc (#any_int alignment: u32, clear_to_zero: b32 = false) -> 
 align_clear    :: proc (#any_int alignment: u32, clear_to_zero: b32 = true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 
 init_arena :: proc(arena: ^Arena, storage: []u8) {
-    arena.storage = storage
+    arena ^= {
+        storage = storage
+    }
 }
 
 push :: proc { push_slice, push_struct, push_size, copy_string }
@@ -180,4 +182,9 @@ end_temporary_memory :: proc(temp_mem: TemporaryMemory) {
 
 check_arena :: proc(arena: ^Arena) {
     assert(arena.temp_count == 0)
+}
+
+clear_arena :: proc(arena: ^Arena) {
+    assert(arena.temp_count == 0)
+    init_arena(arena, arena.storage)
 }

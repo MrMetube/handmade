@@ -83,7 +83,7 @@ mark_brain_active :: proc (brain: ^Brain) {
     }
 }
 
-execute_brain :: proc(input: Input, world: ^World_Mode, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
+execute_brain :: proc(state: ^State, input: Input, world: ^World_Mode, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
     dt := input.delta_time
     
     switch brain.kind {
@@ -92,7 +92,7 @@ execute_brain :: proc(input: Input, world: ^World_Mode, region: ^SimRegion, rend
         using brain.hero
         
         controller_index := brain.id - cast(BrainId) ReservedBrainId.FirstHero
-        con_hero := &world.controlled_heroes[controller_index]
+        con_hero := &state.controlled_heroes[controller_index]
         controller := input.controllers[controller_index]
         
         if was_pressed(controller.back) {

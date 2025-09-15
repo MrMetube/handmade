@@ -100,13 +100,17 @@ GameMemory :: struct {
 State :: struct {
     is_initialized: b32,
     
-    mode_arena: Arena,
+    mode_arena:  Arena,
+    // :CutsceneEpisodes
+    audio_arena: Arena, // @todo(viktor): move this out into the audio system properly!
+    
+    controlled_heroes: [len(Input{}.controllers)] ControlledHero,
     
     mixer: Mixer,
-    world: World_Mode,
-    
     // @note(viktor): This is for testing the changing of volume and pitch and should not persist.
     music: ^PlayingSound,
+    
+    game_mode: Game_Mode,
 }
 
 TransientState :: struct {
@@ -128,25 +132,17 @@ TransientState :: struct {
     envs: [3]EnvironmentMap,
 }
 
-ParticleCellSize :: 16
-
-ParticleCell :: struct {
-    density: f32,
-    velocity_times_density: v3,
+Game_Mode :: union {
+    ^Titlescreen_Mode,
+    ^Cutscene_Mode,
+    ^World_Mode,
 }
-
-Particle :: struct {
-    p:      v3,
-    dp:     v3,
-    ddp:    v3,
-    color:  v4,
-    dcolor: v4,
-    
-    bitmap_id: BitmapId,
-}
+Titlescreen_Mode :: struct {}
+Cutscene_Mode :: struct {}
 
 TaskWithMemory :: struct {
     in_use: b32,
+    depends_on_game_mode: b32,
     arena: Arena,
     
     memory_flush: TemporaryMemory,
@@ -181,8 +177,13 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     assert(size_of(State) <= len(memory.permanent_storage))
     state := cast(^State) raw_data(memory.permanent_storage)
     if !state.is_initialized {
-        init_arena(&state.mode_arena, memory.permanent_storage[size_of(State):])
+        total_arena: Arena
+        init_arena(&total_arena, memory.permanent_storage[size_of(State):])
         
+        sub_arena(&state.audio_arena, &total_arena, 1 * Megabyte)
+        sub_arena(&state.mode_arena, &total_arena, arena_remaining_size(&total_arena))
+        
+        // :CutsceneEpisodes CheckForMetaInput
         do_init_world = true
         
         init_mixer(&state.mixer, &state.mode_arena)
@@ -230,7 +231,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     if do_init_world {
-        play_world(&state.world, &state.mode_arena, tran_state)
+        play_world(state, tran_state)
     }
 
     ////////////////////////////////////////////////
@@ -256,7 +257,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     { debug_data_block("Profile")
         debug_ui_element(ArenaOccupancy{ &state.mode_arena }, "Mode Arena")
-        debug_ui_element(ArenaOccupancy{ &state.world.arena }, "World Arena")
         debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transitive State Arena")
         debug_ui_element(FrameSlider{})
         debug_ui_element(FrameBarsGraph{})
@@ -308,8 +308,12 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     rerun := false
     
     for {
-        // switch state.game_mode
-        /* rerun = */update_and_render_world(&state.world, tran_state, &render_group, input)
+        switch mode in state.game_mode {
+          case ^Titlescreen_Mode: unreachable()
+          case ^Cutscene_Mode:    unreachable()
+          case ^World_Mode:
+            /* rerun = */update_and_render_world(state, mode, tran_state, &render_group, input)
+        }
         
         if !rerun do break
     }
@@ -325,6 +329,20 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     check_arena(&state.mode_arena)
     check_arena(&tran_state.arena)
+}
+
+set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid) {
+    need_to_wait := false
+    for task in tran_state.tasks {
+        need_to_wait ||= task.depends_on_game_mode
+    }
+    
+    if need_to_wait {
+        Platform.complete_all_work(tran_state.low_priority_queue)
+    }
+    clear_arena(&state.mode_arena)
+    
+    state.game_mode = mode{}
 }
 
 // @note(viktor): at the moment this has to be a really fast function. It shall not be slower than a
@@ -353,14 +371,14 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
 
 ////////////////////////////////////////////////
 
-begin_task_with_memory :: proc(tran_state: ^TransientState) -> (result: ^TaskWithMemory) {
+begin_task_with_memory :: proc(tran_state: ^TransientState, depends_on_game_mode: b32) -> (result: ^TaskWithMemory) {
     for &task in tran_state.tasks {
         if !task.in_use {
             result = &task
             
-            task.memory_flush = begin_temporary_memory(&task.arena)
+            result.memory_flush = begin_temporary_memory(&result.arena)
             result.in_use = true
-            
+            result.depends_on_game_mode = depends_on_game_mode
             break
         }
     }

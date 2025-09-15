@@ -1,7 +1,7 @@
 package game
 
 SimRegion :: struct {
-    world: ^World_Mode,
+    world: ^World_,
     
     origin: WorldPosition, 
     bounds, updatable_bounds: Rectangle3,
@@ -29,7 +29,7 @@ EntityHash :: struct {
 
 ////////////////////////////////////////////////
 
-begin_sim :: proc(sim_arena: ^Arena, world: ^World_Mode, origin: WorldPosition, bounds: Rectangle3, dt: f32, particle_cache: ^Particle_Cache) -> (region: ^SimRegion) {
+begin_sim :: proc(sim_arena: ^Arena, world_mode: ^World_Mode, origin: WorldPosition, bounds: Rectangle3, dt: f32, particle_cache: ^Particle_Cache) -> (region: ^SimRegion) {
     timed_function()
     
     region = push(sim_arena, SimRegion)
@@ -48,24 +48,24 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World_Mode, origin: WorldPosition, 
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
     UpdateSafetyMarginZ :: 1 // @todo(viktor): what should this be?
     
-    region.world = world
+    region.world = world_mode.world
     region.origin = origin
     region.updatable_bounds = add_radius(bounds, v3{region.max_entity_radius, region.max_entity_radius, 0})
     region.bounds = add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
     
-    min_p := map_into_worldspace(world, region.origin, region.bounds.min)
-    max_p := map_into_worldspace(world, region.origin, region.bounds.max)
+    min_p := map_into_worldspace(region.world, region.origin, region.bounds.min)
+    max_p := map_into_worldspace(region.world, region.origin, region.bounds.max)
     
     // @todo(viktor): @speed this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
-                chunk_p := [3]i32{chunk_x, chunk_y, chunk_z}
-                chunk := extract_chunk(world, chunk_p)
+                chunk_p := v3i{chunk_x, chunk_y, chunk_z}
+                chunk := extract_chunk(region.world, chunk_p)
                 
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
-                    chunk_delta := world_distance(world, chunk_world_p, region.origin)
+                    chunk_delta := world_distance(region.world, chunk_world_p, region.origin)
                     block := chunk.first_block
                     for block != nil {
                         entities := slice_from_parts(Entity, &block.entity_data.data, block.entity_count)
@@ -110,11 +110,11 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World_Mode, origin: WorldPosition, 
                         }
                         
                         next_block := block.next
-                        list_push(&world.first_free_block, block)
+                        list_push(&region.world.first_free_block, block)
                         block = next_block
                     }
                     
-                    list_push(&world.first_free_chunk, chunk)
+                    list_push(&region.world.first_free_chunk, chunk)
                 }
             }
         }
@@ -125,7 +125,7 @@ begin_sim :: proc(sim_arena: ^Arena, world: ^World_Mode, origin: WorldPosition, 
     return region
 }
 
-end_sim :: proc(region: ^SimRegion) {
+end_sim :: proc(region: ^SimRegion, world_mode: ^World_Mode) {
     timed_function()
     
     for &entity in slice(region.entities) {
@@ -137,57 +137,57 @@ end_sim :: proc(region: ^SimRegion) {
         chunk_p.offset = 0
         chunk_delta := entity_p.offset - entity.p
         
-        if entity.id == region.world.camera_following_id {
+        if entity.id == world_mode.camera_following_id {
             // @volatile Room size
-            room_delta := v3{25.5, 13.5, region.world.typical_floor_height}
+            room_delta := v3{25.5, 13.5, world_mode.typical_floor_height}
             half_room_delta := room_delta*0.5
             half_room_apron := half_room_delta - {1, 1, 1} * 0.7
             height :f32= 0.5
-            region.world.camera_offset = 0
+            world_mode.camera_offset = 0
             
             offset: v3
-            delta := world_distance(region.world, entity_p, region.world.camera_p)
+            delta := world_distance(region.world, entity_p, world_mode.camera_p)
             
             for i in 0..<3 {
                 if delta[i] >  half_room_delta[i] do offset[i] += room_delta[i]
                 if delta[i] < -half_room_delta[i] do offset[i] -= room_delta[i]
             }
             
-            region.world.camera_p = map_into_worldspace(region.world, region.world.camera_p, offset)
+            world_mode.camera_p = map_into_worldspace(region.world, world_mode.camera_p, offset)
             
             delta -= offset
             if delta.y >  half_room_apron.y {
                 t := clamp_01_map_to_range(half_room_apron.y, delta.y, half_room_delta.y)
-                region.world.camera_offset.y = t*half_room_delta.y
-                region.world.camera_offset.z = (-(t*t)+2*t)*height
+                world_mode.camera_offset.y = t*half_room_delta.y
+                world_mode.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.y < -half_room_apron.y {
                 t := clamp_01_map_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
-                region.world.camera_offset.y = t*-half_room_delta.y
-                region.world.camera_offset.z = (-(t*t)+2*t)*height
+                world_mode.camera_offset.y = t*-half_room_delta.y
+                world_mode.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.x >  half_room_apron.x {
                 t := clamp_01_map_to_range(half_room_apron.x, delta.x, half_room_delta.x)
-                region.world.camera_offset.x = t*half_room_delta.x
-                region.world.camera_offset.z = (-(t*t)+2*t)*height
+                world_mode.camera_offset.x = t*half_room_delta.x
+                world_mode.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.x < -half_room_apron.x {
                 t := clamp_01_map_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
-                region.world.camera_offset.x = t*-half_room_delta.x
-                region.world.camera_offset.z = (-(t*t)+2*t)*height
+                world_mode.camera_offset.x = t*-half_room_delta.x
+                world_mode.camera_offset.z = (-(t*t)+2*t)*height
             }
             
             if delta.z >  half_room_apron.z {
                 t := clamp_01_map_to_range(half_room_apron.z, delta.z, half_room_delta.z)
-                region.world.camera_offset.z = t*half_room_delta.z
+                world_mode.camera_offset.z = t*half_room_delta.z
             }
             
             if delta.z < -half_room_apron.z {
                 t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
-                region.world.camera_offset.z = t*-half_room_delta.z
+                world_mode.camera_offset.z = t*-half_room_delta.z
             }
         }
         
@@ -394,7 +394,7 @@ transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, d
     return result
 }
 
-move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
+move_entity :: proc(world_mode: ^World_Mode, region: ^SimRegion, entity: ^Entity, dt: f32) {
     timed_function()
     
     entity_delta := 0.5*entity.ddp * square(dt) + entity.dp * dt
@@ -427,7 +427,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
                     
                 // @todo(viktor): Robustness!
                 OverlapEpsilon :: 0.001
-                if can_collide(region.world, entity, &test_entity) {
+                if can_collide(world_mode, entity, &test_entity) {
                     for volume in entity.collision.volumes {
                         for test_volume in test_entity.collision.volumes {
                             minkowski_diameter := get_dimension(volume) + get_dimension(test_volume)
@@ -507,7 +507,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
             if hit != nil {
                 entity_delta = desired_p - entity.p
                 
-                stops_on_collision := handle_collision(region.world, entity, hit)
+                stops_on_collision := handle_collision(world_mode, entity, hit)
                 if stops_on_collision {
                     entity.dp.xy    = project(entity.dp.xy, wall_normal)
                     entity_delta.xy = project(entity_delta.xy, wall_normal)

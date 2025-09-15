@@ -40,6 +40,8 @@ AssetTypeId :: enum u32 {
     
     // @note(viktor): Fonts
     Font, FontGlyph,
+    
+    // @todo(viktor): :CutsceneEpisodes cutscene stuff
 }
 
 AssetFontType :: enum {
@@ -84,8 +86,8 @@ AssetData :: struct #packed {
 }
 
 BitmapInfo :: struct #packed {
-    dimension:        [2]u32,
-    align_percentage: [2]f32,
+    dimension:        [2] u32,
+    align_percentage: [2] f32,
     // @note(viktor): Data is:
     //     pixels: [dimension[1]][dimension[2]] [4]u8
 }

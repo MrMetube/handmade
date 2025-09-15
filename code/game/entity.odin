@@ -143,287 +143,15 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-begin_entity :: proc(world: ^World_Mode) -> (result: ^Entity) {
-    assert(world.creation_buffer_index < len(world.creation_buffer))
-    world.creation_buffer_index += 1
-    
-    result = &world.creation_buffer[world.creation_buffer_index]
-    // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
-    result ^= {}
-    
-    world.last_used_entity_id += 1
-    result.id = world.last_used_entity_id
-    result.collision = world.null_collision
-    
-    result.x_axis = {1, 0}
-    result.y_axis = {0, 1}
-    
-    return result
-}
-
-end_entity :: proc(world: ^World_Mode, entity: ^Entity, p: WorldPosition) {
-    assert(world.creation_buffer_index > 0)
-    world.creation_buffer_index -= 1
-    entity.p = p.offset
-    
-    pack_entity_into_world(nil, world, entity, p)
-}
-
-// @cleanup
-begin_grounded_entity :: proc(world: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
-    result = begin_entity(world)
-    result.collision = collision
-    
-    return result
-}
-
-add_brain :: proc(world: ^World_Mode) -> (result: BrainId) {
-    world.last_used_entity_id += 1
-    for world.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
-        world.last_used_entity_id += 1
-    }
-    result = cast(BrainId) world.last_used_entity_id
-    
-    return result
-}
-
-mark_for_deletion :: proc(entity: ^Entity) {
-    if entity != nil {
-        entity.flags += { .MarkedForDeletion }
-    }
-}
-
-add_wall :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(world, world.wall_collision)
-    defer end_entity(world, entity, p)
-    
-    entity.flags += {.Collides}
-    entity.occupying = occupying
-    append(&entity.pieces, VisiblePiece{
-        asset = .Rock,
-        height = 1.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
-        color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
-    })
-}
-
-add_hero :: proc(world: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
-    p := map_into_worldspace(world, region.origin, get_sim_space_traversable(occupying).p)
-    
-    body := begin_grounded_entity(world, world.hero_body_collision)
-        body.brain_id = brain_id
-        body.brain_kind = .Hero
-        body.brain_slot = brain_slot_for(BrainHero, "body")
-        
-        // @todo(viktor): We will probably need a creation-time system for
-        // guaranteeing no overlapping occupation.
-        body.occupying = occupying
-        
-        append(&body.pieces, VisiblePiece{
-            asset  = .Shadow,
-            height = 0.5,
-            offset = {0, -0.5, 0},
-            color  = {1,1,1,0.5},
-        })        
-        append(&body.pieces, VisiblePiece{
-            asset  = .Cape,
-            height = hero_height*1.3,
-            offset = {0, -0.3, 0},
-            color  = 1,
-            flags  = { .SquishAxis, .BobUpAndDown },
-        })
-        append(&body.pieces, VisiblePiece{
-            asset  = .Body,
-            height = hero_height,
-            color  = 1,
-            flags  = { .SquishAxis },
-        })
-        
-    end_entity(world, body, p)
-    
-    head := begin_grounded_entity(world, world.hero_head_collision)
-        head.flags += {.Collides}
-        head.brain_id = brain_id
-        head.brain_kind = .Hero
-        head.brain_slot = brain_slot_for(BrainHero, "head")
-        head.movement_mode = ._Floating
-        
-        hero_height :: 3.5
-        // @todo(viktor): should render above the body
-        append(&head.pieces, VisiblePiece{
-            asset  = .Head,
-            height = hero_height*1.4,
-            offset = {0, -0.9*hero_height, 0},
-            color  = 1,
-        })
-        
-        init_hitpoints(head, 3)
-        
-        if world.camera_following_id == 0 {
-            world.camera_following_id = head.id
-        }
-    end_entity(world, head, p)
-    
-    glove := begin_grounded_entity(world, world.glove_collision)
-        glove.flags += {.Collides}
-        glove.brain_id = brain_id
-        glove.brain_kind = .Hero
-        glove.brain_slot = brain_slot_for(BrainHero, "glove")
-        
-        glove.movement_mode = .AngleOffset
-        glove.angle_current = -0.25 * Tau
-        glove.angle_base_offset  = 0.75
-        glove.angle_swipe_offset = 1.5
-        
-        append(&head.pieces, VisiblePiece{
-            asset  = .Sword,
-            height = hero_height,
-            offset = {0, -0.5*hero_height, 0},
-            color  = 1,
-        })
-        
-    end_entity(world, glove, p)
-}
-
-add_snake_piece :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
-    entity := begin_grounded_entity(world, world.monstar_collision)
-    defer end_entity(world, entity, p)
-    
-    entity.flags += {.Collides}
-    
-    entity.brain_id = brain_id
-    entity.brain_kind = .Snake
-    entity.brain_slot = brain_slot_for(BrainSnake, "segments", segment_index)
-    entity.occupying = occupying
-    
-    height :: 0.5
-    append(&entity.pieces, VisiblePiece{
-        asset  = .Shadow,
-        height = height,
-        offset = {0, -height, 0},
-        color  = {1,1,1,0.5},
-    })
-    
-    append(&entity.pieces, VisiblePiece{
-        asset  = segment_index == 0 ? .Head : .Body,
-        height = 1,
-        color  = 1,
-    })
-    
-    init_hitpoints(entity, 3)
-}
-
-add_monster :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(world, world.monstar_collision)
-    defer end_entity(world, entity, p)
-    
-    entity.flags += {.Collides}
-    
-    entity.brain_id = add_brain(world)
-    entity.brain_kind = .Monster
-    entity.brain_slot = brain_slot_for(BrainMonster, "body")
-    entity.occupying = occupying
-    
-    height :: 0.75
-    append(&entity.pieces, VisiblePiece{
-        asset  = .Shadow,
-        height = height,
-        offset = {0, -height, 0},
-        color  = {1,1,1,0.5},
-    })
-    
-    append(&entity.pieces, VisiblePiece{
-        asset  = .Monster,
-        height = 1.5,
-        color  = 1,
-    })
-    
-    init_hitpoints(entity, 3)
-}
-
-add_familiar :: proc(world: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(world, world.familiar_collision)
-    defer end_entity(world, entity, p)
-    
-    entity.brain_id   = add_brain(world)
-    entity.brain_kind = .Familiar
-    entity.brain_slot = brain_slot_for(BrainFamiliar, "familiar")
-    entity.occupying  = occupying
-    entity.movement_mode = ._Floating
-    
-    append(&entity.pieces, VisiblePiece{
-        asset  = .Head,
-        height = 2,
-        color  = 1,
-        offset = {0, 1, 0},
-        flags  = { .BobUpAndDown },
-    })
-    
-    append(&entity.pieces, VisiblePiece{
-        asset  = .Shadow,
-        height = 0.3,
-        color  = {1,1,1,0.5},
-    })
-}
-
-StandartRoom :: struct { // :RoomSize
-    p:      [17][9] WorldPosition,
-    ground: [17][9] TraversableReference,
-}
-
-add_standart_room :: proc(world: ^World_Mode, p: WorldPosition, left_hole, right_hole: bool, target: TraversableReference) -> (result: StandartRoom) {
-    // @volatile :RoomSize
-    h_width  :i32= 17/2
-    h_height :i32=  9/2
-    tile_size_in_meters :: 1.5
-    
-    for offset_y in -h_height..=h_height {
-        for offset_x in -h_width..=h_width {
-            p := p
-            p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
-            p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
-            result.p[offset_x+8][offset_y+4] = p
-            
-            if left_hole && (offset_x >= -3 && offset_x <= -2 && offset_y >= -1 && offset_y <= 1) {
-                // @note(viktor): hole down to floor below
-            } else if right_hole && (offset_x >= 2 && offset_x <= 3 && offset_y >= -1 && offset_y <= 1) {
-                // @note(viktor): hole down to floor below
-            } else {
-                entity := begin_grounded_entity(world, world.floor_collision)
-                entity.traversables = make_array(&world.arena, TraversablePoint, 1)
-                append(&entity.traversables, TraversablePoint{})
-                if (right_hole && offset_x == 1 && offset_y == 0) || (left_hole && offset_x == -1 && offset_y == 0) {
-                    entity.auto_boost_to = target
-                }
-                end_entity(world, entity, p)
-                
-                occupying: TraversableReference
-                occupying.entity.id = entity.id
-                result.ground[offset_x+8][offset_y+4] = occupying
-            }
-        }
-    }
-    
-    return result
-}
-
-init_hitpoints :: proc(entity: ^Entity, count: u32) {
-    assert(count < len(entity.hit_points))
-
-    entity.hit_point_max = count
-    for &hit_point in entity.hit_points[:count] {
-        hit_point = { filled_amount = HitPointPartCount }
-    }
-}
-
-update_and_render_entities :: proc(input: Input, world: ^World_Mode, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
+update_and_render_entities :: proc(input: Input, world_mode: ^World_Mode, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
     timed_function()
     
-    particle_cache := world.particle_cache
+    particle_cache := world_mode.particle_cache
     
-    fade_top_end      := .9 * world.typical_floor_height
-    fade_top_start    := .5 * world.typical_floor_height
-    fade_bottom_start := -1 * world.typical_floor_height
-    fade_bottom_end   := -4 * world.typical_floor_height
+    fade_top_end      := .9 * world_mode.typical_floor_height
+    fade_top_start    := .5 * world_mode.typical_floor_height
+    fade_bottom_start := -1 * world_mode.typical_floor_height
+    fade_bottom_end   := -4 * world_mode.typical_floor_height
     
     MinimumLayer :: -4
     MaximumLayer :: 1
@@ -433,7 +161,7 @@ update_and_render_entities :: proc(input: Input, world: ^World_Mode, sim_region:
     test_alpha: f32
     for &fog_amount, index in fog_amount {
         relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z[index] = world.typical_floor_height * cast(f32) relative_layer_index - world.camera_offset.z
+        camera_relative_ground_z[index] = world_mode.typical_floor_height * cast(f32) relative_layer_index - world_mode.camera_offset.z
         
         test_alpha = clamp_01_map_to_range(fade_top_end,      camera_relative_ground_z[index], fade_top_start)
         fog_amount = clamp_01_map_to_range(fade_bottom_start, camera_relative_ground_z[index], fade_bottom_end)
@@ -556,7 +284,7 @@ update_and_render_entities :: proc(input: Input, world: ^World_Mode, sim_region:
             }
                             
             if entity.ddp != 0 || entity.dp != 0 {
-                move_entity(sim_region, &entity, dt)
+                move_entity(world_mode, sim_region, &entity, dt)
             }
             
             ////////////////////////////////////////////////
@@ -680,61 +408,6 @@ draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, tran
             // @cleanup rect
             push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)
             health_x += spacing_between
-        }
-    }
-}
-
-// @cleanup
-add_collision_rule :: proc(world:^World_Mode, a, b: EntityId, should_collide: b32) {
-    timed_function()
-    // @todo(viktor): collapse this with should_collide
-    a, b := a, b
-    if a > b do swap(&a, &b)
-    // @todo(viktor): BETTER HASH FUNCTION!!!
-    found: ^PairwiseCollsionRule
-    hash_bucket := a & (len(world.collision_rule_hash) - 1)
-    for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
-        if rule.id_a == a && rule.id_b == b {
-            found = rule
-            break
-        }
-    }
-
-    if found == nil {
-        found = list_pop_head(&world.first_free_collision_rule) or_else push(&world.arena, PairwiseCollsionRule)
-        list_push(&world.collision_rule_hash[hash_bucket], found)
-    }
-
-    if found != nil {
-        found.id_a = a
-        found.id_b = b
-        found.can_collide = should_collide
-    }
-}
-
-// @cleanup
-clear_collision_rules :: proc(world: ^World_Mode, entity_id: EntityId) {
-    timed_function()
-    // @todo(viktor): need to make a better data structute that allows for
-    // the removal of collision rules without searching the entire table
-    // @note(viktor): One way to make removal easy would be to always
-    // add _both_ orders of the pairs of storage indices to the
-    // hash table, so no matter which position the entity is in,
-    // you can always find it. Then, when you do your first pass
-    // through for removal, you just remember the original top
-    // of the free list, and when you're done, do a pass through all
-    // the new things on the free list, and remove the reverse of
-    // those pairs.
-    for hash_bucket in 0..<len(world.collision_rule_hash) {
-        for rule_pointer := &world.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
-            rule := rule_pointer^
-            if rule.id_a == entity_id || rule.id_b == entity_id {
-                // :ListEntryRemovalInLoop
-                list_push(&world.first_free_collision_rule, rule)
-                rule_pointer ^= rule.next
-            } else {
-                rule_pointer = &rule.next
-            }
         }
     }
 }
