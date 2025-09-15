@@ -10,7 +10,7 @@ package game
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
-FountainTest:                  b32
+FountainTest:                  b32 = true
 ShowGrid:                      b32
 EnvironmentTest:               b32
 UseDebugCamera:                b32
