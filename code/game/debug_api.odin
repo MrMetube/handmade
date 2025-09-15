@@ -41,6 +41,7 @@ debug_pointer_id_raw :: proc(pointer: pmm) -> (result: DebugId) {
 
 debug_hit :: proc(id: DebugId, z: f32) {
     debug := get_debug_state()
+    if debug == nil do return
     
     debug.next_hot_interaction = {
         id = id,
@@ -52,7 +53,8 @@ debug_highlighted :: proc(id: DebugId) -> (highlighted: b32, color: v4) {
     when !DebugEnabled do return highlighted, color
     
     debug := get_debug_state()
-
+    if debug == nil do return
+    
     if debug.hot_interaction.id == id {
         highlighted = true
         color = Emerald
@@ -70,6 +72,7 @@ debug_requested :: proc(id: DebugId) -> (result: b32) {
     when !DebugEnabled do return result
     
     debug := get_debug_state()
+    if debug == nil do return
 
     if is_selected(debug, id) {
         result = true

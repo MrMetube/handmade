@@ -85,7 +85,7 @@ GameMemory :: struct {
     permanent_storage: []u8,
     transient_storage: []u8,
     
-    debug_storage: ([]u8        when INTERNAL else struct {}),
+    debug_state:   (pmm         when INTERNAL else struct {}),
     debug_table:   (^DebugTable when INTERNAL else struct {}),
         
     high_priority_queue: ^PlatformWorkQueue,
@@ -154,6 +154,8 @@ ControlledHero :: struct {
 
 // @note(viktor): Platform specific structs
 PlatformWorkQueue  :: struct{}
+
+/* @(export)  */
 Platform: PlatformAPI
 
 @(export)
@@ -162,8 +164,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     when DebugEnabled {
         if GlobalDebugMemory == nil {
-            assert(memory.debug_storage != nil)
-            assert(size_of(DebugState) <= len(memory.debug_storage))
             GlobalDebugMemory = memory
             GlobalDebugTable = memory.debug_table
         }

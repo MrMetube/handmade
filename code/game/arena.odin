@@ -4,9 +4,10 @@ package game
 @(common="file")
 
 Arena :: struct {
-    storage:    []u8,
+    storage:    [] u8,
     used:       u64,
     temp_count: i32,
+    minimum_block_size: u64,
 }
 
 TemporaryMemory :: struct {
@@ -34,9 +35,15 @@ no_clear       :: proc () -> PushParams { return { DefaultAlignment, {} }}
 align_no_clear :: proc (#any_int alignment: u32, clear_to_zero: b32 = false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 align_clear    :: proc (#any_int alignment: u32, clear_to_zero: b32 = true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 
-init_arena :: proc(arena: ^Arena, storage: []u8) {
+init_arena :: proc { init_arena_with_storage, init_arena_with_size }
+init_arena_with_storage :: proc(arena: ^Arena, storage: []u8) {
     arena ^= {
-        storage = storage
+        storage = storage,
+    }
+}
+init_arena_with_size :: proc(arena: ^Arena, minimum_block_size: u64) {
+    arena ^= {
+        minimum_block_size = minimum_block_size,
     }
 }
 
@@ -69,6 +76,19 @@ push_size :: proc(arena: ^Arena, #any_int size_init: u64, params := DefaultPushP
     alignment_offset := arena_alignment_offset(arena, params.alignment)
 
     size := size_init + alignment_offset
+    if arena.used + size >= cast(u64) len(arena.storage) {
+        size = size_init // @note(viktor): the memory will allways be aligned now!
+        
+        if arena.minimum_block_size == 0 {
+            arena.minimum_block_size = 2 * Megabyte
+        }
+        block_size := max(size, arena.minimum_block_size)
+        
+        memory := Platform.allocate_memory(block_size)
+        
+        arena.storage = slice_from_parts(u8, memory, block_size)
+        arena.used = 0
+    }
     assert(arena.used + size < cast(u64) len(arena.storage))
     
     result = &arena.storage[arena.used + alignment_offset]
@@ -153,6 +173,8 @@ arena_get_effective_size :: proc(arena: ^Arena, size_init: u64, alignment: u64) 
 }
 
 arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: u64 = DefaultAlignment) -> (result: u64) {
+    if arena.storage == nil do return 0
+    
     pointer := transmute(u64) &arena.storage[arena.used]
 
     alignment_mask := alignment - 1

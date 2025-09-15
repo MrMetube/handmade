@@ -11,6 +11,9 @@ PlatformAPI :: struct {
     open_next_file:                     PlatformOpenNextFile,
     read_data_from_file:                PlatformReadDataFromFile,
     mark_file_error:                    PlatformMarkFileError,
+    
+    allocate_memory:   PlatformAllocateMemory,
+    deallocate_memory: PlatformDeallocateMemory,
 }
 
 @(common) PlatformWorkQueueCallback :: #type proc(data: pmm)
@@ -31,3 +34,6 @@ PlatformAPI :: struct {
 Platform_no_file_errors :: proc(handle: ^PlatformFileHandle) -> b32 { 
     return handle.no_errors
 }
+
+@(common) PlatformAllocateMemory   :: #type proc(#any_int size: u64) -> (result: pmm)
+@(common) PlatformDeallocateMemory :: #type proc(memory: pmm)

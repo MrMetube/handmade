@@ -30,8 +30,7 @@ DebugPrintBuffer: [1024]u8
 ////////////////////////////////////////////////
 
 DebugState :: struct {
-    initialized: b32,
-    paused:      b32,
+    paused: b32,
     
     arena: Arena,
 
@@ -269,60 +268,14 @@ ClockEntry :: struct {
 debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
     
-    assert(len(memory.debug_storage) >= size_of(DebugState))
-    debug := cast(^DebugState) raw_data(memory.debug_storage)
     
     assets, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
     if assets == nil do return
     
-    if !debug.initialized {
-        debug.initialized = true
-        
-        debug.initialization_clock = read_cycle_counter()
-   
-        // :PointerArithmetic
-        total_memory := memory.debug_storage[size_of(DebugState):]
-        init_arena(&debug.arena, total_memory)
-        
-        when true {
-            sub_arena(&debug.per_frame_arena, &debug.arena, 3 * len(total_memory) / 4)
-        } else { 
-            // @note(viktor): use this to test the handling of deallocation and freeing of frames
-            sub_arena(&debug.per_frame_arena, &debug.arena, 200 * Kilobyte)
-        }
-        
-        debug.collating_frame_ordinal   = 1
-        debug.most_recent_frame_ordinal = 0
-        debug.oldest_frame_ordinal_that_is_already_freed = 0
-        
-        debug.profile_root  = get_element_from_guid_by_parent(debug, { guid = { name = "ProfileRoot" } }, nil, {})
-        debug.profile_group = create_link(debug, "Profiles")
-        
-        debug.root_info     = push_slice(&debug.arena, u8, 512)
-        debug.root_group    = create_link(debug, "Root")
-        debug.root_group.name = cast(string) debug.root_info[:0]
-        
-        debug.font_scale = 0.6
-        
-        left_edge  := -0.5 * cast(f32) render_commands.width
-        top_edge   :=  0.5 * cast(f32) render_commands.height   
-        
-        list_init_sentinel(&debug.tree_sentinel)
-        debug_tree := add_tree(debug, debug.root_group, { left_edge, top_edge })
-        debug_tree.p = { left_edge, top_edge-10 }
-        
-        debug.backing_transform = default_flat_transform()
-        debug.ui_transform      = default_flat_transform()
-        debug.shadow_transform  = default_flat_transform()
-        debug.text_transform    = default_flat_transform()
-        
-        debug.backing_transform.chunk_z = 16_000
-        debug.ui_transform.chunk_z      = 20_000
-        debug.shadow_transform.chunk_z  = 24_000
-        debug.text_transform.chunk_z    = 28_000
-
-        debug.render_target_index = 1
+    if memory.debug_state == nil {
+        memory.debug_state = debug_init(render_commands.width, render_commands.height)
     }
+    debug := cast(^DebugState) memory.debug_state
     
     init_render_group(&debug.render_group, assets, render_commands, false, generation_id)
     push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
@@ -360,9 +313,49 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     push_blend_render_targets(&debug.render_group, debug.render_target_index, 1.0)
 }
 
+debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
+    boot_strap: Arena
+    debug = push(&boot_strap, DebugState)
+    debug.arena = boot_strap
+    
+    debug.initialization_clock = read_cycle_counter()
+    
+    debug.collating_frame_ordinal = 1
+    
+    debug.profile_root  = get_element_from_guid_by_parent(debug, { guid = { name = "ProfileRoot" } }, nil, {})
+    debug.profile_group = create_link(debug, "Profiles")
+    
+    debug.root_info  = push_slice(&debug.arena, u8, 512)
+    debug.root_group = create_link(debug, "Root")
+    debug.root_group.name = cast(string) debug.root_info[:0]
+    
+    debug.font_scale = 0.6
+    
+    left_edge  := -0.5 * cast(f32) width
+    top_edge   :=  0.5 * cast(f32) height   
+    
+    list_init_sentinel(&debug.tree_sentinel)
+    debug_tree := add_tree(debug, debug.root_group, { left_edge, top_edge })
+    debug_tree.p = { left_edge, top_edge-10 }
+    
+    debug.backing_transform = default_flat_transform()
+    debug.ui_transform      = default_flat_transform()
+    debug.shadow_transform  = default_flat_transform()
+    debug.text_transform    = default_flat_transform()
+    
+    debug.backing_transform.chunk_z = 16_000
+    debug.ui_transform.chunk_z      = 20_000
+    debug.shadow_transform.chunk_z  = 24_000
+    debug.text_transform.chunk_z    = 28_000
+    
+    debug.render_target_index = 1
+    
+    return debug
+}
+
 get_debug_state :: proc() -> (result: ^DebugState) {
     if GlobalDebugMemory != nil {
-        result = cast(^DebugState) raw_data(GlobalDebugMemory.debug_storage)
+        result = auto_cast GlobalDebugMemory.debug_state
     }
     return result
 }
@@ -510,11 +503,15 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
         result, ok = list_pop_head(&debug.first_free_stored_event)
         
         if !ok {
-            if arena_has_room(&debug.per_frame_arena, DebugStoredEvent) {
-                result = push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
+            when false {
+                if arena_has_room(&debug.per_frame_arena, DebugStoredEvent) {
+                    result = push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
+                } else {
+                    assert(debug.oldest_frame_ordinal_that_is_already_freed != debug.collating_frame_ordinal)
+                    free_oldest_frame(debug)
+                }
             } else {
-                assert(debug.oldest_frame_ordinal_that_is_already_freed != debug.collating_frame_ordinal)
-                free_oldest_frame(debug)
+                result = push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
             }
         }
     }

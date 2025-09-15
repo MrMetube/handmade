@@ -36,7 +36,6 @@ LowPriorityThreads  :: 2
 FrameTempStorageSize :: 128 * Megabyte
 PermanentStorageSize :: 256 * Megabyte
 TransientStorageSize ::   1 * Gigabyte
-DebugStorageSize     :: 256 * Megabyte when INTERNAL else 0
 
 ////////////////////////////////////////////////
 //  Globals
@@ -49,6 +48,8 @@ GlobalPerformanceCounterFrequency: f64
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
 GlobalBlitTextureHandle: u32
+
+Platform: PlatformAPI
 
 // Debug Variables
 
@@ -111,7 +112,7 @@ main :: proc() {
         instance := cast(win.HINSTANCE) win.GetModuleHandleW(nil)
         window_class := win.WNDCLASSW{
             hInstance = instance,
-            lpszClassName = win.L("HandmadeWindowClass"),
+            lpszClassName = "HandmadeWindowClass",
             style = win.CS_HREDRAW | win.CS_VREDRAW | win.CS_OWNDC,
             lpfnWndProc = main_window_callback,
             hCursor = win.LoadCursorW(nil, cast(cstring16) win.MAKEINTRESOURCEW(32512)),
@@ -136,7 +137,7 @@ main :: proc() {
         window = win.CreateWindowExW(
             0,
             window_class.lpszClassName,
-            win.L("Handmade"),
+            "Handmade",
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
@@ -167,8 +168,6 @@ main :: proc() {
     high_queue, low_queue: PlatformWorkQueue
     init_work_queue(&high_queue, HighPriorityThreads)
     init_work_queue(&low_queue,  LowPriorityThreads )
-    
-    print("\033[2J") // Clear the terminal
     
     state: PlatformState
     {
@@ -266,26 +265,31 @@ main :: proc() {
     push_buffer_size :: 32 * Megabyte
     push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size), push_buffer_size)
     
+    Platform = {
+        enqueue_work      = enqueue_work,
+        complete_all_work = complete_all_work,
+        
+        begin_processing_all_files_of_type = begin_processing_all_files_of_type,
+        end_processing_all_files_of_type   = end_processing_all_files_of_type,
+        open_next_file                     = open_next_file,
+        read_data_from_file                = read_data_from_file,
+        mark_file_error                    = mark_file_error,
+        
+        allocate_memory   = allocate_memory,
+        deallocate_memory = deallocate_memory,
+    }
+    
     game_memory := GameMemory {
         high_priority_queue = &high_queue,
         low_priority_queue  = &low_queue,
         
-        Platform_api = {
-            enqueue_work      = enqueue_work,
-            complete_all_work = complete_all_work,
-            
-            begin_processing_all_files_of_type = begin_processing_all_files_of_type,
-            end_processing_all_files_of_type   = end_processing_all_files_of_type,
-            open_next_file                     = open_next_file,
-            read_data_from_file                = read_data_from_file,
-            mark_file_error                    = mark_file_error,
-        },
+        Platform_api = Platform,
     }
     
     { // @note(viktor): initialize game_memory
         base_address := cast(pmm) cast(umm) (1 * Terabyte when INTERNAL else 0)
         
-        total_size := cast(uint) (PermanentStorageSize + TransientStorageSize + DebugStorageSize)
+        total_size := cast(uint) (PermanentStorageSize + TransientStorageSize)
         
         storage_ptr := cast([^]u8) win.VirtualAlloc(base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
         state.game_memory_block = storage_ptr[:total_size]
@@ -312,8 +316,6 @@ main :: proc() {
         // :PointerArithmetic
         game_memory.permanent_storage = storage_ptr[                   0 :][: PermanentStorageSize]
         game_memory.transient_storage = storage_ptr[PermanentStorageSize :][: TransientStorageSize]
-        game_memory.debug_storage     = storage_ptr[TransientStorageSize :][: DebugStorageSize    ]
-        
         game_memory.debug_table = cast(^DebugTable) allocate_memory(DebugTableSize)
         
         texture_op_count := 1024
@@ -770,12 +772,12 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
 ////////////////////////////////////////////////
 // Exports to the game
 
-allocate_memory :: proc(#any_int size: u64) -> (result: pmm) {
+allocate_memory : PlatformAllocateMemory : proc(#any_int size: u64) -> (result: pmm) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     return result
 }
 
-deallocate_memory :: proc(memory: pmm) {
+deallocate_memory : PlatformDeallocateMemory : proc(memory: pmm) {
     win.VirtualFree(memory, 0, win.MEM_RELEASE)
 }
 

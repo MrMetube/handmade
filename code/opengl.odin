@@ -91,14 +91,14 @@ load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
     window_class := win.WNDCLASSW {
         lpfnWndProc = win.DefWindowProcW,
         hInstance = auto_cast win.GetModuleHandleW(nil),
-        lpszClassName = win.L("HandmadeWGLLoader"),
+        lpszClassName = "HandmadeWGLLoader",
     }
     
     if win.RegisterClassW(&window_class) != 0 {
         window := win.CreateWindowExW(
             0,
             window_class.lpszClassName,
-            win.L("Handmade Hero"),
+            "Handmade Hero",
             0,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
