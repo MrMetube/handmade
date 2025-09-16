@@ -3,7 +3,7 @@ package game
 World_Mode :: struct {
     ////////////////////////////////////////////////
     // World specific
-    world: ^World_,
+    world: ^World,
     
     ////////////////////////////////////////////////
     // General
@@ -68,7 +68,6 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     set_game_mode(state, tran_state, ^World_Mode)
     world_mode := push(&state.mode_arena, World_Mode)
     defer state.game_mode = world_mode
-    // sub_arena(&world.arena, parent_arena, arena_remaining_size(parent_arena))
     
     ////////////////////////////////////////////////
     
@@ -225,7 +224,6 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     )
     
     world_mode.camera_p = new_camera_p
-    
     world_mode.particle_cache = push(&tran_state.arena, Particle_Cache)
     init_particle_cache(world_mode.particle_cache, tran_state.assets)
 }
@@ -474,7 +472,7 @@ add_standart_room :: proc(world_mode: ^World_Mode, p: WorldPosition, left_hole, 
                 // @note(viktor): hole down to floor below
             } else {
                 entity := begin_grounded_entity(world_mode, world_mode.floor_collision)
-                entity.traversables = make_array(&world_mode.world.arena, TraversablePoint, 1)
+                entity.traversables = make_array(world_mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
                 if (right_hole && offset_x == 1 && offset_y == 0) || (left_hole && offset_x == -1 && offset_y == 0) {
                     entity.auto_boost_to = target
@@ -505,7 +503,7 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
 
 make_null_collision :: proc(world_mode: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(&world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
+    result = push(world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {}
     
     return result
@@ -513,10 +511,10 @@ make_null_collision :: proc(world_mode: ^World_Mode) -> (result: ^EntityCollisio
 
 make_simple_grounded_collision :: proc(world_mode: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(&world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
+    result = push(world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
-        volumes = push(&world_mode.world.arena, Rectangle3, 1),
+        volumes = push(world_mode.world.arena, Rectangle3, 1),
     }
     result.volumes[0] = result.total_volume
     
@@ -525,7 +523,7 @@ make_simple_grounded_collision :: proc(world_mode: ^World_Mode, size: v3, offset
 
 make_simple_floor_collision :: proc(world_mode: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(&world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
+    result = push(world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
         volumes = {},
@@ -551,7 +549,7 @@ add_collision_rule :: proc(world_mode: ^World_Mode, a, b: EntityId, should_colli
     }
 
     if found == nil {
-        found = list_pop_head(&world_mode.first_free_collision_rule) or_else push(&world_mode.world.arena, PairwiseCollsionRule)
+        found = list_pop_head(&world_mode.first_free_collision_rule) or_else push(world_mode.world.arena, PairwiseCollsionRule)
         list_push(&world_mode.collision_rule_hash[hash_bucket], found)
     }
 

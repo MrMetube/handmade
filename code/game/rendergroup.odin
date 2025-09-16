@@ -124,7 +124,6 @@ EnvironmentMap :: struct {
     LOD: [4]Bitmap,
 }
 
-@(common)
 RenderEntryType :: enum u8 {
     None,
     RenderEntryBitmap,
@@ -574,14 +573,12 @@ SortSpriteBounds :: struct {
     flags: bit_set[enum u16{ Visited, Drawn,    DebugBox, Cycle }; u16],
 }
 
-@(common)
 SpriteBounds :: struct {
     chunk_z: i32,
     y_min, y_max, z_max: f32,
     using manual_sort_key: ManualSortKey,
 }
 
-@(common)
 ManualSortKey :: struct {
     always_in_front_of: u16,
     always_behind:      u16,
@@ -593,7 +590,6 @@ SpriteEdge :: struct {
     next_edge_with_same_front: ^SpriteEdge,
 }
 
-@(common)
 is_y_sprite :: proc(s: SpriteBounds) -> b32 {
     return s.y_min == s.y_max
 }

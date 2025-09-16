@@ -22,7 +22,7 @@ import win "core:sys/windows"
 ////////////////////////////////////////////////
 // Config
 
-GlobalBackBuffer:=  Bitmap {
+GlobalBackBuffer :=  Bitmap {
     // width = 1280, height = 720,
     width = 1920, height = 1080,
     // width = 2560, height = 1440,
@@ -32,10 +32,6 @@ MonitorRefreshHz :: 120
 
 HighPriorityThreads :: 9
 LowPriorityThreads  :: 2
-
-FrameTempStorageSize :: 128 * Megabyte
-PermanentStorageSize :: 256 * Megabyte
-TransientStorageSize ::   1 * Gigabyte
 
 ////////////////////////////////////////////////
 //  Globals
@@ -239,11 +235,7 @@ main :: proc() {
     ////////////////////////////////////////////////
     // Memory Setup
     
-    // @todo(viktor): Lets make this our first growable arena!
-    // Also use it in more places if needed!
     frame_arena: Arena
-    frame_storage := slice_from_parts(u8, allocate_memory(FrameTempStorageSize), FrameTempStorageSize)
-    init_arena(&frame_arena, frame_storage)
     
     game_dll_name := build_exe_path(state, "game.dll")
     temp_dll_name := build_exe_path(state, "game_temp.dll")
@@ -261,7 +253,7 @@ main :: proc() {
     render_commands: RenderCommands
     push_buffer_size :: 32 * Megabyte
     push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size), push_buffer_size)
-        
+    
     game_memory := GameMemory {
         high_priority_queue = auto_cast &high_queue,
         low_priority_queue  = auto_cast &low_queue,
@@ -269,17 +261,13 @@ main :: proc() {
         Platform_api = Platform,
     }
     
+    set_platform_api_in_the_statically_linker_game_code(Platform)
+    
     { // @note(viktor): initialize game_memory
-        base_address := cast(pmm) cast(umm) (1 * Terabyte when INTERNAL else 0)
+        total_size: uint = 0
+        state.game_memory_block = nil
         
-        total_size := cast(uint) (PermanentStorageSize + TransientStorageSize)
-        
-        storage_ptr := cast([^]u8) win.VirtualAlloc(base_address, total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-        state.game_memory_block = storage_ptr[:total_size]
-        
-        // @todo(viktor): TransientStorage needs to be broken up
-        // into game transient and cache transient, and only
-        // the former need be saved for state playback.
+        // @todo(viktor): TransientStorage needs to be broken up into game transient and cache transient, and only the former need be saved for state playback.
         for &buffer, index in state.replay_buffers {
             buffer.filename   = get_record_replay_filepath(state, cast(i32) index)
             buffer.filehandle = win.CreateFileW(buffer.filename, win.GENERIC_READ|win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
@@ -296,10 +284,7 @@ main :: proc() {
             }
         }
         
-        // :PointerArithmetic
-        game_memory.permanent_storage = storage_ptr[                   0 :][: PermanentStorageSize]
-        game_memory.transient_storage = storage_ptr[PermanentStorageSize :][: TransientStorageSize]
-        game_memory.debug_table = cast(^DebugTable) allocate_memory(DebugTableSize)
+        game_memory.debug_table = cast(^DebugTable) allocate_memory(size_of(DebugTable))
         
         texture_op_count := 1024
         texture_ops := (cast([^]TextureOp) allocate_memory(texture_op_count * size_of(TextureOp)))[:texture_op_count]
@@ -310,7 +295,7 @@ main :: proc() {
     }
     texture_op_queue := &game_memory.platform_texture_op_queue
     
-    if samples == nil || game_memory.permanent_storage == nil || game_memory.transient_storage == nil {
+    if samples == nil {
         assert(false)
         return // @logging 
     }

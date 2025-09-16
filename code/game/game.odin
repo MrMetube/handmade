@@ -2,7 +2,7 @@ package game
 
 // @cleanup #placeholder
 @(common) INTERNAL :: #config(INTERNAL, false)
-@(common) SlowCode :: INTERNAL
+SlowCode :: INTERNAL
 
 ////////////////////////////////////////////////
 // @todo(viktor): Find a better place for these configurations
@@ -82,10 +82,10 @@ Input :: struct {
 GameMemory :: struct {
     reloaded_executable: b32,
     // @note(viktor): REQUIRED to be cleared to zero at startup
-    permanent_storage: []u8,
-    transient_storage: []u8,
+    state:           pmm, // ^State
+    transient_state: pmm, // ^TransientState
     
-    debug_state:   (pmm         when INTERNAL else struct {}),
+    debug_state:   (pmm         when INTERNAL else struct {}), // ^DebugState
     debug_table:   (^DebugTable when INTERNAL else struct {}),
         
     high_priority_queue: ^WorkQueue,
@@ -97,8 +97,7 @@ GameMemory :: struct {
 }
 
 State :: struct {
-    is_initialized: b32,
-    
+    total_arena: Arena,
     mode_arena:  Arena,
     // :CutsceneEpisodes
     audio_arena: Arena, // @todo(viktor): move this out into the audio system properly!
@@ -113,7 +112,6 @@ State :: struct {
 }
 
 TransientState :: struct {
-    is_initialized: b32,
     arena: Arena,
     
     assets:        ^Assets,
@@ -167,38 +165,28 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
 
     do_init_world := false 
     
-    assert(size_of(State) <= len(memory.permanent_storage))
-    state := cast(^State) raw_data(memory.permanent_storage)
-    if !state.is_initialized {
-        total_arena: Arena
-        init_arena(&total_arena, memory.permanent_storage[size_of(State):])
+    state := cast(^State) memory.state
+    if state == nil {
+        memory.state = bootstrap_arena(State, "total_arena")
+        state = cast(^State) memory.state
         
-        sub_arena(&state.audio_arena, &total_arena, 1 * Megabyte)
-        sub_arena(&state.mode_arena, &total_arena, arena_remaining_size(&total_arena))
+        init_mixer(&state.mixer, &state.audio_arena)
         
-        // :CutsceneEpisodes CheckForMetaInput
-        do_init_world = true
+        do_init_world = true // :CutsceneEpisodes CheckForMetaInput
         
-        init_mixer(&state.mixer, &state.mode_arena)
-        
-        when DebugEnabled {
-            debug_set_event_recording(true)
-        }
-        
-        state.is_initialized = true
+        when DebugEnabled do debug_set_event_recording(true)
     }
 
-    assert(size_of(TransientState) <= len(memory.transient_storage))
-    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
-    if !tran_state.is_initialized {
-        init_arena(&tran_state.arena, memory.transient_storage[size_of(TransientState):])
-
+    tran_state := cast(^TransientState) memory.transient_state
+    if tran_state == nil {
+        memory.transient_state = bootstrap_arena(TransientState, "arena")
+        tran_state = cast(^TransientState) memory.transient_state
+        
         tran_state.high_priority_queue = memory.high_priority_queue
         tran_state.low_priority_queue  = memory.low_priority_queue
         
         for &task in tran_state.tasks {
             task.in_use = false
-            sub_arena(&task.arena, &tran_state.arena, 16 * Megabyte)
         }
         
         tran_state.assets = make_assets(&tran_state.arena, 512 * Megabyte, tran_state, &memory.platform_texture_op_queue)
@@ -219,8 +207,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
                 size /= 2
             }
         }
-        
-        tran_state.is_initialized = true
     }
     
     if do_init_world {
@@ -248,7 +234,9 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Profile")
+        debug_ui_element(ArenaOccupancy{ &state.total_arena }, "State Total Arena")
         debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transient State Arena")
+        debug_ui_element(ArenaOccupancy{ &state.audio_arena }, "Audio Arena")
         debug_ui_element(FrameSlider{})
         debug_ui_element(FrameBarsGraph{})
         debug_ui_element(FrameInfo{})
@@ -342,8 +330,8 @@ set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid
 // @todo(viktor): Allow sample offsets here for more robust platform options
 @(export) 
 output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer) {
-    state      := cast(^State)          raw_data(memory.permanent_storage)
-    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
+    state      := cast(^State)          memory.state
+    tran_state := cast(^TransientState) memory.transient_state
     
     output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
 }
@@ -351,8 +339,8 @@ output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer)
 ////////////////////////////////////////////////
 
 debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, generation_id: AssetGenerationId) {
-    tran_state := cast(^TransientState) raw_data(memory.transient_storage)
-    if tran_state.is_initialized {
+    tran_state := cast(^TransientState) memory.transient_state
+    if tran_state != nil {
         assets = tran_state.assets
         generation_id = tran_state.generation_id
     }

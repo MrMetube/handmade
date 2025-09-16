@@ -14,7 +14,7 @@ GameSoundBuffer :: struct {
 }
 
 Mixer :: struct {
-    permanent_arena:          Arena,
+    permanent_arena:          ^Arena,
     first_playing_sound:      ^PlayingSound,
     first_free_playing_sound: ^PlayingSound,
     
@@ -41,13 +41,13 @@ PlayingSound :: struct {
     d_current_volume: [2]f32,
 }
 
-init_mixer :: proc(mixer: ^Mixer, parent_arena: ^Arena) {
+init_mixer :: proc(mixer: ^Mixer, arena: ^Arena) {
     mixer.master_volume = 0.2
-    sub_arena(&mixer.permanent_arena, parent_arena, 1 * Megabyte)
+    mixer.permanent_arena = arena
 }
 
 play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
-    playing_sound := list_pop_head(&mixer.first_free_playing_sound) or_else push(&mixer.permanent_arena, PlayingSound, no_clear())
+    playing_sound := list_pop_head(&mixer.first_free_playing_sound) or_else push(mixer.permanent_arena, PlayingSound, no_clear())
     
     // @todo(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound ^= {

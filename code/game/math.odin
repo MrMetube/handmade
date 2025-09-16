@@ -33,6 +33,7 @@ i32x8 :: #simd [8] i32
 f32x4 :: #simd [4] f32
 i32x4 :: #simd [4] i32
 
+// @todo(viktor): avx512 is 16 wide
 LaneWidth :: 8
 
 when LaneWidth != 1 {
@@ -410,6 +411,13 @@ when LaneWidth != 1 {
     horizontal_add :: simd.reduce_add_pairs
     maximum :: simd.max
     
+    extract_v4 :: proc (a: lane_v4, #any_int n: u32) -> (result: v4) {
+        result.x = extract(a.x, n)
+        result.y = extract(a.y, n)
+        result.z = extract(a.z, n)
+        result.w = extract(a.w, n)
+        return result
+    }
     extract_v3 :: proc (a: lane_v3, #any_int n: u32) -> (result: v3) {
         result.x = extract(a.x, n)
         result.y = extract(a.y, n)
@@ -456,6 +464,16 @@ when LaneWidth != 1 {
         }
         return result
      }
+     extract_v4 :: proc (a: lane_v4, #any_int n: u32) -> (result: v4) {
+        assert(n == 0)
+        result = a
+        return result
+    }
+    extract_v3 :: proc (a: lane_v3, #any_int n: u32) -> (result: v3) {
+        assert(n == 0)
+        result = a
+        return result
+    }
 }
 
 ////////////////////////////////////////////////

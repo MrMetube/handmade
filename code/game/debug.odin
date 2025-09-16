@@ -134,13 +134,6 @@ DebugOpenBlock :: struct {
 
 ////////////////////////////////////////////////
 
-#assert(size_of(DebugEventLink) == 56)
-#assert(size_of(DebugValue) == 64)
-#assert(size_of(DebugGUID) == 56)
-#assert(size_of(DebugEvent) == 136)
-#assert(!DebugEnabled || size_of(DebugTable) == DebugTableSize)
-// @todo(viktor): now that we have a better way for common decls, can this be removed?
-@(common) DebugTableSize :: 136_000_160
 @(common)
 DebugTable :: struct {
     record_increment: u64,
@@ -316,9 +309,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
 }
 
 debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
-    boot_strap: Arena
-    debug = push(&boot_strap, DebugState)
-    debug.arena = boot_strap
+    debug = bootstrap_arena(DebugState, "arena")
     
     debug.initialization_clock = read_cycle_counter()
     

@@ -1,7 +1,7 @@
 package game
 
 SimRegion :: struct {
-    world: ^World_,
+    world: ^World,
     
     origin: WorldPosition, 
     bounds, updatable_bounds: Rectangle3,

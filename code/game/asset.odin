@@ -102,7 +102,6 @@ Font :: struct {
 
 ////////////////////////////////////////////////
 
-@(common)
 TextureOpQueue :: struct {
     mutex: TicketMutex,
     
