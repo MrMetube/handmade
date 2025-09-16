@@ -13,7 +13,7 @@ optimizations    := false ? "-o:speed" : "-o:none"
 PedanticGame     :: false
 PedanticPlatform :: false
 
-flags    := [] string {"-error-pos-style:unix","-vet-cast","-vet-shadowing","-microarch:native","-target:windows_amd64"}
+flags    := [] string {"-vet-cast","-vet-shadowing","-microarch:native","-target:windows_amd64"}
 
 debug    :: "-debug"
 internal :: "-define:INTERNAL=true" // @cleanup
@@ -22,8 +22,6 @@ pedantic := [] string {
     "-warnings-as-errors","-vet-unused-imports","-vet-semicolon","-vet-unused-variables","-vet-style",
     "-vet-packages:main","-vet-unused-procedures"
 }
-
-check_and_commoner :: "-custom-attribute:common,printlike"
 
 ////////////////////////////////////////////////
 
@@ -58,8 +56,6 @@ Task :: enum {
     platform,
     asset_builder,
     
-    clean,
-    
     debugger, 
     run,
     renderdoc,
@@ -80,8 +76,6 @@ main :: proc() {
           case "platform":      tasks += { .platform }
           case "asset_builder": tasks += { .asset_builder }
           
-          case "clean":         tasks += { .clean }
-          
           case "debugger":      tasks += { .debugger }
           case "help":          tasks += { .help }
           case "renderdoc":     tasks += { .renderdoc }
@@ -95,11 +89,19 @@ main :: proc() {
     }
     
     make_directory_if_not_exists(data_dir)
-    err := os.set_current_directory(build_dir)
-    assert(err == nil)
+    { err := os.set_current_directory(build_dir) ; assert(err == nil) }
     
-    if !check_printlikes(code_dir) do os.exit(1)
-    if !check_printlikes(game_dir) do os.exit(1)
+    metaprogram: Metaprogram
+    if !metaprogram_collect_data(&metaprogram, code_dir) do os.exit(1)
+    if !metaprogram_collect_data(&metaprogram, game_dir) do os.exit(1)
+    
+    if !check_printlikes(&metaprogram, code_dir) do os.exit(1)
+    if !check_printlikes(&metaprogram, game_dir) do os.exit(1)
+    
+    sb := strings.builder_make()
+    fmt.sbprint(&sb, "-custom-attribute:")
+    fmt.sbprint(&sb, "common", "api", "printlike", sep=",")
+    custom_attribute_flag := strings.to_string(sb)
     
     cmd: Cmd
     if .debugger in tasks {
@@ -107,14 +109,6 @@ main :: proc() {
             fmt.printfln("INFO: Killing running debugger in order to build.")
             kill(pid)
         }
-    }
-    
-    if .clean in tasks {
-        fmt.println("INFO: Deleting all generated files")
-        os.change_directory(code_dir)
-        delete_all_like(`*generated.odin`)
-        os.change_directory("..")
-        os.change_directory(build_dir)
     }
     
     build := true
@@ -127,13 +121,70 @@ main :: proc() {
     
     if build {
         if tasks & BuildTasks == {} do tasks += { .game, .platform }
-        if .platform in tasks do build_platform()
-        if .game     in tasks do build_game()
+        
+        generate_platform_api(metaprogram.apis, `..\code\generated-platform_api.odin`, `..\code\game\generated-platform_api.odin`)
+        
+        if .game in tasks {
+            delete_all_like(`.\game*.pdb`)
+            delete_all_like(`.\game*.rdi`)
+            
+            // @note(viktor): the platform checks for this lock file when hot-reloading
+            lock_path := `.\lock.tmp` 
+            lock, err := os.open(lock_path, mode = os.O_CREATE)
+            if err != nil do fmt.print("ERROR: ", os.error_string(err))
+            
+            defer {
+                os.close(lock)
+                os.remove(lock_path)
+            }
+            
+            fmt.fprint(lock, "WAITING FOR PDB")
+            
+            pdb := fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number())
+            
+            odin_build(&cmd, game_dir, `.\game.dll`)
+            append(&cmd, "-build-mode:dll")
+            append(&cmd, pdb)
+            append(&cmd, debug)
+            append(&cmd, ..flags)
+            append(&cmd, custom_attribute_flag)
+            append(&cmd, internal)
+            append(&cmd, optimizations)
+            if PedanticGame do append(&cmd, ..pedantic)
+            
+            silence: string
+            run_command(&cmd, stdout = &silence)
+        }
+        
+        if .platform in tasks { 
+            if handle_running_exe_gracefully(debug_exe, .Skip) {
+                // @todo(viktor): this could be run in parallel
+                if !generate_game_api(&metaprogram, `..\code\generated-game_api.odin`) {
+                    fmt.println("ERROR: Could not generate game api")
+                    os.exit(1)
+                }
+                if !generate_commons(&metaprogram, `..\code\generated-commons.odin`) {
+                    fmt.println("ERROR: Could not extract declarations marked with @common")
+                    os.exit(1)
+                }
+                
+                odin_build(&cmd, code_dir, `.\`+debug_exe)
+                append(&cmd, debug)
+                append(&cmd, ..flags)
+                append(&cmd, custom_attribute_flag)
+                append(&cmd, internal)
+                append(&cmd, optimizations)
+                if PedanticPlatform do append(&cmd, ..pedantic)
+                
+                run_command(&cmd)
+            }
+        }
+        
         if .asset_builder in tasks {
             odin_build(&cmd, asset_builder_dir, `..\build\asset_builder.exe`)
-            append(&cmd, ..flags)
             append(&cmd, debug)
-            append(&cmd, check_and_commoner)
+            append(&cmd, ..flags)
+            append(&cmd, custom_attribute_flag)
             append(&cmd, ..pedantic)
             run_command(&cmd)
         }
@@ -196,62 +247,6 @@ main :: proc() {
     fmt.println("Done.")
 }
 
-build_game :: proc() {
-    out := `.\game.dll`
-    delete_all_like(`.\game*.pdb`)
-    delete_all_like(`.\game*.rdi`)
-    
-    // @note(viktor): the platform checks for this lock file when hot-reloading
-    lock_path := `.\lock.tmp` 
-    lock, err := os.open(lock_path, mode = os.O_CREATE)
-    if err != nil do fmt.print("ERROR: ", os.error_string(err))
-    defer {
-        os.close(lock)
-        os.remove(lock_path)
-    }
-    fmt.fprint(lock, "WAITING FOR PDB")
-    
-    pdb := fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number())
-    
-    cmd: Cmd
-    odin_build(&cmd, game_dir, out)
-    append(&cmd, "-build-mode:dll")
-    append(&cmd, pdb)
-    append(&cmd, ..flags)
-    append(&cmd, debug)
-    append(&cmd, internal)
-    append(&cmd, check_and_commoner)
-    append(&cmd, optimizations)
-    if PedanticGame do append(&cmd, ..pedantic)
-    silence: string
-    run_command(&cmd, stdout = &silence)
-}
-
-build_platform :: proc() {
-    debug_exe :: `debug.exe`
-    if handle_running_exe_gracefully(debug_exe, .Skip) {
-        if !extract_common_and_exports() {
-            fmt.println("ERROR: Could not extract declarations marked with @common or @export")
-            os.exit(1)
-        }
-        
-        cmd: Cmd
-        odin_build(&cmd, code_dir, `.\`+debug_exe)
-        append(&cmd, ..flags)
-        append(&cmd, debug)
-        append(&cmd, internal)
-        append(&cmd, optimizations)
-        append(&cmd, check_and_commoner)
-        if PedanticPlatform do append(&cmd, ..pedantic)
-        
-        if !run_command(&cmd, or_exit = false) {
-            // @note(viktor): Change the modification time of the debug.exe so that the correctly and succesfully generated files are not seen as newer than the debug.exe. Otherwise they would be detected as modified by the user.
-            os2.change_times(debug_exe, time.now(), time.now())
-            os.exit(1)
-        }
-    }
-}
-
 usage :: proc () {
     fmt.printf(`Usage:
   %v [<options>]
@@ -264,8 +259,6 @@ Options:
         .game          = "Rebuild the game. If it is running it will be hotreloaded.",
         .platform      = "Rebuild the platform, if the game isn't running.",
         .asset_builder = "Rebuild the asset builder.",
-        
-        .clean         = "Delete all generated files before building. This will override the check for modifications in any generated files.",
         
         .debugger      = "Start/Restart the debugger.",
         .renderdoc     = "Run the program with renderdoc attached and launch renderdoc with the capture after the program closes.",

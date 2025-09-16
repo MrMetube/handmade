@@ -744,7 +744,7 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
     work.asset.state = .Loaded
 }
 
-do_load_asset_work : PlatformWorkQueueCallback : proc(data: pmm) {
+do_load_asset_work :: proc(data: pmm) {
     work := cast(^LoadAssetWork) data
     
     load_asset_work_immediatly(work)

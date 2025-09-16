@@ -1,4 +1,3 @@
-#+private
 package build
 
 import "core:fmt"
@@ -22,18 +21,10 @@ Procedure :: struct {
     return_count: int,
 }
 
-CheckContext :: struct {
-    files:        map[string]string,
+check_printlikes :: proc(using mp: ^Metaprogram, dir: string) -> (succes: b32) {
+    context.user_ptr = mp
     
-    printlikes:   map[string]Printlike,
-    procedures:   map[string]Procedure,
-}
-
-check_printlikes :: proc(dir: string) -> (succes: b32) {
-    using my_context: CheckContext
-    context.user_ptr = &my_context
-    
-    collect_all_files(dir)
+    collect_all_files(&files, dir)
     
     code_package, ok := parser.parse_package_from_path(dir)
     assert(ok)
@@ -46,19 +37,8 @@ check_printlikes :: proc(dir: string) -> (succes: b32) {
     return true
 }
 
-collect_all_files :: proc(directory: string) {
-    using my := cast(^CheckContext) context.user_ptr
-    
-    fi, _ := os2.read_directory_by_path(directory, -1, context.allocator)
-    for f in fi {
-        bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
-        absolute_path, _ := os2.get_absolute_path(f.fullpath, context.allocator)
-        files[absolute_path] = string(bytes)
-    }
-}
-
 check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: b32) {
-    using my := cast(^CheckContext) context.user_ptr
+    using mp := cast(^Metaprogram) context.user_ptr
     
     v := ast.Visitor{ visit = visit_and_collect_printlikes_and_procedures }
     ast.walk(&v, pkg)
@@ -70,9 +50,9 @@ check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: b32) {
 }
 
 visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
-    using my := cast(^CheckContext) context.user_ptr
-    
     if node == nil do return visitor
+    
+    using mp := cast(^Metaprogram) context.user_ptr
     
     #partial switch decl in node.derived {
       case ^ast.Value_Decl:
@@ -80,7 +60,16 @@ visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node:
         pos := decl.pos
         end := decl.end
         
-        name, name_and_body, attribute := collect_declarations_with_attribute("printlike", attributes, pos, end)
+        
+        name, name_and_body: string
+        {
+            name_and_body = read_pos_or_fail(pos, end)
+            eon := strings.index(name_and_body, "::")
+            if eon == -1 do eon = len(name_and_body)-1
+            name = name_and_body[:eon]
+            name = strings.trim_space(name)
+        }
+        
         if len(decl.values) > 0 {
             value := decl.values[0]
             #partial switch procedure in value.derived_expr {
@@ -94,7 +83,7 @@ visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node:
                     procedures[p.name] = p
                 }
                 
-                if attribute != nil {
+                if has_attribute(attributes, "printlike") {
                     printlike := Printlike { name = name }
                     
                     found: b32
@@ -129,7 +118,7 @@ visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node:
 }
 
 visit_and_check_printlikes :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
-    using my := cast(^CheckContext) context.user_ptr
+    using mp := cast(^Metaprogram) context.user_ptr
     
     if node == nil do return visitor
     
@@ -196,6 +185,8 @@ visit_and_check_printlikes :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^a
     
     return visitor
 }
+
+////////////////////////////////////////////////
 
 White  :: ansi.CSI + ansi.FG_BRIGHT_WHITE  + ansi.SGR
 Red    :: ansi.CSI + ansi.FG_BRIGHT_RED    + ansi.SGR
@@ -292,60 +283,4 @@ get_expected_format_string_arg_count :: proc(format: string, indices: ^[dynamic]
     }
     
     return ok
-}
-
-collect_declarations_with_attribute :: proc(target: string, attributes: []^ast.Attribute, pos, end: tokenizer.Pos, attribute_names: ^[dynamic]string = nil) -> (name, name_and_body: string, result: ^ast.Attribute) {
-    using my := cast(^CheckContext) context.user_ptr
-    
-    name_and_body = read_pos_or_fail(pos, end)
-    eon := strings.index(name_and_body, "::")
-    if eon == -1 do eon = len(name_and_body)-1
-    name = name_and_body[:eon]
-    name = strings.trim_space(name)
-    
-    for &attribute in attributes {
-        if len(attribute.elems) == 0 do continue
-        
-        is_marked_as_common: b32
-        
-        for expr in attribute.elems {
-            if att_name, ok := read_pos(expr.pos, expr.end); ok {
-                if strings.equal_fold(att_name, target) {
-                    result = attribute
-                }
-                if attribute_names != nil {
-                    append(attribute_names, att_name)
-                }
-            }
-        }
-    }
-    
-    return 
-}
-
-
-read_pos_or_fail :: proc(start, end: tokenizer.Pos) -> (result: string) {
-    using my := cast(^CheckContext) context.user_ptr
-    ok: bool
-    result, ok = read_pos(start, end)
-    assert(ok)
-    return result
-}
-
-read_pos :: proc(start, end: tokenizer.Pos) -> (result: string, ok: bool) {
-    using my := cast(^CheckContext) context.user_ptr
-    
-    file: string
-    file, ok = files[start.file]
-    ok &= start.file==end.file
-    if ok {
-        result = file[start.offset:end.offset]
-    } else {
-        if start.file==end.file {
-            fmt.println("unknown file:", start.file)
-        } else {
-            fmt.println("bad pos:", start, end)
-        }
-    }
-    return
 }

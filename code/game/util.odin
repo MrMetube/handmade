@@ -183,12 +183,12 @@ assert :: proc(condition: $B, message := #caller_expression(condition), loc := #
     }
 }
 
-slice_from_parts :: proc { slice_from_parts_cast, slice_from_parts_direct }
+slice_from_parts :: proc { slice_from_parts_cast, slice_from_parts_pointer }
 slice_from_parts_cast :: proc "contextless" ($T: typeid, data: pmm, #any_int count: i64) -> []T {
     // :PointerArithmetic
     return (cast([^]T)data)[:count]
 }
-slice_from_parts_direct :: proc "contextless" (data: ^$T, #any_int count: i64) -> []T {
+slice_from_parts_pointer :: proc "contextless" (data: ^$T, #any_int count: i64) -> []T {
     // :PointerArithmetic
     return (cast([^]T)data)[:count]
 }

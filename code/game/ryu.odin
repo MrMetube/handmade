@@ -28,8 +28,6 @@
 #+vet !semicolon !unused-procedures !style
 package game
 
-@(common="file")
-
 import "base:intrinsics"
 
 RYU_FLOAT_FULL_TABLE :: #config(RYU_FLOAT_FULL_TABLE, false)

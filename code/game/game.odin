@@ -88,12 +88,12 @@ GameMemory :: struct {
     debug_state:   (pmm         when INTERNAL else struct {}),
     debug_table:   (^DebugTable when INTERNAL else struct {}),
         
-    high_priority_queue: ^PlatformWorkQueue,
-    low_priority_queue:  ^PlatformWorkQueue,
+    high_priority_queue: ^WorkQueue,
+    low_priority_queue:  ^WorkQueue,
     
     platform_texture_op_queue: TextureOpQueue,
     
-    Platform_api: PlatformAPI,
+    Platform_api: Platform_Api,
 }
 
 State :: struct {
@@ -124,8 +124,8 @@ TransientState :: struct {
     test_diffuse: Bitmap,
     test_normal:  Bitmap,
     
-    high_priority_queue: ^PlatformWorkQueue,
-    low_priority_queue:  ^PlatformWorkQueue,
+    high_priority_queue: ^WorkQueue,
+    low_priority_queue:  ^WorkQueue,
     
     env_size: v2i,
     envs: [3]EnvironmentMap,
@@ -151,12 +151,6 @@ ControlledHero :: struct {
     brain_id: BrainId,
     recenter_t: f32,
 }
-
-// @note(viktor): Platform specific structs
-PlatformWorkQueue  :: struct{}
-
-/* @(export)  */
-Platform: PlatformAPI
 
 @(export)
 update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {

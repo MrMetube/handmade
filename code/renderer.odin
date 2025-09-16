@@ -247,7 +247,7 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
+software_render_commands :: proc(queue: ^WorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
     timed_function()
     
     targets := push_slice(arena, Bitmap, commands.max_render_target_index+1)
@@ -307,7 +307,7 @@ software_render_commands :: proc(queue: ^PlatformWorkQueue, commands: ^RenderCom
     complete_all_work(queue)
 }
 
-do_tile_render_work : PlatformWorkQueueCallback : proc(data: pmm) {
+do_tile_render_work :: proc(data: pmm) {
     timed_function()
     using work := cast(^TileRenderWork) data
     assert(commands != nil)

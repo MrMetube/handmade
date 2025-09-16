@@ -2,6 +2,6 @@
 *.test
 *.input
 
-/code/*generated*.odin
+/**/generated*.odin
 
 lock.tmp

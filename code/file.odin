@@ -15,7 +15,8 @@ FileExtensions :: [PlatformFileType] string {
     .AssetFile = "hha",
 }
 
-begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : proc(type: PlatformFileType) -> (result: PlatformFileGroup) {
+@(api)
+begin_processing_all_files_of_type :: proc(type: PlatformFileType) -> (result: PlatformFileGroup) {
     pattern: [32] win.wchar_t
     pattern[0] = '*'
     pattern[1] = '.'
@@ -48,7 +49,8 @@ begin_processing_all_files_of_type : PlatformBeginProcessingAllFilesOfType : pro
     return result
 }
 
-open_next_file : PlatformOpenNextFile : proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle) {
+@(api)
+open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle) {
     file_group := cast(^FileGroup) group._platform
     
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
@@ -75,7 +77,8 @@ open_next_file : PlatformOpenNextFile : proc(group: ^PlatformFileGroup) -> (resu
 
 }
 
-read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm) {
+@(api)
+read_data_from_file :: proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm) {
     file_handle := cast(^FileHandle) handle._platform
     if Platform_no_file_errors(handle) {
         overlap_info := win.OVERLAPPED{
@@ -93,7 +96,8 @@ read_data_from_file : PlatformReadDataFromFile : proc(handle: ^PlatformFileHandl
     }
 }
 
-end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(group: ^PlatformFileGroup) {
+@(api)
+end_processing_all_files_of_type :: proc(group: ^PlatformFileGroup) {
     file_group := cast(^FileGroup) group._platform
     if file_group != nil {
         win.FindClose(file_group.find_handle)
@@ -102,7 +106,8 @@ end_processing_all_files_of_type : PlatformEndProcessingAllFilesOfType : proc(gr
     }
 }
 
-mark_file_error : PlatformMarkFileError : proc(handle: ^PlatformFileHandle, error_message: string) {
+@(api)
+mark_file_error :: proc(handle: ^PlatformFileHandle, error_message: string) {
     when INTERNAL {
         print("FILE ERROR: %\n", error_message)
         

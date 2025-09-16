@@ -5,7 +5,7 @@ import "base:runtime"
 import "core:thread"
 import win "core:sys/windows"
 
-PlatformWorkQueue :: struct {
+WorkQueue :: struct {
     semaphore_handle: win.HANDLE,
     
     completion_goal, 
@@ -14,23 +14,23 @@ PlatformWorkQueue :: struct {
     next_entry_to_write, 
     next_entry_to_read:  u32,
     
-    entries: [4096]PlatformWorkQueueEntry,
+    entries: [4096] WorkQueueEntry,
 }
 
-PlatformWorkQueueEntry :: struct {
-    callback: PlatformWorkQueueCallback,
+WorkQueueEntry :: struct {
+    callback: proc (data: pmm),
     data:     pmm,
 }
 
 CreateThreadInfo :: struct {
-    queue: ^PlatformWorkQueue,
+    queue: ^WorkQueue,
     index: u32,
 }
 
 @(private="file") next_thread_index: u32 = 1
 @(private="file") infos: [1024]CreateThreadInfo
 
-init_work_queue :: proc(queue: ^PlatformWorkQueue, count: u32) {
+init_work_queue :: proc(queue: ^WorkQueue, count: u32) {
     queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast count, nil)
     
     for &info in infos[next_thread_index:][:count] {
@@ -47,7 +47,7 @@ init_work_queue :: proc(queue: ^PlatformWorkQueue, count: u32) {
     }
 }
 
-enqueue_work_or_do_immediatly :: proc(queue: ^PlatformWorkQueue, data: pmm, callback: PlatformWorkQueueCallback) {
+enqueue_work_or_do_immediatly :: proc(queue: ^WorkQueue, data: pmm, callback: proc (data: pmm)) {
     if queue != nil {
         enqueue_work(queue, data, callback)
     } else {
@@ -55,7 +55,8 @@ enqueue_work_or_do_immediatly :: proc(queue: ^PlatformWorkQueue, data: pmm, call
     }
 }
 
-enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, data: pmm, callback: PlatformWorkQueueCallback) {
+@(api)
+enqueue_work :: proc(queue: ^WorkQueue, data: pmm, callback: proc (data: pmm)) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
     assert(new_next_entry != queue.next_entry_to_read, "too many units of work enqueued") 
@@ -73,7 +74,8 @@ enqueue_work : PlatformEnqueueWork : proc(queue: ^PlatformWorkQueue, data: pmm, 
     win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
 }
 
-complete_all_work :: proc(queue: ^PlatformWorkQueue) {
+@(api)
+complete_all_work :: proc(queue: ^WorkQueue) {
     if queue == nil do return
     
     for queue.completion_count != queue.completion_goal {
@@ -86,7 +88,7 @@ complete_all_work :: proc(queue: ^PlatformWorkQueue) {
     assert(ok)
 }
 
-do_next_work_queue_entry :: proc(queue: ^PlatformWorkQueue) -> (should_sleep: b32) {
+do_next_work_queue_entry :: proc(queue: ^WorkQueue) -> (should_sleep: b32) {
     old_next_entry := queue.next_entry_to_read
     
     if old_next_entry != queue.next_entry_to_write {

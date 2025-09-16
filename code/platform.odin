@@ -49,8 +49,6 @@ GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMEN
 
 GlobalBlitTextureHandle: u32
 
-Platform: PlatformAPI
-
 // Debug Variables
 
 GlobalPause:                 b32
@@ -61,7 +59,6 @@ GlobalUseSoftwareRenderer:   b32
 
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
-DebugTable :: struct {} // Definition in game/debug.odin
 
 ////////////////////////////////////////////////
 // Types
@@ -165,7 +162,7 @@ main :: proc() {
         init_opengl(window_dc)
     }
     
-    high_queue, low_queue: PlatformWorkQueue
+    high_queue, low_queue: WorkQueue
     init_work_queue(&high_queue, HighPriorityThreads)
     init_work_queue(&low_queue,  LowPriorityThreads )
     
@@ -264,24 +261,10 @@ main :: proc() {
     render_commands: RenderCommands
     push_buffer_size :: 32 * Megabyte
     push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size), push_buffer_size)
-    
-    Platform = {
-        enqueue_work      = enqueue_work,
-        complete_all_work = complete_all_work,
         
-        begin_processing_all_files_of_type = begin_processing_all_files_of_type,
-        end_processing_all_files_of_type   = end_processing_all_files_of_type,
-        open_next_file                     = open_next_file,
-        read_data_from_file                = read_data_from_file,
-        mark_file_error                    = mark_file_error,
-        
-        allocate_memory   = allocate_memory,
-        deallocate_memory = deallocate_memory,
-    }
-    
     game_memory := GameMemory {
-        high_priority_queue = &high_queue,
-        low_priority_queue  = &low_queue,
+        high_priority_queue = auto_cast &high_queue,
+        low_priority_queue  = auto_cast &low_queue,
         
         Platform_api = Platform,
     }
@@ -747,7 +730,7 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
     /* 
     if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes 224 57:16 */ {
         render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
@@ -772,12 +755,14 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^PlatformWorkQ
 ////////////////////////////////////////////////
 // Exports to the game
 
-allocate_memory : PlatformAllocateMemory : proc(#any_int size: u64) -> (result: pmm) {
+@(api)
+allocate_memory :: proc(#any_int size: u64) -> (result: pmm) {
     result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     return result
 }
 
-deallocate_memory : PlatformDeallocateMemory : proc(memory: pmm) {
+@(api)
+deallocate_memory :: proc(memory: pmm) {
     win.VirtualFree(memory, 0, win.MEM_RELEASE)
 }
 

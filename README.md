@@ -3,7 +3,7 @@ Following the [Handmade Hero](https://guide.handmadehero.org/) Series in odin.
 
 ## Build
 
-To initialize the build tool:
+To run the build tool:
 ```console
-odin run build -out:.\build\build.exe
+odin run build -out:.\build\build.exe -keep-executable -debug
 ```

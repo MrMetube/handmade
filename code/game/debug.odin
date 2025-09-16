@@ -139,7 +139,9 @@ DebugOpenBlock :: struct {
 #assert(size_of(DebugGUID) == 56)
 #assert(size_of(DebugEvent) == 136)
 #assert(!DebugEnabled || size_of(DebugTable) == DebugTableSize)
+// @todo(viktor): now that we have a better way for common decls, can this be removed?
 @(common) DebugTableSize :: 136_000_160
+@(common)
 DebugTable :: struct {
     record_increment: u64,
     edit_event: DebugEvent,
