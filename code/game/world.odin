@@ -242,8 +242,7 @@ get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: v3i) -> (result
     result = next_pointer_of_the_chunks_previous_chunk^
     
     if arena != nil && result == nil {
-        result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk)
-        #no_bounds_check (cast([^] u8) result)[size_of(result^) +10] = 0
+        result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk, no_clear())
         result ^= {
             chunk = chunk_p
         }

@@ -3,7 +3,7 @@ package game
 
 @(common) import "base:runtime"
 
-DebugEnabled :: !true && INTERNAL
+DebugEnabled :: true && INTERNAL
 
 DebugGUID :: struct {
     name:      string,

@@ -336,7 +336,22 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
                 boolean_button(layout, "Occupancy", is_occupancy, set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}))
                 arena := graph.arena
                 
-                text := debug_print("%, % / %", element.guid.name, view_memory_size(arena.used), view_memory_size(len(arena.storage)))
+                
+                text: string
+                if arena.current_block != nil {
+                    count: u32
+                    total_size: umm
+                    total_used: umm
+                    for block := arena.current_block; block != nil; block = block.arena_previous_block {
+                        count += 1
+                        total_used += block.used
+                        total_size += auto_cast len(block.storage)
+                    }
+                    
+                    text = debug_print("%: used % / total %", element.guid.name, view_memory_size(total_used), view_memory_size(total_size))
+                } else {
+                    text = debug_print("%: unused", element.guid.name)
+                }
                 action_button(layout, text, {}, backdrop_color = {})
             end_ui_row(layout)
             
@@ -433,13 +448,33 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
 draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rect: Rectangle2) {
     push_rectangle(&debug.render_group, rect, debug.backing_transform, DarkGreen)
     
-    scale := cast(f32) (cast(f64) arena.used / cast(f64) len(arena.storage))
-    
-    split_point := linear_blend(rect.min.x, rect.max.x, scale)
-    filled := rectangle_min_max(rect.min, v2{split_point, rect.max.y})
-    unused := rectangle_min_max(v2{split_point, rect.min.y}, rect.max)
-    push_rectangle(&debug.render_group, unused, debug.backing_transform, {0,0,0,0.7})
-    push_rectangle(&debug.render_group, filled, debug.ui_transform, Green)
+    if arena.current_block == nil {
+        push_rectangle(&debug.render_group, rect, debug.ui_transform, Orange)
+    } else {
+        // @speed we could pass this in as a parameter, we computed it just now in the caller
+        count: u32
+        for block := arena.current_block; block != nil; block = block.arena_previous_block do count += 1
+        
+        index: u32
+        for block := arena.current_block; block != nil; block = block.arena_previous_block {
+            defer index += 1
+            
+            min_x := linear_blend(rect.min.x, rect.max.x, cast(f32) (count - 1 - index)     / cast(f32) count)
+            max_x := linear_blend(rect.min.x, rect.max.x, cast(f32) (count - index) / cast(f32) count)
+            sub_rect := rectangle_min_max(v2{min_x, rect.min.y}, v2{max_x, rect.max.y})
+            
+            scale := cast(f32) (cast(f64) block.used / cast(f64) len(block.storage))
+            color := index == 0 ? Green : Blue
+            
+            split_point := linear_blend(sub_rect.min.x, sub_rect.max.x, scale)
+            shrink: f32 : 1
+            filled  := rectangle_min_max(sub_rect.min, v2{split_point, sub_rect.max.y})
+            divider := rectangle_min_max(v2{split_point-shrink, sub_rect.min.y}, v2{split_point, sub_rect.max.y})
+            
+            push_rectangle(&debug.render_group, filled, debug.ui_transform, color)
+            push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline)
+        }
+    }
 }
 
 add_tooltip :: proc(debug: ^DebugState, text: string) {

@@ -387,8 +387,9 @@ remove_if_exists :: proc(path: string) {
 
 delete_all_like :: proc(pattern: string) {
     files := all_like(pattern)
+    if len(files) == 0 do return
+    
     for file in files {
-        // fmt.printfln("INFO: deleting %v", file)
         os.remove(file)
     }
     fmt.printfln("INFO: deleted %v files with pattern '%v'", len(files), pattern)

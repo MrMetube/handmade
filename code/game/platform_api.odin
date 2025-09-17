@@ -1,6 +1,27 @@
 package game
 
+////////////////////////////////////////////////
+// Shared Definitions
+
 WorkQueue :: struct {}
+
+@(common) PlatformFileType   :: enum { AssetFile }
+@(common) PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }
+@(common) PlatformFileGroup  :: struct { file_count: u32, _platform: pmm }
+
+@(common) Platform_no_file_errors :: proc (handle: ^PlatformFileHandle) -> b32 { return handle.no_errors }
+
+////////////////////////////////////////////////
+
+@(common) Platform_Memory_Block :: struct {
+    // @todo(viktor): maybe make this a [] u8
+    storage: [] u8,
+    allocation_flags: Platform_Allocation_Flags,
+    
+    // For Arenas
+    used: umm,
+    arena_previous_block: ^Platform_Memory_Block,
+}
 
 @(common) Platform_Allocation_Flags :: bit_set [Platform_Allocation_Flag; u64]
 @(common) Platform_Allocation_Flag :: enum { 
@@ -8,10 +29,5 @@ WorkQueue :: struct {}
     check_overflow,
     check_underflow,
 }
-BoundsCheck :: Platform_Allocation_Flags { .check_overflow, .check_underflow }
 
-@(common) PlatformFileType   :: enum { AssetFile }
-@(common) PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }
-@(common) PlatformFileGroup  :: struct { file_count: u32, _platform: pmm }
-
-@(common) Platform_no_file_errors :: proc (handle: ^PlatformFileHandle) -> b32 { return handle.no_errors }
+@(common) BoundsCheck :: Platform_Allocation_Flags { .check_overflow, .check_underflow }

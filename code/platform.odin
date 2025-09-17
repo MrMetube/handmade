@@ -82,6 +82,8 @@ PlatformState :: struct {
     replaying_handle: win.HANDLE,
     recording_index:  i32,
     replaying_index:  i32,
+    
+    file_arena: Arena,
 }
 
 Memory_Block :: struct #align(64) {
@@ -90,12 +92,11 @@ Memory_Block :: struct #align(64) {
 }
 
 _Memory_Block :: struct {
-    prev, next: ^Memory_Block,
+    // @note(viktor): this needs to be the first member so that a ^Platform_Memory_Block can be cast to a ^Memory_Block
+    block: Platform_Memory_Block,
     
-    size: u64,
-    base: pmm,
-    allocation_flags: Platform_Allocation_Flags,
-    loop_flags:       Memory_Block_Flags,
+    prev, next: ^Memory_Block,
+    loop_flags: Memory_Block_Flags,
 }
 
 Memory_Block_Flags :: bit_set [Memory_Block_Flag]
@@ -746,30 +747,36 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, de
 PageSize :: 4096 // @todo(viktor): you can get this from the OS, too!
 // @todo(viktor): This could be a special allocator that then can just be passed to the game arenas
 @(api)
-allocate_memory :: proc(#any_int size: u64, allocation_flags := Platform_Allocation_Flags{}) -> (result: pmm) {
-    // @note(viktor): We require the memory block headers not to change the cache line alignment of an allocation.
-    #assert(size_of(Memory_Block) == 64)
-    
+allocate_memory :: proc(#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {
     total_size := size + size_of(Memory_Block)
     
+    base_offset: umm = size_of(Memory_Block)
+    protect_offset: umm
     if .check_underflow in allocation_flags {
-        total_size += 2 * PageSize
+        total_size = size + 2 * PageSize
+        base_offset = 2 * PageSize
+        protect_offset = PageSize
+    }
+    if .check_overflow in allocation_flags {
+        size_rounded_up := align_pow2(size, PageSize)
+        total_size = size_rounded_up + 2 * PageSize
+        base_offset = PageSize + size_rounded_up - size
+        protect_offset = PageSize + size_rounded_up
     }
     
     memory := cast([^] u8) win.VirtualAlloc(nil, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
     assert(memory != nil)
     
     block := cast(^Memory_Block) memory
-    block.base = &memory[size_of(Memory_Block)]
-    if .check_underflow in allocation_flags {
+    
+    if BoundsCheck & allocation_flags != {} {
         old_protect: u32
-        protected := win.VirtualProtect(&memory[PageSize], PageSize, win.PAGE_NOACCESS, &old_protect)
+        protected := win.VirtualProtect(&memory[protect_offset], PageSize, win.PAGE_NOACCESS, &old_protect)
         assert(protected)
-        block.base = &memory[2 * PageSize]
     }
     
-    block.size = size
-    block.allocation_flags = allocation_flags
+    block.block.storage          = memory[base_offset:][:size]
+    block.block.allocation_flags = allocation_flags
     
     if is_in_loop(&GlobalPlatformState) && .not_restored not_in allocation_flags {
         block.loop_flags += { .allocated_during_loop }
@@ -779,23 +786,14 @@ allocate_memory :: proc(#any_int size: u64, allocation_flags := Platform_Allocat
     list_prepend(&GlobalPlatformState.block_sentinel, block)
     end_ticket_mutex(&GlobalPlatformState.block_mutex)
     
-    result = block.base
+    result = &block.block
     
     return result
 }
 
 @(api)
-deallocate_memory :: proc(memory: pmm, allocation_flags := Platform_Allocation_Flags{}) {
-    if memory == nil do return
-    memory := cast([^] u8) memory
-    
-    block: ^Memory_Block
-    #no_bounds_check {
-        block = auto_cast &memory[-size_of(Memory_Block)]
-        if .check_underflow in allocation_flags {
-            block = auto_cast &memory[-2 * PageSize]
-        }
-    }
+deallocate_memory :: proc (memory_block: ^Platform_Memory_Block) {
+    block := cast(^Memory_Block) memory_block
     
     if is_in_loop(&GlobalPlatformState) {
         block.loop_flags += { .freed_during_loop }
@@ -855,17 +853,18 @@ begin_recording_input :: proc(state: ^PlatformState, index: i32) {
         
         written: u32
         for source := state.block_sentinel.next; source != &state.block_sentinel; source = source.next {
-            if .not_restored in source.allocation_flags do continue
+            if .not_restored in source.block.allocation_flags do continue
             
+            base := raw_data(source.block.storage)
             dest := Saved_Memory_Block {
-                base = cast(u64) cast(umm) source.base,
-                size = source.size,
+                base = cast(u64) cast(umm) base,
+                size = cast(u64) len(source.block.storage),
             }
             
             ok: win.BOOL
             ok = win.WriteFile(state.recording_handle, &dest, size_of(dest), &written, nil)
             assert(ok)
-            ok = win.WriteFile(state.recording_handle, source.base, safe_truncate(u32, dest.size), &written, nil)
+            ok = win.WriteFile(state.recording_handle, base, safe_truncate(u32, dest.size), &written, nil)
             assert(ok)
         }
         

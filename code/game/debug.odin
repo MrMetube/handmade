@@ -493,20 +493,7 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
     
     ok: b32
     for result == nil {
-        result, ok = list_pop_head(&debug.first_free_stored_event)
-        
-        if !ok {
-            when false {
-                if arena_has_room(&debug.per_frame_arena, DebugStoredEvent) {
-                    result = push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
-                } else {
-                    assert(debug.oldest_frame_ordinal_that_is_already_freed != debug.collating_frame_ordinal)
-                    free_oldest_frame(debug)
-                }
-            } else {
-                result = push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
-            }
-        }
+        result = list_pop_head(&debug.first_free_stored_event) or_else push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
     }
     
     result ^= {

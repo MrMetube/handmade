@@ -16,7 +16,7 @@ FileExtensions :: [PlatformFileType] string {
 }
 
 @(api)
-begin_processing_all_files_of_type :: proc(type: PlatformFileType) -> (result: PlatformFileGroup) {
+begin_processing_all_files_of_type :: proc (type: PlatformFileType) -> (result: PlatformFileGroup) {
     pattern: [32] win.wchar_t
     pattern[0] = '*'
     pattern[1] = '.'
@@ -29,7 +29,7 @@ begin_processing_all_files_of_type :: proc(type: PlatformFileType) -> (result: P
     }
     
     // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
-    group := cast(^FileGroup) allocate_memory(size_of(FileGroup))
+    group := new(FileGroup)
     if group != nil {
         group.find_handle = win.FindFirstFileW(cast(cstring16) &pattern[0], &group.data)
         for group.find_handle != win.INVALID_HANDLE_VALUE {
@@ -55,8 +55,8 @@ open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle
     
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
         // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
-        // @leak the file handles can only be freed once the load_work, which is threaded, completed
-        file_handle := cast(^FileHandle) allocate_memory(size_of(FileHandle))
+        // @leak the file handles can only be freed once the load_work, which is threaded, completes
+        file_handle := new(FileHandle)
 
         if file_handle != nil {
             file_handle.handle = win.CreateFileW(cast(cstring16) &file_group.data.cFileName[0], win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
@@ -101,7 +101,7 @@ end_processing_all_files_of_type :: proc(group: ^PlatformFileGroup) {
     file_group := cast(^FileGroup) group._platform
     if file_group != nil {
         win.FindClose(file_group.find_handle)
-        deallocate_memory(file_group)
+        free(file_group)
         group._platform = nil
     }
 }

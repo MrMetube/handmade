@@ -7,25 +7,19 @@ import "base:intrinsics"
 
 
 Arena :: struct {
-    storage:    [] u8,
-    used:       umm,
+    // @todo(viktor): if we see performance problems here, maybe move storage and used out?
+    current_block: ^Platform_Memory_Block,
+    
     temp_count: i32,
     
-    block_count: i32,
     minimum_block_size: umm,
-    
     allocation_flags: Platform_Allocation_Flags,
 }
 
 TemporaryMemory :: struct {
     arena: ^Arena,
-    storage: [] u8,
-    used:    umm,
-}
-
-Memory_Block_Chain :: struct {
-    storage: [] u8,
-    used:    umm,
+    block: ^Platform_Memory_Block,
+    used:  umm,
 }
 
 PushParams :: struct {
@@ -75,20 +69,16 @@ set_minimum_block_size :: proc (arena: ^Arena, size: umm) {
 clear_arena :: proc(arena: ^Arena) {
     assert(arena.temp_count == 0)
     
-    for arena.block_count > 0 {
+    for arena.current_block != nil {
         free_last_block(arena)
     }
 }
 
 free_last_block :: proc (arena: ^Arena) {
-    old_storage := arena.storage
-    defer Platform.deallocate_memory(raw_data(old_storage), arena.allocation_flags)
+    block := arena.current_block
+    arena.current_block = block.arena_previous_block
     
-    link := get_link(arena)
-    arena.storage = link.storage
-    arena.used    = link.used
-    
-    arena.block_count -= 1
+    Platform.deallocate_memory(block)
 }
 
 ////////////////////////////////////////////////
@@ -117,58 +107,54 @@ push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (
     return result
 }
 
-get_link :: proc (arena: ^Arena) -> (result: ^Memory_Block_Chain) {
-    assert(arena.storage != nil)
+@(require_results)
+push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushParams) -> (result: pmm) {
+    alignment_offset: umm
+    if arena.current_block != nil {
+        alignment_offset = arena_alignment_offset(arena, params.alignment)
+    }
+    size := size_init + alignment_offset
     
-    #no_bounds_check {
-        result = auto_cast &arena.storage[len(arena.storage)]
+    if arena.current_block == nil || arena.current_block.used + size >= auto_cast len(arena.current_block.storage) {
+        size = size_init // @note(viktor): the memory will allways be aligned now!
+        
+        if BoundsCheck & arena.allocation_flags != {} {
+            arena.minimum_block_size = 0
+            size = align_pow2(size, params.alignment)
+        } else if arena.minimum_block_size == 0 {
+            arena.minimum_block_size = 2 * Megabyte
+        }
+        
+        block_size := max(size, arena.minimum_block_size)
+        new_block  := Platform.allocate_memory(block_size, arena.allocation_flags)
+        
+        new_block.arena_previous_block = arena.current_block
+        arena.current_block = new_block
+    }
+    assert(arena.current_block.used + size <= auto_cast len(arena.current_block.storage))
+    assert(size >= size_init)
+    
+    alignment_offset = arena_alignment_offset(arena, params.alignment)
+    result = &arena.current_block.storage[arena.current_block.used + alignment_offset]
+    arena.current_block.used += size
+    
+    
+    if .ClearToZero in params.flags {
+        intrinsics.mem_zero(result, size_init)
     }
     
     return result
 }
 
-@(require_results)
-push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushParams) -> (result: pmm) {
-    alignment_offset := arena_alignment_offset(arena, params.alignment)
+arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> (result: umm) {
+    if arena.current_block.storage == nil do return 0
+    if arena.current_block.used == auto_cast len(arena.current_block.storage) do return 0
     
-    arena.allocation_flags += { .check_overflow }
-    
-    size := size_init + alignment_offset
-    if arena.used + size >= cast(umm) len(arena.storage) {
-        size = size_init // @note(viktor): the memory will allways be aligned now!
-        
-        if BoundsCheck & arena.allocation_flags != {} {
-            arena.minimum_block_size = 0
-        } else if arena.minimum_block_size == 0 {
-            arena.minimum_block_size = 2 * Megabyte
-        }
-        
-        block_size := max(size + size_of(Memory_Block_Chain), arena.minimum_block_size)
-        
-        memory := Platform.allocate_memory(block_size, arena.allocation_flags)
-        
-        saved := Memory_Block_Chain {
-            storage = arena.storage,
-            used    = arena.used,
-        }
-        
-        arena.storage = slice_from_parts(u8, memory, block_size - size_of(Memory_Block_Chain))
-        arena.used = 0
-        
-        link := get_link(arena)
-        link ^= saved
-        
-        arena.block_count += 1
-    }
-    assert(arena.used + size <= cast(umm) len(arena.storage))
-    
-    result = &arena.storage[arena.used + alignment_offset]
-    arena.used += size
-    
-    assert(size >= size_init)
-    
-    if .ClearToZero in params.flags {
-        intrinsics.mem_zero(result, size_init)
+    pointer := transmute(umm) &arena.current_block.storage[arena.current_block.used]
+
+    alignment_mask := alignment - 1
+    if pointer & alignment_mask != 0 {
+        result = alignment - (pointer & alignment_mask) 
     }
     
     return result
@@ -179,39 +165,6 @@ push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushP
     Platform = api
 }
 
-// @note(viktor): This is generally not for production use, this is probably
-// only really something we need during testing, but who knows
-@(require_results)
-copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
-    buffer := push_slice(arena, u8, len(s), no_clear())
-    bytes  := transmute([]u8) s
-    for r, i in bytes {
-        buffer[i] = r
-    }
-    result = transmute(string) buffer
-    
-    return result
-}
-
-
-arena_has_room :: proc { arena_has_room_slice, arena_has_room_struct, arena_has_room_size }
-@(require_results)
-arena_has_room_slice :: proc(arena: ^Arena, $Element: typeid, #any_int len: u64, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
-    return arena_has_room_size(arena, size_of(Element) * len, alignment)
-}
-
-@(require_results)
-arena_has_room_struct :: proc(arena: ^Arena, $T: typeid, #any_int alignment: u64 = DefaultAlignment) -> (result: b32) {
-    return arena_has_room_size(arena, size_of(T), alignment)
-}
-
-arena_has_room_size :: proc(arena: ^Arena, #any_int size_init: umm, #any_int alignment: umm = DefaultAlignment) -> (result: b32) {
-    size := arena_get_effective_size(arena, size_init, alignment)
-    result = arena.used + size < cast(umm) len(arena.storage)
-    return result
-}
-
-
 zero :: proc { zero_size, zero_slice }
 zero_size :: proc(memory: pmm, size: u64) {
     intrinsics.mem_zero(memory, size)
@@ -220,29 +173,18 @@ zero_slice :: proc(data: []$T){
     intrinsics.mem_zero(raw_data(data), len(data) * size_of(T))
 }
 
-arena_get_effective_size :: proc(arena: ^Arena, size_init: umm, alignment: umm) -> (result: umm) {
-    alignment_offset := arena_alignment_offset(arena, alignment)
-    result =  size_init + alignment_offset
-    return result
-}
-
-arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> (result: umm) {
-    if arena.storage == nil do return 0
-    if arena.used == auto_cast len(arena.storage) do return 0
+// @note(viktor): This is generally not for production use, this is probably
+// only really something we need during testing, but who knows
+@(require_results)
+copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
+    // @todo(viktor): handle zero sized allocations better in push_size
+    if s == "" do return
+    buffer := push_slice(arena, u8, len(s), no_clear())
+    bytes  := transmute([]u8) s
     
-    pointer := transmute(umm) &arena.storage[arena.used]
-
-    alignment_mask := alignment - 1
-    if pointer & alignment_mask != 0 {
-        result = alignment - (pointer & alignment_mask) 
-    }
+    copy_slice(buffer, bytes)
     
-    return result
-}
-
-arena_remaining_size :: proc(arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> (result: umm) {
-    alignment_offset:= arena_alignment_offset(arena, alignment)
-    result = (auto_cast len(arena.storage) - 1) - (arena.used + alignment_offset)
+    result = transmute(string) buffer
     
     return result
 }
@@ -250,9 +192,11 @@ arena_remaining_size :: proc(arena: ^Arena, #any_int alignment: umm = DefaultAli
 ////////////////////////////////////////////////
 
 begin_temporary_memory :: proc(arena: ^Arena) -> (result: TemporaryMemory) {
-    result.arena   = arena
-    result.used    = arena.used
-    result.storage = arena.storage
+    result.arena = arena
+    result.block = arena.current_block
+    if result.block != nil {
+        result.used  = arena.current_block.used
+    }
     
     arena.temp_count += 1
     
@@ -263,12 +207,15 @@ end_temporary_memory :: proc(temp_mem: TemporaryMemory) {
     arena := temp_mem.arena
     assert(arena.temp_count > 0)
     
-    for raw_data(arena.storage) != raw_data(temp_mem.storage) {
+    for arena.current_block != temp_mem.block {
         free_last_block(arena)
     }
     
-    assert(arena.used >= temp_mem.used)
-    arena.used = temp_mem.used
+    if arena.current_block != nil {
+        assert(arena.current_block.used >= temp_mem.used)
+        arena.current_block.used = temp_mem.used
+    }
+    
     arena.temp_count -= 1
 }
 
