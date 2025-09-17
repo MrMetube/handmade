@@ -92,7 +92,8 @@ Memory_Block :: struct #align(64) {
 _Memory_Block :: struct {
     prev, next: ^Memory_Block,
     
-    size:  u64,
+    size: u64,
+    base: pmm,
     allocation_flags: Platform_Allocation_Flags,
     loop_flags:       Memory_Block_Flags,
 }
@@ -273,7 +274,7 @@ main :: proc() {
     // @todo(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
     push_buffer_size :: 32 * Megabyte
-    push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size, { .NotRestored }), push_buffer_size)
+    push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size, { .not_restored }), push_buffer_size)
     
     game_memory := GameMemory {
         high_priority_queue = auto_cast &high_queue,
@@ -742,18 +743,35 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, de
 ////////////////////////////////////////////////
 // Platform Allocator
 
+PageSize :: 4096 // @todo(viktor): you can get this from the OS, too!
 // @todo(viktor): This could be a special allocator that then can just be passed to the game arenas
 @(api)
 allocate_memory :: proc(#any_int size: u64, allocation_flags := Platform_Allocation_Flags{}) -> (result: pmm) {
     // @note(viktor): We require the memory block headers not to change the cache line alignment of an allocation.
     #assert(size_of(Memory_Block) == 64)
     
-    block := cast(^Memory_Block) win.VirtualAlloc(nil, cast(uint) (size + size_of(Memory_Block)), win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
-    assert(block != nil)
+    total_size := size + size_of(Memory_Block)
+    
+    if .check_underflow in allocation_flags {
+        total_size += 2 * PageSize
+    }
+    
+    memory := cast([^] u8) win.VirtualAlloc(nil, cast(uint) total_size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    assert(memory != nil)
+    
+    block := cast(^Memory_Block) memory
+    block.base = &memory[size_of(Memory_Block)]
+    if .check_underflow in allocation_flags {
+        old_protect: u32
+        protected := win.VirtualProtect(&memory[PageSize], PageSize, win.PAGE_NOACCESS, &old_protect)
+        assert(protected)
+        block.base = &memory[2 * PageSize]
+    }
+    
     block.size = size
     block.allocation_flags = allocation_flags
     
-    if is_in_loop(&GlobalPlatformState) && .NotRestored not_in allocation_flags {
+    if is_in_loop(&GlobalPlatformState) && .not_restored not_in allocation_flags {
         block.loop_flags += { .allocated_during_loop }
     }
     
@@ -761,15 +779,23 @@ allocate_memory :: proc(#any_int size: u64, allocation_flags := Platform_Allocat
     list_prepend(&GlobalPlatformState.block_sentinel, block)
     end_ticket_mutex(&GlobalPlatformState.block_mutex)
     
-    result = get_pointer_from_memory_block(block)
+    result = block.base
+    
     return result
 }
 
 @(api)
-deallocate_memory :: proc(memory: pmm) {
+deallocate_memory :: proc(memory: pmm, allocation_flags := Platform_Allocation_Flags{}) {
     if memory == nil do return
- 
-    block := get_memory_block_from_pointer(memory)
+    memory := cast([^] u8) memory
+    
+    block: ^Memory_Block
+    #no_bounds_check {
+        block = auto_cast &memory[-size_of(Memory_Block)]
+        if .check_underflow in allocation_flags {
+            block = auto_cast &memory[-2 * PageSize]
+        }
+    }
     
     if is_in_loop(&GlobalPlatformState) {
         block.loop_flags += { .freed_during_loop }
@@ -787,15 +813,8 @@ free_memory_block :: proc (block: ^Memory_Block) {
     assert(ok)
 }
 
+@(deprecated="remove")
 get_memory_block_from_pointer :: proc (full_block: pmm) -> (result: ^Memory_Block) {
-    blocks := cast([^] Memory_Block) full_block
-    #no_bounds_check result = &blocks[-1]
-    return result
-}
-
-get_pointer_from_memory_block :: proc (block: ^Memory_Block) -> (result: pmm) {
-    blocks := cast([^] Memory_Block) block
-    result = &blocks[1]
     return result
 }
 
@@ -836,19 +855,17 @@ begin_recording_input :: proc(state: ^PlatformState, index: i32) {
         
         written: u32
         for source := state.block_sentinel.next; source != &state.block_sentinel; source = source.next {
-            if .NotRestored in source.allocation_flags do continue
-            
-            base_pointer := get_pointer_from_memory_block(source)
+            if .not_restored in source.allocation_flags do continue
             
             dest := Saved_Memory_Block {
-                base = cast(u64) cast(umm) base_pointer,
+                base = cast(u64) cast(umm) source.base,
                 size = source.size,
             }
             
             ok: win.BOOL
             ok = win.WriteFile(state.recording_handle, &dest, size_of(dest), &written, nil)
             assert(ok)
-            ok = win.WriteFile(state.recording_handle, base_pointer, safe_truncate(u32, dest.size), &written, nil)
+            ok = win.WriteFile(state.recording_handle, source.base, safe_truncate(u32, dest.size), &written, nil)
             assert(ok)
         }
         
@@ -869,38 +886,10 @@ end_recording_input :: proc(state: ^PlatformState) {
     state.recording_index = 0
 }
 
-_buffer: [128 * Megabyte] u8
-
 begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
     clear_blocks_by_mask(state, { .allocated_during_loop })
     
     path := get_record_replay_filepath(index)
-    sanity := win.CreateFileW(path, win.GENERIC_READ, 0, nil, win.OPEN_EXISTING, 0, nil)
-    
-    if sanity != win.INVALID_HANDLE {
-        read: u32
-        for {
-            block: Saved_Memory_Block
-            ok: win.BOOL
-            ok = win.ReadFile(sanity, &block, size_of(block), &read, nil)
-            if !ok {
-                print("% %\n", path, os.error_string(os.get_last_error()))
-            }
-            assert(ok)
-            if block.base == 0 do break
-            
-            ok = win.ReadFile(sanity, &_buffer[0], 1, &read, nil)
-            if !ok {
-                print("% %\n", path, os.error_string(os.get_last_error()))
-            }
-            ok = win.ReadFile(sanity, &_buffer[1], safe_truncate(u32, block.size)-1, &read, nil)
-            if !ok {
-                print("% %\n", path, os.error_string(os.get_last_error()))
-            }
-            read = read
-        }
-    }
-    win.CloseHandle(sanity)
     state.replaying_handle = win.CreateFileW(path, win.GENERIC_READ, 0, nil, win.OPEN_EXISTING, 0, nil)
     
     if state.replaying_handle != win.INVALID_HANDLE {
@@ -918,14 +907,8 @@ begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
             if block.base == 0 do break
             
             base_pointer := cast(pmm) cast(umm) block.base
-            assert(block.size < auto_cast len(_buffer))
-            
-            ok = win.ReadFile(state.replaying_handle, &_buffer[0], safe_truncate(u32, block.size), &read, nil)
+            ok = win.ReadFile(state.replaying_handle, base_pointer, safe_truncate(u32, block.size), &read, nil)
             assert(ok)
-            
-            dest := slice_from_parts(u8, base_pointer, block.size)
-            copy(dest, _buffer[:read])
-            read = read
         }
     }
 }

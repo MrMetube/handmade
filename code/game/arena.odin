@@ -23,7 +23,7 @@ TemporaryMemory :: struct {
     used:    umm,
 }
 
-Memory_Block_Footer :: struct {
+Memory_Block_Chain :: struct {
     storage: [] u8,
     used:    umm,
 }
@@ -82,11 +82,11 @@ clear_arena :: proc(arena: ^Arena) {
 
 free_last_block :: proc (arena: ^Arena) {
     old_storage := arena.storage
-    defer Platform.deallocate_memory(raw_data(old_storage))
+    defer Platform.deallocate_memory(raw_data(old_storage), arena.allocation_flags)
     
-    footer := get_footer(arena)
-    arena.storage = footer.storage
-    arena.used    = footer.used
+    link := get_link(arena)
+    arena.storage = link.storage
+    arena.used    = link.used
     
     arena.block_count -= 1
 }
@@ -117,7 +117,7 @@ push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (
     return result
 }
 
-get_footer :: proc (arena: ^Arena) -> (result: ^Memory_Block_Footer) {
+get_link :: proc (arena: ^Arena) -> (result: ^Memory_Block_Chain) {
     assert(arena.storage != nil)
     
     #no_bounds_check {
@@ -130,28 +130,33 @@ get_footer :: proc (arena: ^Arena) -> (result: ^Memory_Block_Footer) {
 @(require_results)
 push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushParams) -> (result: pmm) {
     alignment_offset := arena_alignment_offset(arena, params.alignment)
-
+    
+    arena.allocation_flags += { .check_overflow }
+    
     size := size_init + alignment_offset
     if arena.used + size >= cast(umm) len(arena.storage) {
         size = size_init // @note(viktor): the memory will allways be aligned now!
         
-        if arena.minimum_block_size == 0 {
+        if BoundsCheck & arena.allocation_flags != {} {
+            arena.minimum_block_size = 0
+        } else if arena.minimum_block_size == 0 {
             arena.minimum_block_size = 2 * Megabyte
         }
-        block_size := max(size + size_of(Memory_Block_Footer), arena.minimum_block_size)
+        
+        block_size := max(size + size_of(Memory_Block_Chain), arena.minimum_block_size)
         
         memory := Platform.allocate_memory(block_size, arena.allocation_flags)
         
-        saved := Memory_Block_Footer {
+        saved := Memory_Block_Chain {
             storage = arena.storage,
             used    = arena.used,
         }
         
-        arena.storage = slice_from_parts(u8, memory, block_size - size_of(Memory_Block_Footer))
+        arena.storage = slice_from_parts(u8, memory, block_size - size_of(Memory_Block_Chain))
         arena.used = 0
         
-        footer := get_footer(arena)
-        footer ^= saved
+        link := get_link(arena)
+        link ^= saved
         
         arena.block_count += 1
     }
@@ -163,8 +168,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushP
     assert(size >= size_init)
     
     if .ClearToZero in params.flags {
-        timed_block("ClearToZero")
-        intrinsics.mem_zero(result, size)
+        intrinsics.mem_zero(result, size_init)
     }
     
     return result
@@ -257,13 +261,13 @@ begin_temporary_memory :: proc(arena: ^Arena) -> (result: TemporaryMemory) {
 
 end_temporary_memory :: proc(temp_mem: TemporaryMemory) {
     arena := temp_mem.arena
-    assert(arena.used >= temp_mem.used)
     assert(arena.temp_count > 0)
     
     for raw_data(arena.storage) != raw_data(temp_mem.storage) {
         free_last_block(arena)
     }
     
+    assert(arena.used >= temp_mem.used)
     arena.used = temp_mem.used
     arena.temp_count -= 1
 }

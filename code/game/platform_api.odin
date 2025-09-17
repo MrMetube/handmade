@@ -3,7 +3,12 @@ package game
 WorkQueue :: struct {}
 
 @(common) Platform_Allocation_Flags :: bit_set [Platform_Allocation_Flag; u64]
-@(common) Platform_Allocation_Flag :: enum { NotRestored }
+@(common) Platform_Allocation_Flag :: enum { 
+    not_restored,
+    check_overflow,
+    check_underflow,
+}
+BoundsCheck :: Platform_Allocation_Flags { .check_overflow, .check_underflow }
 
 @(common) PlatformFileType   :: enum { AssetFile }
 @(common) PlatformFileHandle :: struct { no_errors:  b32, _platform: pmm }

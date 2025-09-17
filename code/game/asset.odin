@@ -133,7 +133,7 @@ TextureOp :: struct {
 ////////////////////////////////////////////////
 
 make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_queue: ^TextureOpQueue) -> (assets: ^Assets) {
-    assets = bootstrap_arena(Assets, "arena", allocation_flags = { .NotRestored })
+    assets = bootstrap_arena(Assets, "arena", allocation_flags = { .not_restored })
     
     list_init_sentinel(&assets.memory_sentinel)
     
@@ -159,7 +159,7 @@ make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_qu
     total_tag_count:   u32 = 1
     total_asset_count: u32 = 1
     {
-            file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
+        file_group := Platform.begin_processing_all_files_of_type(.AssetFile)
         defer Platform.end_processing_all_files_of_type(&file_group)
         
         // @todo(viktor): which arena?
@@ -211,6 +211,7 @@ make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_qu
     assets.assets[0] = {}
     
     for id in AssetTypeId {
+        
         dest_type := &assets.types[id]
         dest_type.first_asset_index = asset_count
 
@@ -219,6 +220,8 @@ make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_qu
             
             if Platform_no_file_errors(&file.handle) {
                 for source_type in file.asset_type_array {
+                    if id == .None do continue
+                    
                     if source_type.id == id {
                         if source_type.id == .FontGlyph {
                             file.font_bitmap_id_offset = cast(BitmapId) (asset_count - source_type.first_asset_index)
@@ -230,7 +233,7 @@ make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_qu
                         
                         hha_asset_array := push(&tran_state.arena, hha.AssetData, asset_count_for_type)
                         read_data_from_file_into_slice(&file.handle, file.header.assets + cast(u64) source_type.first_asset_index * size_of(hha.AssetData), hha_asset_array)
-                                                    
+                        
                         assets_for_type := assets.assets[asset_count:][:asset_count_for_type]
                         for &asset, asset_index in assets_for_type {
                             hha_asset := hha_asset_array[asset_index]
