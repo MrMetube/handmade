@@ -35,7 +35,7 @@ complete_previous_reads_before_future_reads :: proc "contextless" () {
 
 ////////////////////////////////////////////////
 
-TicketMutex :: struct {
+TicketMutex :: struct #align(64) {
     ticket:  u64,
     serving: u64,
 }

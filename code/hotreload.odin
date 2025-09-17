@@ -8,7 +8,7 @@ game := game_stubs
 @(private="file")
 game_lib: win.HMODULE
 
-load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: win.wstring) -> (is_valid: b32, last_write_time: u64) {
+load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: b32, last_write_time: u64) {
     if game_lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
     } else {
@@ -51,7 +51,7 @@ unload_game_lib :: proc() {
     game = game_stubs
 }
 
-get_last_write_time :: proc(filename: win.wstring) -> (last_write_time: u64) {
+get_last_write_time :: proc(filename: cstring16) -> (last_write_time: u64) {
     FILE_ATTRIBUTE_DATA :: struct {
         dwFileAttributes: win.DWORD,
         ftCreationTime:   win.FILETIME,

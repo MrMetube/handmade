@@ -36,6 +36,8 @@ LowPriorityThreads  :: 2
 ////////////////////////////////////////////////
 //  Globals
 
+platform_state: PlatformState
+
 GlobalRunning: b32
 GlobalSoundBuffer: ^IDirectSoundBuffer
 
@@ -71,25 +73,37 @@ SoundOutput :: struct {
 PlatformState :: struct {
     exe_path: string,
     
-    game_memory_block: []u8,
-    replay_buffers:    [4]ReplayBuffer,
+    // @note(viktor): to touch the memory ring you need to take the memory mutex.
+    block_mutex:    TicketMutex,
+    block_sentinel: Memory_Block,
     
-    input_record_handle: win.HANDLE,
-    input_record_index:  i32,
-    input_replay_handle: win.HANDLE,
-    input_replay_index:  i32,
+    recording_handle: win.HANDLE,
+    replaying_handle: win.HANDLE,
+    recording_index:  i32,
+    replaying_index:  i32,
 }
 
-ReplayBuffer :: struct {
-    filename:     win.wstring,
-    filehandle:   win.HANDLE,
-    memory_map:   win.HANDLE,
-    memory_block: []u8,
+Memory_Block :: struct #align(64) {
+    using _data: _Memory_Block,
+    _pad: [64 - size_of(_Memory_Block)] u8,
+}
+
+_Memory_Block :: struct {
+    prev, next: ^Memory_Block,
+    
+    base: pmm,
+    size: u64,
+}
+
+Saved_Memory_Block :: struct {
+    base: u64,
+    size: u64,
 }
 
 main :: proc() {
     unused(draw_rectangle_slowly)
-    unused(deallocate_memory)
+    
+    list_init_sentinel(&platform_state.block_sentinel)
     
     {
         frequency: win.LARGE_INTEGER
@@ -151,6 +165,7 @@ main :: proc() {
     ////////////////////////////////////////////////
     // Platform Setup
     
+    
     {
         window_dc := win.GetDC(window)
         defer win.ReleaseDC(window, window_dc)
@@ -162,18 +177,17 @@ main :: proc() {
     init_work_queue(&high_queue, HighPriorityThreads)
     init_work_queue(&low_queue,  LowPriorityThreads )
     
-    state: PlatformState
     {
         exe_path_buffer: [win.MAX_PATH_WIDE] u16
         size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
-        exe_path_and_name := win.wstring_to_utf8(cast(cstring16) raw_data(exe_path_buffer[:size_of_filename]), cast(int) size_of_filename) or_else ""
+        exe_path_and_name := win.wstring_to_utf8(cast(cstring16) &exe_path_buffer[0], cast(int) size_of_filename) or_else ""
         on_last_slash: u32
         for r, i in exe_path_and_name {
             if r == '\\' {
                 on_last_slash = cast(u32) i
             }
         }
-        state.exe_path = exe_path_and_name[:on_last_slash]
+        platform_state.exe_path = exe_path_and_name[:on_last_slash]
     }
     
     // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
@@ -237,9 +251,9 @@ main :: proc() {
     
     frame_arena: Arena
     
-    game_dll_name := build_exe_path(state, "game.dll")
-    temp_dll_name := build_exe_path(state, "game_temp.dll")
-    lock_name     := build_exe_path(state, "lock.temp")
+    game_dll_name := build_exe_path("game.dll")
+    temp_dll_name := build_exe_path("game_temp.dll")
+    lock_name     := build_exe_path("lock.temp")
     game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
     game.debug_set_event_recording(game_lib_is_valid)
     
@@ -264,30 +278,10 @@ main :: proc() {
     set_platform_api_in_the_statically_linker_game_code(Platform)
     
     { // @note(viktor): initialize game_memory
-        total_size: uint = 0
-        state.game_memory_block = nil
-        
-        // @todo(viktor): TransientStorage needs to be broken up into game transient and cache transient, and only the former need be saved for state playback.
-        for &buffer, index in state.replay_buffers {
-            buffer.filename   = get_record_replay_filepath(state, cast(i32) index)
-            buffer.filehandle = win.CreateFileW(buffer.filename, win.GENERIC_READ|win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
-            
-            size_high := cast(win.DWORD)(total_size >> 32)
-            size_low  := cast(win.DWORD)total_size
-            buffer.memory_map = win.CreateFileMappingW(buffer.filehandle, nil, win.PAGE_READWRITE, size_high, size_low, nil)
-            
-            buffer_storage_ptr := cast([^]u8) win.MapViewOfFile(buffer.memory_map, win.FILE_MAP_ALL_ACCESS, 0, 0, total_size)
-            if buffer_storage_ptr != nil {
-                buffer.memory_block = buffer_storage_ptr[:total_size]
-            } else {
-                // @logging 
-            }
-        }
-        
         game_memory.debug_table = cast(^DebugTable) allocate_memory(size_of(DebugTable))
         
         texture_op_count := 1024
-        texture_ops := (cast([^]TextureOp) allocate_memory(texture_op_count * size_of(TextureOp)))[:texture_op_count]
+        texture_ops := (cast([^] TextureOp) allocate_memory(texture_op_count * size_of(TextureOp)))[:texture_op_count]
         for &op, index in texture_ops[:texture_op_count-1] {
             op.next = &texture_ops[index + 1]
         }
@@ -372,7 +366,7 @@ main :: proc() {
                     button.ended_down = old_keyboard_controller.buttons[index].ended_down
                 }
                 
-                process_pending_messages(&state, new_keyboard_controller)
+                process_pending_messages(&platform_state, new_keyboard_controller)
             }
             
             max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
@@ -442,10 +436,10 @@ main :: proc() {
                     if new_controller.stick_average != {0,0} do new_controller.is_analog = true
                     
                     // @todo(viktor): what if we don't want to override the stick
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) { new_controller.stick_average.x =  1; new_controller.is_analog = false }
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT)  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP)    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN)  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
+                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 { new_controller.stick_average.x =  1; new_controller.is_analog = false }
+                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
+                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP) != 0    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
+                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
                     
                     Threshold :: 0.5
                     process_Xinput_button(&new_controller.stick_left , old_controller.stick_left , 1, new_controller.stick_average.x < -Threshold ? 1 : 0)
@@ -483,12 +477,13 @@ main :: proc() {
         game_updated := game.begin_timed_block("game updated")
         
         if !GlobalPause {
-            if state.input_record_index != 0 {
-                record_input(&state, new_input)
+            state := &platform_state
+            if state.recording_index != 0 {
+                record_input(state, new_input)
             }
             
-            if state.input_replay_index != 0 {
-                replay_input(&state, new_input)
+            if state.replaying_index != 0 {
+                replay_input(state, new_input)
             }
             
             if game_lib_is_valid {
@@ -742,13 +737,47 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, de
 
 @(api)
 allocate_memory :: proc(#any_int size: u64) -> (result: pmm) {
-    result = win.VirtualAlloc(nil, cast(uint) size, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    // @note(viktor): We require the memory block headers not to change the cache line alignment of an allocation.
+    #assert(size_of(Memory_Block) == 64)
+    
+    block := cast(^Memory_Block) win.VirtualAlloc(nil, cast(uint) (size + size_of(Memory_Block)), win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    assert(block != nil)
+    block.base = block
+    block.size = size
+    
+    begin_ticket_mutex(&platform_state.block_mutex)
+    list_prepend(&platform_state.block_sentinel, block)
+    end_ticket_mutex(&platform_state.block_mutex)
+    
+    result = get_pointer_from_memory_block(block)
+    
     return result
 }
 
 @(api)
 deallocate_memory :: proc(memory: pmm) {
-    win.VirtualFree(memory, 0, win.MEM_RELEASE)
+    if memory != nil {
+        block := get_memory_block_from_pointer(memory)
+        
+        begin_ticket_mutex(&platform_state.block_mutex)
+        list_remove(block)
+        end_ticket_mutex(&platform_state.block_mutex)
+        
+        ok := win.VirtualFree(block, 0, win.MEM_RELEASE)
+        assert(ok)
+    }
+}
+
+get_memory_block_from_pointer :: proc (full_block: pmm) -> (result: ^Memory_Block) {
+    blocks := cast([^] Memory_Block) full_block
+    #no_bounds_check result = &blocks[-1]
+    return result
+}
+
+get_pointer_from_memory_block :: proc (block: ^Memory_Block) -> (result: pmm) {
+    blocks := cast([^] Memory_Block) block
+    result = &blocks[1]
+    return result
 }
 
 ////////////////////////////////////////////////
@@ -771,64 +800,81 @@ get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
 ////////////////////////////////////////////////   
 //  Record and Replay
 
-get_record_replay_filepath :: proc(state: PlatformState, index:i32) -> win.wstring {
-    buffer: [64]u8
-    return build_exe_path(state, format_string(buffer[:], "editloop_%.input", index))
+get_record_replay_filepath :: proc(index: i32) -> cstring16 {
+    buffer: [64] u8
+    return build_exe_path(format_string(buffer[:], "editloop_%.input", index))
 }
 
-begin_recording_input :: proc(state: ^PlatformState, input_recording_index: i32) {
-    replay_buffer := state.replay_buffers[input_recording_index]
+begin_recording_input :: proc(state: ^PlatformState, index: i32) {
+    path := get_record_replay_filepath(index)
+    state.recording_handle = win.CreateFileW(path, win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
     
-    if replay_buffer.memory_block != nil {
-        state.input_record_index = input_recording_index
-        state.input_record_handle = replay_buffer.filehandle
-        // @todo(viktor): this is slow on the first start
-        file_position := cast(win.LARGE_INTEGER) len(state.game_memory_block)
-        win.SetFilePointerEx(state.input_record_handle, file_position, nil, win.FILE_BEGIN)
+    written: u32
+    if state.recording_handle != win.INVALID_HANDLE {
+        state.recording_index = index
         
-        copy_slice(replay_buffer.memory_block, state.game_memory_block)
+        for link := state.block_sentinel.next; link != &state.block_sentinel; link = link.next {
+            base_pointer := get_pointer_from_memory_block(link)
+            block := Saved_Memory_Block {
+                base = cast(u64) cast(umm) base_pointer,
+                size = link.size,
+            }
+            
+            win.WriteFile(state.replaying_handle, &block, size_of(block), &written, nil)
+            win.WriteFile(state.replaying_handle, base_pointer, safe_truncate(block.size, u32), &written, nil)
+        }
+        
+        final_block := Saved_Memory_Block {}
+        win.WriteFile(state.replaying_handle, &final_block, size_of(final_block), &written, nil)
     }
 }
 
 record_input :: proc(state: ^PlatformState, input: ^Input) {
     bytes_written: u32
-    win.WriteFile(state.input_record_handle, input, cast(u32) size_of(Input), &bytes_written, nil)
+    win.WriteFile(state.recording_handle, input, cast(u32) size_of(Input), &bytes_written, nil)
 }
 
 end_recording_input :: proc(state: ^PlatformState) {
-    state.input_record_index = 0
+    win.CloseHandle(state.recording_handle)
+    state.recording_index = 0
 }
 
-begin_replaying_input :: proc(state: ^PlatformState, input_replaying_index: i32) {
-    replay_buffer := state.replay_buffers[input_replaying_index]
+begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
+    path := get_record_replay_filepath(index)
+    state.replaying_handle = win.CreateFileW(path, win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
     
-    if replay_buffer.memory_block != nil {
-        state.input_replay_index = input_replaying_index
-        state.input_replay_handle = replay_buffer.filehandle
+    if state.replaying_handle != win.INVALID_HANDLE {
+        state.replaying_index = index
         
-        file_position := cast(win.LARGE_INTEGER) len(state.game_memory_block)
-        win.SetFilePointerEx(state.input_replay_handle, file_position, nil, win.FILE_BEGIN)
-        
-        copy(state.game_memory_block, replay_buffer.memory_block)
+        read: u32
+        for {
+            block: Saved_Memory_Block
+            win.ReadFile(state.replaying_handle, &block, size_of(block), &read, nil)
+            if block.base == 0 do break
+            
+            base_pointer := cast(pmm) cast(umm) block.base
+            win.ReadFile(state.replaying_handle, base_pointer, safe_truncate(block.size, u32), &read, nil)
+        }
     }
 }
 
 replay_input :: proc(state: ^PlatformState, input: ^Input) {
     bytes_read: u32
-    win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
+    win.ReadFile(state.replaying_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
     if bytes_read != 0 {
-        // @note(viktor): there is still input
+        // @note(viktor): there still is input
     } else {
         // @note(viktor): we reached the end of the stream go back to beginning
-        replay_index := state.input_replay_index
+        replay_index := state.replaying_index
         end_replaying_input(state)
         begin_replaying_input(state, replay_index)
-        win.ReadFile(state.input_replay_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
+        win.ReadFile(state.replaying_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
     }
 }
 
 end_replaying_input :: proc(state: ^PlatformState) {
-    state.input_replay_index = 0
+    win.CloseHandle(state.replaying_handle)
+    state.replaying_index = 0
 }
 
 ////////////////////////////////////////////////   
@@ -1060,10 +1106,10 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
                   case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.back,           is_down)
                   case win.VK_L:
                     if is_down {
-                        if state.input_replay_index != 0 {
+                        if state.replaying_index != 0 {
                             end_replaying_input(state)
-                        } else if state.input_record_index == 0 {
-                            assert(state.input_replay_index == 0)
+                        } else if state.recording_index == 0 {
+                            assert(state.replaying_index == 0)
                             begin_recording_input(state, 1) 
                         } else {
                             end_recording_input(state)
@@ -1088,9 +1134,8 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
     }
 }
 
-build_exe_path :: proc(state: PlatformState, filename: string) -> win.wstring {
+build_exe_path :: proc(filename: string) -> cstring16 {
     buffer: [256]u8
-    filename := filename
-    path := format_string(buffer[:], "%\\%", state.exe_path, filename)
+    path := format_string(buffer[:], `%\%`, platform_state.exe_path, filename)
     return win.utf8_to_wstring(path)
 }
