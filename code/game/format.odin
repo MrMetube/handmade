@@ -467,8 +467,10 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
         bytes := buf[:count]
         append(&temp, bytes)
         
-      case string:  append(&temp, value)
-      case cstring: append(&temp, string(value))
+      case string:    append(&temp, value)
+      case cstring:   append(&temp, string(value))
+      case string16:  append(&temp, fmt.tprint(value))
+      case cstring16: append(&temp, fmt.tprint(value))
        
       case u8:      draw_unsigned_integer(&temp, view_integer(value))
       case u16:     draw_unsigned_integer(&temp, view_integer(value))

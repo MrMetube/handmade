@@ -29,8 +29,8 @@ begin_processing_all_files_of_type :: proc(type: PlatformFileType) -> (result: P
     }
     
     // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
-    group, err := new(FileGroup)
-    if err == nil {
+    group := cast(^FileGroup) allocate_memory(size_of(FileGroup))
+    if group != nil {
         group.find_handle = win.FindFirstFileW(cast(cstring16) &pattern[0], &group.data)
         for group.find_handle != win.INVALID_HANDLE_VALUE {
             result.file_count += 1
@@ -56,9 +56,9 @@ open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
         // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
         // @leak the file handles can only be freed once the load_work, which is threaded, completed
-        file_handle, err := new(FileHandle)
+        file_handle := cast(^FileHandle) allocate_memory(size_of(FileHandle))
 
-        if err == nil {
+        if file_handle != nil {
             file_handle.handle = win.CreateFileW(cast(cstring16) &file_group.data.cFileName[0], win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
             
             result.no_errors = file_handle.handle != win.INVALID_HANDLE_VALUE
@@ -82,12 +82,12 @@ read_data_from_file :: proc(handle: ^PlatformFileHandle, #any_int position, amou
     file_handle := cast(^FileHandle) handle._platform
     if Platform_no_file_errors(handle) {
         overlap_info := win.OVERLAPPED{
-            Offset     = safe_truncate(position, u32),
-            OffsetHigh = safe_truncate(position >> 32, u32),
+            Offset     = safe_truncate(u32, position),
+            OffsetHigh = safe_truncate(u32, position >> 32),
         }
         
         bytes_read: u32
-        amount_32 := safe_truncate(amount, u32)
+        amount_32 := safe_truncate(u32, amount)
         if win.ReadFile(file_handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount {
             // @note(viktor): File read succeded
         } else {
@@ -101,7 +101,7 @@ end_processing_all_files_of_type :: proc(group: ^PlatformFileGroup) {
     file_group := cast(^FileGroup) group._platform
     if file_group != nil {
         win.FindClose(file_group.find_handle)
-        free(file_group)
+        deallocate_memory(file_group)
         group._platform = nil
     }
 }

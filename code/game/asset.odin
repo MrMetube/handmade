@@ -3,23 +3,21 @@ package game
 import hha "asset_builder"
 
 Assets :: struct {
-    tran_state: ^TransientState,
+    arena: Arena,
+    
+    // @note(viktor): only used to get access to the work queue for asset loading
+    tran_state:       ^TransientState,
     texture_op_queue: ^TextureOpQueue,
     
-    next_generation:            AssetGenerationId,
-    in_flight_generation_count: u32,
-    in_flight_generations:      [32]AssetGenerationId,    
-    
-    memory_operation_lock: u32,
     memory_sentinel: AssetMemoryBlock,
     
     loaded_asset_sentinel: AssetMemoryHeader,
         
-    files: []AssetFile,
+    files: [] AssetFile,
 
-    types:  [AssetTypeId]AssetType,
-    assets: []Asset,
-    tags:   []AssetTag,
+    types:  [AssetTypeId] AssetType,
+    assets: [] Asset,
+    tags:   [] AssetTag,
     
     tag_ranges: [AssetTagId]f32,
 }
@@ -134,12 +132,12 @@ TextureOp :: struct {
 
 ////////////////////////////////////////////////
 
-make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState, texture_op_queue: ^TextureOpQueue) -> (assets: ^Assets) {
-    assets = push(arena, Assets)
+make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_queue: ^TextureOpQueue) -> (assets: ^Assets) {
+    assets = bootstrap_arena(Assets, "arena", allocation_flags = { .NotRestored })
     
     list_init_sentinel(&assets.memory_sentinel)
     
-    insert_block(&assets.memory_sentinel, push(arena, memory_size), memory_size)
+    insert_block(&assets.memory_sentinel, push(&assets.arena, memory_size), memory_size)
     list_init_sentinel(&assets.loaded_asset_sentinel)
     
     assets.tran_state = tran_state
@@ -165,7 +163,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
         defer Platform.end_processing_all_files_of_type(&file_group)
         
         // @todo(viktor): which arena?
-        assets.files = push(arena, AssetFile, file_group.file_count)
+        assets.files = push(&assets.arena, AssetFile, file_group.file_count)
         for &file in assets.files {
             file.handle = Platform.open_next_file(&file_group)
             file.tag_base = total_tag_count
@@ -173,7 +171,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
             file.header = {}
             read_data_from_file_into_struct(&file.handle, 0, &file.header)
             
-            file.asset_type_array = push(arena, hha.AssetType, file.header.asset_type_count)
+            file.asset_type_array = push(&assets.arena, hha.AssetType, file.header.asset_type_count)
             read_data_from_file_into_slice(&file.handle, file.header.asset_types, file.asset_type_array)
 
             if file.header.magic_value != hha.MagicValue { 
@@ -196,8 +194,8 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
     }
     
     // @note(viktor): Allocate all metadata space
-    assets.assets = push(arena, Asset,    total_asset_count)
-    assets.tags   = push(arena, AssetTag, total_tag_count)
+    assets.assets = push(&assets.arena, Asset,    total_asset_count)
+    assets.tags   = push(&assets.arena, AssetTag, total_tag_count)
     
     // @note(viktor): Load tags
     for &file in assets.files {
@@ -227,7 +225,7 @@ make_assets :: proc(arena: ^Arena, memory_size: u64, tran_state: ^TransientState
                         }
                         
                         asset_count_for_type := source_type.one_past_last_index - source_type.first_asset_index
-                        hha_memory := begin_temporary_memory(arena)
+                        hha_memory := begin_temporary_memory(&assets.arena)
                         defer end_temporary_memory(hha_memory)
                         
                         hha_asset_array := push(&tran_state.arena, hha.AssetData, asset_count_for_type)
@@ -486,10 +484,11 @@ begin_generation :: proc(assets: ^Assets) -> (result: AssetGenerationId) {
     timed_function()
     begin_asset_lock(assets)
     
-    result = assets.next_generation
-    assets.next_generation += 1
-    assets.in_flight_generations[assets.in_flight_generation_count] = result
-    assets.in_flight_generation_count += 1
+    tran_state := assets.tran_state
+    result = tran_state.next_generation
+    tran_state.next_generation += 1
+    tran_state.in_flight_generations[tran_state.in_flight_generation_count] = result
+    tran_state.in_flight_generation_count += 1
     
     end_asset_lock(assets)
     
@@ -497,20 +496,24 @@ begin_generation :: proc(assets: ^Assets) -> (result: AssetGenerationId) {
 }
 
 end_generation :: proc(assets: ^Assets, generation: AssetGenerationId) {
-    for &in_flight in assets.in_flight_generations[:assets.in_flight_generation_count] {
+    begin_asset_lock(assets)
+    tran_state := assets.tran_state
+    for &in_flight in tran_state.in_flight_generations[:tran_state.in_flight_generation_count] {
         if in_flight == generation {
-            assets.in_flight_generation_count -= 1
-            if assets.in_flight_generation_count > 0 {
-                in_flight = assets.in_flight_generations[assets.in_flight_generation_count]
+            tran_state.in_flight_generation_count -= 1
+            if tran_state.in_flight_generation_count > 0 {
+                in_flight = tran_state.in_flight_generations[tran_state.in_flight_generation_count]
             }
         }
     }
+    end_asset_lock(assets)
 }
 
 generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (result: b32) {
     result = true
     
-    for in_flight in assets.in_flight_generations[:assets.in_flight_generation_count] {
+    tran_state :=  assets.tran_state
+    for in_flight in tran_state.in_flight_generations[:tran_state.in_flight_generation_count] {
         if in_flight == check {
             result = false
             break
@@ -521,15 +524,17 @@ generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (
 }
 
 begin_asset_lock :: proc(assets: ^Assets) {
+    tran_state := assets.tran_state
     for {
-        if ok, _ := atomic_compare_exchange(&assets.memory_operation_lock, 0, 1); ok {
+        if ok, _ := atomic_compare_exchange(&tran_state.memory_operation_lock, 0, 1); ok {
             break
         }
     }
 }
 end_asset_lock :: proc(assets: ^Assets) {
     complete_previous_writes_before_future_writes()
-    volatile_store(&assets.memory_operation_lock, 0)
+    tran_state := assets.tran_state
+    volatile_store(&tran_state.memory_operation_lock, 0)
 }
 
 acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {

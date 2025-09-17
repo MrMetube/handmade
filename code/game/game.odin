@@ -116,8 +116,8 @@ TransientState :: struct {
     
     assets:        ^Assets,
     generation_id: AssetGenerationId,
-    
-    tasks: [4]TaskWithMemory,
+        
+    tasks: [4] TaskWithMemory,
     
     test_diffuse: Bitmap,
     test_normal:  Bitmap,
@@ -127,6 +127,12 @@ TransientState :: struct {
     
     env_size: v2i,
     envs: [3]EnvironmentMap,
+    
+    // @todo(viktor): potentially remove this system, it is just for asset locking
+    next_generation:            AssetGenerationId,
+    memory_operation_lock:      u32,
+    in_flight_generation_count: u32,
+    in_flight_generations:      [32] AssetGenerationId,    
 }
 
 Game_Mode :: union {
@@ -189,7 +195,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
             task.in_use = false
         }
         
-        tran_state.assets = make_assets(&tran_state.arena, 512 * Megabyte, tran_state, &memory.platform_texture_op_queue)
+        tran_state.assets = make_assets(512 * Megabyte, tran_state, &memory.platform_texture_op_queue)
         
         state.mixer.master_volume = 0.1
         

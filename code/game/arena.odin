@@ -13,6 +13,8 @@ Arena :: struct {
     
     block_count: i32,
     minimum_block_size: umm,
+    
+    allocation_flags: Platform_Allocation_Flags,
 }
 
 TemporaryMemory :: struct {
@@ -35,6 +37,8 @@ PushFlags :: enum {
     ClearToZero,
 }
 
+////////////////////////////////////////////////
+
 DefaultAlignment :: 4
 
 DefaultPushParams :: PushParams {
@@ -48,8 +52,11 @@ align_clear    :: proc (#any_int alignment: umm, clear_to_zero: b32 = true ) -> 
 
 ////////////////////////////////////////////////
 
-bootstrap_arena :: proc ($type_with_arena: typeid, $arena_member: string, minimum_block_size: umm = 0, params := DefaultPushParams) -> (result: ^type_with_arena){
-    boot_strap := Arena { minimum_block_size = minimum_block_size }
+bootstrap_arena :: proc ($type_with_arena: typeid, $arena_member: string, minimum_block_size: umm = 0, params := DefaultPushParams, allocation_flags := Platform_Allocation_Flags {} ) -> (result: ^type_with_arena){
+    boot_strap := Arena { 
+        minimum_block_size = minimum_block_size, 
+        allocation_flags = allocation_flags,
+    }
     
     result = push(&boot_strap, type_with_arena, params = params)
     bytes := slice_from_parts(u8, result, size_of(type_with_arena))
@@ -72,13 +79,6 @@ clear_arena :: proc(arena: ^Arena) {
         free_last_block(arena)
     }
 }
-
-// sub_arena :: proc(sub_arena: ^Arena, arena: ^Arena, #any_int storage_size: umm, params: = DefaultPushParams) {
-//     assert(sub_arena != arena)
-    
-//     storage := push(arena, u8, storage_size, params)
-//     init_arena(sub_arena, storage)
-// }
 
 free_last_block :: proc (arena: ^Arena) {
     old_storage := arena.storage
@@ -140,7 +140,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushP
         }
         block_size := max(size + size_of(Memory_Block_Footer), arena.minimum_block_size)
         
-        memory := Platform.allocate_memory(block_size)
+        memory := Platform.allocate_memory(block_size, arena.allocation_flags)
         
         saved := Memory_Block_Footer {
             storage = arena.storage,

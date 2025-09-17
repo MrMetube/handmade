@@ -94,10 +94,11 @@ align8     :: proc "contextless" (value: $T) -> T { return (value + (8-1)) &~ (8
 align16    :: proc "contextless" (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
 align_pow2 :: proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
 
-safe_truncate :: proc(value: $T, $R: typeid) -> R
+safe_truncate :: proc($R: typeid, value: $T) -> (result: R)
 where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is_integer(R){
     assert(value <= cast(T) max(R))
-    return cast(R) value
+    result = cast(R) value
+    return result
 }
 
 @(require_results) rec_cast :: proc($T: typeid, rec: $R/Rectangle([$N]$E)) -> Rectangle([N]T) where T != E {
@@ -113,26 +114,26 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
 @(require_results) vcast_4 :: proc "contextless" ($T: typeid, x, y, z, w: $E) -> ([4] T) where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
-@(require_results) vcast_vec :: proc "contextless" ($T: typeid, v:[$N]$E) -> (result: [N] T) where T != E {
+@(require_results) vcast_vec :: proc "contextless" ($T: typeid, v: [$N] $E) -> (result: [N] T) where T != E {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = cast(T) v[i]
     }
     return result
 }
 
-@(require_results) min_vec :: proc(a,b: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) min_vec :: proc(a,b: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = min(a[i], b[i])
     }
     return result
 }
-@(require_results) max_vec :: proc(a,b: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) max_vec :: proc(a,b: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = max(a[i], b[i])
     }
     return result
 }
-@(require_results) abs_vec :: proc(a: [$N]$E) -> (result: [N]E) where intrinsics.type_is_numeric(E) {
+@(require_results) abs_vec :: proc(a: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = abs(a[i])
     }
