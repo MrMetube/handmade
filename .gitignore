@@ -1,7 +1,0 @@
-*.hha
-*.test
-*.input
-
-/**/generated*.odin
-
-lock.tmp
