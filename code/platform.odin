@@ -254,6 +254,7 @@ main :: proc() {
     ////////////////////////////////////////////////
     // Memory Setup
     
+    // @todo(viktor): delete the temp_dll file on quit
     game_dll_name := build_exe_path("game.dll")
     temp_dll_name := build_exe_path("game_temp.dll")
     lock_name     := build_exe_path("lock.temp")
@@ -492,7 +493,10 @@ main :: proc() {
             }
             
             if game_lib_is_valid {
-                game.update_and_render(&game_memory, new_input^, &render_commands)
+                game.update_and_render(&game_memory, new_input, &render_commands)
+                if new_input.quit_requested {
+                    GlobalRunning = false
+                }
             }
         }
         

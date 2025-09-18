@@ -83,7 +83,7 @@ mark_brain_active :: proc (brain: ^Brain) {
     }
 }
 
-execute_brain :: proc(state: ^State, input: Input, world: ^World_Mode, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
+execute_brain :: proc(state: ^State, input: ^Input, world: ^World_Mode, region: ^SimRegion, render_group: ^RenderGroup, brain: ^Brain) {
     dt := input.delta_time
     
     switch brain.kind {
@@ -98,6 +98,7 @@ execute_brain :: proc(state: ^State, input: Input, world: ^World_Mode, region: ^
         if was_pressed(controller.back) {
             mark_for_deletion(body)
             mark_for_deletion(head)
+            con_hero.brain_id = 0
             return
         }
         

@@ -27,31 +27,53 @@ AssetTypeId :: enum u32 {
     None,
     
     // @note(viktor): Bitmaps
-    Shadow, Wall, Stair, 
-    Rock, Grass,
+    Shadow, 
+    Tree, 
+    Sword, 
+    Rock, 
+    
+    Grass,
+    Tuft,
+    Stone,
 
-    Cape, Head, Body, Sword,
-    Monster,
+    Head, 
+    Cape,
+    Torso,
     
-    // @note(viktor): Sounds
-    Blop, Drop, Woosh, Hit,
-    
-    Music,
     
     // @note(viktor): Fonts
-    Font, FontGlyph,
+    Font, 
+    FontGlyph,
     
-    // @todo(viktor): :CutsceneEpisodes cutscene stuff
+    
+    // @note(viktor): Sounds
+    Bloop, 
+    Crack, 
+    Drop, 
+    Glide,
+    Music, 
+    Puhp,
+    
+    // @note(viktor): Cutscene
+    OpeningCutscene
 }
 
-AssetFontType :: enum {
+AssetFontType :: enum u32 {
     Default = 0,
     Debug   = 10,
 }
 
-AssetTagId :: enum {
+AssetTagId :: enum u32 {
+    Smoothness,
+    Flatness,
+    
     FacingDirection, // @note(viktor): angle in radians
-    FontType,        // @note(viktor): see AssetFontType
+    
+    UnicodeCodepoint,
+    FontType,         // @note(viktor): see AssetFontType
+    
+    ShotIndex,
+    LayerIndex,
 }
 
 // 
@@ -73,10 +95,10 @@ Header :: struct #packed {
 }
 
 AssetData :: struct #packed {
+    data_offset: u64,
+    
     first_tag_index:         u32,
     one_past_last_tag_index: u32,
-    
-    data_offset: u64,
     
     info: struct #raw_union {
         bitmap: BitmapInfo,
@@ -105,17 +127,19 @@ SoundChain :: enum u32 {
 }
 
 FontInfo :: struct #packed {
+    one_past_highest_codepoint: rune,
+    glyph_count: u32,
+    
     ascent:  f32,
     descent: f32,
     linegap: f32,
     
-    one_past_highest_codepoint: rune,
-    glyph_count: u32,
     // @note(viktor): Data is:
     //     glyphs:   [glyph_count] GlyphInfo,
     //     advances: [glyph_count][glyph_count] f32,
 }
 
+#assert(size_of(rune) == size_of(u32))
 GlyphInfo :: struct #packed {
     codepoint: rune,
     bitmap:    BitmapId,

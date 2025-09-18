@@ -79,9 +79,12 @@ SourceFontGlyphInfo :: struct {
 
 main :: proc() {
     write_fonts()
-    write_hero()
-    write_non_hero()
-    write_sounds()
+    when false {
+        assert(false, "I am now using the official art packs")
+        write_hero()
+        write_non_hero()
+        write_sounds()
+    }
 }
 
 make_hha :: proc() -> (hha: ^HHA) {
@@ -105,7 +108,7 @@ write_hero :: proc () {
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
 
-    begin_asset_type(hha, .Body)
+    begin_asset_type(hha, .Torso)
     add_bitmap_asset(hha, "../assets/body_left.bmp",  {0.36, 0.01})
     add_tag(hha, .FacingDirection, Pi)
     add_bitmap_asset(hha, "../assets/body_right.bmp", {0.63, 0.01})
@@ -135,9 +138,9 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/shadow.bmp", {0.5, -0.4})
     end_asset_type(hha)
         
-    begin_asset_type(hha, .Stair)
-    add_bitmap_asset(hha, "../assets/stair.bmp")
-    end_asset_type(hha)
+    // begin_asset_type(hha, .Stair)
+    // add_bitmap_asset(hha, "../assets/stair.bmp")
+    // end_asset_type(hha)
 
     // @todo(viktor): alignment percentages for these
     begin_asset_type(hha, .Rock)
@@ -168,9 +171,9 @@ write_non_hero :: proc () {
     add_bitmap_asset(hha, "../assets/flower2.bmp")
     end_asset_type(hha)
     
-    begin_asset_type(hha, .Monster)
-    add_bitmap_asset(hha, "../assets/orc_left.bmp"     , v2{0.7 , 0})
-    add_tag(hha, .FacingDirection, Pi)
+    // begin_asset_type(hha, .Monster)
+    // add_bitmap_asset(hha, "../assets/orc_left.bmp"     , v2{0.7 , 0})
+    // add_tag(hha, .FacingDirection, Pi)
     add_bitmap_asset(hha, "../assets/orc_right.bmp"    , v2{0.27, 0})
     add_tag(hha, .FacingDirection, 0)
     end_asset_type(hha)
@@ -178,7 +181,7 @@ write_non_hero :: proc () {
 
 write_fonts :: proc() {
     hha := make_hha()
-    defer output_hha_file(`.\fonts.hha`, hha)
+    defer output_hha_file(`.\data\fonts.hha`, hha)
     
     // chinese_font := load_font(`C:\Users\Viktor\Downloads\Noto_Sans_SC\static\NotoSansSC-Regular.ttf`)
     // for c in "贺佳樱我爱你" do add_character_asset(hha, &debug_font, c)
@@ -189,8 +192,8 @@ write_fonts :: proc() {
     
     begin_asset_type(hha, .FontGlyph)
     for &it in fonts {
-        for c in rune(1)..<127 do add_character_asset(hha, it.font, c)
-        for c in "°ßöüäÖÜÄ" do add_character_asset(hha, it.font, c)
+        for c in rune(1+26)..<127 do add_character_asset(hha, it.font, c)
+        for c in "°ßöüäÖÜÄµ" do add_character_asset(hha, it.font, c)
     }
     end_asset_type(hha)
     
@@ -206,7 +209,7 @@ write_sounds :: proc() {
     hha := make_hha()
     defer output_hha_file(`.\sounds.hha`, hha)
     
-    begin_asset_type(hha, .Blop)
+    begin_asset_type(hha, .Bloop)
     add_sound_asset(hha, "../assets/blop0.wav")
     add_sound_asset(hha, "../assets/blop1.wav")
     add_sound_asset(hha, "../assets/blop2.wav")
@@ -218,18 +221,18 @@ write_sounds :: proc() {
     add_sound_asset(hha, "../assets/drop2.wav")
     end_asset_type(hha)
         
-    begin_asset_type(hha, .Hit)
-    add_sound_asset(hha, "../assets/hit0.wav")
-    add_sound_asset(hha, "../assets/hit1.wav")
-    add_sound_asset(hha, "../assets/hit2.wav")
-    add_sound_asset(hha, "../assets/hit3.wav")
-    end_asset_type(hha)
+    // begin_asset_type(hha, .Hit)
+    // add_sound_asset(hha, "../assets/hit0.wav")
+    // add_sound_asset(hha, "../assets/hit1.wav")
+    // add_sound_asset(hha, "../assets/hit2.wav")
+    // add_sound_asset(hha, "../assets/hit3.wav")
+    // end_asset_type(hha)
                 
-    begin_asset_type(hha, .Woosh)
-    add_sound_asset(hha, "../assets/woosh0.wav")
-    add_sound_asset(hha, "../assets/woosh1.wav")
-    add_sound_asset(hha, "../assets/woosh2.wav")
-    end_asset_type(hha)
+    // begin_asset_type(hha, .Woosh)
+    // add_sound_asset(hha, "../assets/woosh0.wav")
+    // add_sound_asset(hha, "../assets/woosh1.wav")
+    // add_sound_asset(hha, "../assets/woosh2.wav")
+    // end_asset_type(hha)
         
     
     sec :: 48000
@@ -345,14 +348,14 @@ write_slice :: proc(out: os.Handle, at: ^i64, slice: []$T) {
     at^ += auto_cast written
 }
 
-begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId) {
+begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId, override:= 0) {
     assert(hha.type == nil)
     assert(hha.asset_index == 0)
     
     hha.type = &hha.types[hha.type_count]
     hha.type_count += 1
     hha.type.id = id
-    hha.type.first_asset_index   = auto_cast hha.asset_count
+        hha.type.first_asset_index   = auto_cast hha.asset_count
     hha.type.one_past_last_index = hha.type.first_asset_index
 }
 

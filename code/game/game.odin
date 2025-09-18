@@ -52,7 +52,8 @@ InputController :: struct {
 
 @(common) 
 Input :: struct {
-    delta_time: f32,
+    delta_time:     f32,
+    quit_requested: bool,
     
     controllers: [5]InputController,
         
@@ -140,8 +141,6 @@ Game_Mode :: union {
     ^Cutscene_Mode,
     ^World_Mode,
 }
-Titlescreen_Mode :: struct {}
-Cutscene_Mode :: struct {}
 
 TaskWithMemory :: struct {
     in_use: b32,
@@ -157,7 +156,8 @@ ControlledHero :: struct {
 }
 
 @(export)
-update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
+update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^RenderCommands) {
+    input := input
     Platform = memory.Platform_api
     
     when DebugEnabled {
@@ -169,16 +169,12 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     
     ////////////////////////////////////////////////
 
-    do_init_world := false 
-    
     state := cast(^State) memory.state
     if state == nil {
         memory.state = bootstrap_arena(State, "total_arena")
         state = cast(^State) memory.state
         
         init_mixer(&state.mixer, &state.audio_arena)
-        
-        do_init_world = true // :CutsceneEpisodes CheckForMetaInput
         
         when DebugEnabled do debug_set_event_recording(true)
     }
@@ -215,10 +211,6 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         }
     }
     
-    if do_init_world {
-        play_world(state, tran_state)
-    }
-
     ////////////////////////////////////////////////
     
     { debug_data_block("Game")
@@ -255,7 +247,7 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
         debug_record_value(&UseDebugCamera)
         debug_record_value(&DebugCameraDistance)
     }
-
+    
     if SoundPanningWithMouse {
         // @note(viktor): test sound panning with the mouse 
         music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
@@ -288,18 +280,27 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     ////////////////////////////////////////////////
     // Update and Render
     
+    if state.game_mode == nil {
+        play_intro_cutscene(state, tran_state)
+        when true { // go directly into the game
+            controller := &input.controllers[0]
+            controller.start.ended_down = true
+            controller.start.half_transition_count = 1
+        }
+    }
+    
     render_group: RenderGroup
     init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
     
-    // @todo(viktor): :CutsceneEpisodes rerun
     rerun := false
-    
     for {
         switch mode in state.game_mode {
-          case ^Titlescreen_Mode: unreachable()
-          case ^Cutscene_Mode:    unreachable()
+          case ^Titlescreen_Mode: 
+            rerun = update_and_render_title_screen(state, tran_state, &render_group, input, mode)
+          case ^Cutscene_Mode:
+            rerun = update_and_render_cutscene(state, tran_state, &render_group, input, mode)
           case ^World_Mode:
-            /* rerun = */update_and_render_world(state, mode, tran_state, &render_group, input)
+            rerun = update_and_render_world(state, tran_state, &render_group, input, mode)
         }
         
         if !rerun do break
@@ -312,13 +313,11 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     tran_state.generation_id = begin_generation(tran_state.assets)
     
-    // @todo(viktor): :CutsceneEpisodes quit requested
-    
     check_arena(&state.mode_arena)
     check_arena(&tran_state.arena)
 }
 
-set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid) {
+set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid) -> (result: ^mode) {
     need_to_wait := false
     for task in tran_state.tasks {
         need_to_wait ||= task.depends_on_game_mode
@@ -329,7 +328,9 @@ set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid
     }
     clear_arena(&state.mode_arena)
     
-    state.game_mode = mode{}
+    result = push(&state.mode_arena, mode)
+    state.game_mode = result
+    return result
 }
 
 // @note(viktor): at the moment this has to be a really fast function. It shall not be slower than a

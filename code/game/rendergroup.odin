@@ -21,15 +21,14 @@ package game
         _NON-premulitplied_ alpha.
 */
 
-@(common) 
-Color :: [4]u8
+@(common) Color :: [4] u8
 
 @(common) 
 Bitmap :: struct {
     // @todo(viktor): the length of the slice and either width or height are redundant
-    memory: []Color,
+    memory: [] Color,
     
-    align_percentage:  [2]f32,
+    align_percentage:  [2] f32,
     width_over_height: f32,
     
     width, height: i32,
@@ -182,6 +181,22 @@ ProjectedBasis :: struct {
     scale: f32,
     valid: b32,
 }
+
+////////////////////////////////////////////////
+
+Camera_Params :: struct {
+    width_of_monitor: f32,
+    meters_to_pixels: f32,
+    focal_length:     f32,
+}
+
+ get_standard_camera_params :: proc (width_in_pixels: f32, focal_length: f32) -> (result: Camera_Params) {
+    result.width_of_monitor = 0.635
+    result.meters_to_pixels = width_in_pixels / result.width_of_monitor
+    result.focal_length = focal_length
+    
+    return result
+ }
 
 ////////////////////////////////////////////////
 

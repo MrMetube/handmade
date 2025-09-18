@@ -377,12 +377,10 @@ get_line_advance :: proc(info: ^FontInfo) -> (result: f32) {
 
 get_bitmap_for_glyph :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: BitmapId) {
     glyph := get_glyph_from_codepoint(font, info, codepoint)
-    entry := font.glyphs[glyph]
+    result = font.glyphs[glyph].bitmap
     
-    // @todo(viktor): why is this not handled by the null glyph1?!
-    if(entry.codepoint == codepoint) {
-        result = font.bitmap_id_offset + entry.bitmap
-    }
+    // @todo(viktor): find out why  font.bitmap_id_offset is 0 instead of the 26 we expect
+    result += 26
     
     return result
 }
@@ -722,6 +720,11 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
           case .Bitmap:
             bitmap := &work.asset.header.value.(Bitmap)
             
+            // @todo(viktor): :ShuffledColors Bitmap colors for the official hhas are shuffled
+            for &pixel in bitmap.memory {
+                swap(&pixel.r, &pixel.b)
+            }
+            
             op := TextureOpAllocate {
                 width = bitmap.width, 
                 height = bitmap.height, 
@@ -738,7 +741,7 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
             for glyph_index in 1..<info.glyph_count {
                 glyph := &font.glyphs[glyph_index]
                 assert(glyph.codepoint < info.one_past_highest_codepoint)
-                font.unicode_map[glyph.codepoint] = cast(u16) glyph_index
+                font.unicode_map[glyph.codepoint] = safe_truncate(u16, glyph_index)
             }
         }
     }

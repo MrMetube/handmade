@@ -140,7 +140,7 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-update_and_render_entities :: proc(input: Input, world_mode: ^World_Mode, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
+update_and_render_entities :: proc(input: ^Input, world_mode: ^World_Mode, sim_region: ^SimRegion, render_group: ^RenderGroup, camera_p: v3, dt: f32, haze_color: v4) {
     timed_function()
     
     particle_cache := world_mode.particle_cache

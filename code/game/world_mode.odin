@@ -65,9 +65,7 @@ Particle :: struct {
 ////////////////////////////////////////////////
 
 play_world :: proc(state: ^State, tran_state: ^TransientState) {
-    set_game_mode(state, tran_state, ^World_Mode)
-    world_mode := push(&state.mode_arena, World_Mode)
-    defer state.game_mode = world_mode
+    world_mode := set_game_mode(state, tran_state, World_Mode)
     
     ////////////////////////////////////////////////
     
@@ -280,8 +278,8 @@ add_wall :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Traversab
     entity.flags += {.Collides}
     entity.occupying = occupying
     append(&entity.pieces, VisiblePiece{
-        asset = .Rock,
-        height = 1.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
+        asset = .Tree,
+        height = 2.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
         color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
     })
 }
@@ -303,20 +301,19 @@ add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: Travers
         
         append(&body.pieces, VisiblePiece{
             asset  = .Shadow,
-            height = 0.5,
-            offset = {0, -0.5, 0},
+            height = hero_height*1,
             color  = {1,1,1,0.5},
         })        
         append(&body.pieces, VisiblePiece{
             asset  = .Cape,
-            height = hero_height*1.3,
-            offset = {0, -0.3, 0},
+            height = hero_height*1.2,
             color  = 1,
             flags  = { .SquishAxis, .BobUpAndDown },
         })
         append(&body.pieces, VisiblePiece{
-            asset  = .Body,
-            height = hero_height,
+            asset  = .Torso,
+            height = hero_height*1.2,
+            offset = {0, -0.1, 0},
             color  = 1,
             flags  = { .SquishAxis },
         })
@@ -334,8 +331,8 @@ add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: Travers
         // @todo(viktor): should render above the body
         append(&head.pieces, VisiblePiece{
             asset  = .Head,
-            height = hero_height*1.4,
-            offset = {0, -0.9*hero_height, 0},
+            height = hero_height*1.2,
+            offset = {0, -0.7, 0},
             color  = 1,
         })
         
@@ -354,13 +351,14 @@ add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: Travers
         
         glove.movement_mode = .AngleOffset
         glove.angle_current = -0.25 * Tau
-        glove.angle_base_offset  = 0.75
-        glove.angle_swipe_offset = 1.5
+        glove.angle_base_offset  = 0.3
+        glove.angle_swipe_offset = 1
+        glove.angle_current_offset = 0.3
         
         append(&head.pieces, VisiblePiece{
             asset  = .Sword,
-            height = hero_height,
-            offset = {0, -0.5*hero_height, 0},
+            height = 0.25*hero_height,
+            offset = 0,
             color  = 1,
         })
         
@@ -378,17 +376,17 @@ add_snake_piece :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Tr
     entity.brain_slot = brain_slot_for(BrainSnake, "segments", segment_index)
     entity.occupying = occupying
     
-    height :: 0.5
+    height :: 1.5
     append(&entity.pieces, VisiblePiece{
         asset  = .Shadow,
         height = height,
-        offset = {0, -height, 0},
+        offset = {0, 0, 0},
         color  = {1,1,1,0.5},
     })
     
     append(&entity.pieces, VisiblePiece{
-        asset  = segment_index == 0 ? .Head : .Body,
-        height = 1,
+        asset  = segment_index == 0 ? .Head : .Torso,
+        height = height,
         color  = 1,
     })
     
@@ -406,17 +404,17 @@ add_monster :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Traver
     entity.brain_slot = brain_slot_for(BrainMonster, "body")
     entity.occupying = occupying
     
-    height :: 0.75
+    height :: 4.5
     append(&entity.pieces, VisiblePiece{
         asset  = .Shadow,
         height = height,
-        offset = {0, -height, 0},
+        offset = {0, 0, 0},
         color  = {1,1,1,0.5},
     })
     
     append(&entity.pieces, VisiblePiece{
-        asset  = .Monster,
-        height = 1.5,
+        asset  = .Torso,
+        height = height,
         color  = 1,
     })
     
@@ -435,15 +433,15 @@ add_familiar :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Trave
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Head,
-        height = 2,
+        height = 2.5,
         color  = 1,
-        offset = {0, 1, 0},
+        offset = {0, 0, 0},
         flags  = { .BobUpAndDown },
     })
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Shadow,
-        height = 0.3,
+        height = 2.5,
         color  = {1,1,1,0.5},
     })
 }

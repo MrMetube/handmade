@@ -66,16 +66,14 @@ chunk_position_from_tile_positon :: proc(world_mode: ^World_Mode, tile_x, tile_y
     return result
 }
 
-update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_state: ^TransientState, render_group: ^RenderGroup, input: Input) {
+update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, world_mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
     
     dt := input.delta_time * TimestepPercentage/100.0
     
-    monitor_width_in_meters :: 0.635
-    meters_to_pixels_for_monitor := cast(f32) render_group.commands.width / monitor_width_in_meters
-    
-    focal_length, distance_above_ground : f32 = 0.3, 10
-    perspective(render_group, meters_to_pixels_for_monitor, focal_length, distance_above_ground)
+    camera := get_standard_camera_params(get_dimension(render_group.screen_area).x, 0.3)
+    distance_above_ground: f32 = 11
+    perspective(render_group, camera.meters_to_pixels, camera.focal_length, distance_above_ground)
     
     haze_color := DarkBlue
     push_clear(render_group, haze_color * {1,1,1,0})
@@ -89,7 +87,7 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     sim_memory := begin_temporary_memory(&tran_state.arena)
     // @todo(viktor): by how much should we expand the sim region?
     // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := add_radius(camera_bounds, v3{30, 30, 20})
+    sim_bounds := add_radius(camera_bounds, v3{15, 15, 15})
     sim_origin := world_mode.camera_p
     
     sim_region := begin_sim(sim_memory.arena, world_mode, sim_origin, sim_bounds, dt, world_mode.particle_cache)
@@ -101,7 +99,6 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     if ShowRenderAndSimulationBounds {
         world_transform := default_flat_transform()
         world_transform.offset -= camera_p 
-        world_transform.chunk_z = 10000
         push_rectangle_outline(render_group, screen_bounds,               world_transform, Orange, 0.1)
         push_rectangle_outline(render_group, sim_region.bounds,           world_transform, Blue,   0.2)
         push_rectangle_outline(render_group, sim_region.updatable_bounds, world_transform, Green,  0.2)
@@ -148,6 +145,7 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     
     ////////////////////////////////////////////////
     
+    // @todo(viktor): What was this about?
     // @todo(viktor): :TransientClipRect
     old_clip_rect_index := render_group.current_clip_rect_index
     defer render_group.current_clip_rect_index = old_clip_rect_index
@@ -170,14 +168,19 @@ update_and_render_world :: proc(state: ^State, world_mode: ^World_Mode, tran_sta
     
     check_arena(world_mode.world.arena)
     
-    // @todo(viktor): Should switch mode. Implemented in :CutsceneEpisodes
-    heroes_exist: b32
+    heroes_exist: bool
     for con_hero in state.controlled_heroes {
         if con_hero.brain_id != 0 {
             heroes_exist = true
             break
         }
     }
+    
+    if !heroes_exist {
+        play_intro_cutscene(state, tran_state)
+    }
+    
+    return false
 }
 
 ////////////////////////////////////////////////
