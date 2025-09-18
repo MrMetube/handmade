@@ -78,7 +78,7 @@ free_last_block :: proc (arena: ^Arena) {
     block := arena.current_block
     arena.current_block = block.arena_previous_block
     
-    Platform.deallocate_memory(block)
+    Platform.deallocate_memory_block(block)
 }
 
 ////////////////////////////////////////////////
@@ -126,7 +126,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushP
         }
         
         block_size := max(size, arena.minimum_block_size)
-        new_block  := Platform.allocate_memory(block_size, arena.allocation_flags)
+        new_block  := Platform.allocate_memory_block(block_size, arena.allocation_flags)
         
         new_block.arena_previous_block = arena.current_block
         arena.current_block = new_block
@@ -161,7 +161,7 @@ arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: umm = DefaultA
 }
 
 // @todo(viktor): This is a hack, because we link with the game translation unit twice. once at compile time and once at runtime. the compiletime PlatformApi is never able to be set otherwise
-@(common) set_platform_api_in_the_statically_linker_game_code :: proc (api: Platform_Api) {
+@(common) set_platform_api_in_the_statically_linked_game_code :: proc (api: Platform_Api) {
     Platform = api
 }
 

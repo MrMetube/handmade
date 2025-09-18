@@ -33,7 +33,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: cstring16) -> (
             print("%\n", os.error_string(os.get_last_error()))
         }
     }
-
+    
     if !is_valid {
         game = game_stubs
     }
@@ -60,7 +60,7 @@ get_last_write_time :: proc(filename: cstring16) -> (last_write_time: u64) {
         nFileSizeHigh:    win.DWORD,
         nFileSizeLow:     win.DWORD,
     }
-
+    
     file_information: FILE_ATTRIBUTE_DATA
     if win.GetFileAttributesExW(filename, win.GetFileExInfoStandard, &file_information) {
         last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)

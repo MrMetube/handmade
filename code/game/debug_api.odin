@@ -1,7 +1,7 @@
 #+vet !unused-procedures
 package game
 
-@(common) import "base:runtime"
+import "base:runtime"
 
 DebugEnabled :: true && INTERNAL
 
@@ -106,6 +106,7 @@ is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
 ////////////////////////////////////////////////
 // Record Insertion
 
+@(export)
 debug_ui_element :: proc(kind: DebugValue, name:= #caller_expression(kind), loc := #caller_location) {
     debug_record_event(kind, name, loc)
 }

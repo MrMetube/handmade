@@ -2,7 +2,7 @@ package game
 
 // @cleanup #placeholder
 @(common) INTERNAL :: #config(INTERNAL, false)
-SlowCode :: INTERNAL
+@(common) SlowCode :: INTERNAL
 
 ////////////////////////////////////////////////
 // @todo(viktor): Find a better place for these configurations
@@ -240,9 +240,11 @@ update_and_render :: proc(memory: ^GameMemory, input: Input, render_commands: ^R
     }
     
     { debug_data_block("Profile")
-        debug_ui_element(ArenaOccupancy{ &state.total_arena }, "State Total Arena")
-        debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transient State Arena")
-        debug_ui_element(ArenaOccupancy{ &state.audio_arena }, "Audio Arena")
+        { debug_data_block("Memory")
+            debug_ui_element(ArenaOccupancy{ &state.total_arena }, "State Total Arena")
+            debug_ui_element(ArenaOccupancy{ &tran_state.arena }, "Transient State Arena")
+            debug_ui_element(ArenaOccupancy{ &state.audio_arena }, "Audio Arena")
+        }
         debug_ui_element(FrameSlider{})
         debug_ui_element(FrameBarsGraph{})
         debug_ui_element(FrameInfo{})

@@ -1,7 +1,6 @@
 package main
 
 import "base:runtime"
-import "core:os"
 import win "core:sys/windows"
 
 /*
@@ -114,6 +113,9 @@ Saved_Memory_Block :: struct {
 main :: proc() {
     list_init_sentinel(&GlobalPlatformState.block_sentinel)
     
+    set_platform_api_in_the_statically_linked_game_code(Platform)
+    platform_arena: Arena
+    
     {
         frequency: win.LARGE_INTEGER
         win.QueryPerformanceFrequency(&frequency)
@@ -137,13 +139,8 @@ main :: proc() {
         
         {
             buffer := &GlobalBackBuffer
-            
-            bytes_per_pixel :: 4
-            buffer_pitch := align16(buffer.width)
-            assert(buffer_pitch == buffer.width)
-            bitmap_memory_size := cast(uint) (buffer_pitch * buffer.height * bytes_per_pixel)
-            
-            buffer.memory = slice_from_parts(Color, allocate_memory(bitmap_memory_size), buffer.width*buffer.height)
+            assert(align16(buffer.width) == buffer.width)
+            buffer.memory = push(&platform_arena, Color, buffer.width * buffer.height)
         }
         
         if win.RegisterClassW(&window_class) == 0 {
@@ -173,7 +170,6 @@ main :: proc() {
     
     ////////////////////////////////////////////////
     // Platform Setup
-    
     
     {
         window_dc := win.GetDC(window)
@@ -250,15 +246,13 @@ main :: proc() {
     init_xInput()
     
     // @todo(viktor): Monitor xbox controllers for being plugged in after the fact
-    xbox_controller_present: [XUSER_MAX_COUNT]b32 = true
+    xbox_controller_present: [XUSER_MAX_COUNT] b32 = true
     
     input: [2]Input
     old_input, new_input := &input[0], &input[1]
     
     ////////////////////////////////////////////////
     // Memory Setup
-    
-    frame_arena: Arena
     
     game_dll_name := build_exe_path("game.dll")
     temp_dll_name := build_exe_path("game_temp.dll")
@@ -267,15 +261,16 @@ main :: proc() {
     game.debug_set_event_recording(game_lib_is_valid)
     
     // @todo(viktor): make this like sixty seconds?
-    // @todo(viktor): pool with bitmap alloc
     // @todo(viktor): remove MaxPossibleOverlap
-    MaxPossibleOverlap :: 8 * size_of(Sample)
-    samples := cast([^]Sample) win.VirtualAlloc(nil, cast(uint) sound_output.buffer_size + MaxPossibleOverlap, win.MEM_RESERVE | win.MEM_COMMIT, win.PAGE_READWRITE)
+    MaxPossibleOverlap :: 8
+    samples := push(&platform_arena, Sample, sound_output.samples_per_second + MaxPossibleOverlap)
+    assert(samples != nil)
+    
+    frame_arena := Arena { allocation_flags = { .not_restored } }
     
     // @todo(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
-    push_buffer_size :: 32 * Megabyte
-    push_buffer := slice_from_parts(u8, allocate_memory(push_buffer_size, { .not_restored }), push_buffer_size)
+    push_buffer := push(&frame_arena, u8, 32 * Megabyte)
     
     game_memory := GameMemory {
         high_priority_queue = auto_cast &high_queue,
@@ -284,24 +279,17 @@ main :: proc() {
         Platform_api = Platform,
     }
     
-    set_platform_api_in_the_statically_linker_game_code(Platform)
-    
     { // @note(viktor): initialize game_memory
-        game_memory.debug_table = cast(^DebugTable) allocate_memory(size_of(DebugTable))
+        game_memory.debug_table = push(&platform_arena, DebugTable)
         
         texture_op_count := 1024
-        texture_ops := (cast([^] TextureOp) allocate_memory(texture_op_count * size_of(TextureOp)))[:texture_op_count]
+        texture_ops := push(&platform_arena, TextureOp, texture_op_count)
         for &op, index in texture_ops[:texture_op_count-1] {
             op.next = &texture_ops[index + 1]
         }
         game_memory.platform_texture_op_queue.first_free = &texture_ops[0]
     }
     texture_op_queue := &game_memory.platform_texture_op_queue
-    
-    if samples == nil {
-        assert(false)
-        return // @logging 
-    }
     
     ////////////////////////////////////////////////
     //  Timer Setup
@@ -313,7 +301,7 @@ main :: proc() {
     //  Game Loop
         
     for GlobalRunning {
-        ////////////////////////////////////////////////   
+        ////////////////////////////////////////////////
         // Input
         input_processed := game.begin_timed_block("input processed")
         
@@ -479,6 +467,14 @@ main :: proc() {
             game.debug_record_b32(&GlobalPause)
             game.debug_record_b32(&GlobalDebugShowCursor)
         }
+        
+        { debug_data_block("Profile")
+            { debug_data_block("Memory")
+                game.debug_ui_element(ArenaOccupancy{ &platform_arena }, "Platform Arena")
+                game.debug_ui_element(ArenaOccupancy{ &frame_arena }, "Platform Frame Arena")
+            }
+        }
+            
                 
         game.end_timed_block(input_processed)
         ////////////////////////////////////////////////
@@ -746,8 +742,9 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, de
 
 PageSize :: 4096 // @todo(viktor): you can get this from the OS, too!
 // @todo(viktor): This could be a special allocator that then can just be passed to the game arenas
+
 @(api)
-allocate_memory :: proc(#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {
+allocate_memory_block :: proc(#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {
     total_size := size + size_of(Memory_Block)
     
     base_offset: umm = size_of(Memory_Block)
@@ -756,8 +753,7 @@ allocate_memory :: proc(#any_int size: umm, allocation_flags := Platform_Allocat
         total_size = size + 2 * PageSize
         base_offset = 2 * PageSize
         protect_offset = PageSize
-    }
-    if .check_overflow in allocation_flags {
+    } else if .check_overflow in allocation_flags {
         size_rounded_up := align_pow2(size, PageSize)
         total_size = size_rounded_up + 2 * PageSize
         base_offset = PageSize + size_rounded_up - size
@@ -787,12 +783,11 @@ allocate_memory :: proc(#any_int size: umm, allocation_flags := Platform_Allocat
     end_ticket_mutex(&GlobalPlatformState.block_mutex)
     
     result = &block.block
-    
     return result
 }
 
 @(api)
-deallocate_memory :: proc (memory_block: ^Platform_Memory_Block) {
+deallocate_memory_block :: proc (memory_block: ^Platform_Memory_Block) {
     block := cast(^Memory_Block) memory_block
     
     if is_in_loop(&GlobalPlatformState) {
@@ -811,12 +806,10 @@ free_memory_block :: proc (block: ^Memory_Block) {
     assert(ok)
 }
 
-@(deprecated="remove")
-get_memory_block_from_pointer :: proc (full_block: pmm) -> (result: ^Memory_Block) {
-    return result
-}
-
 clear_blocks_by_mask :: proc (state: ^PlatformState, mask: Memory_Block_Flags) {
+    begin_ticket_mutex(&state.block_mutex)
+    defer end_ticket_mutex(&state.block_mutex)
+    
     for it := state.block_sentinel.next; it != &state.block_sentinel; {
         block := it
         it = it.next
@@ -829,6 +822,22 @@ clear_blocks_by_mask :: proc (state: ^PlatformState, mask: Memory_Block_Flags) {
             block.loop_flags = {}
         }
     }
+}
+
+// @todo(viktor): only generate this when INTERNAL?
+@(api)
+debug_get_memory_stats :: proc () -> (result: Debug_Platform_Memory_Stats) {
+    state := &GlobalPlatformState
+    begin_ticket_mutex(&state.block_mutex)
+    defer end_ticket_mutex(&state.block_mutex)
+    
+    for it := state.block_sentinel.next; it != &state.block_sentinel; it = it.next{
+        result.block_count += 1
+        result.total_used += it.block.used
+        result.total_size += auto_cast len(it.block.storage)
+    }
+    
+    return result
 }
 
 ////////////////////////////////////////////////   
@@ -844,6 +853,17 @@ get_record_replay_filepath :: proc(index: i32) -> cstring16 {
     return build_exe_path(format_string(buffer[:], "editloop_%.input", index))
 }
 
+verify_memory_block_integrity :: proc (state: ^PlatformState) {
+    begin_ticket_mutex(&state.block_mutex)
+    for source := state.block_sentinel.next; source != &state.block_sentinel; source = source.next {
+        if source.block.storage != nil {
+            size := safe_truncate(u32, len(source.block.storage))
+            unused(size)
+        }
+    }
+    end_ticket_mutex(&state.block_mutex)
+}
+
 begin_recording_input :: proc(state: ^PlatformState, index: i32) {
     path := get_record_replay_filepath(index)
     state.recording_handle = win.CreateFileW(path, win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
@@ -851,6 +871,7 @@ begin_recording_input :: proc(state: ^PlatformState, index: i32) {
     if state.recording_handle != win.INVALID_HANDLE {
         state.recording_index = index
         
+        begin_ticket_mutex(&state.block_mutex)
         written: u32
         for source := state.block_sentinel.next; source != &state.block_sentinel; source = source.next {
             if .not_restored in source.block.allocation_flags do continue
@@ -867,6 +888,7 @@ begin_recording_input :: proc(state: ^PlatformState, index: i32) {
             ok = win.WriteFile(state.recording_handle, base, safe_truncate(u32, dest.size), &written, nil)
             assert(ok)
         }
+        end_ticket_mutex(&state.block_mutex)
         
         final_block := Saved_Memory_Block {}
         ok := win.WriteFile(state.recording_handle, &final_block, size_of(final_block), &written, nil)
@@ -899,9 +921,6 @@ begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
             block: Saved_Memory_Block
             ok: win.BOOL
             ok = win.ReadFile(state.replaying_handle, &block, size_of(block), &read, nil)
-            if !ok {
-                print("% %\n", path, os.error_string(os.get_last_error()))
-            }
             assert(ok)
             if block.base == 0 do break
             
@@ -1039,7 +1058,7 @@ get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := fals
 toggle_fullscreen :: proc(window: win.HWND) {
     // @note(viktor): This follows Raymond Chen's prescription for fullscreen toggling, see:
     // http://blogs.msdn.com/b/oldnewthing/archive/2010/04/12/9994016.aspx
-
+    
     style := cast(u32) win.GetWindowLongW(window, win.GWL_STYLE)
     if style & win.WS_OVERLAPPEDWINDOW != 0 {
         info := win.MONITORINFO{cbSize = size_of(win.MONITORINFO)}
@@ -1095,7 +1114,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
                 new_pos.cy = new_cy + added.y
             }
         }
-            
+        
         result = win.DefWindowProcA(window, message, w_param, l_param)
         
       case win.WM_ACTIVATEAPP:
@@ -1130,7 +1149,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     }
     return result
 }
-        
+
 process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
     if is_down != new_state.ended_down {
         new_state.ended_down             = is_down

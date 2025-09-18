@@ -160,8 +160,17 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     draw_trees(debug, mouse_p, input.delta_time)
     end_layout(&debug.mouse_text_layout)
     
+    memory_stats := Platform.debug_get_memory_stats()
+    
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
-    debug.root_group.name = format_string(debug.root_info, "%", view_seconds(most_recent_frame.seconds_elapsed, precision = 3))
+    info_text := format_string(debug.root_info, 
+        "% - % memory blocks, % used size / % total size", 
+        view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
+        view_magnitude(memory_stats.block_count),
+        view_memory_size(memory_stats.total_used),
+        view_memory_size(memory_stats.total_size),
+    )
+    debug.root_group.name = info_text
     
     interact(debug, input, mouse_p)
 }
@@ -310,12 +319,13 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         
       case FrameInfo:
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
-        text := debug_print("Viewed Frame: %, % events, % data_blocks, % profile_blocks",
-            view_seconds(viewed_frame.seconds_elapsed,       precision = 0), 
-            view_magnitude(viewed_frame.stored_event_count,  precision = 0), 
-            view_magnitude(viewed_frame.data_block_count,    precision = 0), 
-            view_magnitude(viewed_frame.profile_block_count, precision = 0), 
+        text := debug_print("Viewed Frame: %, % events, % data blocks, % profile blocks",
+            view_seconds(viewed_frame.seconds_elapsed), 
+            view_magnitude(viewed_frame.stored_event_count), 
+            view_magnitude(viewed_frame.data_block_count), 
+            view_magnitude(viewed_frame.profile_block_count), 
         )
+        
         basic_text_element(layout, text)
         
       case ArenaOccupancy:
@@ -453,26 +463,42 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
     } else {
         // @speed we could pass this in as a parameter, we computed it just now in the caller
         count: u32
-        for block := arena.current_block; block != nil; block = block.arena_previous_block do count += 1
+        total_size: umm
+        for block := arena.current_block; block != nil; block = block.arena_previous_block {
+            count += 1
+            total_size += auto_cast len(block.storage)
+        }
         
         index: u32
+        prev_start := rect.max.x
+        size_sum: umm
+        // @note(viktor): we are iterating backwards
         for block := arena.current_block; block != nil; block = block.arena_previous_block {
             defer index += 1
             
-            min_x := linear_blend(rect.min.x, rect.max.x, cast(f32) (count - 1 - index)     / cast(f32) count)
-            max_x := linear_blend(rect.min.x, rect.max.x, cast(f32) (count - index) / cast(f32) count)
-            sub_rect := rectangle_min_max(v2{min_x, rect.min.y}, v2{max_x, rect.max.y})
+            block_size := cast(umm) len(block.storage)
+            size_sum += auto_cast block_size
+            
+            sub_scale := cast(f32) (cast(f64) size_sum / cast(f64) total_size)
+            start_point := linear_blend(rect.max.x, rect.min.x, sub_scale)
+            sub_rect := rectangle_min_max(v2{start_point, rect.min.y}, v2{prev_start, rect.max.y})
+            prev_start = start_point
             
             scale := cast(f32) (cast(f64) block.used / cast(f64) len(block.storage))
-            color := index == 0 ? Green : Blue
             
             split_point := linear_blend(sub_rect.min.x, sub_rect.max.x, scale)
             shrink: f32 : 1
             filled  := rectangle_min_max(sub_rect.min, v2{split_point, sub_rect.max.y})
             divider := rectangle_min_max(v2{split_point-shrink, sub_rect.min.y}, v2{split_point, sub_rect.max.y})
             
+            color := index == 0 ? Green : Blue
             push_rectangle(&debug.render_group, filled, debug.ui_transform, color)
             push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline)
+            if contains(filled, mouse_p) {
+                add_tooltip(debug, debug_print("used % / total %", view_memory_size(block.used, expand_lower = -1), view_memory_size(block_size, expand_lower = -1)))
+            } else if contains(sub_rect, mouse_p) {
+                add_tooltip(debug, debug_print("free % / total %", view_memory_size(block_size - block.used, expand_lower = -1), view_memory_size(block_size, expand_lower = -1)))
+            }
         }
     }
 }

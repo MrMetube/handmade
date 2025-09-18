@@ -305,22 +305,22 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
     
     gl.Enable(gl.TEXTURE_2D)
-
+    
     gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
     gl.Clear(gl.COLOR_BUFFER_BIT)
-
+    
     glMatrixMode(gl.TEXTURE)
     glLoadIdentity()
-
+    
     glMatrixMode(gl.MODELVIEW)
     glLoadIdentity()
-
+    
     glMatrixMode(gl.PROJECTION)
     glLoadIdentity()
-
+    
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
 }
-    
+
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
@@ -433,13 +433,13 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
                     
                     glVertex2f(max.x, max.y)
                     glVertex2f(min.x, max.y)
-
+                    
                     glVertex2f(min.x, max.y)
                     glVertex2f(min.x, min.y)
-
+                    
                 glEnd()
             }
-                        
+            
             gl.Enable(gl.TEXTURE_2D)
             
           case .RenderEntryBitmap:
@@ -468,7 +468,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             panic("Unhandled Entry")
         }
     }
-
+    
     if GlobalDebugShowRenderSortGroups {
         timed_block("show render sort groups")
         
@@ -577,20 +577,20 @@ gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,
     // @note(viktor): Lower triangle
     glTexCoord2f(min_uv.x, min_uv.y)
     glVertex2f(min.x, min.y)
-
+    
     glTexCoord2f(max_uv.x, min_uv.y)
     glVertex2f(max.x, min.y)
-
+    
     glTexCoord2f(max_uv.x, max_uv.y)
     glVertex2f(max.x, max.y)
-
+    
     // @note(viktor): Upper triangle
     glTexCoord2f(min_uv.x, min_uv.y)
     glVertex2f(min.x, min.y)
-
+    
     glTexCoord2f(max_uv.x, max_uv.y)
     glVertex2f(max.x, max.y)
-
+    
     glTexCoord2f(min_uv.x, max_uv.y)
     glVertex2f(min.x, max.y)
     glEnd()

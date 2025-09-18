@@ -29,6 +29,7 @@ Metaprogram :: struct {
     
     printlikes: map[string]Printlike,
     procedures: map[string]Procedure,
+    printlikes_failed: bool,
 }
 
 metaprogram_collect_data :: proc(using mp: ^Metaprogram, dir: string) -> (success: b32) {

@@ -91,21 +91,18 @@ time_table := [?] Magnitude (time.Duration) {
     {   0,  "h"},
 }
 
-view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), scale, limit: int, precision: u8 = 0) -> (result: Temp_Views) {
+view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+    // @todo(viktor): there needs to be a better way to do this. make this best match strategy explicit
     begin_temp_views()
-    section := table[scale:limit]
     
-    before: T
-    value := value
-    
-    for magnitude, index in section {
-        if index == len(section)-1 || abs(value) < magnitude.upper_bound {
-            if precision != 0 && scale + index != 0 {
-                below := table[(scale + index) - 1]
-                rest := cast(f64) before / cast(f64) below.upper_bound
-                append_temp_view(view_float(rest, precision = precision))
-                append_temp_view(magnitude.symbol)
-            } else {
+    view_best_magnitude :: proc (value: T, table: [] Magnitude (T)) -> (total_bound: Maybe(T)) {
+        value := value
+        
+        total_bound = 1
+        
+        for magnitude, index in table {
+            if index == len(table)-1 || abs(value) < magnitude.upper_bound {
+                
                 when intrinsics.type_is_integer(T) {
                     append_temp_view(view_integer(value))
                 } else {
@@ -113,11 +110,36 @@ view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), scale, limit: in
                     append_temp_view(view_float(value, precision = 0))
                 }
                 append_temp_view(magnitude.symbol)
+                
+                return total_bound
             }
-            break
+            value /= magnitude.upper_bound
+            (&total_bound.(T))^ *= magnitude.upper_bound
         }
-        before = value
-        value /= magnitude.upper_bound
+        
+        return nil
+    }
+    
+    value := value
+    next := view_best_magnitude(value, table)
+    
+    expand_lower := expand_lower < 0 ? len(table) : expand_lower
+    for bound, ok := next.? ; ok && expand_lower != 0 ; expand_lower -= 1 {
+        append_temp_view(" ")
+        
+        value = modulus(value, bound)
+        if value == 0 do break
+        
+        next = view_best_magnitude(value, table)
+        bound, ok = next.?
+    }
+    
+    // @todo(viktor): alternatively dont cutoff but show as decimal
+    when false do if precision != 0 && next != 1 {
+        below := table[(scale + best_index) - 1]
+        rest := cast(f64) before / cast(f64) below.upper_bound
+        append_temp_view(view_float(rest, precision = precision))
+        append_temp_view(best_magnitude.symbol)
     }
     
     result = end_temp_views()
@@ -209,11 +231,10 @@ Integer_Amount :: enum {
 }
 
 // @todo(viktor): width
-// view_magnitude :: proc { view_magnitude_integer, view_magnitude_decimal }
-view_magnitude :: proc (value: $T, scale := Integer_Amount.unit, limit := Integer_Amount.quetta, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_integer(T) {
+view_magnitude :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_integer(T) {
     @(static, rodata)
     integer_table := [?] Magnitude (T) {
-        {1000, " "}, 
+        {1000, ""}, 
         /* 
         {10, " "},  // unit
         {10, "da"}, // deca
@@ -230,10 +251,10 @@ view_magnitude :: proc (value: $T, scale := Integer_Amount.unit, limit := Intege
         {1000, "R"}, // ronna
         {   0, "Q"}, // quetta
     }
-    result = view_magnitude_raw(value, integer_table[:], scale = auto_cast scale, limit = auto_cast limit, precision = precision)
+    result = view_magnitude_raw(value, integer_table[:], precision = precision)
     return result
 }
-view_magnitude_decimal :: proc (value: $T, scale := Decimal_Amount.unit, limit := Decimal_Amount.quetta, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_float(T) {
+view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_float(T) {
     @(static, rodata)
     decimal_table := [?] Magnitude (T) {
         {1000, "q"}, // quecto
@@ -251,7 +272,7 @@ view_magnitude_decimal :: proc (value: $T, scale := Decimal_Amount.unit, limit :
         {10, "c"}, // centi
         {10, "d"}, // deci
         */
-        {1000, " "}, 
+        {1000, ""}, 
         /* 
         {10, " "},  // unit
         {10, "da"}, // deca
@@ -268,22 +289,22 @@ view_magnitude_decimal :: proc (value: $T, scale := Decimal_Amount.unit, limit :
         {1000, "R"}, // ronna
         {   0, "Q"}, // quetta
     }
-    result = view_magnitude_raw(value, decimal_table[:], scale = auto_cast scale, limit = auto_cast limit, precision = precision)
+    result = view_magnitude_raw(value, decimal_table[:], precision = precision)
     return result
 }
 
 ////////////////////////////////////////////////
 // Time
 
-view_memory_size :: proc (#any_int value: umm, scale := Memory.bytes, limit := Memory.exabytes, precision: u8 = 0) -> (result: Temp_Views) {
-    return view_magnitude_raw(value, bytes_table[:], cast(int) scale, cast(int) limit, precision)
+view_memory_size :: proc (#any_int value: umm, expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+    return view_magnitude_raw(value, bytes_table[:], expand_lower = expand_lower, precision = precision)
 }
 
-view_time_duration :: proc (value: time.Duration, scale := Time_Unit.nanoseconds, limit := Time_Unit.hours, precision: u8 = 0) -> (result: Temp_Views) {
-    return view_magnitude_raw(value, time_table[:], cast(int) scale, cast(int) limit, precision)
+view_time_duration :: proc (value: time.Duration, expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+    return view_magnitude_raw(value, time_table[:], expand_lower = expand_lower, precision = precision)
 }
-view_seconds :: proc (value: f32, precision: u8 = 0) -> (result: Temp_Views) {
-    return view_time_duration(cast(time.Duration) (value * cast(f32) time.Second), precision = precision)
+view_seconds :: proc (value: f32, expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+    return view_time_duration(cast(time.Duration) (value * cast(f32) time.Second), expand_lower = expand_lower, precision = precision)
 }
 
 view_time :: proc (value: time.Time) -> (result: Temp_Views) {

@@ -40,7 +40,7 @@ init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width
         push_buffer_data_at = auto_cast len(push_buffer),
     }
 }
-    
+
 prep_for_render :: proc(commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
     sort_render_elements(commands, &result, temp_arena)
     linearize_clip_rects(commands, &result, temp_arena)
@@ -232,9 +232,9 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
     
     walk.hit_cycle ||= .Cycle in at.flags
     if .Visited in at.flags do return
-
+    
     at.flags += { .Visited, .Cycle }
-
+    
     for edge := at.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
         assert(edge.front == index)
         walk_sprite_graph_front_to_back(walk, edge.behind)
@@ -305,7 +305,7 @@ software_render_commands :: proc(queue: ^WorkQueue, commands: ^RenderCommands, p
             }
         }
     }
-
+    
     complete_all_work(queue)
 }
 
@@ -313,7 +313,7 @@ do_tile_render_work :: proc(data: pmm) {
     timed_function()
     using work := cast(^TileRenderWork) data
     assert(commands != nil)
-
+    
     clip_rect := base_clip_rect
     clip_rect_index := max(u16)
     
@@ -467,9 +467,9 @@ draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, 
     max_color_value: f32x8 = 255 * 255
     
     color := vec_cast(f32x8, color)
-        
+    
     texture_size := vec_cast(f32x8, texture.width, texture.height) - 2
-        
+    
     texture_width := cast(i32x8) texture.width
     
     for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
@@ -572,7 +572,7 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
     for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
         floorp := floor(i32, testp)
         ceilp  := ceil(i32, testp)
-     
+        
         fill_rect.min.x = min(fill_rect.min.x, floorp.x)
         fill_rect.min.y = min(fill_rect.min.y, floorp.y)
         fill_rect.max.x = max(fill_rect.max.x, ceilp.x)
@@ -619,7 +619,7 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
         end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
         fill_rect.max.x = align8(fill_rect.max.x)
     }
-
+    
     normal_x_axis_ := 1 / length_squared(x_axis) * x_axis
     normal_y_axis_ := 1 / length_squared(y_axis) * y_axis
     
@@ -644,7 +644,7 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, co
     color.rgb = square(color.rgb)
     color.rgb = clamp(color.rgb, 0, max_color_value)
     inv_color_a := (1 - (inv_255 * color.a))
-        
+    
     for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
         // @note(viktor): Iterative calculations will lead to arithmetic errors,
         // so we always calculate based of the index.
@@ -763,7 +763,7 @@ pack_pixel :: proc (value: [4]f32x8) -> (result: u32x8) {
 sample :: proc(texture: Bitmap, p: v2i) -> (result: v4) {
     texel := texture.memory[ p.y * texture.width +  p.x]
     result = vec_cast(f32, texel)
-
+    
     return result
 }
 
@@ -772,7 +772,7 @@ sample_bilinear :: proc(texture: Bitmap, p: v2i) -> (s00, s01, s10, s11: v4) {
     s01 = sample(texture, p + {1, 0})
     s10 = sample(texture, p + {0, 1})
     s11 = sample(texture, p + {1, 1})
-
+    
     return s00, s01, s10, s11
 }
 
@@ -792,61 +792,61 @@ sample_bilinear :: proc(texture: Bitmap, p: v2i) -> (s00, s01, s10, s11: v4) {
 */
 sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
     assert(environment_map.LOD[0].memory != nil)
-
+    
     // @note(viktor): pick which LOD to sample from
     lod_index := round(i32, roughness * cast(f32) (len(environment_map.LOD)-1))
     lod := environment_map.LOD[lod_index]
     lod_size := vec_cast(f32, lod.width, lod.height)
-
+    
     // @note(viktor): compute the distance to the map and the
     // scaling factor for meters-to-UVs
     uvs_per_meter: f32 = 0.1 // @todo(viktor): parameterize
     c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
     offset := c * sample_direction.xz
-
+    
     // @note(viktor): Find the intersection point
     uv := screen_space_uv + offset
     uv = clamp_01(uv)
-
+    
     // @note(viktor): bilinear sample
     t        := uv * (lod_size - 2)
     index    := vec_cast(i32, t)
     fraction := t - vec_cast(f32, index)
-
+    
     assert(index.x >= 0 && index.x < lod.width)
     assert(index.y >= 0 && index.y < lod.height)
-
+    
     l00, l01, l10, l11 := sample_bilinear(lod, index)
-
+    
     l00 = srgb_255_to_linear_1(l00)
     l01 = srgb_255_to_linear_1(l01)
     l10 = srgb_255_to_linear_1(l10)
     l11 = srgb_255_to_linear_1(l11)
-
+    
     result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
-
+    
     if GlobalDebugShowLightingSampling {
         // @note(viktor): Turn this on to see where in the map you're sampling!
         texel := &lod.memory[index.y * lod.width + index.x]
         texel ^= 255
     }
-
+    
     return result
 }
 
 blend_bilinear :: proc(s00, s01, s10, s11: v4, t: v2) -> (result: v4) {
     result = linear_blend( linear_blend(s00, s01, t.x), linear_blend(s10, s11, t.x), t.y )
-
+    
     return result
 }
 
 @(require_results)
 unscale_and_bias :: proc(normal: v4) -> (result: v4) {
     inv_255: f32 = 1.0 / 255.0
-
+    
     result.xyz = -1 + 2 * (normal.xyz * inv_255)
     result.w = inv_255 * normal.w
-
+    
     return result
 }
 
@@ -854,26 +854,26 @@ unscale_and_bias :: proc(normal: v4) -> (result: v4) {
 srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
     result.rgb = square(srgb.rgb)
     result.a = srgb.a
-
+    
     return result
 }
 srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
     inv_255: f32 = 1.0 / 255.0
     result = srgb * inv_255
     result = srgb_to_linear(result)
-
+    
     return result
 }
 
 linear_to_srgb :: proc(linear: v4) -> (result: v4) {
     result.rgb = square_root(linear.rgb)
     result.a = linear.a
-
+    
     return result
 }
 linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
     result = linear_to_srgb(linear)
     result *= 255
-
+    
     return result
 }

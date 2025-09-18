@@ -5,22 +5,22 @@ import "vendor:directx/dxgi"
 
 init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) {
     assert(GlobalSoundBuffer == nil, "DSound has already been initialized")
-
+    
     dSound_lib := win.LoadLibraryW(win.utf8_to_wstring("dsound.dll"))
     if dSound_lib == nil {
         // @logging 
     }
-
+    
     DirectSoundCreate := cast(ProcDirectSoundCreate) win.GetProcAddress(dSound_lib, "DirectSoundCreate")
     if DirectSoundCreate == nil {
         // @logging 
     }
-
+    
     direct_sound : ^IDirectSound
     if result := DirectSoundCreate(nil, &direct_sound, nil); win.FAILED(result) {
         // @logging 
     }
-
+    
     wave_format: WAVEFORMATEX = {
         wFormatTag      = WAVE_FORMAT_PCM,
         nChannels       = 2,
@@ -32,7 +32,7 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
     if result := direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY); win.FAILED(result) {
         // @logging 
     }
-
+    
     fake_sound_buffer_description: DSBUFFERDESC = {
         dwSize  = size_of(DSBUFFERDESC),
         dwFlags = DSBCAPS_PRIMARYBUFFER,
@@ -46,7 +46,7 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
     if result := fake_sound_buffer_for_setup->SetFormat(&wave_format); win.FAILED(result) {
         // @logging 
     }
-
+    
     actual_sound_buffer_description := DSBUFFERDESC{
         dwSize        = size_of(DSBUFFERDESC),
         dwFlags       = DSBCAPS_GETCURRENTPOSITION2,
@@ -90,18 +90,9 @@ IDirectSound :: struct {
 
 IDirectSoundVtbl :: struct {
     using iunknown_vtable: dxgi.IUnknown_VTable,
-    CreateSoundBuffer:    proc "stdcall" (
-        this: ^IDirectSound,
-        pcDSBufferDesc: ^DSBUFFERDESC,
-        ppDSBuffer: ^^IDirectSoundBuffer,
-        pUnkOuter: rawptr,
-    ) -> win.HRESULT,
+    CreateSoundBuffer:    proc "stdcall" (this: ^IDirectSound, pcDSBufferDesc: ^DSBUFFERDESC, ppDSBuffer: ^^IDirectSoundBuffer, pUnkOuter: rawptr) -> win.HRESULT,
     GetCaps:              proc "stdcall" (this: ^IDirectSound, pDSCaps: ^DSCAPS) -> win.HRESULT,
-    DuplicateSoundBuffer: proc "stdcall" (
-        this: ^IDirectSound,
-        pDSBufferOriginal: ^IDirectSoundBuffer,
-        ppDSBufferDuplicate: ^^IDirectSoundBuffer,
-    ) -> win.HRESULT,
+    DuplicateSoundBuffer: proc "stdcall" (this: ^IDirectSound, pDSBufferOriginal: ^IDirectSoundBuffer, ppDSBufferDuplicate: ^^IDirectSoundBuffer) -> win.HRESULT,
     SetCooperativeLevel:  proc "stdcall" (this: ^IDirectSound, hwnd: win.HWND, dwLevel: win.DWORD) -> win.HRESULT,
     Compact:              proc "stdcall" (this: ^IDirectSound) -> win.HRESULT,
     GetSpeakerConfig:     proc "stdcall" (this: ^IDirectSound, pdwSpeakerConfig: ^win.DWORD) -> win.HRESULT,
@@ -137,55 +128,22 @@ IDirectSoundBuffer :: struct {
 IDirectSoundBufferVtbl :: struct {
     using iunknown_vtable: dxgi.IUnknown_VTable,
     GetCaps:            proc "stdcall" (this: ^IDirectSoundBuffer, pDSBufferCaps: ^DSBCAPS) -> win.HRESULT, //LPDSBCAPS
-    GetCurrentPosition: proc "stdcall" (
-        this: ^IDirectSoundBuffer,
-        pdwCurrentPlayCursor: ^win.DWORD,
-        pdwCurrentWriteCursor: ^win.DWORD,
-    ) -> win.HRESULT,
-    GetFormat:          proc "stdcall" (
-        this: ^IDirectSoundBuffer,
-        pwfxFormat: ^WAVEFORMATEX,
-        dwSizeAllocated: win.DWORD,
-        pdwSizeWritten: ^win.DWORD,
-    ) -> win.HRESULT,
+    GetCurrentPosition: proc "stdcall" (this: ^IDirectSoundBuffer, pdwCurrentPlayCursor: ^win.DWORD, pdwCurrentWriteCursor: ^win.DWORD) -> win.HRESULT,
+    GetFormat:          proc "stdcall" (this: ^IDirectSoundBuffer, pwfxFormat: ^WAVEFORMATEX, dwSizeAllocated: win.DWORD, pdwSizeWritten: ^win.DWORD) -> win.HRESULT,
     GetVolume:          proc "stdcall" (this: ^IDirectSoundBuffer, plVolume: ^win.LONG) -> win.HRESULT,
     GetPan:             proc "stdcall" (this: ^IDirectSoundBuffer, plPan: ^win.LONG) -> win.HRESULT,
     GetFrequency:       proc "stdcall" (this: ^IDirectSoundBuffer, pdwFrequency: ^win.DWORD) -> win.HRESULT,
     GetStatus:          proc "stdcall" (this: ^IDirectSoundBuffer, pdwStatus: ^win.DWORD) -> win.HRESULT,
-    Initialize:         proc "stdcall" (
-        this: ^IDirectSoundBuffer,
-        pDirectSound: ^IDirectSound,
-        pcDSBufferDesc: ^DSBUFFERDESC,
-    ) -> win.HRESULT,
-    Lock:               proc "stdcall" (
-        this: ^IDirectSoundBuffer,
-        dwOffset: win.DWORD,
-        dwBytes: win.DWORD,
-        ppvAudioPtr1: ^win.LPVOID,
-        pdwAudioBytes1: ^win.DWORD,
-        ppvAudioPtr2: ^win.LPVOID,
-        pdwAudioBytes2: ^win.DWORD,
-        dwFlags: win.DWORD,
-    ) -> win.HRESULT,
-    Play:               proc "stdcall" (
-        this: ^IDirectSoundBuffer,
-        dwReserved1: win.DWORD,
-        dwPriority: win.DWORD,
-        dwFlags: win.DWORD,
-    ) -> win.HRESULT,
+    Initialize:         proc "stdcall" (this: ^IDirectSoundBuffer, pDirectSound: ^IDirectSound, pcDSBufferDesc: ^DSBUFFERDESC) -> win.HRESULT,
+    Lock:               proc "stdcall" (this: ^IDirectSoundBuffer, dwOffset: win.DWORD, dwBytes: win.DWORD, ppvAudioPtr1: ^win.LPVOID, pdwAudioBytes1: ^win.DWORD, ppvAudioPtr2: ^win.LPVOID, pdwAudioBytes2: ^win.DWORD, dwFlags: win.DWORD) -> win.HRESULT,
+    Play:               proc "stdcall" (this: ^IDirectSoundBuffer, dwReserved1: win.DWORD, dwPriority: win.DWORD, dwFlags: win.DWORD) -> win.HRESULT,
     SetCurrentPosition: proc "stdcall" (this: ^IDirectSoundBuffer, dwNewPosition: win.DWORD) -> win.HRESULT,
     SetFormat:          proc "stdcall" (this: ^IDirectSoundBuffer, pcfxFormat: ^WAVEFORMATEX) -> win.HRESULT,
     SetVolume:          proc "stdcall" (this: ^IDirectSoundBuffer, lVolume: win.LONG) -> win.HRESULT,
     SetPan:             proc "stdcall" (this: ^IDirectSoundBuffer, lPan: win.LONG) -> win.HRESULT,
     SetFrequency:       proc "stdcall" (this: ^IDirectSoundBuffer, dwFrequency: win.DWORD) -> win.HRESULT,
     Stop:               proc "stdcall" (this: ^IDirectSoundBuffer) -> win.HRESULT,
-    Unlock:             proc "stdcall" (
-        this: ^IDirectSoundBuffer,
-        pvAudioPtr1: win.LPVOID,
-        dwAudioBytes1: win.DWORD,
-        pvAudioPtr2: win.LPVOID,
-        dwAudioBytes2: win.DWORD,
-    ) -> win.HRESULT,
+    Unlock:             proc "stdcall" (this: ^IDirectSoundBuffer, pvAudioPtr1: win.LPVOID, dwAudioBytes1: win.DWORD, pvAudioPtr2: win.LPVOID, dwAudioBytes2: win.DWORD ) -> win.HRESULT,
     Restore:            proc "stdcall" (this: ^IDirectSoundBuffer) -> win.HRESULT,
 }
 
@@ -204,36 +162,36 @@ DSBPLAY_TERMINATEBY_PRIORITY :: 0x000000020
 
 
 DSCAPS :: struct {
-    dwSize: win.DWORD,
-    dwFlags: win.DWORD,
-    dwMinSecondarySampleRate: win.DWORD,
-    dwMaxSecondarySampleRate: win.DWORD,
-    dwPrimaryBuffers: win.DWORD,
-    dwMaxHwMixingAllBuffers: win.DWORD,
-    dwMaxHwMixingStaticBuffers: win.DWORD,
-    dwMaxHwMixingStreamingBuffers: win.DWORD,
-    dwFreeHwMixingAllBuffers: win.DWORD,
-    dwFreeHwMixingStaticBuffers: win.DWORD,
+    dwSize:                         win.DWORD,
+    dwFlags:                        win.DWORD,
+    dwMinSecondarySampleRate:       win.DWORD,
+    dwMaxSecondarySampleRate:       win.DWORD,
+    dwPrimaryBuffers:               win.DWORD,
+    dwMaxHwMixingAllBuffers:        win.DWORD,
+    dwMaxHwMixingStaticBuffers:     win.DWORD,
+    dwMaxHwMixingStreamingBuffers:  win.DWORD,
+    dwFreeHwMixingAllBuffers:       win.DWORD,
+    dwFreeHwMixingStaticBuffers:    win.DWORD,
     dwFreeHwMixingStreamingBuffers: win.DWORD,
-    dwMaxHw3DAllBuffers: win.DWORD,
-    dwMaxHw3DStaticBuffers: win.DWORD,
-    dwMaxHw3DStreamingBuffers: win.DWORD,
-    dwFreeHw3DAllBuffers: win.DWORD,
-    dwFreeHw3DStaticBuffers: win.DWORD,
-    dwFreeHw3DStreamingBuffers: win.DWORD,
-    dwTotalHwMemBytes: win.DWORD,
-    dwFreeHwMemBytes: win.DWORD,
-    dwMaxContigFreeHwMemBytes: win.DWORD,
-    dwUnlockTransferRateHwBuffers: win.DWORD,
-    dwPlayCpuOverheadSwBuffers: win.DWORD,
-    dwReserved1: win.DWORD,
-    dwReserved2: win.DWORD,
+    dwMaxHw3DAllBuffers:            win.DWORD,
+    dwMaxHw3DStaticBuffers:         win.DWORD,
+    dwMaxHw3DStreamingBuffers:      win.DWORD,
+    dwFreeHw3DAllBuffers:           win.DWORD,
+    dwFreeHw3DStaticBuffers:        win.DWORD,
+    dwFreeHw3DStreamingBuffers:     win.DWORD,
+    dwTotalHwMemBytes:              win.DWORD,
+    dwFreeHwMemBytes:               win.DWORD,
+    dwMaxContigFreeHwMemBytes:      win.DWORD,
+    dwUnlockTransferRateHwBuffers:  win.DWORD,
+    dwPlayCpuOverheadSwBuffers:     win.DWORD,
+    dwReserved1:                    win.DWORD,
+    dwReserved2:                    win.DWORD,
 }
 
 DSBCAPS :: struct{
-    dwSize              : win.DWORD,
-    dwFlags             : win.DWORD,
-    dwBufferBytes       : win.DWORD,
+    dwSize:               win.DWORD,
+    dwFlags:              win.DWORD,
+    dwBufferBytes:        win.DWORD,
     dwUnlockTransferRate: win.DWORD,
-    dwPlayCpuOverhead   : win.DWORD,
+    dwPlayCpuOverhead:    win.DWORD,
 }

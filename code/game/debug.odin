@@ -165,6 +165,7 @@ DebugEvent :: struct {
     value: DebugValue,
 }
 
+@(common)
 DebugValue :: union {
     FrameMarker,
     BeginTimedBlock, EndTimedBlock,
@@ -204,7 +205,7 @@ TopClocksList      :: struct {}
 ThreadProfileGraph :: struct {}
 FrameBarsGraph     :: struct {}
 
-ArenaOccupancy :: struct { arena: ^Arena }
+@(common) ArenaOccupancy :: struct { arena: ^Arena }
 
 ////////////////////////////////////////////////
 
@@ -288,8 +289,10 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
     
     { debug_data_block("Profile")   
-        debug_ui_element(ArenaOccupancy{ &debug.arena }, "Debug Arena")
-        debug_ui_element(ArenaOccupancy{ &debug.per_frame_arena }, "Debug Per Frame Arena")
+        { debug_data_block("Memory")   
+            debug_ui_element(ArenaOccupancy{ &debug.arena }, "Debug Arena")
+            debug_ui_element(ArenaOccupancy{ &debug.per_frame_arena }, "Debug Per Frame Arena")
+        }
     }
     
     collate_events(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])

@@ -57,7 +57,7 @@ open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle
         // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
         // @leak the file handles can only be freed once the load_work, which is threaded, completes
         file_handle := new(FileHandle)
-
+        
         if file_handle != nil {
             file_handle.handle = win.CreateFileW(cast(cstring16) &file_group.data.cFileName[0], win.GENERIC_READ, win.FILE_SHARE_READ, nil, win.OPEN_EXISTING, 0, nil)
             
@@ -72,7 +72,7 @@ open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle
             file_group.find_handle = win.INVALID_HANDLE_VALUE
         }
     }
-
+    
     return result
 
 }

@@ -21,7 +21,7 @@ Procedure :: struct {
     return_count: int,
 }
 
-check_printlikes :: proc(using mp: ^Metaprogram, dir: string) -> (succes: b32) {
+check_printlikes :: proc(using mp: ^Metaprogram, dir: string) -> (succes: bool) {
     context.user_ptr = mp
     
     collect_all_files(&files, dir)
@@ -29,15 +29,10 @@ check_printlikes :: proc(using mp: ^Metaprogram, dir: string) -> (succes: b32) {
     code_package, ok := parser.parse_package_from_path(dir)
     assert(ok)
     
-    if !check_printlikes_by_package(code_package) {
-        fmt.println("INFO: Printlikes did not check out")
-        return false
-    }
-    
-    return true
+    return check_printlikes_by_package(code_package)
 }
 
-check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: b32) {
+check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: bool) {
     using mp := cast(^Metaprogram) context.user_ptr
     
     v := ast.Visitor{ visit = visit_and_collect_printlikes_and_procedures }
@@ -46,7 +41,7 @@ check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: b32) {
     v = ast.Visitor{ visit = visit_and_check_printlikes }
     ast.walk(&v, pkg)
     
-    return true
+    return !mp.printlikes_failed
 }
 
 visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
@@ -196,20 +191,23 @@ Green  :: ansi.CSI + ansi.FG_BRIGHT_GREEN  + ansi.SGR
 Reset  :: ansi.CSI + ansi.FG_DEFAULT       + ansi.SGR
 
 report_printlike_error :: proc (call: ^ast.Call_Expr, expected, actual: int) {
+    using mp := cast(^Metaprogram) context.user_ptr
+    mp.printlikes_failed = true
+    
     message := expected < actual ? "Too many arguments." : "Too few arguments."
-    fmt.printf("%v%v:%v:%v: ", White, call.pos.file, call.pos.line, call.pos.column)
-    fmt.printf("%vFormat Error: %v %v ", Red, Reset, message)
+    fmt.eprintf("%v%v:%v:%v: ", White, call.pos.file, call.pos.line, call.pos.column)
+    fmt.eprintf("%vFormat Error: %v %v ", Red, Reset, message)
     if expected == 0 {
-        fmt.printf("Expected no arguments, but got %v.\n", actual)
+        fmt.eprintf("Expected no arguments, but got %v.\n", actual)
     } else if expected == 1 {
-        fmt.printf("Expected 1 argument, but got %v.\n", actual)
+        fmt.eprintf("Expected 1 argument, but got %v.\n", actual)
     } else { 
-        fmt.printf("Expected %v arguments, but got %v.\n", expected, actual)
+        fmt.eprintf("Expected %v arguments, but got %v.\n", expected, actual)
     }
 
     full_call := read_pos_or_fail(call.pos, call.end)
     
-    fmt.printf("\t%v", White)
+    fmt.eprintf("\t%v", White)
     skip: b32
     for r, i in full_call {
         if skip {
@@ -218,21 +216,21 @@ report_printlike_error :: proc (call: ^ast.Call_Expr, expected, actual: int) {
         }
         if r == '%' {
             if i < len(full_call)-1 && full_call[i+1] == '%' {
-                fmt.print("%%")
+                fmt.eprint("%%")
                 skip = true
             } else {
-                fmt.printf("%v%%%v", Blue, White)
+                fmt.eprintf("%v%%%v", Blue, White)
             }
         } else {
-            fmt.print(r)
+            fmt.eprint(r)
         }
     }
     
-    fmt.printfln("%v\n", Reset)
+    fmt.eprintfln("%v\n", Reset)
     if expected == 1 {
-        fmt.printfln("\tThe percent sign that consumes an argument in the format string is highlighted.\n")
+        fmt.eprintfln("\tThe percent sign that consumes an argument in the format string is highlighted.\n")
     } else if expected != 0 {
-        fmt.printfln("\tThe percent signs that consume an argument in the format string are highlighted.\n")
+        fmt.eprintfln("\tThe percent signs that consume an argument in the format string are highlighted.\n")
     }
 }
 

@@ -14,7 +14,6 @@ WorkQueue :: struct {}
 ////////////////////////////////////////////////
 
 @(common) Platform_Memory_Block :: struct {
-    // @todo(viktor): maybe make this a [] u8
     storage: [] u8,
     allocation_flags: Platform_Allocation_Flags,
     
@@ -31,3 +30,9 @@ WorkQueue :: struct {}
 }
 
 @(common) BoundsCheck :: Platform_Allocation_Flags { .check_overflow, .check_underflow }
+
+@(common) Debug_Platform_Memory_Stats :: struct {
+    block_count: u64,
+    total_size:  umm,
+    total_used:  umm,
+}

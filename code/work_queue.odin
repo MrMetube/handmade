@@ -60,7 +60,7 @@ enqueue_work :: proc(queue: ^WorkQueue, data: pmm, callback: proc (data: pmm)) {
     old_next_entry := queue.next_entry_to_write
     new_next_entry := (old_next_entry + 1) % len(queue.entries)
     assert(new_next_entry != queue.next_entry_to_read, "too many units of work enqueued") 
-
+    
     entry := &queue.entries[old_next_entry] 
     entry.data     = data
     entry.callback = callback
@@ -94,7 +94,7 @@ do_next_work_queue_entry :: proc(queue: ^WorkQueue) -> (should_sleep: b32) {
     if old_next_entry != queue.next_entry_to_write {
         new_next_entry := (old_next_entry + 1) % len(queue.entries)
         ok, index := atomic_compare_exchange(&queue.next_entry_to_read, old_next_entry, new_next_entry)
-    
+        
         if ok {
             assert(index == old_next_entry)
             
