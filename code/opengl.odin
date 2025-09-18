@@ -173,14 +173,16 @@ opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
         result.shading_language_version = "(none)"
     }
     
-    len: u32
+    length: int
     extensions := cast(string) result.extensions
-    for extensions != "" {
-        len += 1
-        if extensions[len] == ' ' {
-            part      := extensions[:len]
-            extensions = extensions[len+1:]
-            len = 0
+    for len(extensions) > 0 {
+        length += 1
+        if length >= len(extensions) do break
+        
+        if extensions[length] == ' ' {
+            part      := extensions[:length]
+            extensions = extensions[length+1:]
+            length = 0
             if      "GL_EXT_texture_sRGB"     == part do result.GL_EXT_texture_sRGB = true
             else if "GL_EXT_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
             else if "GL_ARB_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
@@ -324,7 +326,7 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i, clear_color: v4) {
+gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     draw_dim := get_dimension(draw_region)
@@ -364,6 +366,9 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             gl.Scissor(0, 0, draw_dim.x, draw_dim.y)
         }
         
+        // @todo(viktor): this can get out of sync with the targets if a middle target doesnt push a clear
+        // @todo(viktor): Why are there 3 framebuffer handles if we only use 2 render targets?
+        clear_color := index < commands.clear_colors.count ? commands.clear_colors.data[index] : 0
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
         gl.Clear(gl.COLOR_BUFFER_BIT)
     }

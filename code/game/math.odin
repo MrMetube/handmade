@@ -186,7 +186,7 @@ where !intrinsics.type_is_array(F)
 {
     return  cast(T) (f < 0 ? -math.round(-f) : math.round(f))
 }
-round_v :: proc($T: typeid, v: [$N]$F) -> (result: [N]T) {
+round_v :: proc($T: typeid, v: [$N]$F) -> (result: [N] T) {
     #unroll for i in 0..<N do result[i] = cast(T) math.round(v[i]) 
     return result
 }
@@ -195,7 +195,7 @@ floor :: proc { floor_f, floor_v }
 floor_f :: proc($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.floor(f)
 }
-floor_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {
+floor_v :: proc($T: typeid, fs: [$N]f32) -> [N] T {
     return vec_cast(T, simd.to_array(simd.floor(simd.from_array(fs))))
 }
 
@@ -203,7 +203,7 @@ ceil :: proc { ceil_f, ceil_v }
 ceil_f :: proc($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.ceil(f)
 }
-ceil_v :: proc($T: typeid, fs: [$N]f32) -> [N]T {
+ceil_v :: proc($T: typeid, fs: [$N]f32) -> [N] T {
     return vec_cast(T, simd.to_array(simd.ceil(simd.from_array(fs))))
 }
 
@@ -246,53 +246,53 @@ atan2_vec :: proc (v: [2] $T) -> (result: T) { return math.atan2(v.y, v.x) }
 // Vector operations
 
 V3 :: proc { V3_x_yz, V3_xy_z }
-V3_x_yz :: proc(x: $T, yz: [2]T) -> [3]T { return { x, yz.x, yz.y }}
-V3_xy_z :: proc(xy: [2]$T, z: T) -> [3]T { return { xy.x, xy.y, z }}
+V3_x_yz :: proc(x: $T, yz: [2] T) -> [3] T { return { x, yz.x, yz.y }}
+V3_xy_z :: proc(xy: [2] $T, z: T) -> [3] T { return { xy.x, xy.y, z }}
 
-Rect3 :: proc(xy: $R/Rectangle([2]$E), z_min, z_max: E) -> Rectangle([3]E) { 
+Rect3 :: proc(xy: $R/Rectangle([2] $E), z_min, z_max: E) -> Rectangle([3] E) { 
     return { V3(xy.min, z_min), V3(xy.max, z_max)}
 }
 
 V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
-V4_x_yzw  :: proc "contextless" (x: $T, yzw: [3]T) -> (result: [4]T) {
+V4_x_yzw  :: proc (x: $T, yzw: [3] T) -> (result: [4] T) {
     result.x = x
     result.yzw = yzw
     return result
 }
-V4_xy_zw  :: proc "contextless" (xy: [2]$T, zw: [2]T) -> (result: [4]T) {
+V4_xy_zw  :: proc (xy: [2]$T, zw: [2] T) -> (result: [4] T) {
     result.xy = xy
     result.zw = zw
     return result
 }
-V4_xyz_w  :: proc "contextless" (xyz: [3]$T, w: T) -> (result: [4]T) {
+V4_xyz_w  :: proc (xyz: [3]$T, w: T) -> (result: [4] T) {
     result.xyz = xyz
     result.w = w
     return result
 }
-V4_x_y_zw :: proc "contextless" (x: $T, y: T, zw: [2]T) -> (result: [4]T) {
+V4_x_y_zw :: proc (x: $T, y: T, zw: [2] T) -> (result: [4] T) {
     result.x = x
     result.y = y
     result.zw = zw
     return result
 }
-V4_x_yz_w :: proc "contextless" (x: $T, yz: [2]T, w:T) -> (result: [4]T) {
+V4_x_yz_w :: proc (x: $T, yz: [2] T, w:T) -> (result: [4] T) {
     result.x = x
     result.yz = yz
     result.w = w
     return result
 }
-V4_xy_z_w :: proc "contextless" (xy: [2]$T, z, w: T) -> (result: [4]T) {
+V4_xy_z_w :: proc (xy: [2]$T, z, w: T) -> (result: [4] T) {
     result.xy = xy
     result.z = z
     result.w = w
     return result
 }
 
-v4_to_rgba :: proc "contextless" (rgba: v4) -> (result: [4]u8) {
+v4_to_rgba :: proc (rgba: v4) -> (result: [4]u8) {
     result = vec_cast(u8, rgba * 255)
     return result
 }
-rgba_to_v4 :: proc "contextless" (rgba: [4]u8) -> (result: v4) {
+rgba_to_v4 :: proc (rgba: [4]u8) -> (result: v4) {
     result = vec_cast(f32, rgba)
     result /= 255
     return result
@@ -303,7 +303,7 @@ perpendicular :: proc(v: v2) -> (result: v2) {
     return result
 }
 
-arm :: proc(angle: $T) -> (result: [2]T) {
+arm :: proc(angle: $T) -> (result: [2] T) {
     result = {cos(angle), sin(angle)}
     return result
 }

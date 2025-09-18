@@ -97,10 +97,11 @@ GameMemory :: struct {
     Platform_api: Platform_Api,
 }
 
+////////////////////////////////////////////////
+
 State :: struct {
     total_arena: Arena,
     mode_arena:  Arena,
-    // :CutsceneEpisodes
     audio_arena: Arena, // @todo(viktor): move this out into the audio system properly!
     
     controlled_heroes: [len(Input{}.controllers)] ControlledHero,
@@ -227,7 +228,7 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
         debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
         debug_record_value(&LoadAssetsSingleThreaded)
         
-        TimestepPercentage = clamp(TimestepPercentage, 0, 100)
+        TimestepPercentage = clamp(TimestepPercentage, 0, 1000)
         debug_record_value(&TimestepPercentage)
     }
     
@@ -291,6 +292,8 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
     
     render_group: RenderGroup
     init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
+    
+    input.delta_time *= TimestepPercentage/100.0
     
     rerun := false
     for {

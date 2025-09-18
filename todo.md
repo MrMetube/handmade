@@ -1,21 +1,16 @@
 # @todo
-- "contextless" should be minimized
-- Font Rendering Robustness
-    - Kerning
 - Types
-    - :CutsceneEpisodes 
-    + 330 36:50-43:50
-    - more :PlatformArena
-    - :DisjointArray
+    - more :PlatformArena for files
     - less :PointerArithmetic
         
 ### Graphics Upgrade
     - Particle Systems
     - Transition to "real" artwork
     - Lighting
+    - Font Rendering Robustness - Kerning
     
 ### Collision detection
-    - Clean up predicate proliferation! Can we make a nice clean set of flags/rules so that it's easy to understand how things work in terms of special handling? This may involve making the iteration handle everything instead of handling overlap outside and so on.
+    - Clean up predicate proliferation! Can we make a nice clean set of flags/rules so that it's easy to understand how things work in terms of special handling? This may involve making the iteration handle everything instead of handling overlap outside and so on.+-
     - transient collision rules
         - allow non-transient rules to override transient once
         - Entry/Exit

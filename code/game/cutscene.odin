@@ -227,6 +227,7 @@ render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mo
             t_normal := clamp_01_map_to_range(t_start, t, t_end)
             render_layered_scene(assets, render_group, scene, t_normal)
             result = true
+            break
         }
         
         t_base = t_end
@@ -245,7 +246,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     }
     
     match_vector  := #partial AssetVector { .ShotIndex = cast(f32) scene.shot_index }
-    weight_vector := #partial AssetVector { .LayerIndex = 1 }
+    weight_vector := #partial AssetVector { .ShotIndex = 1, .LayerIndex = 1 }
     
     // @todo(viktor): Why does this fade seem to be wrong?  It appears nonlinear, but if it is in linear brightness, shouldn't it _appear_ linear?
     color := v4{scene_fade_value, scene_fade_value, scene_fade_value, 1}
@@ -253,10 +254,10 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
         perspective(render_group, camera_params.meters_to_pixels, camera_params.focal_length, 0)
-    }
-    
-    if len(scene.layers) == 0 {
-        push_clear(render_group, 0)
+        
+        if len(scene.layers) == 0 {
+            push_clear(render_group, 0)
+        }
     }
     
     for layer, layer_index in scene.layers {
@@ -267,7 +268,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
         
         if !active do continue
         
-        match_vector[.LayerIndex] = cast(f32) layer_index
+        match_vector[.LayerIndex] = cast(f32) layer_index + 1
         layer_image := best_match_bitmap_from(assets, scene.type, match_vector, weight_vector)
         
         if render_group != nil {
@@ -295,6 +296,8 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
                 transform.offset.y = p.y - camera_offset.y
             }
             
+            // transform.offset.z = p.z - camera_offset.z
+            transform.floor_z = p.z - camera_offset.z
             transform.offset.z = p.z - camera_offset.z
             
             push_bitmap(render_group, layer_image, transform, layer.height, 0, color)

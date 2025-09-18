@@ -42,7 +42,6 @@ debug_exe_path :: `.\`+debug_exe
  
 /* 
  @todo(viktor):
- - Find a better way to share common code without a bunch of modules, than copypasta
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
  - get rid of INTERNAL define
  */
@@ -57,11 +56,14 @@ Task :: enum {
     asset_builder,
     
     debugger, 
-    run,
     renderdoc,
+    
+    run,
 }
+
 Tasks :: bit_set [Task]
 BuildTasks := Tasks { .game, .platform, .asset_builder }
+Tool_Tasks := Tasks { .debugger, .renderdoc }
 
 tasks: Tasks
 
@@ -77,27 +79,25 @@ main :: proc() {
           case "asset_builder": tasks += { .asset_builder }
           
           case "debugger":      tasks += { .debugger }
-          case "help":          tasks += { .help }
           case "renderdoc":     tasks += { .renderdoc }
+          case "help":          tasks += { .help }
           case:                 tasks += { .help }
         }
     }
     
-    if .help in tasks {
-        usage()
-        os.exit(1)
-    }
+    if .help in tasks do usage()
+    
+    ////////////////////////////////////////////////
     
     make_directory_if_not_exists(data_dir)
-    { err := os.set_current_directory(build_dir) ; assert(err == nil) }
+    { err := os.set_current_directory(build_dir); assert(err == nil) }
     
+    // @todo(viktor): these can also be tasks
     metaprogram: Metaprogram
     if !metaprogram_collect_data(&metaprogram, code_dir) do os.exit(1)
     if !metaprogram_collect_data(&metaprogram, game_dir) do os.exit(1)
     
-    if !check_printlikes(&metaprogram, code_dir) do os.exit(1)
-    if !check_printlikes(&metaprogram, game_dir) do os.exit(1)
-    
+    // @todo(viktor): let the metaprogramms define these attributes at initialization
     sb := strings.builder_make()
     fmt.sbprint(&sb, "-custom-attribute:")
     fmt.sbprint(&sb, "common", "api", "printlike", sep=",")
@@ -106,86 +106,88 @@ main :: proc() {
     cmd: Cmd
     if .debugger in tasks {
         if ok, pid := is_running(raddbg); ok {
+            // @todo(viktor): we only need to kill it when the game crashed, otherwise the debugger is fine with us killing the game
             fmt.printfln("INFO: Killing running debugger in order to build.")
             kill(pid)
         }
     }
     
-    build := true
-    if (tasks & {.debugger, .renderdoc }) != {} {
+    if tasks & BuildTasks == {} do tasks += { .game, .platform }
+    
+    if tasks & Tool_Tasks != {} {
         if !did_change(debug_exe_path, code_dir) && !did_change(debug_exe_path, game_dir) {
             fmt.println("INFO: No changes detected. Skipping build.")
-            build = false
+            tasks -= BuildTasks
         }
     }
     
-    if build {
-        if tasks & BuildTasks == {} do tasks += { .game, .platform }
+    if .asset_builder in tasks {
+        odin_build(&cmd, asset_builder_dir, `..\build\asset_builder.exe`)
+        append(&cmd, debug)
+        append(&cmd, ..flags)
+        append(&cmd, custom_attribute_flag)
+        append(&cmd, ..pedantic)
+        run_command(&cmd)
+    }
+    
+    if .game in tasks {
+        if !check_printlikes(&metaprogram, game_dir) do os.exit(1)
+
+        generate_platform_api(&metaprogram, `..\code\generated-platform_api.odin`, `..\code\game\generated-platform_api.odin`)
         
-        generate_platform_api(metaprogram.apis, `..\code\generated-platform_api.odin`, `..\code\game\generated-platform_api.odin`)
+        delete_all_like(`.\game*.pdb`)
+        delete_all_like(`.\game*.rdi`)
         
-        if .game in tasks {
-            delete_all_like(`.\game*.pdb`)
-            delete_all_like(`.\game*.rdi`)
+        // @note(viktor): the platform checks for this lock file when hot-reloading
+        lock_path := `.\lock.tmp` 
+        lock, err := os.open(lock_path, mode = os.O_CREATE)
+        if err != nil do fmt.print("ERROR: ", os.error_string(err))
+        
+        defer {
+            os.close(lock)
+            os.remove(lock_path)
+        }
+        
+        fmt.fprint(lock, "WAITING FOR PDB")
+        
+        pdb := fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number())
+        
+        odin_build(&cmd, game_dir, `.\game.dll`)
+        append(&cmd, "-build-mode:dll")
+        append(&cmd, pdb)
+        append(&cmd, debug)
+        append(&cmd, ..flags)
+        append(&cmd, custom_attribute_flag)
+        append(&cmd, internal)
+        append(&cmd, optimizations)
+        if PedanticGame do append(&cmd, ..pedantic)
+        
+        silence: string
+        run_command(&cmd, stdout = &silence)
+    }
+    
+    if .platform in tasks { 
+        if handle_running_exe_gracefully(debug_exe, .Skip) {
+            if !check_printlikes(&metaprogram, code_dir) do os.exit(1)
             
-            // @note(viktor): the platform checks for this lock file when hot-reloading
-            lock_path := `.\lock.tmp` 
-            lock, err := os.open(lock_path, mode = os.O_CREATE)
-            if err != nil do fmt.print("ERROR: ", os.error_string(err))
-            
-            defer {
-                os.close(lock)
-                os.remove(lock_path)
+            // @todo(viktor): these could be run in parallel with each other and the build of the game
+            if !generate_game_api(&metaprogram, `..\code\generated-game_api.odin`) {
+                fmt.println("ERROR: Could not generate game api")
+                os.exit(1)
+            }
+            if !generate_commons(&metaprogram, `..\code\generated-commons.odin`) {
+                fmt.println("ERROR: Could not extract declarations marked with @common")
+                os.exit(1)
             }
             
-            fmt.fprint(lock, "WAITING FOR PDB")
-            
-            pdb := fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number())
-            
-            odin_build(&cmd, game_dir, `.\game.dll`)
-            append(&cmd, "-build-mode:dll")
-            append(&cmd, pdb)
+            odin_build(&cmd, code_dir, `.\`+debug_exe)
             append(&cmd, debug)
             append(&cmd, ..flags)
             append(&cmd, custom_attribute_flag)
             append(&cmd, internal)
             append(&cmd, optimizations)
-            if PedanticGame do append(&cmd, ..pedantic)
+            if PedanticPlatform do append(&cmd, ..pedantic)
             
-            silence: string
-            run_command(&cmd, stdout = &silence)
-        }
-        
-        if .platform in tasks { 
-            if handle_running_exe_gracefully(debug_exe, .Skip) {
-                // @todo(viktor): this could be run in parallel
-                if !generate_game_api(&metaprogram, `..\code\generated-game_api.odin`) {
-                    fmt.println("ERROR: Could not generate game api")
-                    os.exit(1)
-                }
-                if !generate_commons(&metaprogram, `..\code\generated-commons.odin`) {
-                    fmt.println("ERROR: Could not extract declarations marked with @common")
-                    os.exit(1)
-                }
-                
-                odin_build(&cmd, code_dir, `.\`+debug_exe)
-                append(&cmd, debug)
-                append(&cmd, ..flags)
-                append(&cmd, custom_attribute_flag)
-                append(&cmd, internal)
-                append(&cmd, optimizations)
-                if PedanticPlatform do append(&cmd, ..pedantic)
-                
-                run_command(&cmd)
-            }
-        }
-        
-        if .asset_builder in tasks {
-            odin_build(&cmd, asset_builder_dir, `..\build\asset_builder.exe`)
-            append(&cmd, debug)
-            append(&cmd, ..flags)
-            append(&cmd, custom_attribute_flag)
-            append(&cmd, ..pedantic)
             run_command(&cmd)
         }
     }
@@ -268,6 +270,8 @@ Options:
     for task in Task do width = max(len(fmt.tprint(task)), width)
     format := fmt.tprintf("  %%-%vv - %%v\n", width)
     for text, task in infos do fmt.printf(format, task, text)
+    
+    os.exit(1)
 }
 
 Procs :: [dynamic] os2.Process

@@ -114,12 +114,12 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     stair_up, stair_down:  b32
     
     previous_room: StandartRoom
-    room_count: u32 = 4
+    room_count: u32 = 15
     last: v3i
     for screen_index in 0 ..< room_count {
         last = {screen_row, screen_col, tile_z}
         when !true {
-            choice := random_choice(&world.game_entropy, 2)
+            choice := random_between(&world_mode.game_entropy, u32, 0, 2)
         } else {
             choice := 3
         }
@@ -479,6 +479,7 @@ add_standart_room :: proc(world_mode: ^World_Mode, p: WorldPosition, left_hole, 
                 
                 occupying: TraversableReference
                 occupying.entity.id = entity.id
+                occupying.entity.pointer = entity
                 result.ground[offset_x+8][offset_y+4] = occupying
             }
         }

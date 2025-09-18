@@ -90,9 +90,9 @@ Terabyte :: 1024 * Gigabyte
 Petabyte :: 1024 * Terabyte
 Exabyte  :: 1024 * Petabyte
 
-align8     :: proc "contextless" (value: $T) -> T { return (value + (8-1)) &~ (8-1) }
-align16    :: proc "contextless" (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
-align_pow2 :: proc "contextless" (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
+align8     :: proc (value: $T) -> T { return (value + (8-1)) &~ (8-1) }
+align16    :: proc (value: $T) -> T { return (value + (16-1)) &~ (16-1) }
+align_pow2 :: proc (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
 
 safe_truncate :: proc($R: typeid, value: $T) -> (result: R)
 where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is_integer(R){
@@ -105,16 +105,16 @@ where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is
     return { vec_cast(T, rec.min), vec_cast(T, rec.max)}
 }
 vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
-@(require_results) vcast_2 :: proc "contextless" ($T: typeid, x, y: $E) -> ([2] T) where T != E {
+@(require_results) vcast_2 :: proc ($T: typeid, x, y: $E) -> ([2] T) where T != E {
     return {cast(T) x, cast(T) y}
 }
-@(require_results) vcast_3 :: proc "contextless" ($T: typeid, x, y, z: $E) -> ([3] T) where T != E {
+@(require_results) vcast_3 :: proc ($T: typeid, x, y, z: $E) -> ([3] T) where T != E {
     return {cast(T) x, cast(T) y, cast(T) z}
 }
-@(require_results) vcast_4 :: proc "contextless" ($T: typeid, x, y, z, w: $E) -> ([4] T) where T != E {
+@(require_results) vcast_4 :: proc ($T: typeid, x, y, z, w: $E) -> ([4] T) where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
-@(require_results) vcast_vec :: proc "contextless" ($T: typeid, v: [$N] $E) -> (result: [N] T) where T != E {
+@(require_results) vcast_vec :: proc ($T: typeid, v: [$N] $E) -> (result: [N] T) where T != E {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = cast(T) v[i]
     }
@@ -160,7 +160,7 @@ vec_min :: proc (a: $T, b: T) -> (result: T) {
 
 swap :: proc(a, b: ^$T ) { a^, b^ = b^, a^ }
 
-unused :: proc "contextless" (_: $T) {}
+unused :: proc (_: $T) {}
 
 
 absolute_difference :: proc (a, b: $T) -> (result: T) {
@@ -185,24 +185,22 @@ assert :: proc(condition: $B, message := #caller_expression(condition), loc := #
 }
 
 slice_from_parts :: proc { slice_from_parts_cast, slice_from_parts_pointer }
-slice_from_parts_cast :: proc "contextless" ($T: typeid, data: pmm, #any_int count: i64) -> []T {
-    // :PointerArithmetic
-    return (cast([^]T)data)[:count]
+slice_from_parts_cast :: proc ($T: typeid, data: pmm, #any_int count: i64) -> [] T {
+    return (cast([^]T) data)[:count] // :PointerArithmetic
 }
-slice_from_parts_pointer :: proc "contextless" (data: ^$T, #any_int count: i64) -> []T {
-    // :PointerArithmetic
-    return (cast([^]T)data)[:count]
+slice_from_parts_pointer :: proc (data: ^$T, #any_int count: i64) -> [] T {
+    return (cast([^]T) data)[:count] // :PointerArithmetic
 }
 
                 
-slice_to_bytes :: proc (value: []$T) -> (result: []u8) {
+slice_to_bytes :: proc (value: [] $T) -> (result: [] u8) {
     data := raw_data(value)
     len := size_of(T) * len(value)
     result = slice_from_parts(u8, data, len)
     return result
 }
-to_bytes :: proc (value: ^$T) -> (result: []u8) {
-    result = (cast([^]u8) value)[:size_of(T)]
+to_bytes :: proc (value: ^$T) -> (result: [] u8) {
+    result = (cast([^] u8) value)[:size_of(T)]
     return result
 }
 

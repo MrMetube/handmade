@@ -40,9 +40,9 @@ Bitmap :: struct {
 RenderCommands :: struct {
     width, height: i32,
     
-    clear_color: v4,
+    clear_colors: FixedArray(2, v4),
     
-    // @note(viktor): Packed array of disjoint elements. :DisjointArray
+    // @note(viktor): Packed array of disjoint elements.
     // Filled from the front with SortSpriteBounds and from the back with
     // pairs of [RenderEntryHeader some_render_entry]
     // In between the entries is a linked list of RenderEntryCips. See rects.
@@ -385,7 +385,7 @@ push_sort_barrier :: proc(group: ^RenderGroup, turn_of_sorting := false) {
 }
 
 push_clear :: proc(group: ^RenderGroup, color: v4) {
-    group.commands.clear_color = store_color({}, color)
+    append(&group.commands.clear_colors, store_color({}, color))
 }
 
 push_bitmap :: proc(

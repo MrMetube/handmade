@@ -318,7 +318,7 @@ do_tile_render_work :: proc(data: pmm) {
     clip_rect_index := max(u16)
     
     for target, index in targets {
-        clear_color := commands.clear_color
+        clear_color := commands.clear_colors.data[index]
         if index == 0 {
             clear_color.a = clear_color.a
         } else {

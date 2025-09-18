@@ -29,7 +29,7 @@ WorldEntityBlock :: struct {
     next: ^WorldEntityBlock,
     entity_count: u32,
     // @note(viktor): entity_data'count =^= size_of(Entity) * entity_count  for now, because there is no compression
-    entity_data: FixedArray(1 << 14, u8), // :DisjointArray of Entity Data and inlined member arrays or specialized :Arena
+    entity_data: FixedArray(1 << 14, u8),
 }
 
 WorldPosition :: struct {
@@ -66,17 +66,43 @@ chunk_position_from_tile_positon :: proc(world_mode: ^World_Mode, tile_x, tile_y
     return result
 }
 
-update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, world_mode: ^World_Mode) -> (rerun: bool) {
+update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
-    
-    dt := input.delta_time * TimestepPercentage/100.0
     
     camera := get_standard_camera_params(get_dimension(render_group.screen_area).x, 0.3)
     distance_above_ground: f32 = 11
     perspective(render_group, camera.meters_to_pixels, camera.focal_length, distance_above_ground)
     
     haze_color := DarkBlue
-    push_clear(render_group, haze_color * {1,1,1,0})
+    push_clear(render_group, haze_color)
+    
+    update_and_render_simregion(state, tran_state, render_group, input, mode, haze_color)
+    
+    ////////////////////////////////////////////////
+    
+    enviroment_test()
+    
+    ////////////////////////////////////////////////
+    
+    check_arena(mode.world.arena)
+    
+    heroes_exist: bool
+    for con_hero in state.controlled_heroes {
+        if con_hero.brain_id != 0 {
+            heroes_exist = true
+            break
+        }
+    }
+    
+    if !heroes_exist {
+        play_intro_cutscene(state, tran_state)
+    }
+    
+    return false
+}
+
+update_and_render_simregion :: proc (state: ^State, tran_state:^TransientState, render_group:^RenderGroup, input: ^Input, world_mode: ^World_Mode, haze_color: v4) {
+    timed_function()
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := rectangle_min_max(
@@ -90,7 +116,7 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     sim_bounds := add_radius(camera_bounds, v3{15, 15, 15})
     sim_origin := world_mode.camera_p
     
-    sim_region := begin_sim(sim_memory.arena, world_mode, sim_origin, sim_bounds, dt, world_mode.particle_cache)
+    sim_region := begin_sim(sim_memory.arena, world_mode, sim_origin, sim_bounds, input.delta_time, world_mode.particle_cache)
     
     frame_to_frame_camera_delta := world_distance(world_mode.world, world_mode.last_camera_p, world_mode.camera_p)
     world_mode.last_camera_p = world_mode.camera_p
@@ -107,30 +133,32 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     ////////////////////////////////////////////////
     // Look to see if any players are trying to join
     
-    handle_join_inputs := begin_timed_block("handle_join_inputs")
-    for controller, controller_index in input.controllers {
-        con_hero := &state.controlled_heroes[controller_index]
-        if con_hero.brain_id == 0 {
-            if was_pressed(controller.start) {
-                standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
-                assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
-                // maybe keep trying on subsequent frames?
-                
-                brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
-                con_hero ^= { brain_id = brain_id }
-                add_hero(world_mode, sim_region, standing_on, brain_id)
-            }
-        } else {
-            if is_down(controller.shoulder_left) {
-                standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
-                if ok {
-                    p := map_into_worldspace(world_mode.world, world_mode.camera_p, standing_on.entity.pointer.p)
-                    add_monster(world_mode, p, standing_on)
+    if true {
+        handle_join_inputs := begin_timed_block("handle_join_inputs")
+        for controller, controller_index in input.controllers {
+            con_hero := &state.controlled_heroes[controller_index]
+            if con_hero.brain_id == 0 {
+                if was_pressed(controller.start) {
+                    standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
+                    assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
+                    // maybe keep trying on subsequent frames?
+                    
+                    brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
+                    con_hero ^= { brain_id = brain_id }
+                    add_hero(world_mode, sim_region, standing_on, brain_id)
+                }
+            } else {
+                if is_down(controller.shoulder_left) {
+                    standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
+                    if ok {
+                        p := map_into_worldspace(world_mode.world, world_mode.camera_p, standing_on.entity.pointer.p)
+                        add_monster(world_mode, p, standing_on)
+                    }
                 }
             }
         }
+        end_timed_block(handle_join_inputs)
     }
-    end_timed_block(handle_join_inputs)
     
     ////////////////////////////////////////////////
     
@@ -150,37 +178,15 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     old_clip_rect_index := render_group.current_clip_rect_index
     defer render_group.current_clip_rect_index = old_clip_rect_index
     
-    update_and_render_entities(input, world_mode, sim_region, render_group, camera_p, dt, haze_color)
+    update_and_render_entities(input, world_mode, sim_region, render_group, camera_p, input.delta_time, haze_color)
     
-    update_and_render_particle_systems(world_mode.particle_cache, render_group, dt, frame_to_frame_camera_delta, camera_p)
-    
-    ////////////////////////////////////////////////
-    
-    enviroment_test()
-    
-    ////////////////////////////////////////////////
+    update_and_render_particle_systems(world_mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta, camera_p)
     
     // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.
     end_sim(sim_region, world_mode)
     end_temporary_memory(sim_memory)
-    
-    check_arena(world_mode.world.arena)
-    
-    heroes_exist: bool
-    for con_hero in state.controlled_heroes {
-        if con_hero.brain_id != 0 {
-            heroes_exist = true
-            break
-        }
-    }
-    
-    if !heroes_exist {
-        play_intro_cutscene(state, tran_state)
-    }
-    
-    return false
 }
 
 ////////////////////////////////////////////////
@@ -293,7 +299,7 @@ use_space_in_chunk :: proc(world: ^World, pack_size: i64, chunk: ^Chunk) -> (res
     block := chunk.first_block
     
     // :PointerArithmetic
-    result = cast(^Entity)  &block.entity_data.data[block.entity_data.count]
+    result = cast(^Entity) &block.entity_data.data[block.entity_data.count]
     block.entity_data.count += pack_size
     block.entity_count += 1
     

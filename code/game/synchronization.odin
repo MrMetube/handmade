@@ -9,7 +9,7 @@ import "core:simd/x86"
 ////////////////////////////////////////////////
 // Atomics
 
-atomic_compare_exchange :: proc "contextless" (dst: ^$T, old, new: T) -> (ok: b32, was: T) {
+atomic_compare_exchange :: proc (dst: ^$T, old, new: T) -> (ok: b32, was: T) {
     ok_: bool
     was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
     ok = cast(b32) ok_
@@ -24,12 +24,12 @@ atomic_exchange    :: intrinsics.atomic_exchange
 
 // @todo(viktor): Is this correct? How can I validated this?
 @(enable_target_feature="sse2,sse")
-complete_previous_writes_before_future_writes :: proc "contextless" () {
+complete_previous_writes_before_future_writes :: proc () {
     x86._mm_sfence()
     x86._mm_lfence()
 }
 @(enable_target_feature="sse2")
-complete_previous_reads_before_future_reads :: proc "contextless" () {
+complete_previous_reads_before_future_reads :: proc () {
     x86._mm_lfence()
 }
 

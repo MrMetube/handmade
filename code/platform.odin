@@ -726,14 +726,13 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, de
     }
     */
     
-    clear_color := commands.clear_color
-    clear_color.rgb = square(clear_color.rgb)
+    for &color in slice(&commands.clear_colors) do color.rgb = square(color.rgb)
     
     if GlobalUseSoftwareRenderer {
         software_render_commands(render_queue, commands, prep, GlobalBackBuffer, arena)
-        gl_display_bitmap(GlobalBackBuffer, draw_region, clear_color)
+        gl_display_bitmap(GlobalBackBuffer, draw_region, commands.clear_colors.data[0])
     } else {
-        gl_render_commands(commands, prep, draw_region, windows_dim, clear_color)
+        gl_render_commands(commands, prep, draw_region, windows_dim)
     }
     
     { timed_block("SwapBuffers")

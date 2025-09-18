@@ -187,7 +187,7 @@ write_fonts :: proc() {
     // for c in "贺佳樱我爱你" do add_character_asset(hha, &debug_font, c)
     fonts := [?]struct {type: AssetFontType, font: ^SourceFont}{
         { .Default, load_font(100, `C:\Windows\Fonts\LiberationSans-Regular.ttf`) },
-        { .Debug,   load_font(40,  `C:\Users\Viktor\AppData\Local\Microsoft\Windows\Fonts\VictorMono-Bold.otf`) },
+        { .Debug,   load_font(40,  `C:\Users\Viktor\AppData\Local\Microsoft\Windows\Fonts\VictorMono-SemiBold.otf`) },
     }
     
     begin_asset_type(hha, .FontGlyph)
@@ -683,7 +683,6 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
     if len(contents) > 0 {
         headers := cast([^]WAVE_Header) &contents[0]
         header := headers[0]
-        // :PointerArithmetic
         behind_header := cast([^]u8) &headers[1]
         
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
@@ -710,7 +709,6 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             if size % 2 != 0 {
                 size += 1
             }
-            // :PointerArithmetic
             result.at = cast([^]u8) &it.at[size + size_of(WAVE_Chunk)]
             result.stop = it.stop
             return result
