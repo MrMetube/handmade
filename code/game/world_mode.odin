@@ -114,11 +114,11 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     stair_up, stair_down:  b32
     
     previous_room: StandartRoom
-    room_count: u32 = 15
+    room_count: u32 = 10
     last: v3i
     for screen_index in 0 ..< room_count {
         last = {screen_row, screen_col, tile_z}
-        when !true {
+        when true {
             choice := random_between(&world_mode.game_entropy, u32, 0, 2)
         } else {
             choice := 3
@@ -130,8 +130,8 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
           case 1: door_top    = true
           case 2: stair_down  = true
           case 3: stair_up    = true
-          // case 4: door_left   = true
-          // case 5: door_bottom = true
+          case 4: door_left   = true
+          case 5: door_bottom = true
         }
         
         created_stair = stair_down || stair_up

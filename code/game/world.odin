@@ -76,7 +76,14 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     haze_color := DarkBlue
     push_clear(render_group, haze_color)
     
-    update_and_render_simregion(state, tran_state, render_group, input, mode, haze_color)
+    screen_bounds := get_camera_rectangle_at_target(render_group)
+    camera_bounds := Rect3(screen_bounds, -0.5 * mode.typical_floor_height, 4 * mode.typical_floor_height)
+    
+    // @todo(viktor): by how much should we expand the sim region?
+    sim_bounds  := add_radius(camera_bounds, v3{ 15, 15, 15})
+    sim_bounds2 := add_offset(sim_bounds,    v3{-70, -40, 0})
+    update_and_render_simregion(&tran_state.arena, mode, input.delta_time, screen_bounds, sim_bounds, input.mouse.p, render_group, state, input, haze_color)
+    update_and_render_simregion(&tran_state.arena, mode, input.delta_time, screen_bounds, sim_bounds2, input.mouse.p, render_group, nil, nil, 0)
     
     ////////////////////////////////////////////////
     
@@ -101,58 +108,41 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     return false
 }
 
-update_and_render_simregion :: proc (state: ^State, tran_state:^TransientState, render_group:^RenderGroup, input: ^Input, world_mode: ^World_Mode, haze_color: v4) {
+update_and_render_simregion :: proc (sim_arena: ^Arena, mode: ^World_Mode, dt: f32, screen_bounds: Rectangle2, sim_bounds: Rectangle3, mouse_p: v2, render_group: ^RenderGroup, state: ^State, input: ^Input, haze_color: v4) {
     timed_function()
     
-    screen_bounds := get_camera_rectangle_at_target(render_group)
-    camera_bounds := rectangle_min_max(
-        V3(screen_bounds.min, -0.5 * world_mode.typical_floor_height), 
-        V3(screen_bounds.max, 4 * world_mode.typical_floor_height),
-    )
+    sim_origin := mode.camera_p
     
-    sim_memory := begin_temporary_memory(&tran_state.arena)
-    // @todo(viktor): by how much should we expand the sim region?
-    // @todo(viktor): do we want to simulate upper floors, etc?
-    sim_bounds := add_radius(camera_bounds, v3{15, 15, 15})
-    sim_origin := world_mode.camera_p
+    sim_memory := begin_temporary_memory(sim_arena)
     
-    sim_region := begin_sim(sim_memory.arena, world_mode, sim_origin, sim_bounds, input.delta_time, world_mode.particle_cache)
+    sim_region := begin_sim(sim_memory.arena, mode, sim_origin, sim_bounds, dt, mode.particle_cache)
     
-    frame_to_frame_camera_delta := world_distance(world_mode.world, world_mode.last_camera_p, world_mode.camera_p)
-    world_mode.last_camera_p = world_mode.camera_p
-    camera_p := world_mode.camera_offset + world_distance(world_mode.world, world_mode.camera_p, sim_origin)
-    
-    if ShowRenderAndSimulationBounds {
-        world_transform := default_flat_transform()
-        world_transform.offset -= camera_p 
-        push_rectangle_outline(render_group, screen_bounds,               world_transform, Orange, 0.1)
-        push_rectangle_outline(render_group, sim_region.bounds,           world_transform, Blue,   0.2)
-        push_rectangle_outline(render_group, sim_region.updatable_bounds, world_transform, Green,  0.2)
-    }
+    frame_to_frame_camera_delta := world_distance(mode.world, mode.last_camera_p, mode.camera_p)
+    mode.last_camera_p = mode.camera_p
+    camera_p := mode.camera_offset + world_distance(mode.world, mode.camera_p, sim_origin)
     
     ////////////////////////////////////////////////
     // Look to see if any players are trying to join
     
-    if true {
+    if state != nil && input != nil {
         handle_join_inputs := begin_timed_block("handle_join_inputs")
         for controller, controller_index in input.controllers {
             con_hero := &state.controlled_heroes[controller_index]
             if con_hero.brain_id == 0 {
                 if was_pressed(controller.start) {
                     standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
-                    assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...
-                    // maybe keep trying on subsequent frames?
+                    assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...maybe keep trying on subsequent frames?
                     
                     brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
                     con_hero ^= { brain_id = brain_id }
-                    add_hero(world_mode, sim_region, standing_on, brain_id)
+                    add_hero(mode, sim_region, standing_on, brain_id)
                 }
             } else {
                 if is_down(controller.shoulder_left) {
                     standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
                     if ok {
-                        p := map_into_worldspace(world_mode.world, world_mode.camera_p, standing_on.entity.pointer.p)
-                        add_monster(world_mode, p, standing_on)
+                        p := map_into_worldspace(mode.world, mode.camera_p, standing_on.entity.pointer.p)
+                        add_monster(mode, p, standing_on)
                     }
                 }
             }
@@ -167,25 +157,30 @@ update_and_render_simregion :: proc (state: ^State, tran_state:^TransientState, 
         mark_brain_active(&brain)
     }
     for &brain in slice(sim_region.brains) {
-        execute_brain(state, input, world_mode, sim_region, render_group, &brain)
+        execute_brain(mode, sim_region, dt, &brain, state, input)
     }
     end_timed_block(execute_brains)
     
     ////////////////////////////////////////////////
     
-    // @todo(viktor): What was this about?
-    // @todo(viktor): :TransientClipRect
-    old_clip_rect_index := render_group.current_clip_rect_index
-    defer render_group.current_clip_rect_index = old_clip_rect_index
+    update_and_render_entities(mode, sim_region, dt, mouse_p, render_group, camera_p, haze_color)
     
-    update_and_render_entities(input, world_mode, sim_region, render_group, camera_p, input.delta_time, haze_color)
-    
-    update_and_render_particle_systems(world_mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta, camera_p)
+    if render_group != nil {
+        update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta, camera_p)
+     
+        if ShowRenderAndSimulationBounds {
+            world_transform := default_flat_transform()
+            world_transform.offset -= camera_p 
+            push_rectangle_outline(render_group, screen_bounds,               world_transform, Orange, 0.1)
+            push_rectangle_outline(render_group, sim_region.bounds,           world_transform, Blue,   0.2)
+            push_rectangle_outline(render_group, sim_region.updatable_bounds, world_transform, Green,  0.2)
+        }
+    }
     
     // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.
-    end_sim(sim_region, world_mode)
+    end_sim(sim_region, mode)
     end_temporary_memory(sim_memory)
 }
 
