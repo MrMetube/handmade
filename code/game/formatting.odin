@@ -289,7 +289,8 @@ view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> (result: Temp_V
         {1000, "R"}, // ronna
         {   0, "Q"}, // quetta
     }
-    result = view_magnitude_raw(value, decimal_table[:], precision = precision)
+    // @todo(viktor): here a scale parameter would be useful
+    result = view_magnitude_raw(value, decimal_table[Decimal_Amount.unit:], precision = precision)
     return result
 }
 

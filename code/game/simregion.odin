@@ -13,8 +13,8 @@ SimRegion :: struct {
     brains:   Array(Brain),
     
     // @todo(viktor): Do I really want a hash for this?
-    entity_hash: [4096]EntityHash,
-    brain_hash:  [128]BrainHash,
+    entity_hash: [4096] EntityHash,
+    brain_hash:  [128] BrainHash,
     
     null_entity: Entity,
 }
@@ -31,7 +31,59 @@ EntityHash :: struct {
 
 ////////////////////////////////////////////////
 
-begin_sim :: proc(sim_arena: ^Arena, world_mode: ^World_Mode, origin: WorldPosition, bounds: Rectangle3, dt: f32, particle_cache: ^Particle_Cache) -> (region: ^SimRegion) {
+World_Sim :: struct {
+    region: ^SimRegion, 
+    memory: TemporaryMemory,
+    
+    camera_p: v3, 
+}
+
+begin_sim :: proc (sim_arena: ^Arena, mode: ^World_Mode, sim_bounds: Rectangle3, dt: f32) -> (simulation: World_Sim) {
+    timed_function()
+    
+    simulation.memory = begin_temporary_memory(sim_arena)
+    
+    sim_origin := mode.camera_p
+    
+    simulation.region   = begin_world_changes(simulation.memory.arena, mode.world, sim_origin, sim_bounds, dt)
+    simulation.camera_p = mode.camera_offset + world_distance(mode.world, mode.camera_p, sim_origin)
+    
+    return simulation
+}
+
+simulate :: proc (simulation: ^World_Sim, dt: f32, typical_floor_height: f32, render_group: ^RenderGroup, state: ^State, input: ^Input,  haze_color: v4, particle_cache: ^Particle_Cache) {
+    timed_function()
+    
+    region := simulation.region
+    camera_p := simulation.camera_p
+    
+    { timed_block("execute_brains")
+        for &brain in slice(region.brains) {
+            mark_brain_active(&brain)
+        }
+        
+        entropy:=seed_random_series()
+        for &brain in slice(region.brains) {
+            execute_brain(region, dt, &brain, state, input, &entropy)
+        }
+    }
+    
+    update_and_render_entities(region, dt, render_group, camera_p, typical_floor_height, haze_color, particle_cache)
+}
+
+end_sim :: proc (simulation: ^World_Sim, mode: ^World_Mode) {
+    timed_function()
+    
+    // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
+    // can know about the location of the camera at the end of the frame so there isn't
+    // a frame of lag in camera updating compared to the hero.
+    end_world_changes(simulation.region, mode)
+    end_temporary_memory(simulation.memory)
+}
+
+////////////////////////////////////////////////
+
+begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     timed_function()
     
     region = push(sim_arena, SimRegion)
@@ -50,13 +102,16 @@ begin_sim :: proc(sim_arena: ^Arena, world_mode: ^World_Mode, origin: WorldPosit
     update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
     UpdateSafetyMarginZ :: 1 // @todo(viktor): what should this be?
     
-    region.world = world_mode.world
+    region.world = world
     region.origin = origin
     region.updatable_bounds = add_radius(bounds, v3{region.max_entity_radius, region.max_entity_radius, 0})
     region.bounds = add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
     
     min_p := map_into_worldspace(region.world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(region.world, region.origin, region.bounds.max)
+    
+    begin_ticket_mutex(&world.change_ticket)
+    defer end_ticket_mutex(&world.change_ticket)
     
     // @todo(viktor): @speed this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
@@ -123,7 +178,7 @@ begin_sim :: proc(sim_arena: ^Arena, world_mode: ^World_Mode, origin: WorldPosit
     return region
 }
 
-end_sim :: proc(region: ^SimRegion, world_mode: ^World_Mode) {
+end_world_changes :: proc (region: ^SimRegion, world_mode: ^World_Mode) {
     timed_function()
     
     for &entity in slice(region.entities) {
@@ -191,6 +246,7 @@ end_sim :: proc(region: ^SimRegion, world_mode: ^World_Mode) {
         
         entity.p += chunk_delta
         
+        begin_ticket_mutex(&region.world.change_ticket)
         dest := use_space_in_world(region.world, size_of(Entity), entity_p)
         entity.p = entity_p.offset
         
@@ -204,6 +260,7 @@ end_sim :: proc(region: ^SimRegion, world_mode: ^World_Mode) {
         pack_traversable_reference(region, &dest.occupying)
         
         pack_traversable_reference(region, &dest.auto_boost_to)
+        end_ticket_mutex(&region.world.change_ticket)
     }
 }
 
@@ -461,7 +518,7 @@ transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, d
 
 ////////////////////////////////////////////////
 
-move_entity :: proc(world_mode: ^World_Mode, region: ^SimRegion, entity: ^Entity, dt: f32) {
+move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
     timed_function()
     
     entity_delta := 0.5*entity.ddp * square(dt) + entity.dp * dt
@@ -494,7 +551,7 @@ move_entity :: proc(world_mode: ^World_Mode, region: ^SimRegion, entity: ^Entity
                     
                 // @todo(viktor): Robustness!
                 OverlapEpsilon :: 0.001
-                if can_collide(world_mode, entity, &test_entity) {
+                if can_collide(entity, &test_entity) {
                     for volume in entity.collision.volumes {
                         for test_volume in test_entity.collision.volumes {
                             minkowski_diameter := get_dimension(volume) + get_dimension(test_volume)
@@ -574,7 +631,7 @@ move_entity :: proc(world_mode: ^World_Mode, region: ^SimRegion, entity: ^Entity
             if hit != nil {
                 entity_delta = desired_p - entity.p
                 
-                stops_on_collision := handle_collision(world_mode, entity, hit)
+                stops_on_collision := handle_collision(entity, hit)
                 if stops_on_collision {
                     entity.dp.xy    = project(entity.dp.xy, wall_normal)
                     entity_delta.xy = project(entity_delta.xy, wall_normal)
@@ -593,46 +650,20 @@ move_entity :: proc(world_mode: ^World_Mode, region: ^SimRegion, entity: ^Entity
     }
 }
 
-// @cleanup
-entities_overlap :: proc(a, b: ^Entity, epsilon := v3{}) -> (result: b32) {
-    outer: for a_volume in a.collision.volumes {
-        for b_volume in b.collision.volumes {
-            a_rect := rectangle_center_dimension(a.p + get_center(a_volume), get_dimension(a_volume) + epsilon)
-            b_rect := rectangle_center_dimension(b.p + get_center(b_volume), get_dimension(b_volume))
-            
-            if intersects(a_rect, b_rect) {
-                result = true
-                break outer
-            }
-        }
-    }
-    
-    return result
-}
-
-can_collide :: proc(world: ^World_Mode, a, b: ^Entity) -> (result: b32) {
+can_collide :: proc(a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
         if a.id > b.id do a, b = b, a
         
         if .Collides in a.flags && .Collides in b.flags {
             result = true
-            
-            // @todo(viktor): BETTER HASH FUNCTION!!!
-            hash_bucket := a.id & (len(world.collision_rule_hash) - 1)
-            for rule := world.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
-                if rule.id_a == a.id && rule.id_b == b.id {
-                    result = rule.can_collide
-                    break
-                }
-            }
         }
     }
     return result
 }
 
 
-handle_collision :: proc(world: ^World_Mode, a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc(a, b: ^Entity) -> (stops_on_collision: b32) {
     when false {
         a, b := a, b
     
@@ -640,19 +671,6 @@ handle_collision :: proc(world: ^World_Mode, a, b: ^Entity) -> (stops_on_collisi
         
         stops_on_collision = true
     }
-        
-    return stops_on_collision
-}
-
-can_overlap :: proc(mover, region: ^Entity) -> (result: b32) {
-    when false {
-        if mover != region {
-            
-            if region.type == .Stairwell {
-                result = true
-            }
-        }
-    }
     
-    return result
+    return stops_on_collision
 }

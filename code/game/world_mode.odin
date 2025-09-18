@@ -1,8 +1,6 @@
 package game
 
 World_Mode :: struct {
-    ////////////////////////////////////////////////
-    // World specific
     world: ^World,
     
     ////////////////////////////////////////////////
@@ -14,9 +12,6 @@ World_Mode :: struct {
     camera_p:            WorldPosition,
     last_camera_p:       WorldPosition,
     camera_offset:       v3,
-    
-    collision_rule_hash:       [256] ^PairwiseCollsionRule,
-    first_free_collision_rule: ^PairwiseCollsionRule,
     
     null_collision, 
     wall_collision,    
@@ -35,11 +30,6 @@ World_Mode :: struct {
     
     game_entropy:    RandomSeries,
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
-    
-    // @cleanup Particle System tests
-    _next_particle: u32,
-    _particles:     [256] Particle,
-    _cells:         [ParticleCellSize] [ParticleCellSize] ParticleCell,
     
     particle_cache:  ^Particle_Cache,
     creation_region: ^SimRegion,
@@ -103,7 +93,7 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     // "World Gen"
     
     creation_memory := begin_temporary_memory(&tran_state.arena)
-    world_mode.creation_region = begin_sim(creation_memory.arena, world_mode, {}, {}, 0, nil)
+    world_mode.creation_region = begin_world_changes(creation_memory.arena, world_mode.world, {}, {}, 0)
     
     screen_base: v3i
     
@@ -210,7 +200,7 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
         }
     }
     
-    end_sim(world_mode.creation_region, world_mode)
+    end_world_changes(world_mode.creation_region, world_mode)
     world_mode.creation_region = nil
     end_temporary_memory(creation_memory)
     
@@ -531,62 +521,6 @@ make_simple_floor_collision :: proc(world_mode: ^World_Mode, size: v3) -> (resul
     return result
 }
 
-
-add_collision_rule :: proc(world_mode: ^World_Mode, a, b: EntityId, should_collide: b32) {
-    timed_function()
-    // @todo(viktor): collapse this with should_collide
-    a, b := a, b
-    if a > b do swap(&a, &b)
-    // @todo(viktor): BETTER HASH FUNCTION!!!
-    found: ^PairwiseCollsionRule
-    hash_bucket := a & (len(world_mode.collision_rule_hash) - 1)
-    for rule := world_mode.collision_rule_hash[hash_bucket]; rule != nil; rule = rule.next {
-        if rule.id_a == a && rule.id_b == b {
-            found = rule
-            break
-        }
-    }
-
-    if found == nil {
-        found = list_pop_head(&world_mode.first_free_collision_rule) or_else push(world_mode.world.arena, PairwiseCollsionRule)
-        list_push(&world_mode.collision_rule_hash[hash_bucket], found)
-    }
-
-    if found != nil {
-        found.id_a = a
-        found.id_b = b
-        found.can_collide = should_collide
-    }
-}
-
-// @cleanup
-clear_collision_rules :: proc(world_mode: ^World_Mode, entity_id: EntityId) {
-    timed_function()
-    // @todo(viktor): need to make a better data structute that allows for
-    // the removal of collision rules without searching the entire table
-    // @note(viktor): One way to make removal easy would be to always
-    // add _both_ orders of the pairs of storage indices to the
-    // hash table, so no matter which position the entity is in,
-    // you can always find it. Then, when you do your first pass
-    // through for removal, you just remember the original top
-    // of the free list, and when you're done, do a pass through all
-    // the new things on the free list, and remove the reverse of
-    // those pairs.
-    for hash_bucket in 0..<len(world_mode.collision_rule_hash) {
-        for rule_pointer := &world_mode.collision_rule_hash[hash_bucket]; rule_pointer^ != nil;  {
-            rule := rule_pointer^
-            if rule.id_a == entity_id || rule.id_b == entity_id {
-                // :ListEntryRemovalInLoop
-                list_push(&world_mode.first_free_collision_rule, rule)
-                rule_pointer ^= rule.next
-            } else {
-                rule_pointer = &rule.next
-            }
-        }
-    }
-}
-
-////////////////////////////////////////////////
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////

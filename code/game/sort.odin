@@ -1,8 +1,6 @@
 #+vet !unused-procedures
 package game
 
-@(common="file")
-
 SortEntry :: struct {
     sort_key: f32,
     index:    u32,
@@ -10,7 +8,7 @@ SortEntry :: struct {
 
 compare_sort_entries :: proc(a, b: SortEntry) -> b32 { return a.sort_key < b.sort_key }
 
-pradix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
+radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
         sort_key_offsets: [256]u32

@@ -140,15 +140,13 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt: f32, mouse_p: v2, render_group: ^RenderGroup, camera_p: v3, haze_color: v4) {
+update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, camera_p: v3, typical_floor_height: f32, haze_color: v4, particle_cache: ^Particle_Cache) {
     timed_function()
     
-    particle_cache := mode.particle_cache
-    
-    fade_top_end      := .9 * mode.typical_floor_height
-    fade_top_start    := .5 * mode.typical_floor_height
-    fade_bottom_start := -1 * mode.typical_floor_height
-    fade_bottom_end   := -4 * mode.typical_floor_height
+    fade_top_end      := .9 * typical_floor_height
+    fade_top_start    := .5 * typical_floor_height
+    fade_bottom_start := -1 * typical_floor_height
+    fade_bottom_end   := -4 * typical_floor_height
     
     MinimumLayer :: -4
     MaximumLayer :: 1
@@ -158,7 +156,7 @@ update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt
     test_alpha: f32
     for &fog_amount, index in fog_amount {
         relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z[index] = mode.typical_floor_height * cast(f32) relative_layer_index - camera_p.z
+        camera_relative_ground_z[index] = typical_floor_height * cast(f32) relative_layer_index - camera_p.z
         
         test_alpha = clamp_01_map_to_range(fade_top_end,      camera_relative_ground_z[index], fade_top_start)
         fog_amount = clamp_01_map_to_range(fade_bottom_start, camera_relative_ground_z[index], fade_bottom_end)
@@ -180,15 +178,6 @@ update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt
     current_absolute_layer := sim_region.entities.count > 0 ? slice(sim_region.entities)[0].z_layer : 0
     
     for &entity in slice(sim_region.entities) {
-        // @todo(viktor): we dont really have a way to unique-ify these :(
-        debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
-        if debug_requested(debug_id) { 
-            debug_begin_data_block("Game/Entity")
-        }
-        defer if debug_requested(debug_id) {
-            debug_end_data_block()
-        }
-        
         if .active in entity.flags {
             // @todo(viktor): Should non-active entities not do simmy stuff?
             boost_to := get_traversable(entity.auto_boost_to)
@@ -275,8 +264,8 @@ update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt
                     entity.p = pt
                     entity.came_from = entity.occupying
                     
-                    camera_relative_ground_z := mode.typical_floor_height * cast(f32) (entity.z_layer - sim_region.origin.chunk.z) - camera_p.z
-                    spawn_fire(mode.particle_cache, entity.p, camera_relative_ground_z, entity.z_layer)
+                    camera_relative_ground_z := typical_floor_height * cast(f32) (entity.z_layer - sim_region.origin.chunk.z) - camera_p.z
+                    spawn_fire(particle_cache, entity.p, camera_relative_ground_z, entity.z_layer)
                 }
                 
                 hop_duration :f32: 0.2
@@ -288,7 +277,7 @@ update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt
             }
                             
             if entity.ddp != 0 || entity.dp != 0 {
-                move_entity(mode, sim_region, &entity, dt)
+                move_entity(sim_region, &entity, dt)
             }
             
             ////////////////////////////////////////////////
@@ -352,10 +341,6 @@ update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt
                     
                     bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
                     push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
-                    
-                    if debug_requested(debug_id) { 
-                        debug_record_value(&bitmap_id)
-                    }
                 }
                 if entity.pieces.count > 1 do end_aggregate_sort_key(render_group)
                 
@@ -375,29 +360,50 @@ update_and_render_entities :: proc(mode: ^World_Mode, sim_region: ^SimRegion, dt
                     }
                 }
                 
-                when DebugEnabled {
-                    for volume in entity.collision.volumes {
-                        local_mouse_p := unproject_with_transform(render_group.camera, transform, mouse_p)
-                        
-                        if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
-                            debug_hit(debug_id, local_mouse_p.z)
-                        }
-                        
-                        highlighted, color := debug_highlighted(debug_id)
-                        if highlighted {
-                            push_rectangle_outline(render_group, volume, transform, color, 0.05)
-                        }
-                    }
-                    
-                    if debug_requested(debug_id) { 
-                        debug_record_value(cast(^u32) &entity.id, name = "entity_id")
-                        debug_record_value(&entity.p.x)
-                        debug_record_value(&entity.p.y)
-                        debug_record_value(&entity.p.y)
-                        debug_record_value(&entity.dp)
-                    }
-                }
+                debug_pick_entity(&entity, transform, render_group)
             }
+        }
+    }
+}
+
+debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: ^RenderGroup) {
+    when !DebugEnabled do return
+    
+    // @todo(viktor): we dont really have a way to unique-ify these :(
+    debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
+    if       debug_requested(debug_id) do debug_begin_data_block("Game/Entity")
+    defer if debug_requested(debug_id) do debug_end_data_block()
+    
+    if .active in entity.flags {
+        for piece in slice(&entity.pieces) {
+            if debug_requested(debug_id) { 
+                facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
+                facing_weights := #partial AssetVector{ .FacingDirection = 1 }
+                bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
+                debug_record_value(&bitmap_id)
+            }
+        }
+        
+        for volume in entity.collision.volumes {
+            mouse_p := debug_get_mouse_p()
+            local_mouse_p := unproject_with_transform(render_group.camera, transform, mouse_p)
+            
+            if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
+                debug_hit(debug_id, local_mouse_p.z)
+            }
+            
+            highlighted, color := debug_highlighted(debug_id)
+            if highlighted {
+                push_rectangle_outline(render_group, volume, transform, color, 0.05)
+            }
+        }
+        
+        if debug_requested(debug_id) { 
+            debug_record_value(cast(^u32) &entity.id, name = "entity_id")
+            debug_record_value(&entity.p.x)
+            debug_record_value(&entity.p.y)
+            debug_record_value(&entity.p.y)
+            debug_record_value(&entity.dp)
         }
     }
 }

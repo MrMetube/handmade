@@ -136,6 +136,8 @@ DebugOpenBlock :: struct {
 
 @(common)
 DebugTable :: struct {
+    mouse_p: v2,
+    
     record_increment: u64,
     edit_event: DebugEvent,
     // @correctness No attempt is currently made to ensure that the final

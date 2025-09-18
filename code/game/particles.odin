@@ -142,6 +142,8 @@ update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGr
 }
 
 spawn_fire :: proc (cache: ^Particle_Cache, at_init: v3, floor_z: f32, chunk_z: i32) {
+    if cache == nil do return
+    
     system  := &cache.fire_system
     entropy := &cache.entropy
     

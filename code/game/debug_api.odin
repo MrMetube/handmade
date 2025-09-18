@@ -30,16 +30,28 @@ debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(val
 ////////////////////////////////////////////////
 // Selection
 
+debug_set_mouse_p :: proc (mouse_p: v2) {
+    when !DebugEnabled do return
+    
+    GlobalDebugTable.mouse_p = mouse_p
+}
+debug_get_mouse_p :: proc () -> (result: v2) {
+    when !DebugEnabled do return
+    
+    result = GlobalDebugTable.mouse_p
+    return result
+}
+
 debug_pointer_id :: proc { debug_pointer_id_raw, debug_pointer_id_poly }
-debug_pointer_id_poly :: proc(pointer: $P) -> (result: DebugId) { return debug_pointer_id_raw(auto_cast pointer) }
-debug_pointer_id_raw :: proc(pointer: pmm) -> (result: DebugId) {
-    when !DebugEnabled do return result
+debug_pointer_id_poly :: proc (pointer: $P)  -> (result: DebugId) { return debug_pointer_id_raw(auto_cast pointer) }
+debug_pointer_id_raw  :: proc (pointer: pmm) -> (result: DebugId) {
+    when !DebugEnabled do return
     
     result.value[0] = pointer
     return result
 }
 
-debug_hit :: proc(id: DebugId, z: f32) {
+debug_hit :: proc (id: DebugId, z: f32) {
     debug := get_debug_state()
     if debug == nil do return
     
@@ -49,7 +61,7 @@ debug_hit :: proc(id: DebugId, z: f32) {
     }
 }
 
-debug_highlighted :: proc(id: DebugId) -> (highlighted: b32, color: v4) {
+debug_highlighted :: proc (id: DebugId) -> (highlighted: b32, color: v4) {
     when !DebugEnabled do return highlighted, color
     
     debug := get_debug_state()
@@ -69,7 +81,7 @@ debug_highlighted :: proc(id: DebugId) -> (highlighted: b32, color: v4) {
 }
 
 debug_requested :: proc(id: DebugId) -> (result: b32) {
-    when !DebugEnabled do return result
+    when !DebugEnabled do return
     
     debug := get_debug_state()
     if debug == nil do return

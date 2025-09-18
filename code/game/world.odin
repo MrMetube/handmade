@@ -12,10 +12,9 @@ World :: struct {
     
     first_free_chunk: ^Chunk,
     first_free_block: ^WorldEntityBlock,
-}
 
-// @note(viktor): https://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-#assert( len(World_Mode{}.collision_rule_hash) & ( len(World_Mode{}.collision_rule_hash) - 1 ) == 0)
+    change_ticket: TicketMutex,
+}
 
 Chunk :: struct {
     next: ^Chunk,
@@ -73,22 +72,85 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     distance_above_ground: f32 = 11
     perspective(render_group, camera.meters_to_pixels, camera.focal_length, distance_above_ground)
     
-    haze_color := DarkBlue
-    push_clear(render_group, haze_color)
-    
     screen_bounds := get_camera_rectangle_at_target(render_group)
     camera_bounds := Rect3(screen_bounds, -0.5 * mode.typical_floor_height, 4 * mode.typical_floor_height)
     
     // @todo(viktor): by how much should we expand the sim region?
     sim_bounds  := add_radius(camera_bounds, v3{ 15, 15, 15})
-    sim_bounds2 := add_offset(sim_bounds,    v3{-70, -40, 0})
-    update_and_render_simregion(&tran_state.arena, mode, input.delta_time, screen_bounds, sim_bounds, input.mouse.p, render_group, state, input, haze_color)
-    update_and_render_simregion(&tran_state.arena, mode, input.delta_time, screen_bounds, sim_bounds2, input.mouse.p, render_group, nil, nil, 0)
+    
+    debug_set_mouse_p(input.mouse.p)
     
     ////////////////////////////////////////////////
     
-    enviroment_test()
+    haze_color := DarkBlue
+    push_clear(render_group, haze_color)
+
+    World_Sim_Work :: struct {
+        dt: f32,
+        mode: ^World_Mode,
+        bounds: Rectangle3,
+    }
+    do_world_simulation_immediatly :: proc (data: pmm) {
+        timed_function()
+        
+        // @todo(viktor): with the new and improved Platform Api can we get back the polymorphic arguments so that the call site is better checked
+        using work := cast(^World_Sim_Work) data
+        
+        // @todo(viktor): It is inefficient to  reallocate every time - this should be something that is passed in as a property of the worker thread
+        arena: Arena
+        defer clear_arena(&arena)
+        
+        simulation := begin_sim(&arena, mode, bounds, dt)
+        simulate(&simulation, dt, mode.typical_floor_height, nil,  nil, nil, 0, nil)
+        end_sim(&simulation, mode)
+    }
     
+    N :: 5
+    temp := begin_temporary_memory(&tran_state.arena)
+    works := push(temp.arena, World_Sim_Work, N*N)
+    for sim_x in 0..<N {
+        for sim_y in 0..<N {
+            middle :: N/2
+            if sim_x == middle && sim_y == middle do continue
+            
+            work := &works[sim_x + sim_y * N]
+            work.dt = input.delta_time
+            work.mode = mode
+            offset := v3{100, 100, 0} * vec_cast(f32, sim_x - middle, sim_y - middle, 0)
+            work.bounds = add_offset(sim_bounds, offset)
+            
+            when false {
+                do_world_simulation_immediatly(work)
+            } else {
+                Platform.enqueue_work(tran_state.high_priority_queue, work, do_world_simulation_immediatly)
+            }
+        }
+    }
+    
+    {
+        simulation := begin_sim(&tran_state.arena, mode, sim_bounds, input.delta_time)
+        
+        check_for_joining_player(state, input, simulation.region, simulation.camera_p, mode)
+        
+        simulate(&simulation, input.delta_time, mode.typical_floor_height, render_group, state, input, haze_color, mode.particle_cache)
+        
+        frame_to_frame_camera_delta := world_distance(mode.world, mode.last_camera_p, mode.camera_p)
+        mode.last_camera_p  = mode.camera_p
+        update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta, simulation.camera_p)
+        
+        if ShowRenderAndSimulationBounds {
+            world_transform := default_flat_transform()
+            world_transform.offset -= simulation.camera_p
+            push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
+            push_rectangle_outline(render_group, simulation.region.bounds,           world_transform, Blue,   0.2)
+            push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
+        }
+        
+        end_sim(&simulation, mode)
+    }
+    
+    Platform.complete_all_work(tran_state.high_priority_queue)
+    end_temporary_memory(temp)
     ////////////////////////////////////////////////
     
     check_arena(mode.world.arena)
@@ -108,19 +170,7 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     return false
 }
 
-update_and_render_simregion :: proc (sim_arena: ^Arena, mode: ^World_Mode, dt: f32, screen_bounds: Rectangle2, sim_bounds: Rectangle3, mouse_p: v2, render_group: ^RenderGroup, state: ^State, input: ^Input, haze_color: v4) {
-    timed_function()
-    
-    sim_origin := mode.camera_p
-    
-    sim_memory := begin_temporary_memory(sim_arena)
-    
-    sim_region := begin_sim(sim_memory.arena, mode, sim_origin, sim_bounds, dt, mode.particle_cache)
-    
-    frame_to_frame_camera_delta := world_distance(mode.world, mode.last_camera_p, mode.camera_p)
-    mode.last_camera_p = mode.camera_p
-    camera_p := mode.camera_offset + world_distance(mode.world, mode.camera_p, sim_origin)
-    
+check_for_joining_player :: proc (state: ^State, input: ^Input, sim_region: ^SimRegion, camera_p: v3, mode: ^World_Mode) {
     ////////////////////////////////////////////////
     // Look to see if any players are trying to join
     
@@ -149,41 +199,8 @@ update_and_render_simregion :: proc (sim_arena: ^Arena, mode: ^World_Mode, dt: f
         }
         end_timed_block(handle_join_inputs)
     }
-    
-    ////////////////////////////////////////////////
-    
-    execute_brains := begin_timed_block("execute_brains")
-    for &brain in slice(sim_region.brains) {
-        mark_brain_active(&brain)
-    }
-    for &brain in slice(sim_region.brains) {
-        execute_brain(mode, sim_region, dt, &brain, state, input)
-    }
-    end_timed_block(execute_brains)
-    
-    ////////////////////////////////////////////////
-    
-    update_and_render_entities(mode, sim_region, dt, mouse_p, render_group, camera_p, haze_color)
-    
-    if render_group != nil {
-        update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta, camera_p)
-     
-        if ShowRenderAndSimulationBounds {
-            world_transform := default_flat_transform()
-            world_transform.offset -= camera_p 
-            push_rectangle_outline(render_group, screen_bounds,               world_transform, Orange, 0.1)
-            push_rectangle_outline(render_group, sim_region.bounds,           world_transform, Blue,   0.2)
-            push_rectangle_outline(render_group, sim_region.updatable_bounds, world_transform, Green,  0.2)
-        }
-    }
-    
-    // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
-    // can know about the location of the camera at the end of the frame so there isn't
-    // a frame of lag in camera updating compared to the hero.
-    end_sim(sim_region, mode)
-    end_temporary_memory(sim_memory)
 }
-
+    
 ////////////////////////////////////////////////
 
 map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {

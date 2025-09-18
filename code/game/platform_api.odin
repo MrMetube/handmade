@@ -36,3 +36,8 @@ WorkQueue :: struct {}
     total_size:  umm,
     total_used:  umm,
 }
+
+// @todo(viktor): This is a hack, because we link with the game translation unit twice. once at compile time and once at runtime. the compiletime PlatformApi is never able to be set otherwise
+@(common) set_platform_api_in_the_statically_linked_game_code :: proc (api: Platform_Api) {
+    Platform = api
+}

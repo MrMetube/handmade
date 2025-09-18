@@ -160,11 +160,6 @@ arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: umm = DefaultA
     return result
 }
 
-// @todo(viktor): This is a hack, because we link with the game translation unit twice. once at compile time and once at runtime. the compiletime PlatformApi is never able to be set otherwise
-@(common) set_platform_api_in_the_statically_linked_game_code :: proc (api: Platform_Api) {
-    Platform = api
-}
-
 zero :: proc { zero_size, zero_slice }
 zero_size :: proc(memory: pmm, size: u64) {
     intrinsics.mem_zero(memory, size)

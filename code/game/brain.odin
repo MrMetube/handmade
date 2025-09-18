@@ -83,7 +83,7 @@ mark_brain_active :: proc (brain: ^Brain) {
     }
 }
 
-execute_brain :: proc(mode: ^World_Mode, region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State, input: ^Input) {
+execute_brain :: proc(region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State, input: ^Input, entropy: ^RandomSeries) {
     switch brain.kind {
       case .None: unreachable()
       case .Hero:
@@ -153,10 +153,12 @@ execute_brain :: proc(mode: ^World_Mode, region: ^SimRegion, dt: f32, brain: ^Br
             if controller.button_left.ended_down  { dfacing = -{1, 0}; attacked = true }
             if controller.button_right.ended_down { dfacing =  {1, 0}; attacked = true }
             
-            if was_pressed(controller.start) {
-                standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied})
-                if ok {
-                    add_hero(mode, region, standing_on, 0)
+            when false {
+                if was_pressed(controller.start) {
+                    standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied})
+                    if ok {
+                        add_hero(mode, region, standing_on, 0)
+                    }
                 }
             }
         }
@@ -316,7 +318,7 @@ execute_brain :: proc(mode: ^World_Mode, region: ^SimRegion, dt: f32, brain: ^Br
       case .Monster:
         body := brain.monster.body
         if body != nil {
-            delta := random_bilateral(&mode.game_entropy, v3)
+            delta := random_bilateral(entropy, v3)
             
             traversable, ok := get_closest_traversable(region, body.p + delta, { .Unoccupied })
             if ok {
@@ -347,7 +349,7 @@ execute_brain :: proc(mode: ^World_Mode, region: ^SimRegion, dt: f32, brain: ^Br
             
             target_p: v3
             if index == 0 {
-                delta := random_bilateral(&mode.game_entropy, v3)
+                delta := random_bilateral(entropy, v3)
                 target_p = segment.p + delta
             } else {
                 if !head_moved do break

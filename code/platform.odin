@@ -647,7 +647,7 @@ main :: proc() {
         
         game.end_timed_block(prep_render)
         ////////////////////////////////////////////////
-        frame_end_sleep := game.begin_timed_block("frame end sleep")
+        frame_end_sleep := game.begin_timed_block("sleep at frame end")
         
         {
             seconds_elapsed_for_frame := get_seconds_elapsed_until_now(last_counter)
