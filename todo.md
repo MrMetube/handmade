@@ -2,7 +2,12 @@
 - Types
     - more :PlatformArena for files
     - less :PointerArithmetic
-        
+- Debug UI
+    - make better and hopefully unique colors
+    - Color per unit/file, Game, Debug, Renderer, Platform
+    - Top clocks select a parent to see its children top clocks
+    - Frame bars & threads view - add guide lines for ms and frame target ms
+    
 ### Graphics Upgrade
     - Particle Systems
     - Transition to "real" artwork

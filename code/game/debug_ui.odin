@@ -265,6 +265,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         // @note(viktor): nothing
         
       case BitmapId:
+        timed_block("draw_element - BitmapId")
         event := oldest_stored_event != nil ? &oldest_stored_event.event : nil
         if event != nil {
             value := event.value.(BitmapId)
@@ -295,6 +296,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         }
     
       case DebugEventLink, b32, f32, i32, i64, u32, v2, v3, v4, Rectangle2, Rectangle3:
+        timed_block("draw_element - DebugEventLink")
         null_event := DebugEvent {
             guid = element.guid,
             value = element.type,
@@ -318,6 +320,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         basic_text_element(layout, text, autodetect_interaction)
         
       case FrameInfo:
+        timed_block("draw_element - FrameInfo")
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
         text := debug_print("Viewed Frame: %, % events, % data blocks, % profile blocks",
             view_seconds(viewed_frame.seconds_elapsed), 
@@ -329,6 +332,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         basic_text_element(layout, text)
         
       case ArenaOccupancy:
+        timed_block("draw_element - ArenaOccupancy")
         event :^DebugEvent= oldest_stored_event != nil ? &oldest_stored_event.event : nil
         if event != nil {
             graph, ok := &view.kind.(DebugViewArenaGraph)
@@ -349,6 +353,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
                 
                 text: string
                 if arena.current_block != nil {
+                    timed_block("Arena block totals")
                     count: u32
                     total_size: umm
                     total_used: umm
@@ -380,6 +385,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         }
         
       case FrameSlider:
+        timed_block("draw_element - FrameSlider")
         graph, ok := &view.kind.(DebugViewProfileGraph)
         if !ok {
             view.kind = DebugViewProfileGraph{}
@@ -400,7 +406,6 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
         ui_element.flags += {.HasBorder, .Resizable}
         end_ui_element(&ui_element, false)
         draw_frame_slider(debug, mouse_p, ui_element.bounds, element)
-        
         
       case ThreadProfileGraph, FrameBarsGraph, TopClocksList:
         graph, ok := &view.kind.(DebugViewProfileGraph)
@@ -456,6 +461,8 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
 }
 
 draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rect: Rectangle2) {
+    timed_function()
+    
     push_rectangle(&debug.render_group, rect, debug.backing_transform, DarkGreen)
     
     if arena.current_block == nil {
@@ -519,7 +526,6 @@ add_tooltip :: proc(debug: ^DebugState, text: string) {
 draw_tooltips :: proc(debug: ^DebugState) {
     for &tooltip in slice(&debug.tooltips) {
         text: string = cast(string) transmute(cstring) &tooltip
-        color := Isabelline
         
         layout := &debug.mouse_text_layout
         text_bounds := measure_text(debug, text)
@@ -543,6 +549,8 @@ draw_tooltips :: proc(debug: ^DebugState) {
         debug.text_transform.chunk_z += 1000
         push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
         debug.text_transform.chunk_z += 1000
+        
+        color := Isabelline
         push_text(debug, text, p, color)
     }
     
@@ -610,6 +618,8 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
 }
 
 draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+    timed_function()
+    
     link_count: u32
     group := debug.profile_group
     for link := group.first_child; link != sentinel(group); link = link.next {
@@ -652,7 +662,9 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         total_time += entry.stats.sum
     }
     
-    merge_sort(sort_entries, temp_space, compare_sort_entries)
+    { timed_block("sort top clocks")
+        merge_sort(sort_entries, temp_space, compare_sort_entries)
+    }
     
     total_time_percentage := 1 / total_time * 100
     running_sum: f32
@@ -661,15 +673,15 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         entry := entries[sort_entry.index]
         running_sum += entry.stats.sum
         
-        text := debug_print("total %cy - % %% / % %% - %",
+        text := debug_print("%cy - % %% / % %% - %",
             view_magnitude(cast(u32) entry.stats.sum),
             view_float(entry.stats.sum * total_time_percentage, width = 2, precision = 2),
             view_float(running_sum * total_time_percentage, width = 2, precision = 2),
             entry.element.guid.name,
         )
-        color_wheel := color_wheel
-        color := color_wheel[sort_entry.index % len(color_wheel)]
-        push_text(debug, text, p, color)
+        
+        color := debug_get_element_color(entry.element)
+        push_text(debug, text, p + {10, 0}, color)
         
         region_rect := measure_text(debug, text)
         region_rect = add_offset(region_rect, p)
@@ -692,6 +704,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 longest_frame_span: f32
 d_longest_frame_span: f32
 draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
+    timed_function()
     // @todo(viktor): zooming and panning
     
     dim := get_dimension(rect)
@@ -735,11 +748,10 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
                 v2{at_x + bar_width, y_max},
             )
             
-            color_wheel := color_wheel
-            color_index := cast(umm) element % len(color_wheel)
-            color := color_wheel[color_index]
+            color := debug_get_element_color(element)
             
-            if bar_width >= 1 && y_max - y_min >= 1 {
+            height := y_max - y_min
+            if bar_width > 1 && height > 1 {
                 border_color := color * {.2,.2,.2, 1}
                 if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
                     border_color = 1
@@ -749,16 +761,16 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
                 
                 transform.chunk_z += 10
                 push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
-            }
-            
-            if contains(region_rect, mouse_p) {
-                text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
-                add_tooltip(debug, text)
                 
-                // @copypasta with draw_profile
-                if node.first_child != nil {
-                    id := DebugId { value = { graph_root, &element } }
-                    debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
+                if contains(region_rect, mouse_p) {
+                    text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
+                    add_tooltip(debug, text)
+                    
+                    // @copypasta with draw_profile
+                    if node.first_child != nil {
+                        id := DebugId { value = { graph_root, &element } }
+                        debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
+                    }
                 }
             }
         }
@@ -769,6 +781,8 @@ draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 
 d_total_clocks, total_clocks: f32
 draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
+    timed_function()
+    
     lane_count := cast(f32) debug.max_thread_count
     lane_height := safe_ratio_n(get_dimension(rect).y, lane_count, get_dimension(rect).y)
     
@@ -822,9 +836,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
             v2{x_max, lane_y},
         )
      
-        color_wheel := color_wheel
-        color_index := cast(umm) element % len(color_wheel)
-        color := color_wheel[color_index]
+        color := debug_get_element_color(element)
         
         if x_max - x_min >= 1 {
             transform := debug.ui_transform
@@ -849,6 +861,17 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
             draw_profile_lane(debug, graph_root, mouse_p, region_rect, event, lane_height, lane_height/1.618033988749)
         }
     }
+}
+
+debug_get_element_color :: proc (element: ^DebugElement) -> (result: v4) {
+    name := element.guid.name
+    color_hash:= seed_random_series_manual(len(name))
+    for _ in 0..<len(name) do _ = next_random_u32(&color_hash)
+    
+    hash := next_random_u32(&color_hash)
+    color_wheel := color_wheel
+    result = color_wheel[hash % len(color_wheel)]
+    return result
 }
 
 ///////////////////////////////////////////////
@@ -1011,8 +1034,6 @@ interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) ->
 }
 
 interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
-    timed_function()
-    
     mouse_dp := mouse_p - debug.last_mouse_p
     defer debug.last_mouse_p = mouse_p
     
@@ -1412,6 +1433,8 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
 
 @(printlike)
 debug_print :: proc (format: string, args: ..any) -> (result: string) {
+    timed_function()
+    
     result = format_string(DebugPrintBuffer[:], format, ..args)
     return result
 }

@@ -266,6 +266,7 @@ ClockEntry :: struct {
 debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
     
+    timed_function()
     
     assets, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
     if assets == nil do return

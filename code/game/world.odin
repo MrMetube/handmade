@@ -73,10 +73,10 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     perspective(render_group, camera.meters_to_pixels, camera.focal_length, distance_above_ground)
     
     screen_bounds := get_camera_rectangle_at_target(render_group)
-    camera_bounds := Rect3(screen_bounds, -0.5 * mode.typical_floor_height, 4 * mode.typical_floor_height)
+    camera_bounds := Rect3(screen_bounds, -5 * mode.typical_floor_height, 4 * mode.typical_floor_height)
     
     // @todo(viktor): by how much should we expand the sim region?
-    sim_bounds  := add_radius(camera_bounds, v3{ 15, 15, 15})
+    sim_bounds := rectangle_center_dimension(get_center(camera_bounds), 3 * mode.standard_room_dimension)
     
     debug_set_mouse_p(input.mouse.p)
     
@@ -84,26 +84,6 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     
     haze_color := DarkBlue
     push_clear(render_group, haze_color)
-
-    World_Sim_Work :: struct {
-        dt: f32,
-        mode: ^World_Mode,
-        bounds: Rectangle3,
-    }
-    do_world_simulation_immediatly :: proc (data: pmm) {
-        timed_function()
-        
-        // @todo(viktor): with the new and improved Platform Api can we get back the polymorphic arguments so that the call site is better checked
-        using work := cast(^World_Sim_Work) data
-        
-        // @todo(viktor): It is inefficient to  reallocate every time - this should be something that is passed in as a property of the worker thread
-        arena: Arena
-        defer clear_arena(&arena)
-        
-        simulation := begin_sim(&arena, mode, bounds, dt)
-        simulate(&simulation, dt, mode.typical_floor_height, nil,  nil, nil, 0, nil)
-        end_sim(&simulation, mode)
-    }
     
     N :: 5
     temp := begin_temporary_memory(&tran_state.arena)
@@ -144,6 +124,9 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
             push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
             push_rectangle_outline(render_group, simulation.region.bounds,           world_transform, Blue,   0.2)
             push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
+            
+            bounds := get_chunk_bounds(mode.world, 0)
+            push_rectangle_outline(render_group, bounds, world_transform, Red, 0.1)
         }
         
         end_sim(&simulation, mode)
@@ -168,6 +151,27 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     }
     
     return false
+}
+
+World_Sim_Work :: struct {
+    dt: f32,
+    mode: ^World_Mode,
+    bounds: Rectangle3,
+}
+
+do_world_simulation_immediatly :: proc (data: pmm) {
+    timed_function()
+    
+    // @todo(viktor): with the new and improved Platform Api can we get back the polymorphic arguments so that the call site is better checked
+    using work := cast(^World_Sim_Work) data
+    
+    // @todo(viktor): It is inefficient to  reallocate every time - this should be something that is passed in as a property of the worker thread
+    arena: Arena
+    defer clear_arena(&arena)
+    
+    simulation := begin_sim(&arena, mode, bounds, dt)
+    simulate(&simulation, dt, mode.typical_floor_height, nil,  nil, nil, 0, nil)
+    end_sim(&simulation, mode)
 }
 
 check_for_joining_player :: proc (state: ^State, input: ^Input, sim_region: ^SimRegion, camera_p: v3, mode: ^World_Mode) {
@@ -216,6 +220,12 @@ map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = 
     return result
 }
 
+get_chunk_bounds :: proc (world: ^World, chunk_p: v3i) -> (result: Rectangle3) {
+    chunk_center := vec_cast(f32, chunk_p) * world.chunk_dim_meters
+    result = rectangle_center_dimension(chunk_center, world.chunk_dim_meters)
+    return result
+}
+
 world_distance :: proc (world: ^World, a, b: WorldPosition) -> (result: v3) {
     chunk_delta  := vec_cast(f32, a.chunk) - vec_cast(f32, b.chunk)
     offset_delta := a.offset - b.offset
@@ -232,10 +242,28 @@ is_canonical :: proc(world: ^World, offset: v3) -> b32 {
            -half_size.z <= offset.z && offset.z <= half_size.z
 }
 
-get_chunk :: proc (arena: ^Arena = nil, world: ^World, point: WorldPosition) -> ^Chunk {
-    return get_chunk_3(arena, world, point.chunk)
+////////////////////////////////////////////////
+
+get_chunk :: proc(arena: ^Arena, world: ^World, point: WorldPosition) -> (result: ^Chunk) {
+    timed_function()
+    chunk_p := point.chunk
+    
+    next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
+    result = next_pointer_of_the_chunks_previous_chunk^
+    
+    if arena != nil && result == nil {
+        result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk, no_clear())
+        result ^= {
+            chunk = chunk_p
+        }
+        
+        list_push(next_pointer_of_the_chunks_previous_chunk, result) 
+    }
+    
+    return result
 }
-get_chunk_3_internal :: proc(world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
+
+get_chunk_internal :: proc(world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
     ChunkSafeMargin :: 256
     
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -258,40 +286,48 @@ get_chunk_3_internal :: proc(world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
     
     return result
 }
-get_chunk_3 :: proc(arena: ^Arena = nil, world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
-    next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
-    result = next_pointer_of_the_chunks_previous_chunk^
-    
-    if arena != nil && result == nil {
-        result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk, no_clear())
-        result ^= {
-            chunk = chunk_p
-        }
-        
-        list_push(next_pointer_of_the_chunks_previous_chunk, result) 
-    }
-    
-    return result
-}
 
 ////////////////////////////////////////////////
 
 extract_chunk :: proc(world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
-    next_pointer_of_the_chunks_previous_chunk := get_chunk_3_internal(world, chunk_p)
+    timed_function()
+
+    begin_ticket_mutex(&world.change_ticket)
+    
+    next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
     result = next_pointer_of_the_chunks_previous_chunk^
     
     if result != nil {
         next_pointer_of_the_chunks_previous_chunk ^= result.next
     }
     
+    end_ticket_mutex(&world.change_ticket)    
+
     return result
 }
 
+add_to_free_list :: proc (world: ^World, chunk: ^Chunk, first_block, last_block: ^WorldEntityBlock) {
+    begin_ticket_mutex(&world.change_ticket)
+    
+    list_push(&world.first_free_chunk, chunk)
+    if first_block != nil {
+        // @note(viktor): push on the whole list from first to last
+        last_block.next = world.first_free_block
+        world.first_free_block = first_block
+    }
+    
+    end_ticket_mutex(&world.change_ticket)
+}
+
 use_space_in_world :: proc(world: ^World, pack_size: i64, p: WorldPosition) -> (result: ^Entity) {
+    begin_ticket_mutex(&world.change_ticket)
+    
     chunk := get_chunk(world.arena, world, p)
     assert(chunk != nil)
     
     result = use_space_in_chunk(world, pack_size, chunk)
+    
+    end_ticket_mutex(&world.change_ticket)
     
     return result
 }

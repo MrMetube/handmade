@@ -42,6 +42,8 @@ TicketMutex :: struct #align(64) {
 
 @(enable_target_feature="sse2")
 begin_ticket_mutex :: proc (mutex: ^TicketMutex) {
+    timed_function()
+    
     ticket := atomic_add(&mutex.ticket, 1)
     for ticket != volatile_load(&mutex.serving) {
         x86._mm_pause()

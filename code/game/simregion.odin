@@ -6,27 +6,27 @@ SimRegion :: struct {
     origin: WorldPosition, 
     bounds, updatable_bounds: Rectangle3,
     
-    max_entity_radius: f32,
-    max_entity_velocity: f32,
-    
     entities: Array(Entity),
     brains:   Array(Brain),
     
     // @todo(viktor): Do I really want a hash for this?
-    entity_hash: [4096] EntityHash,
-    brain_hash:  [128] BrainHash,
+    entity_hash: [MaxEntityCount] EntityHash,
+    brain_hash:  [MaxBrainCount]  BrainHash,
+    entity_hash_occupancy: [MaxEntityCount / 64] u64,
+    brain_hash_occupancy:  [MaxBrainCount  / 64] u64,
     
     null_entity: Entity,
 }
 
+MaxEntityCount :: 4096
+MaxBrainCount  :: 256
+
 BrainHash :: struct {
     pointer: ^Brain,
-    id:      BrainId, // @todo(viktor): Why are we storing these in the hash?
 }
 
 EntityHash :: struct {
     pointer: ^Entity,
-    id:      EntityId, // @todo(viktor): Why are we storing these in the hash?
 }
 
 ////////////////////////////////////////////////
@@ -39,8 +39,6 @@ World_Sim :: struct {
 }
 
 begin_sim :: proc (sim_arena: ^Arena, mode: ^World_Mode, sim_bounds: Rectangle3, dt: f32) -> (simulation: World_Sim) {
-    timed_function()
-    
     simulation.memory = begin_temporary_memory(sim_arena)
     
     sim_origin := mode.camera_p
@@ -62,7 +60,7 @@ simulate :: proc (simulation: ^World_Sim, dt: f32, typical_floor_height: f32, re
             mark_brain_active(&brain)
         }
         
-        entropy:=seed_random_series()
+        entropy := seed_random_series()
         for &brain in slice(region.brains) {
             execute_brain(region, dt, &brain, state, input, &entropy)
         }
@@ -72,8 +70,6 @@ simulate :: proc (simulation: ^World_Sim, dt: f32, typical_floor_height: f32, re
 }
 
 end_sim :: proc (simulation: ^World_Sim, mode: ^World_Mode) {
-    timed_function()
-    
     // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.
@@ -86,46 +82,41 @@ end_sim :: proc (simulation: ^World_Sim, mode: ^World_Mode) {
 begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (region: ^SimRegion) {
     timed_function()
     
-    region = push(sim_arena, SimRegion)
+    region = push(sim_arena, SimRegion, no_clear())
     
-    MaxEntityCount :: 4096
-    MaxBrainCount  :: 128
+    II := begin_timed_block("clear sim region")
+    region.null_entity = {}
+    zero(region.entity_hash_occupancy[:])
+    zero(region.brain_hash_occupancy[:])
+    end_timed_block(II)
+    
     region.entities = make_array(sim_arena, Entity, MaxEntityCount, no_clear())
     region.brains   = make_array(sim_arena, Brain,  MaxBrainCount,  no_clear())
     
-    // @todo(viktor): Try to make these get enforced more rigorously
-    // @todo(viktor): Perhaps try using a dual system here where we support 
-    // entities larger than the max entity radius by adding them multiple 
-    // times to the spatial partition?
-    region.max_entity_radius   = 5
-    region.max_entity_velocity = 300
-    update_safety_margin := region.max_entity_radius + dt * region.max_entity_velocity
-    UpdateSafetyMarginZ :: 1 // @todo(viktor): what should this be?
-    
     region.world = world
     region.origin = origin
-    region.updatable_bounds = add_radius(bounds, v3{region.max_entity_radius, region.max_entity_radius, 0})
-    region.bounds = add_radius(bounds, v3{update_safety_margin, update_safety_margin, UpdateSafetyMarginZ})
+    region.bounds = bounds
+    region.updatable_bounds = bounds
     
     min_p := map_into_worldspace(region.world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(region.world, region.origin, region.bounds.max)
-    
-    begin_ticket_mutex(&world.change_ticket)
-    defer end_ticket_mutex(&world.change_ticket)
     
     // @todo(viktor): @speed this needs to be accelarated, but man, this CPU is crazy fast
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
                 chunk_p := v3i{chunk_x, chunk_y, chunk_z}
-                chunk := extract_chunk(region.world, chunk_p)
                 
+                chunk := extract_chunk(region.world, chunk_p)
+    
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
                     chunk_delta := world_distance(region.world, chunk_world_p, region.origin)
                     
-                    block := chunk.first_block
-                    for block != nil {
+                    first_block := chunk.first_block
+                    last_block  := first_block
+                    for block := first_block; block != nil; block = block.next {
+                        last_block = block
                         
                         entities := slice_from_parts(Entity, &block.entity_data.data, block.entity_count)
                         for &source in entities {
@@ -153,21 +144,18 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                                 
                                 if dest.brain_id != 0 {
                                     brain := get_or_add_brain(region, dest.brain_id, dest.brain_kind)
+                                    assert(brain != nil)
                                     
-                                    base := slice_from_parts(^Entity, &brain.parts, size_of(brain.parts) / size_of(^Entity))
-                                    base[dest.brain_slot.index] = dest
+                                    index := dest.brain_slot.index
+                                    brain.slots[index] = dest
                                 }
                             } else {
                                 unreachable()
                             }
                         }
-                        
-                        next_block := block.next
-                        list_push(&region.world.first_free_block, block)
-                        block = next_block
                     }
                     
-                    list_push(&region.world.first_free_chunk, chunk)
+                    add_to_free_list(region.world, chunk, first_block, last_block)
                 }
             }
         }
@@ -246,7 +234,6 @@ end_world_changes :: proc (region: ^SimRegion, world_mode: ^World_Mode) {
         
         entity.p += chunk_delta
         
-        begin_ticket_mutex(&region.world.change_ticket)
         dest := use_space_in_world(region.world, size_of(Entity), entity_p)
         entity.p = entity_p.offset
         
@@ -260,7 +247,6 @@ end_world_changes :: proc (region: ^SimRegion, world_mode: ^World_Mode) {
         pack_traversable_reference(region, &dest.occupying)
         
         pack_traversable_reference(region, &dest.auto_boost_to)
-        end_ticket_mutex(&region.world.change_ticket)
     }
 }
 
@@ -385,71 +371,117 @@ entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3)
 }
 
 get_brain_hash_from_id :: proc(region: ^SimRegion, id: BrainId) -> (result: ^BrainHash) {
-    assert(id != 0)
-    
-    hash := cast(u32) id
-    for offset in u32(0)..<len(region.brain_hash) {
-        hash_index := (hash + offset) % len(region.brain_hash)
-        
-        entry := &region.brain_hash[hash_index]
-        if entry.id == 0 || entry.id == id {
-            result = entry
-            break
-        }
-    }
-    
+    result = get_hash_from_id(region.brain_hash[:], region.brain_hash_occupancy[:], cast(u32) id)
+    return result
+}
+get_entity_hash_from_id :: proc(region: ^SimRegion, id: EntityId) -> (result: ^EntityHash) {
+    result = get_hash_from_id(region.entity_hash[:], region.entity_hash_occupancy[:], cast(u32) id)
     return result
 }
 
-get_entity_hash_from_id :: proc(region: ^SimRegion, id: EntityId) -> (result: ^EntityHash) {
+get_hash_from_id :: proc(hashes: [] $T, occupancy: [] u64, id: u32) -> (result: ^T) {
     assert(id != 0)
     
     hash := cast(u32) id
-    for offset in u32(0)..<len(region.entity_hash) {
-        hash_index := (hash + offset) % len(region.entity_hash)
+    count := cast(u32) len(hashes)
+    for offset in 0 ..< count {
+        hash_index := (hash + offset) % count
         
-        entry := &region.entity_hash[hash_index]
-        if entry.id == 0 || entry.id == id {
+        entry := &hashes[hash_index]
+        #assert(size_of(entry.pointer.id) == size_of(id))
+        
+        if is_empty(occupancy, hash_index) {
+            result = entry
+            result.pointer = nil
+            break
+        } else if cast(u32) entry.pointer.id == id {
             result = entry
             break
         }
     }
-
+    
+    assert(result != nil)
     return result
 }
 
 add_entity_to_hash :: proc (region: ^SimRegion, entity: ^Entity) {
-    hash := get_entity_hash_from_id(region, entity.id)
-    assert(hash != nil)
-    assert(hash.pointer == nil)
-    assert(hash.id == 0 || hash.id == entity.id)
-    hash.id = entity.id
-    hash.pointer = entity
+    entry := get_entity_hash_from_id(region, entity.id)
+    
+    // :PointerArithmetic
+    index := cast(umm) entry - cast(umm) &region.entity_hash[0]
+    index /= size_of(EntityHash)
+    assert(is_empty(region.entity_hash_occupancy[:], index))
+    
+    entry.pointer = entity
+    
+    mark_occupied_entity(region, entry)
+    
+    test := get_entity_hash_from_id(region, entity.id)
+    assert(test == entry)
+    assert(test.pointer == entity)
 }
 
 get_or_add_brain :: proc(region: ^SimRegion, id: BrainId, kind: BrainKind) -> (result: ^Brain) {
-    hash := get_brain_hash_from_id(region, id)
-    result = hash.pointer
+    entry := get_brain_hash_from_id(region, id)
+    result = entry.pointer
     
     if result == nil {
-        result = append(&region.brains)
-        result.id = id
-        result.kind = kind
+        // :PointerArithmetic
+        index := cast(umm) entry - cast(umm) &region.brain_hash[0]
+        index /= size_of(BrainHash)
+        assert(is_empty(region.brain_hash_occupancy[:], index))
         
-        hash.pointer = result
+        result = append(&region.brains)
+        result ^= {
+            id = id,
+            kind = kind,
+        }
+        
+        entry.pointer = result
+        mark_occupied_brain(region, entry)
+        
+        test := get_brain_hash_from_id(region, id)
+        assert(test == entry)
+        assert(test.pointer == result)
     }
     
     return result
 }
+
+mark_occupied_entity :: proc (region: ^SimRegion, entry: ^EntityHash) {
+    // :PointerArithmetic
+    index := cast(umm) entry - cast(umm) &region.entity_hash[0]
+    index /= size_of(EntityHash)
+    mark_bit(region.entity_hash_occupancy[:], cast(u64) index)
+}
+mark_occupied_brain :: proc (region: ^SimRegion, entry: ^BrainHash) {
+    // :PointerArithmetic
+    index := cast(umm) entry - cast(umm) &region.brain_hash[0]
+    index /= size_of(BrainHash)
+    mark_bit(region.brain_hash_occupancy[:], cast(u64) index)
+}
+
+////////////////////////////////////////////////
+
+mark_bit :: proc (array: [] u64, #any_int index: u64) {
+    occ_index := index / 64
+    bit_index := index % 64
+    array[occ_index] |= (1 << bit_index)
+}
+
+is_empty :: proc (array: [] u64, #any_int index: u64) -> (result: bool) {
+    occ_index := index / 64
+    bit_index := index % 64
+    result = (array[occ_index] & (1 << bit_index)) == 0
+    return result
+}
+
+////////////////////////////////////////////////
 
 connect_entity_references :: proc(region: ^SimRegion) {
     timed_function()
     
     for &entity in slice(region.entities) {
-        // for &ref in slice(entity.paired_entities) {
-        //     load_entity_reference(region, &ref)
-        // }
-        
         load_traversable_reference(region, &entity.came_from)
         load_traversable_reference(region, &entity.occupying)
         load_traversable_reference(region, &entity.auto_boost_to)
@@ -523,8 +555,6 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
     
     entity_delta := 0.5*entity.ddp * square(dt) + entity.dp * dt
     entity.dp = entity.ddp * dt + entity.dp
-    // @todo(viktor): upgrade physical motion routines to handle capping the maximum velocity?
-    assert(length_squared(entity.dp) <= square(region.max_entity_velocity))
     
     distance_remaining := entity.distance_limit
     if distance_remaining == 0 {

@@ -6,6 +6,7 @@ World_Mode :: struct {
     ////////////////////////////////////////////////
     // General
     typical_floor_height: f32,
+    standard_room_dimension: v3,
     
     // @todo(viktor): Should we allow split-screen?
     camera_following_id: EntityId,
@@ -64,19 +65,18 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     world_mode.game_entropy    = seed_random_series(123)
     world_mode.effects_entropy = seed_random_series(500)
     
-    pixels_to_meters :: 1.0 / 42.0
-    chunk_dim_in_meters :f32= pixels_to_meters * 256
+    // :RoomSize
+    tiles_per_screen :: v2i{17, 9}
+    tile_size_in_meters: f32 = 1.4
+    
     world_mode.typical_floor_height = 3
-
-    chunk_dim_meters := v3{chunk_dim_in_meters, chunk_dim_in_meters, world_mode.typical_floor_height}
+    
+    chunk_dim_meters := v3{17*1.4, 9*1.4, world_mode.typical_floor_height}
     world_mode.world = create_world(chunk_dim_meters, &state.mode_arena)
+    world_mode.standard_room_dimension = chunk_dim_meters
     
     ////////////////////////////////////////////////
     
-    // :RoomSize
-    tiles_per_screen :: v2i{17,9}
-    
-    tile_size_in_meters :f32= 1.5
     world_mode.null_collision     = make_null_collision(world_mode)
     
     world_mode.wall_collision      = world_mode.null_collision // make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world_mode.typical_floor_height})
@@ -95,26 +95,22 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     creation_memory := begin_temporary_memory(&tran_state.arena)
     world_mode.creation_region = begin_world_changes(creation_memory.arena, world_mode.world, {}, {}, 0)
     
-    screen_base: v3i
-    
-    screen_row, screen_col, tile_z := screen_base.x, screen_base.y, screen_base.z
-    created_stair: b32
+    screen_p: v3i
     door_left, door_right: b32
     door_top, door_bottom: b32
     stair_up, stair_down:  b32
     
     previous_room: StandartRoom
-    room_count: u32 = 10
+    room_count: u32 = 1
     last: v3i
     for screen_index in 0 ..< room_count {
-        last = {screen_row, screen_col, tile_z}
+        last = screen_p
         when true {
-            choice := random_between(&world_mode.game_entropy, u32, 0, 2)
+            choice := random_between(&world_mode.game_entropy, u32, 4, 6)
         } else {
             choice := 3
         }
         
-        created_stair = false
         switch choice {
           case 0: door_right  = true
           case 1: door_top    = true
@@ -124,18 +120,15 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
           case 5: door_bottom = true
         }
         
-        created_stair = stair_down || stair_up
+        room_x := screen_p.x * tiles_per_screen.x
+        room_y := screen_p.y * tiles_per_screen.y
         
-        room_x := screen_col * tiles_per_screen.x
-        room_y := screen_row * tiles_per_screen.y
-        
-        left_hole := screen_index % 2 == 0
+        left_hole  := screen_index % 2 == 0
         right_hole := !left_hole
         if screen_index == 0 {
             left_hole  = false
             right_hole = false
         }
-        
         
         target: TraversableReference
         if left_hole {
@@ -144,37 +137,37 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
             target = previous_room.ground[ 3+8][1+4]
         }
         
-        p := chunk_position_from_tile_positon(world_mode, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, tile_z)
+        p := chunk_position_from_tile_positon(world_mode, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, screen_p.z)
         room := add_standart_room(world_mode, p, left_hole, right_hole, target)
         defer previous_room = room
         
-        for tile_y in 0..< len(room.p[0]) {
+        for tile_y in 0..< tiles_per_screen.y {
             tile_x :: 0
-            if !door_left || tile_y != len(room.p[0]) / 2 {
+            if !door_left || tile_y != tiles_per_screen.y / 2 {
                 add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
-        for tile_y in 0..< len(room.p[0]) {
+        for tile_y in 0..< tiles_per_screen.y {
             tile_x :: tiles_per_screen.x-1
-            if !door_right || tile_y != len(room.p[0]) / 2 {
+            if !door_right || tile_y != tiles_per_screen.y / 2 {
                 add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
-        for tile_x in 0 ..< len(room.p) {
+        for tile_x in 0 ..< tiles_per_screen.x {
             tile_y :: 0
-            if !door_bottom || tile_x != len(room.p) / 2 {
+            if !door_bottom || tile_x != tiles_per_screen.x / 2 {
                 add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
-        for tile_x in 0 ..< len(room.p) {
+        for tile_x in 0 ..< tiles_per_screen.x {
             tile_y :: tiles_per_screen.y-1
-            if !door_top || tile_x != len(room.p) / 2 {
+            if !door_top || tile_x != tiles_per_screen.x / 2 {
                 add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
         
-        // add_monster(world,  room.p[3][4], room.ground[3][4])
-        // add_familiar(world, room.p[2][5], room.ground[2][5])
+        add_monster(world_mode,  room.p[3][4], room.ground[3][4])
+        add_familiar(world_mode, room.p[2][5], room.ground[2][5])
         
         snake_brain := add_brain(world_mode)
         for piece_index in u32(0)..<len(BrainSnake{}.segments) {
@@ -191,12 +184,12 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
         stair_down = false
         
         switch choice {
-          case 0: screen_col += 1
-          case 1: screen_row += 1
-          case 2: tile_z -= 1
-          case 3: tile_z += 1
-          case 4: screen_col -= 1
-          case 5: screen_row -= 1
+          case 0: screen_p.x += 1
+          case 1: screen_p.y += 1
+          case 2: screen_p.z -= 1
+          case 3: screen_p.z += 1
+          case 4: screen_p.x -= 1
+          case 5: screen_p.y -= 1
         }
     }
     
@@ -206,8 +199,8 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     
     new_camera_p := chunk_position_from_tile_positon(
         world_mode,
-        last.x * tiles_per_screen.x + tiles_per_screen.x/2,
-        last.y * tiles_per_screen.y + tiles_per_screen.y/2,
+        last.x * tiles_per_screen.x + tiles_per_screen.x,
+        last.y * tiles_per_screen.y + tiles_per_screen.y,
         last.z,
     )
     
@@ -452,7 +445,7 @@ add_standart_room :: proc(world_mode: ^World_Mode, p: WorldPosition, left_hole, 
             p := p
             p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
             p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
-            result.p[offset_x+8][offset_y+4] = p
+            result.p[offset_x+h_width][offset_y+h_height] = p
             
             if left_hole && (offset_x >= -3 && offset_x <= -2 && offset_y >= -1 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
@@ -470,7 +463,7 @@ add_standart_room :: proc(world_mode: ^World_Mode, p: WorldPosition, left_hole, 
                 occupying: TraversableReference
                 occupying.entity.id = entity.id
                 occupying.entity.pointer = entity
-                result.ground[offset_x+8][offset_y+4] = occupying
+                result.ground[offset_x+h_width][offset_y+h_height] = occupying
             }
         }
     }

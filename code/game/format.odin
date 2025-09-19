@@ -441,7 +441,9 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
     if ctx.max_depth <= 0 do return
     
     // @todo(viktor): copy into temp and then apply padding/width 
+    @(static)
     temp_buffer: [4096*16] u8
+    
     temp := make_string_builder(temp_buffer[:])
     defer append(&ctx.dest, to_string(temp))
     // padding := max(0, cast(i32) view.width - cast(i32) temp.count)
