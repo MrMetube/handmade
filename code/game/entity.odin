@@ -108,7 +108,7 @@ EntityCollisionVolumeGroup :: struct {
     // has any volume... in the future, this could be compressed if necessary
     // that the length can be 0 if the total_volume should be used as the only
     // collision volume for the entity.
-    volumes: []Rectangle3,
+    volumes: [] Rectangle3,
 }
 
 EntityReference :: struct {
@@ -117,7 +117,7 @@ EntityReference :: struct {
 }
 
 TraversablePoint :: struct {
-    p:       v3,
+    p:        v3,
     occupant: ^Entity,
 }
 
@@ -345,6 +345,10 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 if entity.pieces.count > 1 do end_aggregate_sort_key(render_group)
                 
                 draw_hitpoints(render_group, &entity, 0.5, transform)
+                
+                for volume in entity.collision.volumes {
+                    push_rectangle_outline(render_group, volume, default_upright_transform(), SeaGreen, 0.1)
+                }
                 
                 if RenderCollisionOutlineAndTraversablePoints {
                     flat_transform := transform

@@ -244,44 +244,6 @@ view_pointer :: proc (
 }
 
 ////////////////////////////////////////////////
-
-view_bin :: proc (
-    value: $I, 
-    width: Maybe(u16) = nil, pad_right_side: b8 = false,
-    flags: Format_Number_Flags = {}, positive_sign: Format_Number_Sign = .Never, 
-) -> (result: View) {
-    result = view_integer(value, width, pad_right_side, flags + { .PrependBaseSpecifier }, positive_sign, basis = 2)
-    return result
-}
-
-view_oct :: proc (
-    value: $I, 
-    width: Maybe(u16) = nil, pad_right_side: b8 = false,
-    flags: Format_Number_Flags = {}, positive_sign: Format_Number_Sign = .Never, 
-) -> (result: View) {
-    result = view_integer(value, width, pad_right_side, flags + { .PrependBaseSpecifier }, positive_sign, basis = 8)
-    return result
-}
-
-view_dec :: proc (
-    value: $I, 
-    width: Maybe(u16) = nil, pad_right_side: b8 = false,
-    flags: Format_Number_Flags = {}, positive_sign: Format_Number_Sign = .Never, 
-) -> (result: View) {
-    result = view_integer(value, width, pad_right_side, flags + { .PrependBaseSpecifier }, positive_sign, basis = 10)
-    return result
-}
-
-view_hex :: proc (
-    value: $I, 
-    width: Maybe(u16) = nil, pad_right_side: b8 = false,
-    flags: Format_Number_Flags = {}, positive_sign: Format_Number_Sign = .Never, 
-) -> (result: View) {
-    result = view_integer(value, width, pad_right_side, flags + { .PrependBaseSpecifier }, positive_sign, basis = 16)
-    return result
-}
-
-////////////////////////////////////////////////
 // @todo(viktor): implement all cases
 // @todo(viktor): use temp views here where needed
 
@@ -301,7 +263,7 @@ view_rows :: proc (value: $T) { unimplemented() }
 // - `omit(expr, ...)`: Interpreting all post-`expr` arguments as member names, expands to show all members of `expr`, except those with matching names.
 view_omit :: proc (value: $T) { unimplemented() }
 
-view_array :: proc (value: ^$T, count: $N) -> (result: []T) {
+view_array :: proc (value: ^$T, count: $N) -> (result: [] T) {
     return (cast([^]T) value)[:count]
 }
 
@@ -633,8 +595,8 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
             append(&temp, fmt.tprint(value))
             
           /* 
-            . enumerated array   [key0 = elem0, key1 = elem1, key2 = elem2, ...]
             . maps:              map[key0 = value0, key1 = value1, ...]
+            . enumerated array   [key0 = elem0, key1 = elem1, key2 = elem2, ...]
             . bit sets           {key0 = elem0, key1 = elem1, ...}
            */  
           case runtime.Type_Info_Enumerated_Array:

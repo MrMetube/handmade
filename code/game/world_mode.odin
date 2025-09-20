@@ -2,17 +2,12 @@ package game
 
 World_Mode :: struct {
     world: ^World,
-    
+
+    camera: Game_Camera,
     ////////////////////////////////////////////////
     // General
-    typical_floor_height: f32,
+    typical_floor_height:    f32,
     standard_room_dimension: v3,
-    
-    // @todo(viktor): Should we allow split-screen?
-    camera_following_id: EntityId,
-    camera_p:            WorldPosition,
-    last_camera_p:       WorldPosition,
-    camera_offset:       v3,
     
     null_collision, 
     wall_collision,    
@@ -22,78 +17,65 @@ World_Mode :: struct {
     hero_head_collision, 
     glove_collision,
     monstar_collision, 
+    room_collision, 
     familiar_collision: ^EntityCollisionVolumeGroup, 
-    
-    // @note(viktor): Only for testing, use Input.delta_time and your own t-values.
-    time: f32,
     
     last_used_entity_id: EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
     
-    game_entropy:    RandomSeries,
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
-    
     particle_cache:  ^Particle_Cache,
     creation_region: ^SimRegion,
 }
 
-ParticleCellSize :: 16
-
-ParticleCell :: struct {
-    density: f32,
-    velocity_times_density: v3,
-}
-
-Particle :: struct {
-    p:      v3,
-    dp:     v3,
-    ddp:    v3,
-    color:  v4,
-    dcolor: v4,
-    
-    bitmap_id: BitmapId,
+Game_Camera :: struct {
+    // @todo(viktor): Should we allow split-screen?
+    following_id: EntityId,
+    p:            WorldPosition,
+    last_p:       WorldPosition,
+    offset:       v3,
 }
 
 ////////////////////////////////////////////////
 
 play_world :: proc(state: ^State, tran_state: ^TransientState) {
-    world_mode := set_game_mode(state, tran_state, World_Mode)
+    mode := set_game_mode(state, tran_state, World_Mode)
     
     ////////////////////////////////////////////////
     
-    world_mode.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
+    mode.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
     
-    world_mode.game_entropy    = seed_random_series(123)
-    world_mode.effects_entropy = seed_random_series(500)
+    mode.effects_entropy = seed_random_series(500)
     
     // :RoomSize
     tiles_per_screen :: v2i{17, 9}
     tile_size_in_meters: f32 = 1.4
     
-    world_mode.typical_floor_height = 3
+    mode.typical_floor_height = 3
     
-    chunk_dim_meters := v3{17*1.4, 9*1.4, world_mode.typical_floor_height}
-    world_mode.world = create_world(chunk_dim_meters, &state.mode_arena)
-    world_mode.standard_room_dimension = chunk_dim_meters
+    chunk_dim_meters := v3{17*1.4, 9*1.4, mode.typical_floor_height}
+    mode.world = create_world(chunk_dim_meters, &state.mode_arena)
+    mode.standard_room_dimension = chunk_dim_meters
     
     ////////////////////////////////////////////////
     
-    world_mode.null_collision     = make_null_collision(world_mode)
+    mode.null_collision     = make_null_collision(mode)
     
-    world_mode.wall_collision      = world_mode.null_collision // make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, world_mode.typical_floor_height})
-    world_mode.stairs_collision    = world_mode.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, world_mode.typical_floor_height + 0.1})
-    world_mode.glove_collision = make_simple_grounded_collision(world_mode, {0.2, 0.2, 0.2})
-    world_mode.hero_body_collision = world_mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
-    world_mode.hero_head_collision = world_mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
-    world_mode.monstar_collision   = world_mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
-    world_mode.familiar_collision  = world_mode.null_collision//make_simple_grounded_collision(world, {0.5, 0.5, 1})
+    mode.wall_collision      = mode.null_collision // make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, mode.typical_floor_height})
+    mode.stairs_collision    = mode.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, mode.typical_floor_height + 0.1})
+    mode.glove_collision = make_simple_grounded_collision(mode, {0.2, 0.2, 0.2})
+    mode.hero_body_collision = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
+    mode.hero_head_collision = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
+    mode.monstar_collision   = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
+    mode.familiar_collision  = mode.null_collision//make_simple_grounded_collision(world, {0.5, 0.5, 1})
     
-    world_mode.floor_collision    = make_simple_floor_collision(world_mode, v3{tile_size_in_meters, tile_size_in_meters, world_mode.typical_floor_height})
+    mode.room_collision    = make_simple_grounded_collision(mode, {17, 9, 1} * v3{tile_size_in_meters, tile_size_in_meters, mode.typical_floor_height})
+    mode.floor_collision    = make_simple_floor_collision(mode, v3{tile_size_in_meters, tile_size_in_meters, mode.typical_floor_height})
     
     ////////////////////////////////////////////////
     // "World Gen"
     
     creation_memory := begin_temporary_memory(&tran_state.arena)
-    world_mode.creation_region = begin_world_changes(creation_memory.arena, world_mode.world, {}, {}, 0)
+    mode.creation_region = begin_world_changes(creation_memory.arena, mode.world, {}, {}, 0)
     
     screen_p: v3i
     door_left, door_right: b32
@@ -101,12 +83,11 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     stair_up, stair_down:  b32
     
     previous_room: StandartRoom
-    room_count: u32 = 1
     last: v3i
-    for screen_index in 0 ..< room_count {
+    for screen_index in 0 ..< 15 {
         last = screen_p
         when true {
-            choice := random_between(&world_mode.game_entropy, u32, 4, 6)
+            choice := random_between(&mode.world.game_entropy, u32, 0, 2)
         } else {
             choice := 3
         }
@@ -119,9 +100,6 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
           case 4: door_left   = true
           case 5: door_bottom = true
         }
-        
-        room_x := screen_p.x * tiles_per_screen.x
-        room_y := screen_p.y * tiles_per_screen.y
         
         left_hole  := screen_index % 2 == 0
         right_hole := !left_hole
@@ -137,43 +115,49 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
             target = previous_room.ground[ 3+8][1+4]
         }
         
-        p := chunk_position_from_tile_positon(world_mode, room_x + tiles_per_screen.x/2, room_y + tiles_per_screen.y/2, screen_p.z)
-        room := add_standart_room(world_mode, p, left_hole, right_hole, target)
+        room_x := screen_p.x * tiles_per_screen.x
+        room_y := screen_p.y * tiles_per_screen.y
+        
+        tile_p := screen_p
+        tile_p.xy *= tiles_per_screen
+        tile_p.xy += tiles_per_screen / 2
+        room := add_standart_room(mode, tile_p, left_hole, right_hole, target)
         defer previous_room = room
         
         for tile_y in 0..< tiles_per_screen.y {
             tile_x :: 0
-            if !door_left || tile_y != tiles_per_screen.y / 2 {
-                add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            if !(door_left && tile_y == tiles_per_screen.y / 2) {
+                add_wall(mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
         for tile_y in 0..< tiles_per_screen.y {
             tile_x :: tiles_per_screen.x-1
-            if !door_right || tile_y != tiles_per_screen.y / 2 {
-                add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            if !(door_right && tile_y == tiles_per_screen.y / 2) {
+                add_wall(mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
         for tile_x in 0 ..< tiles_per_screen.x {
             tile_y :: 0
-            if !door_bottom || tile_x != tiles_per_screen.x / 2 {
-                add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            if !(door_bottom && tile_x == tiles_per_screen.x / 2) {
+                add_wall(mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
         for tile_x in 0 ..< tiles_per_screen.x {
             tile_y :: tiles_per_screen.y-1
-            if !door_top || tile_x != tiles_per_screen.x / 2 {
-                add_wall(world_mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
+            if !(door_top && tile_x == tiles_per_screen.x / 2) {
+                add_wall(mode, room.p[tile_x][tile_y], room.ground[tile_x][tile_y])
             }
         }
         
-        add_monster(world_mode,  room.p[3][4], room.ground[3][4])
-        add_familiar(world_mode, room.p[2][5], room.ground[2][5])
+        // add_monster(mode,  room.p[3][4], room.ground[3][4])
+        // add_familiar(mode, room.p[2][5], room.ground[2][5])
         
-        snake_brain := add_brain(world_mode)
+        snake_brain := add_brain(mode)
         for piece_index in u32(0)..<len(BrainSnake{}.segments) {
             x := 1+piece_index
-            add_snake_piece(world_mode, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
+            add_snake_piece(mode, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
         }
+        
         
         door_left   = door_right
         door_bottom = door_top
@@ -184,40 +168,40 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
         stair_down = false
         
         switch choice {
-          case 0: screen_p.x += 1
-          case 1: screen_p.y += 1
-          case 2: screen_p.z -= 1
-          case 3: screen_p.z += 1
-          case 4: screen_p.x -= 1
-          case 5: screen_p.y -= 1
+        case 0: screen_p.x += 1
+        case 1: screen_p.y += 1
+        case 2: screen_p.z -= 1
+        case 3: screen_p.z += 1
+        case 4: screen_p.x -= 1
+        case 5: screen_p.y -= 1
         }
     }
     
-    end_world_changes(world_mode.creation_region, world_mode)
-    world_mode.creation_region = nil
+    tile_p := last
+    tile_p.xy *= tiles_per_screen
+    tile_p.xy += tiles_per_screen / 2
+    new_camera_p := chunk_position_from_tile_positon(mode.world, tile_p)
+    
+    mode.camera.p = new_camera_p
+    mode.camera.last_p = mode.camera.p
+    
+    end_world_changes(mode.creation_region)
+    mode.creation_region = nil
     end_temporary_memory(creation_memory)
-    
-    new_camera_p := chunk_position_from_tile_positon(
-        world_mode,
-        last.x * tiles_per_screen.x + tiles_per_screen.x,
-        last.y * tiles_per_screen.y + tiles_per_screen.y,
-        last.z,
-    )
-    
-    world_mode.camera_p = new_camera_p
-    world_mode.particle_cache = push(&tran_state.arena, Particle_Cache)
-    init_particle_cache(world_mode.particle_cache, tran_state.assets)
+        
+    mode.particle_cache = push(&tran_state.arena, Particle_Cache)
+    init_particle_cache(mode.particle_cache, tran_state.assets)
 }
 
 ////////////////////////////////////////////////
 
-begin_entity :: proc(world_mode: ^World_Mode) -> (result: ^Entity) {
-    result = create_entity(world_mode.creation_region, allocate_entity_id(world_mode))
+begin_entity :: proc(mode: ^World_Mode) -> (result: ^Entity) {
+    result = create_entity(mode.creation_region, allocate_entity_id(mode))
  
     // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
     result ^= { id = result.id }
     
-    result.collision = world_mode.null_collision
+    result.collision = mode.null_collision
     
     result.x_axis = {1, 0}
     result.y_axis = {0, 1}
@@ -225,38 +209,38 @@ begin_entity :: proc(world_mode: ^World_Mode) -> (result: ^Entity) {
     return result
 }
 
-allocate_entity_id :: proc (world_mode: ^World_Mode) -> (result: EntityId) {
-    world_mode.last_used_entity_id += 1
-    result = world_mode.last_used_entity_id
+allocate_entity_id :: proc (mode: ^World_Mode) -> (result: EntityId) {
+    mode.last_used_entity_id += 1
+    result = mode.last_used_entity_id
  
     return result
 }
 
-end_entity :: proc(world_mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
-    entity.p = world_distance(world_mode.world, p, world_mode.creation_region.origin)
+end_entity :: proc(mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
+    entity.p = world_distance(mode.world, p, mode.creation_region.origin)
 }
 
 // @cleanup
-begin_grounded_entity :: proc(world_mode: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
-    result = begin_entity(world_mode)
+begin_grounded_entity :: proc(mode: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
+    result = begin_entity(mode)
     result.collision = collision
     
     return result
 }
 
-add_brain :: proc(world_mode: ^World_Mode) -> (result: BrainId) {
-    world_mode.last_used_entity_id += 1
-    for world_mode.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
-        world_mode.last_used_entity_id += 1
+add_brain :: proc(mode: ^World_Mode) -> (result: BrainId) {
+    mode.last_used_entity_id += 1
+    for mode.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
+        mode.last_used_entity_id += 1
     }
-    result = cast(BrainId) world_mode.last_used_entity_id
+    result = cast(BrainId) mode.last_used_entity_id
     
     return result
 }
 
-add_wall :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(world_mode, world_mode.wall_collision)
-    defer end_entity(world_mode, entity, p)
+add_wall :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
+    entity := begin_grounded_entity(mode, mode.wall_collision)
+    defer end_entity(mode, entity, p)
     
     entity.flags += {.Collides}
     entity.occupying = occupying
@@ -267,13 +251,13 @@ add_wall :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Traversab
     })
 }
 
-add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
-    world_mode.creation_region = region
-    defer world_mode.creation_region = nil
+add_hero :: proc(mode: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
+    mode.creation_region = region
+    defer mode.creation_region = nil
     
-    p := map_into_worldspace(world_mode.world, region.origin, get_sim_space_traversable(occupying).p)
+    p := map_into_worldspace(mode.world, region.origin, get_sim_space_traversable(occupying).p)
     
-    body := begin_grounded_entity(world_mode, world_mode.hero_body_collision)
+    body := begin_grounded_entity(mode, mode.hero_body_collision)
         body.brain_id = brain_id
         body.brain_kind = .Hero
         body.brain_slot = brain_slot_for(BrainHero, "body")
@@ -301,9 +285,9 @@ add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: Travers
             flags  = { .SquishAxis },
         })
         
-    end_entity(world_mode, body, p)
+    end_entity(mode, body, p)
     
-    head := begin_grounded_entity(world_mode, world_mode.hero_head_collision)
+    head := begin_grounded_entity(mode, mode.hero_head_collision)
         head.flags += {.Collides}
         head.brain_id = brain_id
         head.brain_kind = .Hero
@@ -321,12 +305,12 @@ add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: Travers
         
         init_hitpoints(head, 3)
         
-        if world_mode.camera_following_id == 0 {
-            world_mode.camera_following_id = head.id
+        if mode.camera.following_id == 0 {
+            mode.camera.following_id = head.id
         }
-    end_entity(world_mode, head, p)
+    end_entity(mode, head, p)
     
-    glove := begin_grounded_entity(world_mode, world_mode.glove_collision)
+    glove := begin_grounded_entity(mode, mode.glove_collision)
         glove.flags += {.Collides}
         glove.brain_id = brain_id
         glove.brain_kind = .Hero
@@ -345,12 +329,12 @@ add_hero :: proc(world_mode: ^World_Mode, region: ^SimRegion, occupying: Travers
             color  = 1,
         })
         
-    end_entity(world_mode, glove, p)
+    end_entity(mode, glove, p)
 }
 
-add_snake_piece :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
-    entity := begin_grounded_entity(world_mode, world_mode.monstar_collision)
-    defer end_entity(world_mode, entity, p)
+add_snake_piece :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
+    entity := begin_grounded_entity(mode, mode.monstar_collision)
+    defer end_entity(mode, entity, p)
     
     entity.flags += {.Collides}
     
@@ -376,13 +360,13 @@ add_snake_piece :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Tr
     init_hitpoints(entity, 3)
 }
 
-add_monster :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(world_mode, world_mode.monstar_collision)
-    defer end_entity(world_mode, entity, p)
+add_monster :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
+    entity := begin_grounded_entity(mode, mode.monstar_collision)
+    defer end_entity(mode, entity, p)
     
     entity.flags += {.Collides}
     
-    entity.brain_id = add_brain(world_mode)
+    entity.brain_id = add_brain(mode)
     entity.brain_kind = .Monster
     entity.brain_slot = brain_slot_for(BrainMonster, "body")
     entity.occupying = occupying
@@ -404,11 +388,11 @@ add_monster :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: Traver
     init_hitpoints(entity, 3)
 }
 
-add_familiar :: proc(world_mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(world_mode, world_mode.familiar_collision)
-    defer end_entity(world_mode, entity, p)
+add_familiar :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
+    entity := begin_grounded_entity(mode, mode.familiar_collision)
+    defer end_entity(mode, entity, p)
     
-    entity.brain_id   = add_brain(world_mode)
+    entity.brain_id   = add_brain(mode)
     entity.brain_kind = .Familiar
     entity.brain_slot = brain_slot_for(BrainFamiliar, "familiar")
     entity.occupying  = occupying
@@ -434,39 +418,38 @@ StandartRoom :: struct { // :RoomSize
     ground: [17][9] TraversableReference,
 }
 
-add_standart_room :: proc(world_mode: ^World_Mode, p: WorldPosition, left_hole, right_hole: bool, target: TraversableReference) -> (result: StandartRoom) {
+add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, target: TraversableReference) -> (result: StandartRoom) {
     // @volatile :RoomSize
-    h_width  :i32= 17/2
-    h_height :i32=  9/2
-    tile_size_in_meters :: 1.5
-    
-    for offset_y in -h_height..=h_height {
-        for offset_x in -h_width..=h_width {
-            p := p
-            p.offset.x = cast(f32) (offset_x) * tile_size_in_meters
-            p.offset.y = cast(f32) (offset_y) * tile_size_in_meters
-            result.p[offset_x+h_width][offset_y+h_height] = p
+    for offset_y in cast(i32) -4..=4 {
+        for offset_x in cast(i32) -8..=8 {
+            p := chunk_position_from_tile_positon(mode.world, tile_p + {offset_x, offset_y, 0})
+            result.p[offset_x+8][offset_y+4] = p
             
-            if left_hole && (offset_x >= -3 && offset_x <= -2 && offset_y >= -1 && offset_y <= 1) {
+            if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
-            } else if right_hole && (offset_x >= 2 && offset_x <= 3 && offset_y >= -1 && offset_y <= 1) {
+            } else if right_hole && (offset_x == 3 && offset_y >= -2 && offset_y <= 2) {
                 // @note(viktor): hole down to floor below
             } else {
-                entity := begin_grounded_entity(world_mode, world_mode.floor_collision)
-                entity.traversables = make_array(world_mode.world.arena, TraversablePoint, 1)
+                entity := begin_grounded_entity(mode, mode.floor_collision)
+                entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
-                if (right_hole && offset_x == 1 && offset_y == 0) || (left_hole && offset_x == -1 && offset_y == 0) {
-                    entity.auto_boost_to = target
+                if (right_hole && offset_x == 2 && offset_y == 0) || (left_hole && offset_x == -2 && offset_y == 0) {
+                    // entity.auto_boost_to = target
                 }
-                end_entity(world_mode, entity, p)
+                end_entity(mode, entity, p)
                 
                 occupying: TraversableReference
                 occupying.entity.id = entity.id
                 occupying.entity.pointer = entity
-                result.ground[offset_x+h_width][offset_y+h_height] = occupying
+                result.ground[offset_x+8][offset_y+4] = occupying
             }
         }
     }
+    
+    p := chunk_position_from_tile_positon(mode.world, tile_p)
+    room := begin_grounded_entity(mode, mode.room_collision)
+    room.brain_kind = .Room
+    end_entity(mode, room, p)
     
     return result
 }
@@ -483,29 +466,29 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
 ////////////////////////////////////////////////
 // @cleanup
 
-make_null_collision :: proc(world_mode: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
+make_null_collision :: proc(mode: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
+    result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {}
     
     return result
 }
 
-make_simple_grounded_collision :: proc(world_mode: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_grounded_collision :: proc(mode: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
+    result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
-        volumes = push(world_mode.world.arena, Rectangle3, 1),
+        volumes = push(mode.world.arena, Rectangle3, 1),
     }
     result.volumes[0] = result.total_volume
     
     return result
 }
 
-make_simple_floor_collision :: proc(world_mode: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_floor_collision :: proc(mode: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(world_mode.world.arena, EntityCollisionVolumeGroup, no_clear())
+    result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
         total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
         volumes = {},

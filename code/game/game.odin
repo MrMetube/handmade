@@ -10,7 +10,6 @@ package game
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
-ShowGrid:                      b32
 EnvironmentTest:               b32
 UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
@@ -214,24 +213,6 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
     
     ////////////////////////////////////////////////
     
-    { debug_data_block("Game")
-        { debug_data_block("Audio")
-            debug_record_value(&SoundPanningWithMouse)
-            debug_record_value(&SoundPitchingWithMouse)
-        }
-        
-        { debug_data_block("Tests")
-            debug_record_value(&ShowGrid)
-            debug_record_value(&EnvironmentTest)
-        }
-        
-        debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
-        debug_record_value(&LoadAssetsSingleThreaded)
-        
-        TimestepPercentage = clamp(TimestepPercentage, 0, 1000)
-        debug_record_value(&TimestepPercentage)
-    }
-    
     { debug_data_block("Profile")
         { debug_data_block("Memory")
             debug_ui_element(ArenaOccupancy{ &state.total_arena }, "State Total Arena")
@@ -242,11 +223,29 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
         debug_ui_element(FrameBarsGraph{})
         debug_ui_element(FrameInfo{})
     }
+    
+    { debug_data_block("Game")
  
-    { debug_data_block("Camera")
-        debug_record_value(&ShowRenderAndSimulationBounds)
-        debug_record_value(&UseDebugCamera)
-        debug_record_value(&DebugCameraDistance)
+        { debug_data_block("Camera")
+            debug_record_value(&ShowRenderAndSimulationBounds)
+            debug_record_value(&UseDebugCamera)
+            debug_record_value(&DebugCameraDistance)
+        }
+        
+        debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
+        debug_record_value(&LoadAssetsSingleThreaded)
+        
+        TimestepPercentage = clamp(TimestepPercentage, 0, 1000)
+        debug_record_value(&TimestepPercentage)
+        
+        { debug_data_block("Audio")
+            debug_record_value(&SoundPanningWithMouse)
+            debug_record_value(&SoundPitchingWithMouse)
+        }
+        
+        { debug_data_block("Tests")
+            debug_record_value(&EnvironmentTest)
+        }
     }
     
     if SoundPanningWithMouse {

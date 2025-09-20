@@ -1,4 +1,4 @@
-#+vet unused shadowing cast
+#+vet unused shadowing cast unused-imports style unused-procedures unused-variables
 package build
 
 import "base:intrinsics"
@@ -10,18 +10,15 @@ import "core:time"
 import win "core:sys/windows"
 
 optimizations    := false ? "-o:speed" : "-o:none"
-PedanticGame     :: false
-PedanticPlatform :: false
+PedanticGame     :: !false
+PedanticPlatform :: !false
 
-flags    := [] string {"-vet-cast","-vet-shadowing","-microarch:native","-target:windows_amd64"}
+flags    := [] string { "-vet-cast", "-vet-shadowing", "-microarch:native", "-target:windows_amd64" }
 
 debug    :: "-debug"
 internal :: "-define:INTERNAL=true" // @cleanup
 
-pedantic := [] string {
-    "-warnings-as-errors","-vet-unused-imports","-vet-semicolon","-vet-unused-variables","-vet-style",
-    "-vet-packages:main","-vet-unused-procedures"
-}
+pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semicolon", "-vet-unused-variables", "-vet-style", "-vet-packages:main", "-vet-unused-procedures" }
 
 ////////////////////////////////////////////////
 
@@ -298,7 +295,6 @@ Cmd   :: [dynamic] string
 Handle_Running_Exe :: enum {
     Skip,
     Abort, 
-    Rename,
     Kill,
 }
 
@@ -319,13 +315,6 @@ handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running
             fmt.printfln("INFO: Tried to build '%v', but the program is already running.", exe_name)
             fmt.printfln("INFO: Killing running instance in order to build.")
             kill(pid)
-            return true
-            
-          case .Rename:
-            // @todo(viktor): cleanup the renamed exes when they close
-            new_name := fmt.tprintf(`%v-%d.exe`, exe_name, random_number())
-            fmt.printfln("INFO: Tried to build '%v', but the program is already running. Renaming running instance to '%v' in order to build.", exe_name, new_name)
-            _ = os2.rename(exe_name, new_name)
             return true
         }
     }

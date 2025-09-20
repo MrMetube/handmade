@@ -13,6 +13,8 @@ World :: struct {
     first_free_chunk: ^Chunk,
     first_free_block: ^WorldEntityBlock,
 
+    game_entropy: RandomSeries,
+    
     change_ticket: TicketMutex,
 }
 
@@ -32,12 +34,8 @@ WorldEntityBlock :: struct {
 }
 
 WorldPosition :: struct {
-    // @todo(viktor): It seems like we have to store ChunkX/Y/Z with each
-    // entity because even though the sim region gather doesn't need it
-    // at first, and we could get by without it, but entity references pull
-    // in entities WITHOUT going through their world_chunk, and thus
-    // still need to know the ChunkX/Y/Z
-    chunk: v3i,
+    // @todo(viktor): It seems like we have to store ChunkX/Y/Z with each entity because even though the sim region gather doesn't need it at first, and we could get by without it, but entity references pull in entities WITHOUT going through their world_chunk, and thus still need to know the ChunkX/Y/Z
+    chunk:  v3i,
     offset: v3,
 }
 
@@ -47,20 +45,21 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ Worl
     result = push(arena, World)
     result.chunk_dim_meters = chunk_dim_in_meters
     result.arena = arena
+    result.game_entropy = seed_random_series(123)
     
     return result
 }
 
-chunk_position_from_tile_positon :: proc(world_mode: ^World_Mode, tile_x, tile_y, tile_z: i32, additional_offset := v3{}) -> (result: WorldPosition) {
+chunk_position_from_tile_positon :: proc(world: ^World, tile_p: v3i) -> (result: WorldPosition) {
     // @volatile
-    tile_size_in_meters  :: 1.5
-    tile_depth_in_meters := world_mode.typical_floor_height
+    tile_size_in_meters  :: 1.4
+    tile_depth_in_meters := world.chunk_dim_meters.z
     
-    offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_x, tile_y, tile_z) + {0.5, 0.5, 0})
+    offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_p) + {0.5, 0.5, 0})
     offset.z -= 0.4 * tile_depth_in_meters
-    result = map_into_worldspace(world_mode.world, result, offset + additional_offset)
+    result = map_into_worldspace(world, result, offset)
     
-    assert(is_canonical(world_mode.world, result.offset))
+    assert(is_canonical(world, result.offset))
     
     return result
 }
@@ -85,7 +84,7 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     haze_color := DarkBlue
     push_clear(render_group, haze_color)
     
-    N :: 5
+    N: i32 : 5
     temp := begin_temporary_memory(&tran_state.arena)
     works := push(temp.arena, World_Sim_Work, N*N)
     for sim_x in 0..<N {
@@ -96,8 +95,9 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
             work := &works[sim_x + sim_y * N]
             work.dt = input.delta_time
             work.mode = mode
-            offset := v3{100, 100, 0} * vec_cast(f32, sim_x - middle, sim_y - middle, 0)
-            work.bounds = add_offset(sim_bounds, offset)
+            work.center = mode.camera.p
+            work.center.chunk += {sim_x - middle, sim_y - middle, 0} * 70
+            work.bounds = sim_bounds
             
             when false {
                 do_world_simulation_immediatly(work)
@@ -108,19 +108,21 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
     }
     
     {
-        simulation := begin_sim(&tran_state.arena, mode, sim_bounds, input.delta_time)
+        camera := &mode.camera
+        simulation := begin_sim(&tran_state.arena, mode.world, camera.p, sim_bounds, input.delta_time)
         
-        check_for_joining_player(state, input, simulation.region, simulation.camera_p, mode)
+        check_for_joining_player(state, input, simulation.region, mode)
         
-        simulate(&simulation, input.delta_time, mode.typical_floor_height, render_group, state, input, haze_color, mode.particle_cache)
+        simulate(&simulation, input.delta_time, &mode.world.game_entropy, mode.typical_floor_height, camera.offset, render_group, state, input, haze_color, mode.particle_cache)
         
-        frame_to_frame_camera_delta := world_distance(mode.world, mode.last_camera_p, mode.camera_p)
-        mode.last_camera_p  = mode.camera_p
-        update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta, simulation.camera_p)
+        frame_to_frame_camera_delta := world_distance(mode.world, camera.last_p, camera.p)
+        camera.last_p = camera.p
+        
+        update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta, camera.offset)
         
         if ShowRenderAndSimulationBounds {
             world_transform := default_flat_transform()
-            world_transform.offset -= simulation.camera_p
+            world_transform.offset -= camera.offset
             push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
             push_rectangle_outline(render_group, simulation.region.bounds,           world_transform, Blue,   0.2)
             push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
@@ -128,8 +130,13 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
             bounds := get_chunk_bounds(mode.world, 0)
             push_rectangle_outline(render_group, bounds, world_transform, Red, 0.1)
         }
+
+        camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
+        if camera_entity != nil {
+            update_camera(simulation.region, mode.world, &mode.camera, camera_entity)
+        }
         
-        end_sim(&simulation, mode)
+        end_sim(&simulation)
     }
     
     Platform.complete_all_work(tran_state.high_priority_queue)
@@ -154,9 +161,10 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
 }
 
 World_Sim_Work :: struct {
-    dt: f32,
     mode: ^World_Mode,
+    dt: f32,
     bounds: Rectangle3,
+    center: WorldPosition,
 }
 
 do_world_simulation_immediatly :: proc (data: pmm) {
@@ -169,42 +177,100 @@ do_world_simulation_immediatly :: proc (data: pmm) {
     arena: Arena
     defer clear_arena(&arena)
     
-    simulation := begin_sim(&arena, mode, bounds, dt)
-    simulate(&simulation, dt, mode.typical_floor_height, nil,  nil, nil, 0, nil)
-    end_sim(&simulation, mode)
+    simulation := begin_sim(&arena, mode.world, center, bounds, dt)
+    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, 0, nil,  nil, nil, 0, nil)
+    end_sim(&simulation)
 }
 
-check_for_joining_player :: proc (state: ^State, input: ^Input, sim_region: ^SimRegion, camera_p: v3, mode: ^World_Mode) {
-    ////////////////////////////////////////////////
-    // Look to see if any players are trying to join
+check_for_joining_player :: proc (state: ^State, input: ^Input, region: ^SimRegion, mode: ^World_Mode) {
+    timed_function()
     
-    if state != nil && input != nil {
-        handle_join_inputs := begin_timed_block("handle_join_inputs")
-        for controller, controller_index in input.controllers {
-            con_hero := &state.controlled_heroes[controller_index]
-            if con_hero.brain_id == 0 {
-                if was_pressed(controller.start) {
-                    standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
-                    assert(ok) // @todo(viktor): GameUI that tells you there is no safe space...maybe keep trying on subsequent frames?
-                    
-                    brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
-                    con_hero ^= { brain_id = brain_id }
-                    add_hero(mode, sim_region, standing_on, brain_id)
-                }
-            } else {
-                if is_down(controller.shoulder_left) {
-                    standing_on, ok := get_closest_traversable(sim_region, camera_p, {.Unoccupied} )
-                    if ok {
-                        p := map_into_worldspace(mode.world, mode.camera_p, standing_on.entity.pointer.p)
-                        add_monster(mode, p, standing_on)
-                    }
-                }
+    for controller, controller_index in input.controllers {
+        con_hero := &state.controlled_heroes[controller_index]
+        if con_hero.brain_id == 0 {
+            if was_pressed(controller.start) {
+                standing_on, ok := get_closest_traversable(region, {0, 0, 0}, {.Unoccupied} )
+                assert(ok) // @todo(viktor): Game UI that tells you there is no safe space...maybe keep trying on subsequent frames?
+                
+                brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
+                con_hero ^= { brain_id = brain_id }
+                add_hero(mode, region, standing_on, brain_id)
             }
         }
-        end_timed_block(handle_join_inputs)
     }
 }
+
+update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, entity: ^Entity) {
+    assert(entity.id == camera.following_id)
+        
+    in_room: ^Entity
+    // @todo(viktor): Probably don't want to loop over all entities - maintain a separate list of room entities during unpack!
+    for &entity in slice(region.entities) {
+        if entity.brain_kind != .Room do continue
+        
+        sim_center: Rectangle3
+        if entity_overlaps_rectangle(sim_center, entity.p, entity.collision.total_volume) {
+            in_room = &entity
+            break
+        }
+    }
+    assert(in_room != nil)
     
+    // @volatile :RoomSize
+    room_delta := get_dimension(in_room.collision.total_volume) //v3{24, 12.5, 3}
+    
+    half_room_delta := room_delta*0.5
+    half_room_apron := half_room_delta - 0.7
+    height: f32 = 0.5
+    camera.offset = 0
+    
+    offset: v3
+    entity_p := map_into_worldspace(world, region.origin, entity.p)
+    delta := world_distance(world, entity_p, camera.p)
+    
+    for i in 0..<3 {
+        if delta[i] >  half_room_delta[i] do offset[i] += room_delta[i]
+        if delta[i] < -half_room_delta[i] do offset[i] -= room_delta[i]
+    }
+    
+    camera.p = map_into_worldspace(world, camera.p, offset)
+    
+    delta -= offset
+    if delta.y >  half_room_apron.y {
+        t := clamp_01_map_to_range(half_room_apron.y, delta.y, half_room_delta.y)
+        camera.offset.y = t*half_room_delta.y
+        camera.offset.z = (-(t*t)+2*t)*height
+    }
+    
+    if delta.y < -half_room_apron.y {
+        t := clamp_01_map_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
+        camera.offset.y = t*-half_room_delta.y
+        camera.offset.z = (-(t*t)+2*t)*height
+    }
+    
+    if delta.x >  half_room_apron.x {
+        t := clamp_01_map_to_range(half_room_apron.x, delta.x, half_room_delta.x)
+        camera.offset.x = t*half_room_delta.x
+        camera.offset.z = (-(t*t)+2*t)*height
+    }
+    
+    if delta.x < -half_room_apron.x {
+        t := clamp_01_map_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
+        camera.offset.x = t*-half_room_delta.x
+        camera.offset.z = (-(t*t)+2*t)*height
+    }
+    
+    if delta.z >  half_room_apron.z {
+        t := clamp_01_map_to_range(half_room_apron.z, delta.z, half_room_delta.z)
+        camera.offset.z = t*half_room_delta.z
+    }
+    
+    if delta.z < -half_room_apron.z {
+        t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
+        camera.offset.z = t*-half_room_delta.z
+    }
+}
+
 ////////////////////////////////////////////////
 
 map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = {0,0,0}) -> WorldPosition {
@@ -212,7 +278,7 @@ map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = 
     result.offset += offset
     
     rounded_offset := round(i32, result.offset / world.chunk_dim_meters)
-    result.chunk   =  result.chunk + rounded_offset
+    result.chunk   += rounded_offset
     result.offset  -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
     
     assert(is_canonical(world, result.offset))

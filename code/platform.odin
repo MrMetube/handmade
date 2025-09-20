@@ -111,6 +111,8 @@ Saved_Memory_Block :: struct {
 ////////////////////////////////////////////////
 
 main :: proc() {
+    unused(verify_memory_block_integrity)
+    
     list_init_sentinel(&GlobalPlatformState.block_sentinel)
     
     set_platform_api_in_the_statically_linked_game_code(Platform)
@@ -720,12 +722,6 @@ main :: proc() {
 ////////////////////////////////////////////////
 
 render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
-    /* 
-    if all_assets_valid(&render_group) /* AllResourcesPresent :CutsceneEpisodes 224 57:16 */ {
-        render_group_to_output(tran_state.high_priority_queue, render_group, buffer, &tran_state.arena)
-    }
-    */
-    
     for &color in slice(&commands.clear_colors) do color.rgb = square(color.rgb)
     
     if GlobalUseSoftwareRenderer {
@@ -742,9 +738,9 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, de
 
 ////////////////////////////////////////////////
 // Platform Allocator
+// @todo(viktor): This could be a special allocator that then can just be passed to the game arenas
 
 PageSize :: 4096 // @todo(viktor): you can get this from the OS, too!
-// @todo(viktor): This could be a special allocator that then can just be passed to the game arenas
 
 @(api)
 allocate_memory_block :: proc(#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {

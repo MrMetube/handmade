@@ -8,6 +8,12 @@
     - Top clocks select a parent to see its children top clocks
     - Frame bars & threads view - add guide lines for ms and frame target ms
     
+### Implement multiple sim regions per frame
+    - per-entity clocking
+    - sim region merging?  for multiple players?
+
+# 3D
+
 ### Graphics Upgrade
     - Particle Systems
     - Transition to "real" artwork
@@ -24,9 +30,6 @@
 
 ### Animation
     - Skeletal animation
-### Implement multiple sim regions per frame
-    - per-entity clocking
-    - sim region merging?  for multiple players?
 ### AI
     - AI "storage"
 

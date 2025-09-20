@@ -31,8 +31,13 @@ ReservedBrainId :: enum BrainId {
 
 BrainKind :: enum {
     None,
+    
     Hero, 
     
+    // @note(viktor): These are specials kinds which are used to mark special entities but these entities do not get actual brains (the brain id is set to 0)
+    Room,
+    
+    // @note(viktor): Test kinds
     Snake, 
     Monster,
     Familiar,
@@ -54,7 +59,7 @@ BrainFamiliar :: struct {
 }
 
 BrainSnake :: struct {
-    segments: [8] ^Entity,
+    segments: [4] ^Entity,
 }
 
 BrainMonster :: struct {
@@ -86,6 +91,8 @@ mark_brain_active :: proc (brain: ^Brain) {
 execute_brain :: proc(region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State, input: ^Input, entropy: ^RandomSeries) {
     switch brain.kind {
       case .None: unreachable()
+      case .Room: unreachable() // @note(viktor): See the comment in the definition above.
+      
       case .Hero:
         using brain.hero
         

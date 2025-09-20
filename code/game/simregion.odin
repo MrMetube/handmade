@@ -34,46 +34,38 @@ EntityHash :: struct {
 World_Sim :: struct {
     region: ^SimRegion, 
     memory: TemporaryMemory,
-    
-    camera_p: v3, 
 }
 
-begin_sim :: proc (sim_arena: ^Arena, mode: ^World_Mode, sim_bounds: Rectangle3, dt: f32) -> (simulation: World_Sim) {
+begin_sim :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosition, bounds: Rectangle3, dt: f32) -> (simulation: World_Sim) {
     simulation.memory = begin_temporary_memory(sim_arena)
-    
-    sim_origin := mode.camera_p
-    
-    simulation.region   = begin_world_changes(simulation.memory.arena, mode.world, sim_origin, sim_bounds, dt)
-    simulation.camera_p = mode.camera_offset + world_distance(mode.world, mode.camera_p, sim_origin)
+    simulation.region = begin_world_changes(simulation.memory.arena, world, origin, bounds, dt)
     
     return simulation
 }
 
-simulate :: proc (simulation: ^World_Sim, dt: f32, typical_floor_height: f32, render_group: ^RenderGroup, state: ^State, input: ^Input,  haze_color: v4, particle_cache: ^Particle_Cache) {
+simulate :: proc (simulation: ^World_Sim, dt: f32, game_entropy: ^RandomSeries, typical_floor_height: f32, camera_offset: v3, render_group: ^RenderGroup, state: ^State, input: ^Input,  haze_color: v4, particle_cache: ^Particle_Cache) {
     timed_function()
     
     region := simulation.region
-    camera_p := simulation.camera_p
     
     { timed_block("execute_brains")
         for &brain in slice(region.brains) {
             mark_brain_active(&brain)
         }
         
-        entropy := seed_random_series()
         for &brain in slice(region.brains) {
-            execute_brain(region, dt, &brain, state, input, &entropy)
+            execute_brain(region, dt, &brain, state, input, game_entropy)
         }
     }
     
-    update_and_render_entities(region, dt, render_group, camera_p, typical_floor_height, haze_color, particle_cache)
+    update_and_render_entities(region, dt, render_group, camera_offset, typical_floor_height, haze_color, particle_cache)
 }
 
-end_sim :: proc (simulation: ^World_Sim, mode: ^World_Mode) {
+end_sim :: proc (simulation: ^World_Sim) {
     // @todo(viktor): Make sure we hoist the camera update out to a place where the renderer
     // can know about the location of the camera at the end of the frame so there isn't
     // a frame of lag in camera updating compared to the hero.
-    end_world_changes(simulation.region, mode)
+    end_world_changes(simulation.region)
     end_temporary_memory(simulation.memory)
 }
 
@@ -84,19 +76,20 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
     
     region = push(sim_arena, SimRegion, no_clear())
     
-    II := begin_timed_block("clear sim region")
-    region.null_entity = {}
-    zero(region.entity_hash_occupancy[:])
-    zero(region.brain_hash_occupancy[:])
-    end_timed_block(II)
-    
-    region.entities = make_array(sim_arena, Entity, MaxEntityCount, no_clear())
-    region.brains   = make_array(sim_arena, Brain,  MaxBrainCount,  no_clear())
-    
     region.world = world
     region.origin = origin
     region.bounds = bounds
     region.updatable_bounds = bounds
+    
+    region.entities = make_array(sim_arena, Entity, MaxEntityCount, no_clear())
+    region.brains   = make_array(sim_arena, Brain,  MaxBrainCount,  no_clear())
+    
+    zero(region.entity_hash_occupancy[:])
+    zero(region.brain_hash_occupancy[:])
+    
+    region.null_entity = {}
+    
+    ////////////////////////////////////////////////
     
     min_p := map_into_worldspace(region.world, region.origin, region.bounds.min)
     max_p := map_into_worldspace(region.world, region.origin, region.bounds.max)
@@ -108,7 +101,7 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                 chunk_p := v3i{chunk_x, chunk_y, chunk_z}
                 
                 chunk := extract_chunk(region.world, chunk_p)
-    
+                
                 if chunk != nil {
                     chunk_world_p := WorldPosition { chunk = chunk_p }
                     chunk_delta := world_distance(region.world, chunk_world_p, region.origin)
@@ -166,7 +159,7 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
     return region
 }
 
-end_world_changes :: proc (region: ^SimRegion, world_mode: ^World_Mode) {
+end_world_changes :: proc (region: ^SimRegion) {
     timed_function()
     
     for &entity in slice(region.entities) {
@@ -177,60 +170,6 @@ end_world_changes :: proc (region: ^SimRegion, world_mode: ^World_Mode) {
         chunk_p  := entity_p
         chunk_p.offset = 0
         chunk_delta := entity_p.offset - entity.p
-        
-        if entity.id == world_mode.camera_following_id {
-            // @volatile Room size
-            room_delta := v3{25.5, 13.5, world_mode.typical_floor_height}
-            half_room_delta := room_delta*0.5
-            half_room_apron := half_room_delta - {1, 1, 1} * 0.7
-            height :f32= 0.5
-            world_mode.camera_offset = 0
-            
-            offset: v3
-            delta := world_distance(region.world, entity_p, world_mode.camera_p)
-            
-            for i in 0..<3 {
-                if delta[i] >  half_room_delta[i] do offset[i] += room_delta[i]
-                if delta[i] < -half_room_delta[i] do offset[i] -= room_delta[i]
-            }
-            
-            world_mode.camera_p = map_into_worldspace(region.world, world_mode.camera_p, offset)
-            
-            delta -= offset
-            if delta.y >  half_room_apron.y {
-                t := clamp_01_map_to_range(half_room_apron.y, delta.y, half_room_delta.y)
-                world_mode.camera_offset.y = t*half_room_delta.y
-                world_mode.camera_offset.z = (-(t*t)+2*t)*height
-            }
-            
-            if delta.y < -half_room_apron.y {
-                t := clamp_01_map_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
-                world_mode.camera_offset.y = t*-half_room_delta.y
-                world_mode.camera_offset.z = (-(t*t)+2*t)*height
-            }
-            
-            if delta.x >  half_room_apron.x {
-                t := clamp_01_map_to_range(half_room_apron.x, delta.x, half_room_delta.x)
-                world_mode.camera_offset.x = t*half_room_delta.x
-                world_mode.camera_offset.z = (-(t*t)+2*t)*height
-            }
-            
-            if delta.x < -half_room_apron.x {
-                t := clamp_01_map_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
-                world_mode.camera_offset.x = t*-half_room_delta.x
-                world_mode.camera_offset.z = (-(t*t)+2*t)*height
-            }
-            
-            if delta.z >  half_room_apron.z {
-                t := clamp_01_map_to_range(half_room_apron.z, delta.z, half_room_delta.z)
-                world_mode.camera_offset.z = t*half_room_delta.z
-            }
-            
-            if delta.z < -half_room_apron.z {
-                t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
-                world_mode.camera_offset.z = t*-half_room_delta.z
-            }
-        }
         
         entity.p += chunk_delta
         
@@ -292,6 +231,12 @@ mark_for_deletion :: proc(entity: ^Entity) {
     if entity != nil {
         entity.flags += { .MarkedForDeletion }
     }
+}
+
+get_entity_by_id :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity) {
+    entry := get_entity_hash_from_id(region, id)
+    result = entry != nil ? entry.pointer : nil
+    return result
 }
 
 ////////////////////////////////////////////////

@@ -499,7 +499,6 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
     collation_frame.stored_event_count += 1
     
-    ok: b32
     for result == nil {
         result = list_pop_head(&debug.first_free_stored_event) or_else push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
     }

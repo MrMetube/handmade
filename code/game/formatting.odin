@@ -168,7 +168,6 @@ amount_table_short := [?] Magnitude (u64) {
     {   0, "Q"},
 }
 
-// @todo(viktor): this doesnt work, as view_magnitude only searches for the first entry that is larger and then maybe appends the decimal expansion. We would need a second view_xxx proc that, like view_time, shows all magnitudes with the relevant symbol
 divider_table := [?] Magnitude (f64) {
     {1000, "."}, // quecto
     {1000, "."}, // ronto
@@ -267,17 +266,9 @@ view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> (result: Temp_V
         {1000, "n"}, // nano
         {1000, "µ"}, // micro
         {1000, "m"}, // milli
-        /* 
-        {10, "m"}, // milli
-        {10, "c"}, // centi
-        {10, "d"}, // deci
-        */
+        /* {10, "m"}, // milli {10, "c"}, // centi {10, "d"}, // deci */
         {1000, ""}, 
-        /* 
-        {10, " "},  // unit
-        {10, "da"}, // deca
-        {10, "h"},  // hecta
-        */
+        /* {10, "da"}, // deca {10, "h"},  // hecta */
         {1000, "k"}, // kilo
         {1000, "M"}, // mega
         {1000, "G"}, // giga

@@ -2,13 +2,9 @@ package build
 
 import "core:fmt"
 import "core:strings"
-import "core:os"
-import "core:log"
 import "core:terminal/ansi"
-import "core:os/os2"
 import "core:odin/ast"
 import "core:odin/parser"
-import "core:odin/tokenizer"
 
 Printlike :: struct {
     name:         string,
@@ -126,8 +122,6 @@ visit_and_check_printlikes :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^a
             name = name[index+1:]
         }
         if printlike, ok := printlikes[name]; ok {
-            format_string_index := -1
-            
             if len(call.args) <= printlike.format_index do return visitor
 
             format_arg := call.args[printlike.format_index]
