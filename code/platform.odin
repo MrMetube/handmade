@@ -23,8 +23,8 @@ import win "core:sys/windows"
 // Config
 
 GlobalBackBuffer :=  Bitmap {
-    // width = 1280, height = 720,
-    width = 1920, height = 1080,
+    width = 1280, height = 720,
+    // width = 1920, height = 1080,
     // width = 2560, height = 1440,
 }
 
@@ -51,12 +51,10 @@ GlobalBlitTextureHandle: u32
 
 GlobalPause:                 b32
 GlobalDebugShowCursor:       b32 = INTERNAL
-GlobalChangeRenderType:      b32
-GlobalChangeRenderTypeDelay: f32
-GlobalUseSoftwareRenderer:   b32
+GlobalUseSoftwareRenderer:   b32 = true
 
-GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 _GlobalDebugTable: DebugTable
+GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
 
 ////////////////////////////////////////////////
 // Types
@@ -462,7 +460,6 @@ main :: proc() {
                 game.debug_record_b32(&GlobalUseSoftwareRenderer)
                 
                 {debug_data_block("Environment")
-                    game.debug_record_b32(&GlobalDebugShowLightingBounceDirection)
                     game.debug_record_b32(&GlobalDebugShowLightingSampling)
                 }
             }
@@ -649,6 +646,12 @@ main :: proc() {
         
         game.end_timed_block(prep_render)
         ////////////////////////////////////////////////
+        render := game.begin_timed_block("render")
+        
+        render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, render_prep, window_dim)
+            
+        game.end_timed_block(render)
+        ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("sleep at frame end")
         
         {
@@ -701,8 +704,9 @@ main :: proc() {
             device_context := win.GetDC(window)
             defer win.ReleaseDC(window, device_context)
             
-            render_to_window(&render_commands, &high_queue, device_context, draw_region, &frame_arena, render_prep, window_dim)
-            
+            { timed_block("SwapBuffers")
+                win.SwapBuffers(device_context)
+            }
             flip_counter = get_wall_clock()
         }
         
@@ -721,18 +725,14 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, device_context: win.HDC, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
-    for &color in slice(&commands.clear_colors) do color.rgb = square(color.rgb)
+render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
+    commands.clear_color.rgb = square(commands.clear_color.rgb)
     
     if GlobalUseSoftwareRenderer {
         software_render_commands(render_queue, commands, prep, GlobalBackBuffer, arena)
-        gl_display_bitmap(GlobalBackBuffer, draw_region, commands.clear_colors.data[0])
+        gl_display_bitmap(GlobalBackBuffer, draw_region, commands.clear_color)
     } else {
         gl_render_commands(commands, prep, draw_region, windows_dim)
-    }
-    
-    { timed_block("SwapBuffers")
-        win.SwapBuffers(device_context)
     }
 }
 
@@ -1159,8 +1159,19 @@ process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
 process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^InputController) {
     message: win.MSG
     for {
+        // @note(viktor): We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
+        first  :: min(win.WM_PAINT, win.WM_MOUSEMOVE)
+        second :: max(win.WM_PAINT, win.WM_MOUSEMOVE)
+        last   :: max(u32)
+        
         peek_message := game.begin_timed_block("win.PeekMessageW")
-        has_message := win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE)
+        has_message := win.PeekMessageW(&message, nil, 0, first - 1, win.PM_REMOVE)
+        if !has_message {
+            has_message = win.PeekMessageW(&message, nil, first + 1, second - 1, win.PM_REMOVE)
+            if !has_message {
+                has_message = win.PeekMessageW(&message, nil, second + 1, last, win.PM_REMOVE)
+            }
+        }
         game.end_timed_block(peek_message)
         
         if !has_message do break
@@ -1178,48 +1189,44 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
             WasDown :: 1 << 30
             IsUp    :: 1 << 31
             
-            alt_down :b32= (message.lParam & AltDown) != 0
-            was_down :b32= (message.lParam & WasDown) != 0
-            is_down  :b32= (message.lParam & IsUp)    == 0
+            alt_down: b32 = (message.lParam & AltDown) != 0
+            was_down: b32 = (message.lParam & WasDown) != 0
+            is_down:  b32 = (message.lParam & IsUp)    == 0
             
-            if was_down != is_down {
-                switch vk_code {
-                  case win.VK_W:      process_win_keyboard_message(&keyboard_controller.stick_up,       is_down)
-                  case win.VK_A:      process_win_keyboard_message(&keyboard_controller.stick_left,     is_down)
-                  case win.VK_S:      process_win_keyboard_message(&keyboard_controller.stick_down,     is_down)
-                  case win.VK_D:      process_win_keyboard_message(&keyboard_controller.stick_right,    is_down)
-                  case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.shoulder_left,  is_down)
-                  case win.VK_E:      process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
-                  case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.button_up,      is_down)
-                  case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.button_down,    is_down)
-                  case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.button_left,    is_down)
-                  case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.button_right,   is_down)
-                  case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.start,          is_down)
-                  case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.back,           is_down)
-                  case win.VK_L:
-                    if is_down {
-                        if state.replaying_index != 0 {
-                            end_replaying_input(state)
-                        } else if state.recording_index == 0 {
-                            assert(state.replaying_index == 0)
-                            begin_recording_input(state, 1) 
-                        } else {
-                            end_recording_input(state)
-                            begin_replaying_input(state, 1)
-                        }
+            if was_down == is_down do continue
+            switch vk_code {
+              case win.VK_W:      process_win_keyboard_message(&keyboard_controller.stick_up,       is_down)
+              case win.VK_A:      process_win_keyboard_message(&keyboard_controller.stick_left,     is_down)
+              case win.VK_S:      process_win_keyboard_message(&keyboard_controller.stick_down,     is_down)
+              case win.VK_D:      process_win_keyboard_message(&keyboard_controller.stick_right,    is_down)
+              case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.shoulder_left,  is_down)
+              case win.VK_E:      process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
+              case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.button_up,      is_down)
+              case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.button_down,    is_down)
+              case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.button_left,    is_down)
+              case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.button_right,   is_down)
+              case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.start,          is_down)
+              case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.back,           is_down)
+              case win.VK_L:
+                if is_down {
+                    if state.replaying_index != 0 {
+                        end_replaying_input(state)
+                    } else if state.recording_index == 0 {
+                        assert(state.replaying_index == 0)
+                        begin_recording_input(state, 1) 
+                    } else {
+                        end_recording_input(state)
+                        begin_replaying_input(state, 1)
                     }
-                  case win.VK_P:
-                    if is_down do GlobalPause = !GlobalPause
-                  case win.VK_F4:
-                    if is_down && alt_down do GlobalRunning = false
-                  case win.VK_RETURN:
-                    if is_down && alt_down do toggle_fullscreen(message.hwnd)
                 }
+                
+              case win.VK_F4:     if is_down && alt_down do GlobalRunning = false
+              case win.VK_RETURN: if is_down && alt_down do toggle_fullscreen(message.hwnd)
             }
             
           case:
             timed_block("default_message_handler")
-            
+            // @todo(viktor): on a resize or dragging of the window the whole app freezes, for a possible workaround see "Dangerous Threads Crew" https://www.youtube.com/watch?v=_HpGJeJowiY 
             win.TranslateMessage(&message)
             win.DispatchMessageW(&message)
         }

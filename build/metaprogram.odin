@@ -1,4 +1,4 @@
-#+private
+#+vet unused shadowing cast unused-imports style unused-procedures unused-variables
 package build
 
 import "core:fmt"
@@ -49,6 +49,7 @@ metaprogram_collect_data :: proc(using mp: ^Metaprogram, dir: string) -> (succes
             }
         }
         
+        // @todo(viktor): also extract decls in global when blocks
         for declaration, declaration_index in file.decls {
             #partial switch declaration in declaration.derived_stmt {
             case ^ast.Value_Decl:

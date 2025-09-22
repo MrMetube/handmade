@@ -214,6 +214,7 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
             break
         }
     }
+    if in_room == nil do return
     assert(in_room != nil)
     
     // @volatile :RoomSize

@@ -40,7 +40,7 @@ Bitmap :: struct {
 RenderCommands :: struct {
     width, height: i32,
     
-    clear_colors: FixedArray(2, v4),
+    clear_color: v4,
     
     // @note(viktor): Packed array of disjoint elements.
     // Filled from the front with SortSpriteBounds and from the back with
@@ -70,7 +70,6 @@ RenderPrep :: struct {
 RenderGroup :: struct {
     assets:                ^Assets,
     missing_asset_count:   i32,
-    renders_in_background: b32, // @cleanup is this still used?
     
     screen_area: Rectangle2,
     
@@ -200,25 +199,23 @@ Camera_Params :: struct {
 
 ////////////////////////////////////////////////
 
-init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, renders_in_background: b32, generation_id: AssetGenerationId) {
+init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
     assert((cast(umm) &(cast(^RenderCommands)nil).push_buffer) == (cast(umm) &(cast(^RenderCommands)nil).sort_entries.data))
     
     pixel_size := vec_cast(f32, commands.width, commands.height)
     
     group ^= {
         assets = assets,
-        renders_in_background = renders_in_background,
-        
         screen_area = rectangle_min_dimension(v2{}, pixel_size),
-        
         commands = commands,
-        
         generation_id = generation_id,
     }
     
     clip := rectangle_min_dimension(v2{0,0}, pixel_size)
     group.current_clip_rect_index = push_clip_rect(group, clip, 0)
 }
+
+////////////////////////////////////////////////
 
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
 default_upright_transform :: proc() -> Transform { return { scale = 1, is_upright = true } }
@@ -254,12 +251,6 @@ orthographic :: proc(group: ^RenderGroup, meters_to_pixels: f32) {
         focal_length          = 10,
         distance_above_target = 10,
     }
-}
-
-store_color :: proc(transform: Transform, color: v4) -> (result: v4) {
-    result = linear_blend(color, transform.color, transform.t_color)
-    result.rgb *= result.a
-    return result
 }
 
 ////////////////////////////////////////////////
@@ -313,6 +304,12 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
         screen_bounds = screen_bounds,
     }
     
+    return result
+}
+
+store_color :: proc(transform: Transform, color: v4) -> (result: v4) {
+    result = linear_blend(color, transform.color, transform.t_color)
+    result.rgb *= result.a
     return result
 }
 
@@ -385,7 +382,7 @@ push_sort_barrier :: proc(group: ^RenderGroup, turn_of_sorting := false) {
 }
 
 push_clear :: proc(group: ^RenderGroup, color: v4) {
-    append(&group.commands.clear_colors, store_color({}, color))
+    group.commands.clear_color = store_color({}, color)
 }
 
 push_bitmap :: proc(
@@ -393,18 +390,11 @@ push_bitmap :: proc(
     offset := v3{}, color := v4{1,1,1,1}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
 ) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
-    if group.renders_in_background && bitmap == nil {
-        load_bitmap(group.assets, id, true)
-        bitmap = get_bitmap(group.assets, id, group.generation_id)
-        assert(bitmap != nil)
-    }
-    
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap != nil && bitmap.texture_handle != 0 {
         assert(bitmap.texture_handle != 0)
         push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment, x_axis, y_axis)
     } else {
-        assert(!group.renders_in_background)
         load_bitmap(group.assets, id, false)
         group.missing_asset_count += 1
     }

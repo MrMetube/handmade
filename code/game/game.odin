@@ -290,7 +290,7 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
     }
     
     render_group: RenderGroup
-    init_render_group(&render_group, tran_state.assets, render_commands, false, tran_state.generation_id)
+    init_render_group(&render_group, tran_state.assets, render_commands, tran_state.generation_id)
     
     input.delta_time *= TimestepPercentage/100.0
     

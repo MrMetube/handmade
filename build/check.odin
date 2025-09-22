@@ -1,3 +1,4 @@
+#+vet unused shadowing cast unused-imports style unused-procedures unused-variables
 package build
 
 import "core:fmt"
@@ -69,7 +70,7 @@ visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node:
                 if results != nil {
                     p := Procedure {
                         name = name,
-                        return_count = len(results.list)
+                        return_count = len(results.list),
                     }
                     procedures[p.name] = p
                 }

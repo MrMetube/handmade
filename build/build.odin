@@ -10,13 +10,13 @@ import "core:time"
 import win "core:sys/windows"
 
 optimizations    := false ? "-o:speed" : "-o:none"
-PedanticGame     :: !false
-PedanticPlatform :: !false
+PedanticGame     :: false
+PedanticPlatform :: false
 
-flags    := [] string { "-vet-cast", "-vet-shadowing", "-microarch:native", "-target:windows_amd64" }
+flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native" }
 
 debug    :: "-debug"
-internal :: "-define:INTERNAL=true" // @cleanup
+internal :: "-define:INTERNAL=true"
 
 pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semicolon", "-vet-unused-variables", "-vet-style", "-vet-packages:main", "-vet-unused-procedures" }
 

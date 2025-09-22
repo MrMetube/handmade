@@ -1,20 +1,17 @@
-// @todo(viktor): get rid of this
-#+vet !unused-procedures
 package main
 
 // @todo(viktor): Pull this out into a third layer or into the game so that we can hotreload it
 
 import "core:simd"
 
-GlobalDebugRenderSingleThreaded: b32
-GlobalDebugShowLightingBounceDirection: b32
+GlobalDebugRenderSingleThreaded: b32 = false
 GlobalDebugShowLightingSampling: b32
 GlobalDebugShowRenderSortGroups: b32
 
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
     prep:     RenderPrep,
-    targets:  []Bitmap,
+    targets:  [] Bitmap,
     
     base_clip_rect: Rectangle2i, 
 }
@@ -25,7 +22,7 @@ SortGridEntry :: struct {
 }
 
 SpriteGraphWalk :: struct {
-    nodes:   []SortSpriteBounds,
+    nodes:   [] SortSpriteBounds,
     offsets: ^Array(u32),
     hit_cycle: b32,
 }
@@ -136,6 +133,8 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
     assert(offsets.count + barrier_count == auto_cast len(nodes))
 }
 
+////////////////////////////////////////////////
+
 build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (count: i32, hit_barrier: b32) {
     timed_function()
     
@@ -236,7 +235,6 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
     at.flags += { .Visited, .Cycle }
     
     for edge := at.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
-        assert(edge.front == index)
         walk_sprite_graph_front_to_back(walk, edge.behind)
     }
     
@@ -311,6 +309,7 @@ software_render_commands :: proc(queue: ^WorkQueue, commands: ^RenderCommands, p
 
 do_tile_render_work :: proc(data: pmm) {
     timed_function()
+    
     using work := cast(^TileRenderWork) data
     assert(commands != nil)
     
@@ -318,13 +317,11 @@ do_tile_render_work :: proc(data: pmm) {
     clip_rect_index := max(u16)
     
     for target, index in targets {
-        clear_color := commands.clear_colors.data[index]
+        clear_color: v4
         if index == 0 {
-            clear_color.a = clear_color.a
-        } else {
-            clear_color.a = 0
+            clear_color = commands.clear_color
         }
-        clear_render_target(target, clear_color, clip_rect)
+        clear_render_target(target, clip_rect, clear_color)
     }
     
     target: Bitmap
@@ -353,527 +350,501 @@ do_tile_render_work :: proc(data: pmm) {
             
             source := targets[entry.source_index]
             dest   := targets[entry.dest_index]
-            blend_render_target(dest, entry.alpha, source, clip_rect)
+            blend_render_target(dest, clip_rect, source, entry.alpha)
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
-            origin := entry.rect.min
-            dim := get_dimension(entry.rect)
-            x_axis := v2{dim.x, 0}
-            y_axis := v2{0, dim.y}
-            draw_rectangle(target, origin, x_axis, y_axis, entry.premultiplied_color, clip_rect)
+            draw_rectangle(target, clip_rect, entry.rect, entry.premultiplied_color)
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
-            
-            draw_rectangle(target,
-                entry.p, entry.x_axis, entry.y_axis,
-                entry.bitmap^, entry.premultiplied_color,
-                clip_rect,
-            )
+            draw_rectangle(target, clip_rect, entry.p, entry.x_axis, entry.y_axis, entry.bitmap^, entry.premultiplied_color)
         }
     }
 }
 
-draw_rectangle :: proc { draw_rectangle_with_texture, draw_rectangle_fill_color, draw_rectangle_fill_color_axis_aligned }
+draw_rectangle :: proc { draw_rectangle_fill_color_axis_aligned, draw_rectangle_fill_color, draw_rectangle_with_texture }
 
 ////////////////////////////////////////////////
-// @important @todo(viktor): 
-// - Compress vector operations into simd floats
-// - Extract the copypastas in these routines into functions
+// @todo(viktor): 
+// - Compress vector operations into simd
 
-@(enable_target_feature="sse,sse2")
-draw_rectangle_with_texture :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4, clip_rect: Rectangle2i) {
-    /* 
-    length_x_axis := length(x_axis)
-    length_y_axis := length(y_axis)
-    normal_x_axis := (length_y_axis / length_x_axis) * x_axis
-    normal_y_axis := (length_x_axis / length_y_axis) * y_axis
-    // @note(viktor): normal_z_scale could be a parameter if we want people
-    // to have control over the amount of scaling in the z direction that
-    // the normals appear to have
-    normal_z_scale := linear_blend(length_x_axis, length_y_axis, 0.5)
-    */
+MaskFF :: 0xffffffff
+Inv255 :: 1.0 / 255
+MaxColorValue :: 255 * 255
+
+// 133Mcy
+// 133Mcy - with clear
+//  46Mcy - with blend !LETS GO!
+//  60Mcy 4  /// (133 / 60 - 1) * 100
+//  46Mcy 8  /// (133 / 46 - 1) * 100
+//  38Mcy 16 /// (133 / 36 - 1) * 100
+
+clear_render_target :: proc(dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
+    timed_function()
     
-    fill_rect := rectangle_inverted_infinity(Rectangle2i)
-    for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
-        floorp := floor(i32, testp)
-        ceilp  := ceil(i32,  testp)
-        
-        fill_rect.min.x = min(fill_rect.min.x, floorp.x)
-        fill_rect.min.y = min(fill_rect.min.y, floorp.y)
-        fill_rect.max.x = max(fill_rect.max.x, ceilp.x)
-        fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
-    }
-    fill_rect = get_intersection(fill_rect, clip_rect)
+    ctx: Shader_Context
+    ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, dest, clip_rect, clip_rect)
+    assert(ok)
     
-    if !has_area(fill_rect) do return
+    color := vec_cast(lane_f32, color * 255)
+    color = srgb_to_linear(color)
+    packed := pack_pixel(color)
     
-    maskFF :: 0xffffffff
-    maskFFx8 :u32x8: maskFF
-    clip_mask := maskFFx8
-    
-    start_clip_mask := clip_mask
-    if fill_rect.min.x & 7 != 0 {
-        start_clip_masks := [?]u32x8 {
-            {0..<8 = maskFF},
-            {1..<8 = maskFF},
-            {2..<8 = maskFF},
-            {3..<8 = maskFF},
-            {4..<8 = maskFF},
-            {5..<8 = maskFF},
-            {6..<8 = maskFF},
-            {7..<8 = maskFF},
+    for y := pmin.y; y < pmax.y; y += pstep.y {
+        for x := pmin.x; x < pmax.x; x += pstep.x {
+            shader_update_load_and_store_mask(&ctx, x)
+            shader_store_pixels_at(&ctx, packed, x, y)
         }
-        
-        start_clip_mask = start_clip_masks[fill_rect.min.x & 7]
-        fill_rect.min.x = align8(fill_rect.min.x) - 8
     }
+}
+
+blend_render_target :: proc(dest: Bitmap, clip_rect: Rectangle2i, source: Bitmap, alpha: f32) {
+    timed_function()
     
-    end_clip_mask := clip_mask
-    if fill_rect.max.x & 7 != 0 {
-        end_clip_masks := [?]u32x8 {
-            {0..<8 = maskFF},
-            {0..<1 = maskFF},
-            {0..<2 = maskFF},
-            {0..<3 = maskFF},
-            {0..<4 = maskFF},
-            {0..<5 = maskFF},
-            {0..<6 = maskFF},
-            {0..<7 = maskFF},
+    ctx: Shader_Context
+    ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, dest, clip_rect, clip_rect)
+    assert(ok)
+    
+    for y := pmin.y; y < pmax.y; y += pstep.y {
+        for x := pmin.x; x < pmax.x; x += pstep.x {
+            pixels := shader_load_pixels(&ctx, x, y)
+            
+            // @todo(viktor): this is should be easier to do
+            src    := &source.memory[x + y * source.width]
+            texel_ := simd.masked_load(src, cast(lane_u32) 0, ctx.mask)
+            texel  := unpack_pixel(texel_)
+            
+            texel = srgb_to_linear(texel)
+            
+            t := alpha * (texel.a * Inv255)
+            blended := linear_blend(pixels, texel, t)
+            
+            blended = linear_to_srgb(blended)
+            
+            packed := pack_pixel(blended)
+            
+            shader_store_pixels(&ctx, packed)
         }
-        
-        end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
-        fill_rect.max.x = align8(fill_rect.max.x)
     }
+}
+
+draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Rectangle2i, rect: Rectangle2, color: v4) {
+    // @todo(viktor): is this actually necessary?
+    fill_rect := rectangle_min_max(floor(i32, rect.min), ceil(i32, rect.max))
     
-    delta := vec_cast(f32x8, fill_rect.min) - vec_cast(f32x8, origin) 
-    delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
+    ctx: Shader_Context
+    ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, buffer, clip_rect, fill_rect)
+    if !ok do return
     
-    determinant := x_axis.x * y_axis.y - x_axis.y * y_axis.x
-    // @todo(viktor): Just don't draw if the axis are not independent
-    if determinant == 0 do determinant = 1
+    color := vec_cast(lane_f32, color * 255)
     
-    normal_x_axis := vec_cast(f32x8, v2{ y_axis.y, -y_axis.x} / determinant)
-    normal_y_axis := vec_cast(f32x8, v2{-x_axis.y,  x_axis.x} / determinant)
+    color = srgb_to_linear(color)
+    color.rgb = clamp(color.rgb, 0, MaxColorValue)
+    inv_color_a := (1 - (Inv255 * color.a))
     
-    delta_n_x_axis := delta * normal_x_axis
-    delta_n_y_axis := delta * normal_y_axis
+    for y := pmin.y; y < pmax.y; y += pstep.y {
+        for x := pmin.x; x < pmax.x; x += pstep.x {
+            pixels := shader_load_pixels(&ctx, x, y)
+            
+            // @note(viktor): blend with target pixel
+            blended := inv_color_a * pixels + color
+            
+            blended = linear_to_srgb(blended)
+            
+            packed := pack_pixel(blended)
+            
+            shader_store_pixels(&ctx, packed)
+        }
+    }
+}
+
+draw_rectangle_fill_color :: proc(buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, color: v4) {
+    ctx: Shader_Context
+    ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx, buffer, clip_rect, origin, x_axis, y_axis)
+    if !ok do return
     
-    delta_u_row := delta_n_x_axis.x + delta_n_x_axis.y
-    delta_v_row := delta_n_y_axis.x + delta_n_y_axis.y
+    color := vec_cast(lane_f32, color * 255)
     
-    inv_255:         f32x8 = 1.0 / 255.0
-    max_color_value: f32x8 = 255 * 255
+    color = srgb_to_linear(color)
+    color.rgb = clamp(color.rgb, 0, MaxColorValue)
+    inv_color_a := (1 - (Inv255 * color.a))
     
-    color := vec_cast(f32x8, color)
-    
-    texture_size := vec_cast(f32x8, texture.width, texture.height) - 2
-    
-    texture_width := cast(i32x8) texture.width
-    
-    for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
-        // @note(viktor): iterative calculations will lead to arithmetic errors,
-        // so we calculate always based of the index.
-        y_index := cast(f32) (y - fill_rect.min.y)
-        u_row := delta_u_row + y_index * normal_x_axis.y
-        v_row := delta_v_row + y_index * normal_y_axis.y
+    for y := pmin.y; y < pmax.y; y += pstep.y {
+        shader_row_with_uv(&ctx, y)
         
-        clip_mask = start_clip_mask
-        for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
-            defer {
-                if x + 8*2 < fill_rect.max.x {
-                    clip_mask = maskFF
-                } else {
-                    clip_mask = end_clip_mask
-                }
-            }
+        for x := pmin.x; x < pmax.x; x += pstep.x {
+            pixels, _ := shader_load_pixels_with_uv(&ctx, x, y)
             
-            x_index := cast(f32) (x - fill_rect.min.x) / 8
-            u := u_row + x_index * normal_x_axis.x * 8
-            v := v_row + x_index * normal_y_axis.x * 8
-            uv := [2]f32x8{u,v}
+            // @note(viktor): blend with target pixel
+            blended := inv_color_a * pixels + color
             
-            uv = clamp_01(uv)
+            blended = linear_to_srgb(blended)
             
-            // @note(viktor): Bias texture coordinates to start on the 
-            // boundary between the 0,0 and 1,1 pixels
+            packed := pack_pixel(blended)
+            
+            shader_store_pixels(&ctx, packed)
+        }
+    }
+}
+
+draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4) {
+    ctx: Shader_Context
+    ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx,  buffer, clip_rect, origin, x_axis, y_axis)
+    if !ok do return
+    
+    color := vec_cast(lane_f32, color)
+    
+    texture_size := vec_cast(lane_f32, texture.width, texture.height) - 2
+    
+    texture_width  := cast(lane_u32) texture.width
+    texture_memory := cast(lane_umm) raw_data(texture.memory)
+
+    zero := cast(lane_u32) 0
+    mask := cast(lane_u32) MaskFF
+    
+    for y := pmin.y; y < pmax.y; y += pstep.y {
+        shader_row_with_uv(&ctx, y)
+        
+        for x := pmin.x; x < pmax.x; x += pstep.x {
+            pixel, uv := shader_load_pixels_with_uv(&ctx, x, y)
+            
+            // @note(viktor): Bias texture coordinates to start on the boundary between the 0,0 and 1,1 pixels
             t := uv * texture_size + 0.5
-            s := vec_cast(i32x8, t)
-            f := t - vec_cast(f32x8, s)
+            s :=     vec_cast(lane_u32, t)
+            f := t - vec_cast(lane_f32, s)
             
             // @note(viktor): bilinear sample
-            fetch := cast(ummx8) (s.y * texture_width + s.x)
+            index_a := cast(lane_umm) ((s.x + 0) + (s.y + 0) * texture_width)
+            index_b := cast(lane_umm) ((s.x + 1) + (s.y + 0) * texture_width)
+            index_c := cast(lane_umm) ((s.x + 0) + (s.y + 1) * texture_width)
+            index_d := cast(lane_umm) ((s.x + 1) + (s.y + 1) * texture_width)
             
-            ummx8 :: #simd [8]umm
-            texture_memory := cast(ummx8) raw_data(texture.memory)
-            texture_width  := cast(ummx8) texture.width
+            texel_a := cast(lane_pmm) (texture_memory + index_a * size_of(Color))
+            texel_b := cast(lane_pmm) (texture_memory + index_b * size_of(Color))
+            texel_c := cast(lane_pmm) (texture_memory + index_c * size_of(Color))
+            texel_d := cast(lane_pmm) (texture_memory + index_d * size_of(Color))
             
-            texel_ := texture_memory + fetch * size_of(Color)
-            
-            zero := cast(u32x8) 0
-            sample_a := simd.gather(cast(#simd [8]pmm) (texel_ + size_of(Color) * 0),                   zero, maskFFx8)
-            sample_b := simd.gather(cast(#simd [8]pmm) (texel_ + size_of(Color) * 1),                   zero, maskFFx8)
-            sample_c := simd.gather(cast(#simd [8]pmm) (texel_ + size_of(Color) * texture_width),       zero, maskFFx8)
-            sample_d := simd.gather(cast(#simd [8]pmm) (texel_ + size_of(Color) * (texture_width + 1)), zero, maskFFx8)
+            sample_a := simd.gather(texel_a, zero, mask)
+            sample_b := simd.gather(texel_b, zero, mask)
+            sample_c := simd.gather(texel_c, zero, mask)
+            sample_d := simd.gather(texel_d, zero, mask)
             
             ta := unpack_pixel(sample_a)
             tb := unpack_pixel(sample_b)
             tc := unpack_pixel(sample_c)
             td := unpack_pixel(sample_d)
             
-            // @note(viktor): srgb to linear
-            ta.rgb = square(ta.rgb)
-            tb.rgb = square(tb.rgb)
-            tc.rgb = square(tc.rgb)
-            td.rgb = square(td.rgb)
-            
-            u = uv[0]
-            v = uv[1]
-            // u >= 0 && u <= 1 && v >= 0 && v <= 1
-            write_mask := clip_mask & simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
-            dest  := &buffer.memory[y * buffer.width + x]
-            pixel_ := simd.masked_load(dest, cast(u32x8) 0, write_mask)
-            pixel := unpack_pixel(pixel_)
-            
-            pixel.rgb = square(pixel.rgb)
+            ta = srgb_to_linear(ta)
+            tb = srgb_to_linear(tb)
+            tc = srgb_to_linear(tc)
+            td = srgb_to_linear(td)
             
             texel := bilinear_blend(ta, tb, tc, td, f)
             
             texel *= color
-            texel.rgb = clamp(texel.rgb, 0, max_color_value)
+            texel.rgb = clamp(texel.rgb, 0, MaxColorValue)
             
             // @note(viktor): blend with target pixel
-            inv_texel_a := (1 - (inv_255 * texel.a))
-            
+            inv_texel_a := (1 - (Inv255 * texel.a))
             blended := inv_texel_a * pixel + texel
             
-            // @note(viktor): linear to srgb
-            blended.rgb  = square_root(blended.rgb)
-            mixed := pack_pixel(blended)
+            blended = linear_to_srgb(blended)
             
-            simd.masked_store(dest, mixed, write_mask)
+            packed := pack_pixel(blended)
+            
+            shader_store_pixels(&ctx, packed)
         }
     }
 }
 
-draw_rectangle_fill_color_axis_aligned :: proc(buffer: Bitmap, rect: Rectangle2, color: v4, clip_rect: Rectangle2i){
-    origin := rect.min
-    dim := get_dimension(rect)
-    x_axis := v2{dim.x, 0}
-    y_axis := v2{0, dim.y}
+////////////////////////////////////////////////
+
+// @todo(viktor): How can we split this in a relevant and convinient way
+// 1) Clear             - only clip_rect, only masked_stores into output
+// 2) Blend             - only clip_rect, masked_loads from input and output and blends then stores
+// 3) Fill Rect Aligned - rect-clip_rect intersection, blends output with color then stores
+// 4) Fill Rect Rotated - axis-clip_rect intersection, blends output with color then stores
+// 5) Texture Rotated   - axis-clip_rect intersection, bilinear sample texture in uv coords, blends output with texel then stores
+// 6) (Texture Aligned) - ??? to be done
+
+Shader_Context :: struct {
+    buffer:    Bitmap,
+    at:        ^Color,
     
-    draw_rectangle_fill_color(buffer, origin, x_axis, y_axis, color, clip_rect)
+    fill_rect: Rectangle2i,
+    
+    // 
+    start_mask: lane_u32,
+    end_mask:   lane_u32,
+    mask: lane_u32,
+    
+    // Per function
+    normal_x_axis: lane_v2,
+    normal_y_axis: lane_v2,
+    
+    delta_u_row: lane_f32,
+    delta_v_row: lane_f32,
+    
+    // Per row
+    u_row: lane_f32,
+    v_row: lane_f32,
 }
 
-@(enable_target_feature="sse,sse2")
-draw_rectangle_fill_color :: proc(buffer: Bitmap, origin, x_axis, y_axis: v2, color: v4, clip_rect: Rectangle2i){
-    fill_rect := rectangle_inverted_infinity(Rectangle2i)
-    for testp in ([?]v2{origin, (origin+x_axis), (origin + y_axis), (origin + x_axis + y_axis)}) {
-        floorp := floor(i32, testp)
-        ceilp  := ceil(i32, testp)
-        
-        fill_rect.min.x = min(fill_rect.min.x, floorp.x)
-        fill_rect.min.y = min(fill_rect.min.y, floorp.y)
-        fill_rect.max.x = max(fill_rect.max.x, ceilp.x)
-        fill_rect.max.y = max(fill_rect.max.y, ceilp.y)
-    }
-    fill_rect = get_intersection(fill_rect, clip_rect)
+Shader_Sampler :: struct {
+
+}
+
+////////////////////////////////////////////////
+
+shader_init_with_rect :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_rect, fill_rect: Rectangle2i) -> (ok: bool, pmin, pmax, pstep: v2i) {
+    ctx.buffer = bitmap
+    ctx.fill_rect = get_intersection(fill_rect, clip_rect)
     
-    if !has_area(fill_rect) do return 
+    ok = has_area(ctx.fill_rect)
+    if !ok do return ok, pmin, pmax, pstep
     
+    _shader_init_mask_fill_rect(ctx)
     
-    maskFF :: 0xffff_ffff
-    maskFFx8 :u32x8: maskFF
-    clip_mask := maskFFx8
+    pmin = ctx.fill_rect.min
+    pmax = ctx.fill_rect.max
+    pstep = {LaneWidth, 1}
     
-    start_clip_mask := clip_mask
-    if fill_rect.min.x & 7 != 0 {
-        start_clip_masks := [?]u32x8 {
-            {0..<8 = maskFF},
-            {1..<8 = maskFF},
-            {2..<8 = maskFF},
-            {3..<8 = maskFF},
-            {4..<8 = maskFF},
-            {5..<8 = maskFF},
-            {6..<8 = maskFF},
-            {7..<8 = maskFF},
-        }
-        start_clip_mask = start_clip_masks[fill_rect.min.x & 7]
-        fill_rect.min.x = align8(fill_rect.min.x) - 8
-    }
+    return true, pmin, pmax, pstep
+}
+
+shader_init_with_rotation :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2) -> (ok: bool, pmin, pmax, pstep: v2i) {
+    rect := rectangle_origin_axis(origin, x_axis, y_axis)
     
-    end_clip_mask   := clip_mask
-    if fill_rect.max.x & 7 != 0 {
-        end_clip_masks := [?]u32x8 {
-            {0..<8 = maskFF},
-            {0..<1 = maskFF},
-            {0..<2 = maskFF},
-            {0..<3 = maskFF},
-            {0..<4 = maskFF},
-            {0..<5 = maskFF},
-            {0..<6 = maskFF},
-            {0..<7 = maskFF},
-        }
-        
-        end_clip_mask = end_clip_masks[fill_rect.max.x & 7]
-        fill_rect.max.x = align8(fill_rect.max.x)
+    ok, pmin, pmax, pstep = shader_init_with_rect(ctx, bitmap, clip_rect, rect)
+    if !ok do return ok, pmin, pmax, pstep
+    
+    ////////////////////////////////////////////////
+    
+    // @todo(viktor): Just don't draw if the axis are not independent?
+    determinant := x_axis.x * y_axis.y - x_axis.y * y_axis.x
+    if determinant == 0 do determinant = 1 
+    
+    normal_x_axis_ := v2{ y_axis.y, -y_axis.x} / determinant
+    normal_y_axis_ := v2{-x_axis.y,  x_axis.x} / determinant
+    
+    ctx.normal_x_axis = vec_cast(lane_f32, normal_x_axis_)
+    ctx.normal_y_axis = vec_cast(lane_f32, normal_y_axis_)
+    
+    delta := vec_cast(lane_f32, ctx.fill_rect.min) - vec_cast(lane_f32, origin) 
+    when LaneWidth == 4 {
+        delta.x += { 0, 1, 2, 3 }
+    } else when LaneWidth == 8 {
+        delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
+    } else when LaneWidth == 16 {
+        delta.x += { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }
+    } else {
+        #panic("unhandled lane width")
     }
     
-    normal_x_axis_ := 1 / length_squared(x_axis) * x_axis
-    normal_y_axis_ := 1 / length_squared(y_axis) * y_axis
+    delta_n_x_axis := delta * ctx.normal_x_axis
+    delta_n_y_axis := delta * ctx.normal_y_axis
     
-    normal_x_axis := vec_cast(f32x8, normal_x_axis_)
-    normal_y_axis := vec_cast(f32x8, normal_y_axis_)
+    ctx.delta_u_row = delta_n_x_axis.x + delta_n_x_axis.y
+    ctx.delta_v_row = delta_n_y_axis.x + delta_n_y_axis.y
     
-    delta := vec_cast(f32x8, fill_rect.min) - vec_cast(f32x8, origin) 
-    delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
+    return ok, pmin, pmax, pstep
+}
+
+_shader_init_mask_fill_rect :: proc (ctx: ^Shader_Context) {
+    ctx.start_mask = MaskFF
+    ctx.end_mask   = MaskFF
     
-    delta_n_x_axis := delta * normal_x_axis
-    delta_n_y_axis := delta * normal_y_axis
+    if !is_aligned_pow2(ctx.fill_rect.min.x, LaneWidth) {
+        ctx.start_mask = start_masks[align_offset_pow2(ctx.fill_rect.min.x, LaneWidth)]
+        ctx.fill_rect.min.x = align_pow2(ctx.fill_rect.min.x, LaneWidth) - LaneWidth
+    }
     
-    delta_u_row := delta_n_x_axis.x + delta_n_x_axis.y
-    delta_v_row := delta_n_y_axis.x + delta_n_y_axis.y
+    if !is_aligned_pow2(ctx.fill_rect.max.x, LaneWidth) {
+        ctx.end_mask = end_masks[align_offset_pow2(ctx.fill_rect.max.x, LaneWidth)]
+        ctx.fill_rect.max.x = align_pow2(ctx.fill_rect.max.x, LaneWidth)
+    }
     
-    inv_255         :f32x8= (1.0 / 255.0)
-    max_color_value :f32x8= (255 * 255)
-    
-    color := vec_cast(f32x8, color * 255)
-    
-    // @note(viktor): srgb to linear
-    color.rgb = square(color.rgb)
-    color.rgb = clamp(color.rgb, 0, max_color_value)
-    inv_color_a := (1 - (inv_255 * color.a))
-    
-    for y := fill_rect.min.y; y < fill_rect.max.y; y += 1 {
-        // @note(viktor): Iterative calculations will lead to arithmetic errors,
-        // so we always calculate based of the index.
-        // u := dot(delta, n_x_axis)
-        // v := dot(delta, n_y_axis)
-        y_index := cast(f32) (y - fill_rect.min.y)
-        u_row := delta_u_row + y_index * normal_x_axis.y
-        v_row := delta_v_row + y_index * normal_y_axis.y
-        
-        clip_mask = start_clip_mask
-        for x := fill_rect.min.x; x < fill_rect.max.x; x += 8 {
-            defer {
-                if x + 16 < fill_rect.max.x {
-                    clip_mask = maskFF
-                } else {
-                    clip_mask = end_clip_mask
-                }
-            }
-            x_index := cast(f32) (x - fill_rect.min.x) / 8
-            u := u_row + x_index * normal_x_axis.x * 8
-            v := v_row + x_index * normal_y_axis.x * 8
-            
-            // u >= 0 && u <= 1 && v >= 0 && v <= 1
-            write_mask := clip_mask & simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
-            
-            dest  := &buffer.memory[y * buffer.width + x]
-            pixel_ := simd.masked_load(dest, cast(u32x8) 0, write_mask)
-            pixel := unpack_pixel(pixel_)
-            
-            // @note(viktor): srgb to linear
-            pixel.rgb = square(pixel.rgb)
-            
-            // @todo(viktor): Maybe we should blend the edges to mitigate aliasing for rotated rectangles
-            
-            // @note(viktor): blend with target pixel
-            blended := inv_color_a * pixel + color
-            
-            // @note(viktor): linear to srgb
-            blended.rgb = square_root(blended.rgb)
-            mixed := pack_pixel(blended)
-            
-            simd.masked_store(dest, mixed, write_mask)
-        }
+    if ctx.fill_rect.max.x - ctx.fill_rect.min.x < LaneWidth {
+        ctx.start_mask &= ctx.end_mask
+        ctx.end_mask = ctx.start_mask
     }
 }
 
-clear_render_target :: proc(dest: Bitmap, color: v4, clip_rect: Rectangle2i) {
-    color := color
-    
-    // @note(viktor): linear to srgb
-    color.rgb = square_root(color.rgb)
-    color *= 255
-    
-    for y := clip_rect.min.y; y < clip_rect.max.y; y += 1 {
-        for x := clip_rect.min.x; x < clip_rect.max.x; x += 1 {
-            index := y * dest.width + x
-            pixel := &dest.memory[index]
-            pixel^ = v4_to_rgba(color)
-        }
+////////////////////////////////////////////////
+
+shader_row_with_uv :: proc (ctx: ^Shader_Context, y: i32) {
+    // @note(viktor): Iterative calculations will lead to arithmetic errors, so we always calculate based of the index.
+    y_index := cast(f32) (y - ctx.fill_rect.min.y)
+    ctx.u_row = ctx.delta_u_row + y_index * ctx.normal_x_axis.y
+    ctx.v_row = ctx.delta_v_row + y_index * ctx.normal_y_axis.y
+}
+
+////////////////////////////////////////////////
+
+shader_update_load_and_store_mask :: proc (ctx: ^Shader_Context, x: i32) {
+    if x == ctx.fill_rect.min.x {
+        ctx.mask = ctx.start_mask
+    } else if x + LaneWidth >= ctx.fill_rect.max.x {
+        ctx.mask = ctx.end_mask
+    } else {
+        ctx.mask = MaskFF
     }
 }
 
-blend_render_target :: proc(dest: Bitmap, alpha: f32, source: Bitmap, clip_rect: Rectangle2i) {
-    // @todo(viktor): simd-ize this but remember to check for unaligned loads and stores like in the other routines
-    inv_255: f32 = (1.0 / 255.0)
-    // @todo(viktor): the alpha is not handled correctly, the debug ui is way to transparent
-    for y := clip_rect.min.y; y < clip_rect.max.y; y += 1 {
-        for x := clip_rect.min.x; x < clip_rect.max.x; x += 1 {
-            index := y * dest.width + x
-            
-            texel := &source.memory[index]
-            pixel := &dest.memory[index]
-            
-            texelx8 := rgba_to_v4(texel^)
-            pixelx8 := rgba_to_v4(pixel^)
-            
-            // @note(viktor): srgb to linear
-            texelx8 *= inv_255
-            texelx8.rgb = square(texelx8.rgb)
-            pixelx8 *= inv_255
-            pixelx8.rgb = square(pixelx8.rgb)
-            
-            texel_alpha := alpha * texelx8.a
-            blended := linear_blend(pixelx8, texelx8, texel_alpha)
-            
-            // @note(viktor): linear to srgb
-            blended.rgb = square_root(blended.rgb)
-            blended *= 255
-            
-            pixel^ = v4_to_rgba(blended)
-        }
-    }
+shader_load_pixels :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
+    shader_update_load_and_store_mask(ctx, x)
+    result = _shader_load_pixels(ctx, x, y)
+    
+    return result
 }
 
-unpack_pixel :: proc(pixel: u32x8) -> (color: [4]f32x8) {
-    color.r = cast(f32x8) (0xff &          pixel      )
-    color.g = cast(f32x8) (0xff & simd.shr(pixel,  8) )
-    color.b = cast(f32x8) (0xff & simd.shr(pixel,  16))
-    color.a = cast(f32x8) (0xff & simd.shr(pixel,  24))
+shader_load_pixels_with_uv :: proc (ctx: ^Shader_Context, x, y: i32) -> (pixels: lane_v4, uv: lane_v2) {
+    shader_update_load_and_store_mask(ctx, x)
+    uv = _shader_uv_and_mask(ctx, x, y)
+    pixels = _shader_load_pixels(ctx, x, y)
+    
+    return pixels, uv
+}
+
+_shader_uv_and_mask :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v2) {
+    x_index := cast(f32) (x - ctx.fill_rect.min.x) / LaneWidth
+    u := ctx.u_row + x_index * ctx.normal_x_axis.x * LaneWidth
+    v := ctx.v_row + x_index * ctx.normal_y_axis.x * LaneWidth
+    
+    ctx.mask &= simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
+    
+    u = clamp_01(u)
+    v = clamp_01(v)
+    
+    return {u, v}
+}
+
+_shader_load_pixels :: proc (using ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
+    at      = &buffer.memory[x + y * buffer.width]
+    pixel_ := simd.masked_load(at, cast(lane_u32) 0, mask)
+    result  = unpack_pixel(pixel_)
+    
+    result = srgb_to_linear(result)
+    return result
+}
+
+////////////////////////////////////////////////
+
+shader_store_pixels_at :: proc (ctx: ^Shader_Context, packed: lane_u32, x, y: i32) {
+    ctx.at = &ctx.buffer.memory[x + y * ctx.buffer.width]
+    simd.masked_store(ctx.at, packed, ctx.mask)
+}
+
+shader_store_pixels :: proc (ctx: ^Shader_Context, packed: lane_u32) {
+    simd.masked_store(ctx.at, packed, ctx.mask)
+}
+
+////////////////////////////////////////////////
+
+unpack_pixel :: proc (pixel: lane_u32) -> (color: lane_v4) {
+    color.r = cast(lane_f32) (0xff &          pixel      )
+    color.g = cast(lane_f32) (0xff & simd.shr(pixel,  8) )
+    color.b = cast(lane_f32) (0xff & simd.shr(pixel,  16))
+    color.a = cast(lane_f32) (0xff & simd.shr(pixel,  24))
     
     return color
 }
 
-pack_pixel :: proc (value: [4]f32x8) -> (result: u32x8) {
-    color := vec_cast(u32x8, value)
+pack_pixel :: proc (value: lane_v4) -> (result: lane_u32) {
+    color := vec_cast(lane_u32, value)
     result = color.r | simd.shl_masked(color.g, 8) | simd.shl_masked(color.b, 16) | simd.shl_masked(color.a, 24)
     return result
 }
 
-////////////////////////////////////////////////
-////////////////////////////////////////////////
-////////////////////////////////////////////////
-////////////////////////////////////////////////
-////////////////////////////////////////////////
-
-sample :: proc(texture: Bitmap, p: v2i) -> (result: v4) {
-    texel := texture.memory[ p.y * texture.width +  p.x]
-    result = vec_cast(f32, texel)
-    
+srgb_to_linear :: proc (color: lane_v4) -> (result: lane_v4) {
+    result.rgb = square(color.rgb)
+    result.a = color.a
     return result
 }
 
-sample_bilinear :: proc(texture: Bitmap, p: v2i) -> (s00, s01, s10, s11: v4) {
-    s00 = sample(texture, p + {0, 0})
-    s01 = sample(texture, p + {1, 0})
-    s10 = sample(texture, p + {0, 1})
-    s11 = sample(texture, p + {1, 1})
-    
-    return s00, s01, s10, s11
+linear_to_srgb :: proc (color: lane_v4) -> (result: lane_v4) {
+    result.rgb = square_root(color.rgb)
+    result.a = color.a
+    return result
 }
 
-/*
-    @note(viktor):
+////////////////////////////////////////////////
 
-    screen_space_uv tells us where the ray is being cast _from_ in
-    normalized screen coordinates.
-
-    sample_direction tells us what direction the cast is going
-    it does not have to be normalized, but y _must be positive_.
-
-    roughness says which LODs of Map we sample from.
-
-    distance_from_map_in_z says how far the map is from the sample
-    point in z, given in meters
-*/
-sample_environment_map :: proc(screen_space_uv: v2, sample_direction: v3, roughness: f32, environment_map: EnvironmentMap, distance_from_map_in_z: f32) -> (result: v3) {
-    assert(environment_map.LOD[0].memory != nil)
-    
-    // @note(viktor): pick which LOD to sample from
-    lod_index := round(i32, roughness * cast(f32) (len(environment_map.LOD)-1))
-    lod := environment_map.LOD[lod_index]
-    lod_size := vec_cast(f32, lod.width, lod.height)
-    
-    // @note(viktor): compute the distance to the map and the
-    // scaling factor for meters-to-UVs
-    uvs_per_meter: f32 = 0.1 // @todo(viktor): parameterize
-    c := (uvs_per_meter * distance_from_map_in_z) / sample_direction.y
-    offset := c * sample_direction.xz
-    
-    // @note(viktor): Find the intersection point
-    uv := screen_space_uv + offset
-    uv = clamp_01(uv)
-    
-    // @note(viktor): bilinear sample
-    t        := uv * (lod_size - 2)
-    index    := vec_cast(i32, t)
-    fraction := t - vec_cast(f32, index)
-    
-    assert(index.x >= 0 && index.x < lod.width)
-    assert(index.y >= 0 && index.y < lod.height)
-    
-    l00, l01, l10, l11 := sample_bilinear(lod, index)
-    
-    l00 = srgb_255_to_linear_1(l00)
-    l01 = srgb_255_to_linear_1(l01)
-    l10 = srgb_255_to_linear_1(l10)
-    l11 = srgb_255_to_linear_1(l11)
-    
-    result = blend_bilinear(l00, l01, l10, l11, fraction).rgb
-    
-    if GlobalDebugShowLightingSampling {
-        // @note(viktor): Turn this on to see where in the map you're sampling!
-        texel := &lod.memory[index.y * lod.width + index.x]
-        texel ^= 255
+when LaneWidth == 4 {
+    start_masks := [?] lane_u32 {
+        {0..<4 = MaskFF}, // no mask
+        {1..<4 = MaskFF},
+        {2..<4 = MaskFF},
+        {3..<4 = MaskFF},
     }
     
-    return result
-}
-
-blend_bilinear :: proc(s00, s01, s10, s11: v4, t: v2) -> (result: v4) {
-    result = linear_blend( linear_blend(s00, s01, t.x), linear_blend(s10, s11, t.x), t.y )
+    end_masks := [?] lane_u32 {
+        {0..<4 = MaskFF}, // no mask
+        {0..<1 = MaskFF},
+        {0..<2 = MaskFF},
+        {0..<3 = MaskFF},
+    }
+} else when LaneWidth == 8 {
+    start_masks := [?] lane_u32 {
+        {0..<8 = MaskFF}, // no mask
+        {1..<8 = MaskFF},
+        {2..<8 = MaskFF},
+        {3..<8 = MaskFF},
+        {4..<8 = MaskFF},
+        {5..<8 = MaskFF},
+        {6..<8 = MaskFF},
+        {7..<8 = MaskFF},
+    }
     
-    return result
-}
-
-@(require_results)
-unscale_and_bias :: proc(normal: v4) -> (result: v4) {
-    inv_255: f32 = 1.0 / 255.0
+    end_masks := [?] lane_u32 {
+        {0..<8 = MaskFF}, // no mask
+        {0..<1 = MaskFF},
+        {0..<2 = MaskFF},
+        {0..<3 = MaskFF},
+        {0..<4 = MaskFF},
+        {0..<5 = MaskFF},
+        {0..<6 = MaskFF},
+        {0..<7 = MaskFF},
+    }
+} else when LaneWidth == 16 {
+    start_masks := [?] lane_u32 {
+        { 0..<16 = MaskFF}, // no mask
+        { 1..<16 = MaskFF},
+        { 2..<16 = MaskFF},
+        { 3..<16 = MaskFF},
+        { 4..<16 = MaskFF},
+        { 5..<16 = MaskFF},
+        { 6..<16 = MaskFF},
+        { 7..<16 = MaskFF},
+        { 8..<16 = MaskFF},
+        { 9..<16 = MaskFF},
+        {10..<16 = MaskFF},
+        {11..<16 = MaskFF},
+        {12..<16 = MaskFF},
+        {13..<16 = MaskFF},
+        {14..<16 = MaskFF},
+        {15..<16 = MaskFF},
+    }
     
-    result.xyz = -1 + 2 * (normal.xyz * inv_255)
-    result.w = inv_255 * normal.w
-    
-    return result
-}
-
-// @note(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
-srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
-    result.rgb = square(srgb.rgb)
-    result.a = srgb.a
-    
-    return result
-}
-srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
-    inv_255: f32 = 1.0 / 255.0
-    result = srgb * inv_255
-    result = srgb_to_linear(result)
-    
-    return result
-}
-
-linear_to_srgb :: proc(linear: v4) -> (result: v4) {
-    result.rgb = square_root(linear.rgb)
-    result.a = linear.a
-    
-    return result
-}
-linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
-    result = linear_to_srgb(linear)
-    result *= 255
-    
-    return result
+    end_masks := [?] lane_u32 {
+        {0..<16 = MaskFF}, // no mask
+        {0..< 1 = MaskFF},
+        {0..< 2 = MaskFF},
+        {0..< 3 = MaskFF},
+        {0..< 4 = MaskFF},
+        {0..< 5 = MaskFF},
+        {0..< 6 = MaskFF},
+        {0..< 7 = MaskFF},
+        {0..< 8 = MaskFF},
+        {0..< 9 = MaskFF},
+        {0..<10 = MaskFF},
+        {0..<11 = MaskFF},
+        {0..<12 = MaskFF},
+        {0..<13 = MaskFF},
+        {0..<14 = MaskFF},
+        {0..<15 = MaskFF},
+    }
+} else {
+    #panic("unhandled lane width")
 }

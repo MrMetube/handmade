@@ -4,7 +4,7 @@ import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
 
-GlDefaultTextureFormat :i32= gl.RGBA8
+GlDefaultTextureFormat: i32 = gl.RGBA8
 
 GlMajorVersion :: 4
 GlMinorVersion :: 6
@@ -23,12 +23,11 @@ glBegin:        proc(_: u32)
 glEnd:          proc()
 glMatrixMode:   proc(_: i32)
 glLoadIdentity: proc()
-glLoadMatrixf:  proc(_:[^]f32)
-glTexCoord2f:   proc(_,_:f32)
-glVertex2f:     proc(_,_:f32)
-glVertex2fv:    proc(_:[^]f32)
-glColor4f:      proc(_,_,_,_:f32)
-glColor4fv:     proc(_:[^]f32)
+glLoadMatrixf:  proc(_:[^] f32)
+glTexCoord2f:   proc(_,_: f32)
+glVertex2f:     proc(_,_: f32)
+glColor4f:      proc(_,_,_,_: f32)
+glColor4fv:     proc(_: [^] f32)
 glTexEnvi:      proc(_: u32, _: u32, _: u32)
 
 OpenGlInfo :: struct {
@@ -150,7 +149,6 @@ load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
             win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
             win.gl_set_proc_address(&glVertex2f, "glVertex2f")
-            win.gl_set_proc_address(&glVertex2fv, "glVertex2fv")
             win.gl_set_proc_address(&glColor4f, "glColor4f")
             win.gl_set_proc_address(&glColor4fv, "glColor4fv")
         }
@@ -290,6 +288,8 @@ gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {
 ////////////////////////////////////////////////
 
 gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
+    timed_function()
+    
     gl.Disable(gl.SCISSOR_TEST)
     gl.Disable(gl.BLEND)
     defer gl.Enable(gl.BLEND)
@@ -323,6 +323,8 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
     gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
 }
 
+////////////////////////////////////////////////
+
 FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
@@ -333,13 +335,16 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     gl_bind_frame_buffer(0, draw_region)
     defer gl_bind_frame_buffer(0, draw_region)
     
-    gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.TEXTURE_2D)
+    gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
+    glMatrixMode(gl.TEXTURE)
+    glLoadIdentity()
+    
     // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
-    max_render_target_count := cast(i64) commands.max_render_target_index+1
+    max_render_target_count := cast(i64) commands.max_render_target_index
     assert(max_render_target_count < len(FramebufferHandles.data))
     if max_render_target_count >= FramebufferHandles.count {
         count := FramebufferHandles.count
@@ -358,7 +363,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         }
     }
     
-    for index in 0..< FramebufferHandles.count {
+    for index in 0..< max_render_target_count {
         gl_bind_frame_buffer(cast(u32) index, draw_region)
         if index == 0 {
             gl.Scissor(0, 0, window_dim.x, window_dim.y)
@@ -366,14 +371,17 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             gl.Scissor(0, 0, draw_dim.x, draw_dim.y)
         }
         
-        // @todo(viktor): this can get out of sync with the targets if a middle target doesnt push a clear
-        // @todo(viktor): Why are there 3 framebuffer handles if we only use 2 render targets?
-        clear_color := index < commands.clear_colors.count ? commands.clear_colors.data[index] : 0
+        timed_block("clear render targets")
+        clear_color := commands.clear_color
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
         gl.Clear(gl.COLOR_BUFFER_BIT)
     }
     
     gl_set_screenspace({commands.width, commands.height})
+    
+    draw_dim_f := vec_cast(f32, draw_dim)
+    comm_dim   := vec_cast(f32, commands.width, commands.height)
+    clip_scale := safe_ratio_0(draw_dim_f, comm_dim)
     
     clip_rect_index      := max(u16)
     current_target_index := max(u32)
@@ -393,7 +401,10 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
                 gl_bind_frame_buffer(current_target_index, draw_region)
             }
             
-            rect := current_target_index == 0 ? add_offset(clip.rect, draw_region.min) : clip.rect
+            scaled := scale_radius(rec_cast(f32, clip.rect), clip_scale)
+            rect := rectangle_min_max(round(i32, scaled.min), round(i32, scaled.max))
+            if current_target_index == 0 do rect = add_offset(rect, draw_region.min)
+            
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
         }
         
@@ -403,6 +414,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
           
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
+            timed_block("blend render targets")
             
             gl_bind_frame_buffer(entry.dest_index, draw_region)
             defer gl_bind_frame_buffer(current_target_index, draw_region)
@@ -508,20 +520,18 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     }
 }
 
-draw_bounds_recursive :: proc(bounds: []SortSpriteBounds, index: u16) {
+draw_bounds_recursive :: proc(bounds: [] SortSpriteBounds, index: u16) {
     bound := &bounds[index]
     if .DebugBox in bound.flags do return
     bound.flags += { .DebugBox }
     
     bound_center := get_center(bound.screen_bounds)
     for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
-        assert(edge.front == index)
-        
         behind := bounds[edge.behind]
         behind_center := get_center(behind.screen_bounds)
         
-        glVertex2fv(&bound_center[0])
-        glVertex2fv(&behind_center[0])
+        glVertex2f(bound_center.x, bound_center.y)
+        glVertex2f(behind_center.x, behind_center.y)
         
         draw_bounds_recursive(bounds, edge.behind)
     }
@@ -545,24 +555,21 @@ gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i)
     render_target := FramebufferHandles.data[render_target_index]
     gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
     
-    draw_dim := get_dimension(draw_region)
+    window_dim := get_dimension(draw_region)
     if render_target_index == 0 {
-        gl.Viewport(draw_region.min.x, draw_region.min.y, draw_dim.x, draw_dim.y)
+        gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
     } else {
-        gl.Viewport(0, 0, draw_dim.x, draw_dim.y)
+        gl.Viewport(0, 0, window_dim.x, window_dim.y)
     }
 }
 
 gl_set_screenspace :: proc(size: v2i) {
-    a := safe_ratio_1(f32(2), cast(f32) size.x)
-    b := safe_ratio_1(f32(2), cast(f32) size.y)
-    
-    glMatrixMode(gl.TEXTURE)
-    glLoadIdentity()
-    
     glMatrixMode(gl.MODELVIEW)
     glLoadIdentity()
     
+    glMatrixMode(gl.PROJECTION)
+    a := safe_ratio_1(cast(f32) 2, cast(f32) size.x)
+    b := safe_ratio_1(cast(f32) 2, cast(f32) size.y)
     transform := m4 {
         a, 0, 0, -1,
         0, b, 0, -1,
@@ -570,7 +577,6 @@ gl_set_screenspace :: proc(size: v2i) {
         0, 0, 0,  1,
     }
     
-    glMatrixMode(gl.PROJECTION)
     glLoadMatrixf(&transform[0,0])
 }
 
