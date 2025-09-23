@@ -865,7 +865,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
 
 debug_get_element_color :: proc (element: ^DebugElement) -> (result: v4) {
     name := element.guid.name
-    color_hash:= seed_random_series_manual(len(name))
+    color_hash := seed_random_series_manual(len(name) + cast(int) name[0])
     for _ in 0..<len(name) do _ = next_random_u32(&color_hash)
     
     hash := next_random_u32(&color_hash)

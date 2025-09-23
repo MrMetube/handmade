@@ -23,8 +23,8 @@ import win "core:sys/windows"
 // Config
 
 GlobalBackBuffer :=  Bitmap {
-    width = 1280, height = 720,
-    // width = 1920, height = 1080,
+    // width = 1280, height = 720,
+    width = 1920, height = 1080,
     // width = 2560, height = 1440,
 }
 
@@ -139,7 +139,7 @@ main :: proc() {
         
         {
             buffer := &GlobalBackBuffer
-            assert(align16(buffer.width) == buffer.width)
+            assert(align(16, buffer.width) == buffer.width)
             buffer.memory = push(&platform_arena, Color, buffer.width * buffer.height)
         }
         
@@ -506,7 +506,7 @@ main :: proc() {
         
         if !GlobalPause {
             sound_is_valid = true
-            play_cursor, write_cursor: win.DWORD
+            play_cursor, write_cursor: u32
             audio_counter := get_wall_clock()
             from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
             
@@ -539,7 +539,7 @@ main :: proc() {
                 expected_sound_bytes_per_frame := cast(u32) (cast(f32)sound_output.bytes_per_sample * cast(f32) sound_output.samples_per_second * target_seconds_per_frame)
                 
                 seconds_left_until_flip := target_seconds_per_frame-from_begin_to_audio
-                expected_sound_bytes_until_flip := cast(win.DWORD) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
+                expected_sound_bytes_until_flip := cast(u32) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
                 
                 expected_frame_boundary_byte := play_cursor + expected_sound_bytes_until_flip
                 
@@ -552,7 +552,7 @@ main :: proc() {
                 
                 audio_card_is_low_latency := safe_write_cursor < expected_frame_boundary_byte
                 
-                target_cursor: win.DWORD
+                target_cursor: u32
                 if audio_card_is_low_latency {
                     target_cursor = expected_frame_boundary_byte + expected_sound_bytes_per_frame
                 } else {
@@ -560,7 +560,7 @@ main :: proc() {
                 }
                 target_cursor %= sound_output.buffer_size
                 
-                bytes_to_write: win.DWORD
+                bytes_to_write: u32
                 if byte_to_lock > target_cursor {
                     bytes_to_write = target_cursor - byte_to_lock + sound_output.buffer_size
                 } else{
@@ -569,7 +569,7 @@ main :: proc() {
                 
                 sound_buffer := GameSoundBuffer{
                     samples_per_second = sound_output.samples_per_second,
-                    samples = samples[:align8(bytes_to_write/sound_output.bytes_per_sample)],
+                    samples = samples[:align(8, bytes_to_write / sound_output.bytes_per_sample)],
                 }
                 bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
                 
@@ -753,7 +753,7 @@ allocate_memory_block :: proc(#any_int size: umm, allocation_flags := Platform_A
         base_offset = 2 * PageSize
         protect_offset = PageSize
     } else if .check_overflow in allocation_flags {
-        size_rounded_up := align_pow2(size, PageSize)
+        size_rounded_up := align(PageSize, size)
         total_size = size_rounded_up + 2 * PageSize
         base_offset = PageSize + size_rounded_up - size
         protect_offset = PageSize + size_rounded_up
@@ -974,7 +974,7 @@ get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
 
 fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     region1, region2: pmm
-    region1_size, region2_size: win.DWORD
+    region1_size, region2_size: u32
     
     if result := GlobalSoundBuffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // @todo(viktor): assert that region1/2_size is valid
@@ -1014,7 +1014,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
 
 clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
     region1, region2 : pmm
-    region1_size, region2_size: win.DWORD
+    region1_size, region2_size: u32
     // @copypasta
     if result := GlobalSoundBuffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // @todo(viktor): assert that region1/2_size is valid

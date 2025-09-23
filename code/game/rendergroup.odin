@@ -145,7 +145,7 @@ RenderEntryClip :: struct {
 
 @(common)
 RenderEntryBitmap :: struct {
-    bitmap: ^Bitmap,
+    bitmap: Bitmap,
     id:     u32, // BitmapId @cleanup
     
     premultiplied_color:  v4,
@@ -387,13 +387,13 @@ push_clear :: proc(group: ^RenderGroup, color: v4) {
 
 push_bitmap :: proc(
     group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1,1,1,1}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
+    offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1},
 ) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap != nil && bitmap.texture_handle != 0 {
         assert(bitmap.texture_handle != 0)
-        push_bitmap_raw(group, bitmap, transform, height, offset, color, id, use_alignment, x_axis, y_axis)
+        push_bitmap_raw(group, bitmap^, transform, height, offset, color, id, use_alignment, x_axis, y_axis)
     } else {
         load_bitmap(group.assets, id, false)
         group.missing_asset_count += 1
@@ -401,12 +401,12 @@ push_bitmap :: proc(
 }
 
 push_bitmap_raw :: proc(
-    group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1,1,1,1}, asset_id: BitmapId = 0, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
+    group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
+    offset := v3{}, color := v4{1, 1, 1, 1}, asset_id: BitmapId = 0, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1},
 ) {
     assert(bitmap.width_over_height != 0)
     
-    used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis, y_axis)
+    used_dim := get_used_bitmap_dim(group, bitmap, transform, height, offset, use_alignment, x_axis, y_axis)
     if used_dim.basis.valid {
         assert(bitmap.texture_handle != 0)
         

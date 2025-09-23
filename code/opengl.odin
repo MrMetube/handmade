@@ -346,7 +346,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     glLoadIdentity()
     
     // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
-    max_render_target_count := cast(i64) commands.max_render_target_index
+    max_render_target_count := cast(i64) commands.max_render_target_index + 1
     assert(max_render_target_count < len(FramebufferHandles.data))
     if max_render_target_count >= FramebufferHandles.count {
         count := FramebufferHandles.count
@@ -367,22 +367,24 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     
     for index in 0..< max_render_target_count {
         gl_bind_frame_buffer(cast(u32) index, draw_region)
+        clear_color: v4
         if index == 0 {
             gl.Scissor(0, 0, window_dim.x, window_dim.y)
+            clear_color = commands.clear_color
         } else {
             gl.Scissor(0, 0, draw_dim.x, draw_dim.y)
         }
         
-        clear_color := commands.clear_color
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
         gl.Clear(gl.COLOR_BUFFER_BIT)
     }
     
     gl_set_screenspace({commands.width, commands.height})
     
-    draw_dim_f := vec_cast(f32, draw_dim)
-    comm_dim   := vec_cast(f32, commands.width, commands.height)
-    clip_scale := safe_ratio_0(draw_dim_f, comm_dim)
+    commands_dim := vec_cast(f32, commands.width, commands.height)
+    dim := get_dimension(draw_region)
+    clip_scale_x := safe_ratio_0(cast(f32) dim.x, commands_dim.x)
+    clip_scale_y := safe_ratio_0(cast(f32) dim.y, commands_dim.y)
     
     clip_rect_index      := max(u16)
     current_target_index := max(u32)
@@ -402,8 +404,12 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
                 gl_bind_frame_buffer(current_target_index, draw_region)
             }
             
-            scaled := scale_radius(rec_cast(f32, clip.rect), clip_scale)
-            rect := rectangle_min_max(round(i32, scaled.min), round(i32, scaled.max))
+            rect := clip.rect
+            rect.min.x = round(i32, cast(f32) rect.min.x * clip_scale_x)
+            rect.min.y = round(i32, cast(f32) rect.min.y * clip_scale_y)
+            rect.max.x = round(i32, cast(f32) rect.max.x * clip_scale_x)
+            rect.max.y = round(i32, cast(f32) rect.max.y * clip_scale_y)
+            
             if current_target_index == 0 do rect = add_offset(rect, draw_region.min)
             
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
@@ -421,9 +427,11 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             
             gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+            
             // @todo(viktor): If the window has black bars the rectangle will be offset incorrectly. thanks global variables!
             gl.BindTexture(gl.TEXTURE_2D, FramebufferTextures.data[entry.source_index])
-            gl_rectangle(0, vec_cast(f32, commands.width, commands.height), v4{1,1,1, entry.alpha}, 0, 1)
+            
+            gl_rectangle(v2{0, 0}, commands_dim, v4{1, 1, 1, entry.alpha})
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data

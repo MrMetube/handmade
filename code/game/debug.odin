@@ -279,7 +279,6 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
     push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
-    push_clear(&debug.render_group, {0,0,0,0})
     
     push_sort_barrier(&debug.render_group, true)
     

@@ -170,6 +170,7 @@ play_intro_cutscene :: proc (state: ^State, tran_state: ^TransientState) {
 
 update_and_render_title_screen :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^Titlescreen_Mode) -> (rerun: bool) {
     rerun = check_for_meta_input(state, tran_state, input)
+    
     if !rerun {
         push_clear(render_group, {1, 0.25, 0.25, 1})
         
@@ -185,6 +186,7 @@ update_and_render_title_screen :: proc(state: ^State, tran_state: ^TransientStat
 update_and_render_cutscene :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^Cutscene_Mode) -> (rerun: bool) {
     assets := tran_state.assets
     rerun = check_for_meta_input(state, tran_state, input)
+    
     if !rerun {
         // @note(viktor): prefetch assets for upcoming scenes
         render_cutscene_at_time(assets, nil, mode, mode.t + CutsceneWarmUpSeconds)

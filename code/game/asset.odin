@@ -558,7 +558,7 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
             
             alignment_offset := cast(umm) result & cast(umm) (alignment - 1)
             if alignment_offset != 0 {
-                result = cast(^AssetMemoryHeader) align_pow2(cast(umm) result, cast(umm) (alignment - 1))
+                result = cast(^AssetMemoryHeader) align((alignment - 1), cast(umm) result)
             }
             
             if(block.size - (alignment - auto_cast alignment_offset) >= size) {

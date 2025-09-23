@@ -120,7 +120,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushP
         
         if BoundsCheck & arena.allocation_flags != {} {
             arena.minimum_block_size = 0
-            size = align_pow2(size, params.alignment)
+            size = align(params.alignment, size)
         } else if arena.minimum_block_size == 0 {
             arena.minimum_block_size = 2 * Megabyte
         }

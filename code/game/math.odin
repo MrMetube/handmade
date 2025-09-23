@@ -29,8 +29,9 @@ Rectangle2i :: Rectangle(v2i)
 f32x4 :: #simd [4] f32
 i32x4 :: #simd [4] i32
 
-LaneWidth :: 8
+LaneWidth :: 16
 
+// @todo(viktor): @metaprogram cant see decls in when blocks for now, so we put them in global scope
 lane_f32 :: #simd [LaneWidth] f32
 lane_u32 :: #simd [LaneWidth] u32
 lane_i32 :: #simd [LaneWidth] i32

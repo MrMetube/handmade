@@ -57,7 +57,6 @@ DarkBlue   :: v4{0.08, 0.08, 0.2  , 1}
 SeaGreen :: v4{0.18, 0.77, 0.71, 1}
 
 color_wheel :: [?] v4 {
-    v4{0.3 , 0.22, 0.34, 1}, 
     v4{0.08, 0.38, 0.43, 1}, 
     v4{0.99, 0.96, 0.69, 1}, 
     v4{1   , 0.5 , 0.07, 1}, 
@@ -90,17 +89,9 @@ Terabyte :: 1024 * Gigabyte
 Petabyte :: 1024 * Terabyte
 Exabyte  :: 1024 * Petabyte
 
-align8     :: proc (value: $T)               -> T { return (value + (8-1)) &~ (8-1) }
-align16    :: proc (value: $T)               -> T { return (value + (16-1)) &~ (16-1) }
-align_pow2 :: proc (value: $T, alignment: T) -> T { return (value + (alignment-1)) &~ (alignment-1) }
-
-is_aligned8     :: proc (value: $T)               -> bool { return align_offset8(value) == 0 }
-is_aligned16    :: proc (value: $T)               -> bool { return align_offset16(value) == 0 }
-is_aligned_pow2 :: proc (value: $T, alignment: T) -> bool { return align_offset_pow2(value, alignment) == 0 }
-
-align_offset8     :: proc (value: $T)               -> T { return (value & (8-1)) }
-align_offset16    :: proc (value: $T)               -> T { return (value & (16-1)) }
-align_offset_pow2 :: proc (value: $T, alignment: T) -> T { return (value & (alignment-1)) }
+align        :: proc (#any_int alignment: u64, value: $T) -> T    { return (value + (cast(T) alignment-1)) &~ (cast(T) alignment-1) }
+align_offset :: proc (#any_int alignment: u64, value: $T) -> T    { return (value & (cast(T) alignment-1)) }
+is_aligned   :: proc (#any_int alignment: u64, value: $T) -> bool { return align_offset(alignment, value) == 0 }
 
 safe_truncate :: proc ($R: typeid, value: $T) -> (result: R)
 where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is_integer(R){

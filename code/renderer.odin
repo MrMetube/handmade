@@ -135,10 +135,10 @@ sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena
 
 ////////////////////////////////////////////////
 
-build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (count: i32, hit_barrier: b32) {
+build_sprite_graph :: proc(nodes: [] SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (count: i32, hit_barrier: b32) {
     timed_function()
     
-    assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
+    // assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
     if len(nodes) == 0 do return
     // Grid Factor vs cycles in "bucketing"
     //  o:none   / o:speed
@@ -210,7 +210,7 @@ build_sprite_graph :: proc(nodes: []SortSpriteBounds, arena: ^Arena, screen_size
 unsorted_output :: proc (walk: ^SpriteGraphWalk, nodes: [] SortSpriteBounds) -> (count: i32, hit_barrier: b32) {
     timed_function()
     
-    assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
+    // assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
     if len(nodes) == 0 do return
     
     for &a, index_a in nodes {
@@ -250,27 +250,23 @@ walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
 software_render_commands :: proc(queue: ^WorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
     timed_function()
     
-    targets := push_slice(arena, Bitmap, commands.max_render_target_index+1)
+    targets := push_slice(arena, Bitmap, commands.max_render_target_index + 1)
     targets[0] = base_target
     for &target in targets[1:] {
         target = base_target
-        target.memory = push_slice(arena, Color, target.width * target.height, align_no_clear(16))
-        assert(cast(umm) raw_data(target.memory) & (16 - 1) == 0)
+        target.memory = push_slice(arena, Color, target.width * target.height, align_no_clear(LaneWidth * size_of(Color)))
     }
     
-    // @todo(viktor): Is this still relevant?
     /* @todo(viktor):
-        - Make sure the tiles are all cache-aligned
-        - How big should the tiles be for performance?
         - Actually ballpark the memory bandwidth for our DrawRectangleQuickly
         - Re-test some of our instruction choices
     */
     
     tile_count :: v2i{4, 4}
-    works: [tile_count.x * tile_count.y]TileRenderWork
+    works: [tile_count.x * tile_count.y] TileRenderWork
     
-    tile_size  := v2i{base_target.width, base_target.height} / tile_count
-    tile_size.x = ((tile_size.x + (3)) / 4) * 4
+    tile_size := v2i{base_target.width, base_target.height} / tile_count
+    tile_size.x = align(LaneWidth, tile_size.x)
     
     work_index: i32
     for y in 0..<tile_count.y {
@@ -354,16 +350,14 @@ do_tile_render_work :: proc(data: pmm) {
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
-            draw_rectangle(target, clip_rect, entry.rect, entry.premultiplied_color)
+            draw_rectangle_fill_color_axis_aligned(target, clip_rect, entry.rect, entry.premultiplied_color)
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
-            draw_rectangle(target, clip_rect, entry.p, entry.x_axis, entry.y_axis, entry.bitmap^, entry.premultiplied_color)
+            draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis, entry.y_axis, entry.bitmap, entry.premultiplied_color)
         }
     }
 }
-
-draw_rectangle :: proc { draw_rectangle_fill_color_axis_aligned, draw_rectangle_fill_color, draw_rectangle_with_texture }
 
 ////////////////////////////////////////////////
 // @todo(viktor): 
@@ -655,17 +649,17 @@ _shader_init_mask_fill_rect :: proc (ctx: ^Shader_Context) {
     ctx.start_mask = MaskFF
     ctx.end_mask   = MaskFF
     
-    if !is_aligned_pow2(ctx.fill_rect.min.x, LaneWidth) {
-        ctx.start_mask = start_masks[align_offset_pow2(ctx.fill_rect.min.x, LaneWidth)]
-        ctx.fill_rect.min.x = align_pow2(ctx.fill_rect.min.x, LaneWidth) - LaneWidth
+    if !is_aligned(LaneWidth, ctx.fill_rect.min.x) {
+        ctx.start_mask = start_masks[align_offset(LaneWidth, ctx.fill_rect.min.x)]
+        ctx.fill_rect.min.x = align(LaneWidth, ctx.fill_rect.min.x) - LaneWidth
     }
     
-    if !is_aligned_pow2(ctx.fill_rect.max.x, LaneWidth) {
-        ctx.end_mask = end_masks[align_offset_pow2(ctx.fill_rect.max.x, LaneWidth)]
-        ctx.fill_rect.max.x = align_pow2(ctx.fill_rect.max.x, LaneWidth)
+    if !is_aligned(LaneWidth, ctx.fill_rect.max.x) {
+        ctx.end_mask = end_masks[align_offset(LaneWidth, ctx.fill_rect.max.x)]
+        ctx.fill_rect.max.x = align(LaneWidth, ctx.fill_rect.max.x)
     }
     
-    if ctx.fill_rect.max.x - ctx.fill_rect.min.x < LaneWidth {
+    if ctx.fill_rect.max.x - ctx.fill_rect.min.x == LaneWidth {
         ctx.start_mask &= ctx.end_mask
         ctx.end_mask = ctx.start_mask
     }
