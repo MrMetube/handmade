@@ -241,8 +241,9 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
 }
 
 ////////////////////////////////////////////////
-
 gl_manage_textures :: proc(last: ^TextureOp) {
+    timed_function()
+    
     allocs, deallocs: u32
     
     for operation := last; operation != nil; operation = operation.next {
@@ -289,12 +290,13 @@ gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {
 
 gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
     timed_function()
+
+    gl_bind_frame_buffer(0, draw_region)
     
     gl.Disable(gl.SCISSOR_TEST)
     gl.Disable(gl.BLEND)
     defer gl.Enable(gl.BLEND)
     
-    gl_bind_frame_buffer(0, draw_region)
     
     gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
     defer gl.BindTexture(gl.TEXTURE_2D, 0)
@@ -371,7 +373,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             gl.Scissor(0, 0, draw_dim.x, draw_dim.y)
         }
         
-        timed_block("clear render targets")
         clear_color := commands.clear_color
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
         gl.Clear(gl.COLOR_BUFFER_BIT)
@@ -414,7 +415,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
           
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
-            timed_block("blend render targets")
             
             gl_bind_frame_buffer(entry.dest_index, draw_region)
             defer gl_bind_frame_buffer(current_target_index, draw_region)
@@ -519,6 +519,8 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         }
     }
 }
+
+////////////////////////////////////////////////
 
 draw_bounds_recursive :: proc(bounds: [] SortSpriteBounds, index: u16) {
     bound := &bounds[index]

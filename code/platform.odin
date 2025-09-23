@@ -49,9 +49,9 @@ GlobalBlitTextureHandle: u32
 
 // Debug Variables
 
-GlobalPause:                 b32
-GlobalDebugShowCursor:       b32 = INTERNAL
-GlobalUseSoftwareRenderer:   b32 = true
+GlobalPause:               b32
+GlobalDebugShowCursor:     b32 = INTERNAL
+GlobalUseSoftwareRenderer: b32 = false
 
 _GlobalDebugTable: DebugTable
 GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
