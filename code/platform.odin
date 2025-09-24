@@ -766,7 +766,7 @@ allocate_memory_block :: proc(#any_int size: umm, allocation_flags := Platform_A
     
     if BoundsCheck & allocation_flags != {} {
         old_protect: u32
-        protected := win.VirtualProtect(&memory[protect_offset], PageSize, win.PAGE_NOACCESS, &old_protect)
+        protected := cast(bool) win.VirtualProtect(&memory[protect_offset], PageSize, win.PAGE_NOACCESS, &old_protect)
         assert(protected)
     }
     
@@ -801,7 +801,7 @@ free_memory_block :: proc (block: ^Memory_Block) {
     list_remove(block)
     end_ticket_mutex(&GlobalPlatformState.block_mutex)
     
-    ok := win.VirtualFree(block, 0, win.MEM_RELEASE)
+    ok := cast(bool) win.VirtualFree(block, 0, win.MEM_RELEASE)
     assert(ok)
 }
 
@@ -881,27 +881,28 @@ begin_recording_input :: proc(state: ^PlatformState, index: i32) {
                 size = cast(u64) len(source.block.storage),
             }
             
-            ok: win.BOOL
-            ok = win.WriteFile(state.recording_handle, &dest, size_of(dest), &written, nil)
+            ok: bool
+            ok = cast(bool) win.WriteFile(state.recording_handle, &dest, size_of(dest), &written, nil)
             assert(ok)
-            ok = win.WriteFile(state.recording_handle, base, safe_truncate(u32, dest.size), &written, nil)
+            ok = cast(bool) win.WriteFile(state.recording_handle, base, safe_truncate(u32, dest.size), &written, nil)
             assert(ok)
         }
         end_ticket_mutex(&state.block_mutex)
         
         final_block := Saved_Memory_Block {}
-        ok := win.WriteFile(state.recording_handle, &final_block, size_of(final_block), &written, nil)
+        ok := cast(bool) win.WriteFile(state.recording_handle, &final_block, size_of(final_block), &written, nil)
         assert(ok)
     }
 }
 
 record_input :: proc(state: ^PlatformState, input: ^Input) {
     bytes_written: u32
-    win.WriteFile(state.recording_handle, input, cast(u32) size_of(Input), &bytes_written, nil)
+    ok := cast(bool) win.WriteFile(state.recording_handle, input, cast(u32) size_of(Input), &bytes_written, nil)
+    assert(ok)
 }
 
 end_recording_input :: proc(state: ^PlatformState) {
-    ok := win.CloseHandle(state.recording_handle)
+    ok := cast(bool) win.CloseHandle(state.recording_handle)
     assert(ok)
     state.recording_index = 0
 }
@@ -918,13 +919,13 @@ begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
         read: u32
         for {
             block: Saved_Memory_Block
-            ok: win.BOOL
-            ok = win.ReadFile(state.replaying_handle, &block, size_of(block), &read, nil)
+            ok: bool
+            ok = cast(bool) win.ReadFile(state.replaying_handle, &block, size_of(block), &read, nil)
             assert(ok)
             if block.base == 0 do break
             
             base_pointer := cast(pmm) cast(umm) block.base
-            ok = win.ReadFile(state.replaying_handle, base_pointer, safe_truncate(u32, block.size), &read, nil)
+            ok = cast(bool) win.ReadFile(state.replaying_handle, base_pointer, safe_truncate(u32, block.size), &read, nil)
             assert(ok)
         }
     }
@@ -938,7 +939,7 @@ replay_input :: proc(state: ^PlatformState, input: ^Input) {
             replay_index := state.replaying_index
             end_replaying_input(state)
             begin_replaying_input(state, replay_index)
-            ok := win.ReadFile(state.replaying_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
+            ok := cast(bool) win.ReadFile(state.replaying_handle, input, cast(u32) size_of(Input), &bytes_read, nil)
             assert(ok)
         }
     }
@@ -947,7 +948,7 @@ replay_input :: proc(state: ^PlatformState, input: ^Input) {
 end_replaying_input :: proc(state: ^PlatformState) {
     clear_blocks_by_mask(state, { .freed_during_loop })
     
-    ok := win.CloseHandle(state.replaying_handle)
+    ok := cast(bool) win.CloseHandle(state.replaying_handle)
     assert(ok)
     state.replaying_index = 0
 }

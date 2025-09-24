@@ -202,73 +202,64 @@ check_for_joining_player :: proc (state: ^State, input: ^Input, region: ^SimRegi
 
 update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, entity: ^Entity) {
     assert(entity.id == camera.following_id)
-        
+    
     in_room: ^Entity
+    room_p: v3
+    
     // @todo(viktor): Probably don't want to loop over all entities - maintain a separate list of room entities during unpack!
-    for &entity in slice(region.entities) {
-        if entity.brain_kind != .Room do continue
+    for &test in slice(region.entities) {
+        if test.brain_kind != .Room do continue
         
-        sim_center: Rectangle3
-        if entity_overlaps_rectangle(sim_center, entity.p, entity.collision.total_volume) {
-            in_room = &entity
+        volume := add_offset(test.collision.total_volume, test.p)
+        if contains(volume, entity.p) {
+            in_room = &test
+            room_p = entity.p - test.p
             break
         }
     }
     if in_room == nil do return
-    assert(in_room != nil)
     
-    // @volatile :RoomSize
-    room_delta := get_dimension(in_room.collision.total_volume) //v3{24, 12.5, 3}
+    room_delta := get_dimension(in_room.collision.total_volume)
     
-    half_room_delta := room_delta*0.5
+    half_room_delta := room_delta * 0.5
     half_room_apron := half_room_delta - 0.7
     height: f32 = 0.5
     camera.offset = 0
+    camera.p = map_into_worldspace(world, region.origin, in_room.p)
     
-    offset: v3
-    entity_p := map_into_worldspace(world, region.origin, entity.p)
-    delta := world_distance(world, entity_p, camera.p)
-    
-    for i in 0..<3 {
-        if delta[i] >  half_room_delta[i] do offset[i] += room_delta[i]
-        if delta[i] < -half_room_delta[i] do offset[i] -= room_delta[i]
-    }
-    
-    camera.p = map_into_worldspace(world, camera.p, offset)
-    
-    delta -= offset
+    delta := room_p
     if delta.y >  half_room_apron.y {
         t := clamp_01_map_to_range(half_room_apron.y, delta.y, half_room_delta.y)
-        camera.offset.y = t*half_room_delta.y
-        camera.offset.z = (-(t*t)+2*t)*height
+        camera.offset.y = t * half_room_delta.y
+        camera.offset.z = (-(t*t) + 2*t) * height
     }
     
     if delta.y < -half_room_apron.y {
         t := clamp_01_map_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
-        camera.offset.y = t*-half_room_delta.y
-        camera.offset.z = (-(t*t)+2*t)*height
+        camera.offset.y = t * -half_room_delta.y
+        camera.offset.z = (-(t*t) + 2*t) * height
     }
     
     if delta.x >  half_room_apron.x {
         t := clamp_01_map_to_range(half_room_apron.x, delta.x, half_room_delta.x)
-        camera.offset.x = t*half_room_delta.x
-        camera.offset.z = (-(t*t)+2*t)*height
+        camera.offset.x = t * half_room_delta.x
+        camera.offset.z = (-(t*t) + 2*t) * height
     }
     
     if delta.x < -half_room_apron.x {
         t := clamp_01_map_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
-        camera.offset.x = t*-half_room_delta.x
-        camera.offset.z = (-(t*t)+2*t)*height
+        camera.offset.x = t * -half_room_delta.x
+        camera.offset.z = (-(t*t) + 2*t) * height
     }
     
     if delta.z >  half_room_apron.z {
         t := clamp_01_map_to_range(half_room_apron.z, delta.z, half_room_delta.z)
-        camera.offset.z = t*half_room_delta.z
+        camera.offset.z = t * half_room_delta.z
     }
     
     if delta.z < -half_room_apron.z {
         t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
-        camera.offset.z = t*-half_room_delta.z
+        camera.offset.z = t * -half_room_delta.z
     }
 }
 
@@ -301,7 +292,7 @@ world_distance :: proc (world: ^World, a, b: WorldPosition) -> (result: v3) {
     return result
 }
 
-is_canonical :: proc(world: ^World, offset: v3) -> b32 {
+is_canonical :: proc(world: ^World, offset: v3) -> bool {
     epsilon: f32 = 0.0001
     half_size := 0.5 * world.chunk_dim_meters + epsilon
     return -half_size.x <= offset.x && offset.x <= half_size.x &&
@@ -312,7 +303,6 @@ is_canonical :: proc(world: ^World, offset: v3) -> b32 {
 ////////////////////////////////////////////////
 
 get_chunk :: proc(arena: ^Arena, world: ^World, point: WorldPosition) -> (result: ^Chunk) {
-    timed_function()
     chunk_p := point.chunk
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
@@ -357,8 +347,6 @@ get_chunk_internal :: proc(world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
 ////////////////////////////////////////////////
 
 extract_chunk :: proc(world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
-    timed_function()
-
     begin_ticket_mutex(&world.change_ticket)
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
@@ -427,6 +415,6 @@ clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
     block.next = nil
 }
 
-block_has_room :: proc(block: ^WorldEntityBlock, size: i64) -> b32 {
+block_has_room :: proc(block: ^WorldEntityBlock, size: i64) -> bool {
     return block.entity_data.count + size < len(block.entity_data.data)
 }

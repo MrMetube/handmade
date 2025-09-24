@@ -275,7 +275,7 @@ get_closest_traversable_along_ray :: proc(region: ^SimRegion, from_p: v3, dir: v
     return result, ok
 }
 
-get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
+get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: bool) {
     timed_function()
     // @todo(viktor): make spatial queries easy for things
     closest_point_dsq :f32= 1000

@@ -7,6 +7,8 @@
     - Color per unit/file, Game, Debug, Renderer, Platform
     - Top clocks select a parent to see its children top clocks
     - Frame bars & threads view - add guide lines for ms and frame target ms
+    - (Ctrl) Clicking a ui with a guid opens that location in vscode
+    - other Arena Debug Views?
     
 ### Implement multiple sim regions per frame
     - per-entity clocking

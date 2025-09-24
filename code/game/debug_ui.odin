@@ -339,7 +339,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
             if !ok {
                 view.kind = DebugViewArenaGraph{}
                 graph = &view.kind.(DebugViewArenaGraph)
-                graph.block.size = v2{400, 16}
+                graph.block.size = v2{100, 32}
                 
                 value := event.value.(ArenaOccupancy)
                 graph.arena = value.arena
@@ -363,7 +363,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
                         total_size += auto_cast len(block.storage)
                     }
                     
-                    text = debug_print("%: used % / total %", element.guid.name, view_memory_size(total_used), view_memory_size(total_size))
+                    text = debug_print("%: used % / free % / total %", element.guid.name, view_memory_size(total_size - total_used), view_memory_size(total_used), view_memory_size(total_size))
                 } else {
                     text = debug_print("%: unused", element.guid.name)
                 }
@@ -493,14 +493,15 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
             
             scale := cast(f32) (cast(f64) block.used / cast(f64) len(block.storage))
             
-            split_point := linear_blend(sub_rect.min.x, sub_rect.max.x, scale)
+            split_point := linear_blend(sub_rect.min, sub_rect.max, scale)
             shrink: f32 : 1
-            filled  := rectangle_min_max(sub_rect.min, v2{split_point, sub_rect.max.y})
-            divider := rectangle_min_max(v2{split_point-shrink, sub_rect.min.y}, v2{split_point, sub_rect.max.y})
+            filled  := rectangle_min_max(sub_rect.min, v2{sub_rect.max.x, split_point.y})
+            divider := rectangle_min_max(v2{sub_rect.max.x-shrink, sub_rect.min.y}, sub_rect.max)
             
             color := index == 0 ? Green : Blue
             push_rectangle(&debug.render_group, filled, debug.ui_transform, color)
-            push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline)
+            if index != 0 do push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline)
+            
             if contains(filled, mouse_p) {
                 add_tooltip(debug, debug_print("used % / total %", view_memory_size(block.used, expand_lower = -1), view_memory_size(block_size, expand_lower = -1)))
             } else if contains(sub_rect, mouse_p) {
@@ -685,14 +686,16 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
         
         region_rect := measure_text(debug, text)
         region_rect = add_offset(region_rect, p)
+        region_rect = get_intersection(rect, region_rect)
         if contains(region_rect, mouse_p) {
-            tooltip := debug_print("average %cy - %hits",
+            tooltip := debug_print("average %cy - % %",
                 view_magnitude_decimal(entry.stats.avg),
                 view_magnitude(cast(u64) entry.stats.count), 
+                entry.stats.count == 1 ? "hit" : "hits"
             )
             add_tooltip(debug, tooltip)
         }
-                
+        
         if p.y < rect.min.y {
             break
         } else {

@@ -178,13 +178,14 @@ timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> 
 }
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }
-debug_record_event_loc :: proc(value: DebugValue, name: string, loc:= #caller_location) -> (result: ^DebugEvent) {
+debug_record_event_loc :: proc(value: DebugValue, name: string, loc := #caller_location) -> (result: ^DebugEvent) {
     return debug_record_event_guid(value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
 }
 debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
     if GlobalDebugTable == nil do return
     
+    // @volatile
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, GlobalDebugTable.record_increment)
     result = &GlobalDebugTable.events[state.array_index][state.events_index]
     
@@ -205,7 +206,7 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
 // Only used by the platform layer
 
 @(export)
-debug_set_event_recording :: proc(active: b32, table:=GlobalDebugTable) {
+debug_set_event_recording :: proc(active: b32, table := GlobalDebugTable) {
     if !DebugEnabled do return
     if table == nil do return
     

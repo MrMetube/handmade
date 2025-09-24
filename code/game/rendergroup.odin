@@ -83,7 +83,7 @@ RenderGroup :: struct {
     
     current_clip_rect_index: u16,
     
-    is_aggregating:     b32,
+    is_aggregating:     bool,
     aggregate_bounds:   SpriteBounds,
     first_aggregate_at: i64,
 }

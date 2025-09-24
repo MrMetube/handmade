@@ -290,7 +290,7 @@ Format_Context :: struct {
 @(private="file") temp_view_allocator: mem.Allocator
 
 @(private="file") temp_view_buffer:       [1024] View
-@(private="file") temp_view_inside_block: b32
+@(private="file") temp_view_inside_block: bool
 @(private="file") temp_view_start_index:  u32
 @(private="file") temp_view_next_index:   u32
 

@@ -9,10 +9,8 @@ import "core:simd/x86"
 ////////////////////////////////////////////////
 // Atomics
 
-atomic_compare_exchange :: proc (dst: ^$T, old, new: T) -> (ok: b32, was: T) {
-    ok_: bool
-    was, ok_ = intrinsics.atomic_compare_exchange_strong(dst, old, new)
-    ok = cast(b32) ok_
+atomic_compare_exchange :: proc (dst: ^$T, old, new: T) -> (ok: bool, was: T) {
+    was, ok = intrinsics.atomic_compare_exchange_strong(dst, old, new)
     return ok, was
 }
 
@@ -42,8 +40,6 @@ TicketMutex :: struct #align(64) {
 
 @(enable_target_feature="sse2")
 begin_ticket_mutex :: proc (mutex: ^TicketMutex) {
-    timed_function()
-    
     ticket := atomic_add(&mutex.ticket, 1)
     for ticket != volatile_load(&mutex.serving) {
         x86._mm_pause()
