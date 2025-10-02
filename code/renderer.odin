@@ -350,7 +350,8 @@ do_tile_render_work :: proc(data: pmm) {
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
-            draw_rectangle_fill_color_axis_aligned(target, clip_rect, entry.rect, entry.premultiplied_color)
+            rect := rectangle_min_dimension(entry.p, V3(entry.dim, 0))
+            draw_rectangle_fill_color_axis_aligned(target, clip_rect, rect, entry.premultiplied_color)
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
@@ -423,7 +424,10 @@ blend_render_target :: proc(dest: Bitmap, clip_rect: Rectangle2i, source: Bitmap
     }
 }
 
-draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Rectangle2i, rect: Rectangle2, color: v4) {
+draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Rectangle2i, rect: Rectangle3, color: v4) {
+    // @todo(viktor): Move to 3D
+    rect := get_xy(rect)
+    
     // @todo(viktor): is this actually necessary?
     fill_rect := rectangle_min_max(floor(i32, rect.min), ceil(i32, rect.max))
     
@@ -482,7 +486,10 @@ draw_rectangle_fill_color :: proc(buffer: Bitmap, clip_rect: Rectangle2i, origin
     }
 }
 
-draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, texture: Bitmap, color: v4) {
+draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin: v3, x_axis, y_axis: v2, texture: Bitmap, color: v4) {
+    // @todo(viktor): Move to 3D
+    origin := origin.xy
+    
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx,  buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return

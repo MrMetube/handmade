@@ -10,7 +10,6 @@ package game
 LoadAssetsSingleThreaded:      b32
 SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
-EnvironmentTest:               b32
 UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32
@@ -120,14 +119,8 @@ TransientState :: struct {
         
     tasks: [4] TaskWithMemory,
     
-    test_diffuse: Bitmap,
-    test_normal:  Bitmap,
-    
     high_priority_queue: ^WorkQueue,
     low_priority_queue:  ^WorkQueue,
-    
-    env_size: v2i,
-    envs: [3]EnvironmentMap,
     
     // @todo(viktor): potentially remove this system, it is just for asset locking
     next_generation:            AssetGenerationId,
@@ -194,21 +187,6 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
         tran_state.assets = make_assets(512 * Megabyte, tran_state, &memory.platform_texture_op_queue)
         
         state.mixer.master_volume = 0.1
-        
-        test_size: v2i= 256
-        tran_state.test_diffuse = make_empty_bitmap(&tran_state.arena, test_size, false)
-        tran_state.test_normal  = make_empty_bitmap(&tran_state.arena, test_size, false)
-        make_sphere_normal_map(tran_state.test_normal, 0)
-        make_sphere_diffuse_map(tran_state.test_diffuse)
-        
-        tran_state.env_size = {512, 256}
-        for &env_map in tran_state.envs {
-            size := tran_state.env_size
-            for &lod in env_map.LOD {
-                lod = make_empty_bitmap(&tran_state.arena, size, false)
-                size /= 2
-            }
-        }
     }
     
     ////////////////////////////////////////////////
@@ -241,10 +219,6 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
         { debug_data_block("Audio")
             debug_record_value(&SoundPanningWithMouse)
             debug_record_value(&SoundPitchingWithMouse)
-        }
-        
-        { debug_data_block("Tests")
-            debug_record_value(&EnvironmentTest)
         }
     }
     

@@ -255,7 +255,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     // @todo(viktor): We could potentially simplify this by making better use of the camera.p
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
-        perspective(render_group, camera_params.meters_to_pixels, camera_params.focal_length, 0)
+        perspective(render_group, camera_params.world_scale, camera_params.focal_length, 0)
         
         if len(scene.layers) == 0 {
             push_clear(render_group, 0)

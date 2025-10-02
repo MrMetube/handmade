@@ -19,16 +19,17 @@ GlAttribs := [?]i32{
     0,
 }
 
-glBegin:        proc(_: u32)
-glEnd:          proc()
-glMatrixMode:   proc(_: i32)
-glLoadIdentity: proc()
-glLoadMatrixf:  proc(_:[^] f32)
-glTexCoord2f:   proc(_,_: f32)
-glVertex2f:     proc(_,_: f32)
-glColor4f:      proc(_,_,_,_: f32)
-glColor4fv:     proc(_: [^] f32)
-glTexEnvi:      proc(_: u32, _: u32, _: u32)
+glBegin:        proc (_: u32)
+glEnd:          proc ()
+glMatrixMode:   proc (_: i32)
+glLoadIdentity: proc ()
+glLoadMatrixf:  proc (_:[^] f32)
+glTexCoord2f:   proc (_,_: f32)
+glVertex2f:     proc (_,_: f32)
+glVertex3f:     proc (_,_,_: f32)
+glColor4f:      proc (_,_,_,_: f32)
+glColor4fv:     proc (_: [^] f32)
+glTexEnvi:      proc (_: u32, _: u32, _: u32)
 
 OpenGlInfo :: struct {
     modern_context: b32,
@@ -42,6 +43,9 @@ OpenGlInfo :: struct {
     GL_EXT_texture_sRGB,
     GL_EXT_framebuffer_sRGB: b32,
 }
+
+FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
+FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
 ////////////////////////////////////////////////
 
@@ -149,6 +153,7 @@ load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
             win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
             win.gl_set_proc_address(&glVertex2f, "glVertex2f")
+            win.gl_set_proc_address(&glVertex3f, "glVertex3f")
             win.gl_set_proc_address(&glColor4f, "glColor4f")
             win.gl_set_proc_address(&glColor4fv, "glColor4fv")
         }
@@ -241,6 +246,7 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
 }
 
 ////////////////////////////////////////////////
+
 gl_manage_textures :: proc(last: ^TextureOp) {
     timed_function()
     
@@ -322,13 +328,10 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
     glMatrixMode(gl.PROJECTION)
     glLoadIdentity()
     
-    gl_rectangle(-1, 1, {1,1,1,1}, 0, 1)
+    gl_rectangle({-1, -1, 0}, {1, 1, 0}, {1,1,1,1}, 0, 1)
 }
 
 ////////////////////////////////////////////////
-
-FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
-FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
 gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
@@ -431,7 +434,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             // @todo(viktor): If the window has black bars the rectangle will be offset incorrectly. thanks global variables!
             gl.BindTexture(gl.TEXTURE_2D, FramebufferTextures.data[entry.source_index])
             
-            gl_rectangle(v2{0, 0}, commands_dim, v4{1, 1, 1, entry.alpha})
+            gl_rectangle(v3{0, 0, 0}, V3(commands_dim, 0), v4{1, 1, 1, entry.alpha})
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
@@ -442,25 +445,27 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             color.b = square(color.b)
             
             gl.Disable(gl.TEXTURE_2D)
-            gl_rectangle(entry.rect.min, entry.rect.max, color)
+            gl_rectangle(entry.p, entry.p + V3(entry.dim, 0), color)
                 
-            when false {
-                min := entry.rect.min
-                max := entry.rect.max
+            when !false {
+                min := entry.p
+                max := entry.p + V3(entry.dim, 0)
+                z := max.z
+                
                 glBegin(gl.LINES)
                     color.rgb = 0
                     glColor4fv(&color[0])
-                    glVertex2f(min.x, min.y)
-                    glVertex2f(max.x, min.y)
+                    glVertex3f(min.x, min.y, z)
+                    glVertex3f(max.x, min.y, z)
                     
-                    glVertex2f(max.x, min.y)
-                    glVertex2f(max.x, max.y)
+                    glVertex3f(max.x, min.y, z)
+                    glVertex3f(max.x, max.y, z)
                     
-                    glVertex2f(max.x, max.y)
-                    glVertex2f(min.x, max.y)
+                    glVertex3f(max.x, max.y, z)
+                    glVertex3f(min.x, max.y, z)
                     
-                    glVertex2f(min.x, max.y)
-                    glVertex2f(min.x, min.y)
+                    glVertex3f(min.x, max.y, z)
+                    glVertex3f(min.x, min.y, z)
                     
                 glEnd()
             }
@@ -484,7 +489,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
                 max_uv := v2{1-texel_x, 1-texel_y}
                 
                 min := entry.p
-                max := entry.p + entry.x_axis + entry.y_axis
+                max := entry.p + V3(entry.x_axis, 0) + V3(entry.y_axis, 0)
                 
                 gl_rectangle(min, max, entry.premultiplied_color, min_uv, max_uv)
             }
@@ -578,41 +583,43 @@ gl_set_screenspace :: proc(size: v2i) {
     glLoadIdentity()
     
     glMatrixMode(gl.PROJECTION)
-    a := safe_ratio_1(cast(f32) 2, cast(f32) size.x)
-    b := safe_ratio_1(cast(f32) 2, cast(f32) size.y)
+    a := safe_ratio_1(cast(f32) 2, 1)
+    b := safe_ratio_1(cast(f32) size.x * 2, cast(f32) size.y)
     transform := m4 {
-        a, 0, 0, -1,
-        0, b, 0, -1,
-        0, 0, 1,  0,
-        0, 0, 0,  1,
+        a, 0, 0, 0,
+        0, b, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
     }
     
     glLoadMatrixf(&transform[0,0])
 }
 
-gl_rectangle :: proc(min, max: v2, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
+gl_rectangle :: proc(min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
     glBegin(gl.TRIANGLES)
     
     glColor4f(color.r, color.g, color.b, color.a)
     
+    z := max.z
     // @note(viktor): Lower triangle
     glTexCoord2f(min_uv.x, min_uv.y)
-    glVertex2f(min.x, min.y)
+    glVertex3f(min.x, min.y, z)
     
     glTexCoord2f(max_uv.x, min_uv.y)
-    glVertex2f(max.x, min.y)
+    glVertex3f(max.x, min.y, z)
     
     glTexCoord2f(max_uv.x, max_uv.y)
-    glVertex2f(max.x, max.y)
+    glVertex3f(max.x, max.y, z)
     
     // @note(viktor): Upper triangle
     glTexCoord2f(min_uv.x, min_uv.y)
-    glVertex2f(min.x, min.y)
+    glVertex3f(min.x, min.y, z)
     
     glTexCoord2f(max_uv.x, max_uv.y)
-    glVertex2f(max.x, max.y)
+    glVertex3f(max.x, max.y, z)
     
     glTexCoord2f(min_uv.x, max_uv.y)
-    glVertex2f(min.x, max.y)
+    glVertex3f(min.x, max.y, z)
+    
     glEnd()
 }

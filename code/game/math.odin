@@ -19,7 +19,7 @@ v2i :: [2] i32
 v3i :: [3] i32
 v4i :: [4] i32
 
-m4 :: matrix[4,4] f32
+m4 :: #column_major matrix[4,4] f32
 
 Rectangle   :: struct($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)

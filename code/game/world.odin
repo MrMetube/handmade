@@ -108,7 +108,7 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
         ////////////////////////////////////////////////
         
         camera := get_standard_camera_params(get_dimension(render_group.screen_area).x, 0.3)
-        perspective(render_group, camera.meters_to_pixels, camera.focal_length, mode.camera.offset)
+        perspective(render_group, camera.world_scale, camera.focal_length, mode.camera.offset)
         
         screen_bounds := get_camera_rectangle_at_target(render_group)
         

@@ -116,11 +116,7 @@ TransformMode :: enum {
     None, Perspective, Orthographic,
 }
 
-@(common)
-EnvironmentMap :: struct {
-    pz:  f32,
-    LOD: [4]Bitmap,
-}
+////////////////////////////////////////////////
 
 RenderEntryType :: enum u8 {
     None,
@@ -146,10 +142,11 @@ RenderEntryClip :: struct {
 @(common)
 RenderEntryBitmap :: struct {
     bitmap: Bitmap,
-    id:     u32, // BitmapId @cleanup
+    id:     BitmapId,
     
-    premultiplied_color:  v4,
-    p:      v2,
+    premultiplied_color: v4,
+    p:                   v3,
+    
     // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
     x_axis: v2,
     y_axis: v2,
@@ -158,7 +155,8 @@ RenderEntryBitmap :: struct {
 @(common)
 RenderEntryRectangle :: struct {
     premultiplied_color: v4,
-    rect:  Rectangle2,
+    p:   v3,
+    dim: v2,
 }
 
 @(common)
@@ -168,6 +166,8 @@ RenderEntryBlendRenderTargets :: struct {
     alpha:        f32,
 }
 
+////////////////////////////////////////////////
+
 UsedBitmapDim :: struct {
     size:  v2,
     align: v2,
@@ -176,7 +176,7 @@ UsedBitmapDim :: struct {
 }
 
 ProjectedBasis :: struct {
-    p:     v2,
+    p:     v3,
     scale: f32,
     valid: b32,
 }
@@ -184,14 +184,13 @@ ProjectedBasis :: struct {
 ////////////////////////////////////////////////
 
 Camera_Params :: struct {
-    width_of_monitor: f32,
-    meters_to_pixels: f32,
-    focal_length:     f32,
+    world_scale:  f32,
+    focal_length: f32,
 }
 
  get_standard_camera_params :: proc (width_in_pixels: f32, focal_length: f32) -> (result: Camera_Params) {
-    result.width_of_monitor = 0.635
-    result.meters_to_pixels = width_in_pixels / result.width_of_monitor
+    width_of_monitor_in_meters :: 0.635
+    result.world_scale = 1 / width_of_monitor_in_meters
     result.focal_length = focal_length
     
     return result
@@ -200,7 +199,7 @@ Camera_Params :: struct {
 ////////////////////////////////////////////////
 
 init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
-    assert((cast(umm) &(cast(^RenderCommands)nil).push_buffer) == (cast(umm) &(cast(^RenderCommands)nil).sort_entries.data))
+    assert((cast(umm) &(cast(^RenderCommands) nil).push_buffer) == (cast(umm) &(cast(^RenderCommands) nil).sort_entries.data))
     
     pixel_size := vec_cast(f32, commands.width, commands.height)
     
@@ -220,9 +219,9 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
 default_upright_transform :: proc() -> Transform { return { scale = 1, is_upright = true } }
 
-perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length: f32, p: v3) {
+perspective :: proc(group: ^RenderGroup, world_scale, focal_length: f32, p: v3) {
     // @todo(viktor): need to adjust this based on buffer size
-    pixels_to_meters := 1.0 / meters_to_pixels
+    pixels_to_meters := 1.0 / world_scale
     pixel_size := get_dimension(group.screen_area)
     group.monitor_half_dim_in_meters = 0.5 * pixel_size * pixels_to_meters
     
@@ -230,7 +229,7 @@ perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length: f32, p:
         mode = .Perspective,
         
         screen_center = 0.5 * pixel_size,
-        meters_to_pixels_for_monitor = meters_to_pixels,
+        meters_to_pixels_for_monitor = world_scale,
         
         focal_length = focal_length,
         p = p,
@@ -261,6 +260,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid, bounds: SpriteBound
       case RenderEntryRectangle:          type = .RenderEntryRectangle
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
       case RenderEntryClip:               unreachable()
+      case:                               unreachable()
     }
     assert(type != .None)
     
@@ -362,7 +362,7 @@ push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, ren
     basis := project_with_transform(group.camera, transform, p)
     
     if basis.valid {
-        bp  := basis.p
+        bp  := basis.p.xy
         dim := basis.scale * size.xy
         result = push_clip_rect_direct(group, rectangle_center_dimension(bp - 0.5 * dim, dim), render_target_index)
     }
@@ -411,12 +411,11 @@ push_bitmap_raw :: proc(
         bounds.manual_sort_key = transform.manual_sort_key
         
         size := used_dim.basis.scale * used_dim.size
-        // @todo(viktor): more conservative bounds here
-        screen_rect := rectangle_min_dimension(used_dim.basis.p, size)
-        element := push_render_element(group, RenderEntryBitmap, bounds, screen_rect)
+        
+        element := push_render_element(group, RenderEntryBitmap, bounds, {})
      
         element.bitmap = bitmap
-        element.id     = cast(u32) asset_id
+        element.id     = asset_id
         
         element.p                   = used_dim.basis.p
         element.premultiplied_color = store_color(transform, color)
@@ -437,13 +436,13 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
         dimension := get_dimension(rect)
         
         dim := basis.scale * dimension.xy
-        screen_rect := rectangle_min_dimension(basis.p, dim)
                 
         bounds := get_sprite_bounds(transform, 0, dimension.y)
-        element := push_render_element(group, RenderEntryRectangle, bounds, screen_rect)
+        element := push_render_element(group, RenderEntryRectangle, bounds, {})
 
         element.premultiplied_color = store_color(transform, color)
-        element.rect                = screen_rect
+        element.p = basis.p
+        element.dim = dim
     }
 }
 
@@ -517,15 +516,14 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
             
             projected := camera.focal_length * raw / distance_to_p_z
             
-            result.scale = projected.z  * camera.meters_to_pixels_for_monitor
-            
-            result.p     = projected.xy * camera.meters_to_pixels_for_monitor + camera.screen_center
+            result.scale = camera.meters_to_pixels_for_monitor * projected.z
+            result.p     = camera.meters_to_pixels_for_monitor * projected
             result.valid = true
         }
         
       case .Orthographic:
-        result.p     = camera.meters_to_pixels_for_monitor * p.xy + camera.screen_center
         result.scale = camera.meters_to_pixels_for_monitor
+        result.p     = camera.meters_to_pixels_for_monitor * p
         result.valid = true
     }
 
@@ -533,6 +531,7 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
 }
 
 unproject_with_transform :: proc(camera: Camera, transform: Transform, pixel_p: v2) -> (result: v3) {
+    // @todo(viktor): make this conform with project with transform
     result.xy = (pixel_p - camera.screen_center) / camera.meters_to_pixels_for_monitor 
     result.z  = transform.offset.z
     
