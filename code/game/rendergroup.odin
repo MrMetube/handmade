@@ -91,11 +91,11 @@ RenderGroup :: struct {
 Transform :: struct {
     chunk_z: i32,
     
-    is_upright:   b32,
-    floor_z:      f32,
+    is_upright: b32,
+    floor_z:    f32,
     
-    offset:       v3,  
-    scale:        f32,
+    offset: v3,  
+    scale:  f32,
     
     color:   v4,
     t_color: v4,
@@ -103,13 +103,13 @@ Transform :: struct {
 }
     
 Camera :: struct {
-    mode: TransformMode,
-    
     screen_center:                v2,
     meters_to_pixels_for_monitor: f32,
     
-    focal_length:          f32, // meters the player is sitting from their monitor
-    distance_above_target: f32,
+    mode: TransformMode,
+    // @note(viktor): Only used when mode == .Perspective
+    focal_length: f32, // meters the player is sitting from their monitor
+    p: v3,
 }
 
 TransformMode :: enum {
@@ -220,7 +220,7 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
 default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
 default_upright_transform :: proc() -> Transform { return { scale = 1, is_upright = true } }
 
-perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length, distance_above_target: f32) {
+perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length: f32, p: v3) {
     // @todo(viktor): need to adjust this based on buffer size
     pixels_to_meters := 1.0 / meters_to_pixels
     pixel_size := get_dimension(group.screen_area)
@@ -232,8 +232,8 @@ perspective :: proc(group: ^RenderGroup, meters_to_pixels, focal_length, distanc
         screen_center = 0.5 * pixel_size,
         meters_to_pixels_for_monitor = meters_to_pixels,
         
-        focal_length          = focal_length,
-        distance_above_target = distance_above_target,
+        focal_length = focal_length,
+        p = p,
     }
 }
 
@@ -247,9 +247,6 @@ orthographic :: proc(group: ^RenderGroup, meters_to_pixels: f32) {
         
         screen_center = 0.5 * pixel_size,
         meters_to_pixels_for_monitor = meters_to_pixels,
-        
-        focal_length          = 10,
-        distance_above_target = 10,
     }
 }
 
@@ -493,31 +490,20 @@ get_used_bitmap_dim :: proc(
     return result
 }
 
-get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangle2) {
-    result = get_camera_rectangle_at_distance(group, group.camera.distance_above_target)
-    return result
-}
-
-get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
-    camera_half_dim := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_dim_in_meters).xy
-    result = rectangle_center_half_dimension(v2{}, camera_half_dim)
-    
-    return result
-}
-
 project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3) -> (result: ProjectedBasis) {
     p := base_p + transform.offset
     
     near_clip_plane :: 0.2
     
-    distance_above_target := camera.distance_above_target
     switch camera.mode {
       case .None: unreachable()
+      
       case .Perspective:
+        p.xy -= camera.p.xy
+        distance_above_target := camera.p.z
         if UseDebugCamera {
             distance_above_target *= DebugCameraDistance
         }
-        
         
         floor_z := transform.floor_z
         distance_to_p_z := distance_above_target - floor_z
@@ -553,11 +539,31 @@ unproject_with_transform :: proc(camera: Camera, transform: Transform, pixel_p: 
     switch camera.mode {
       case .None:         unreachable()
       case .Orthographic: // nothing
-      case .Perspective:  result.xy *= (camera.distance_above_target - result.z) / camera.focal_length
+      
+      case .Perspective:  
+        result.xy *= (camera.p.z - result.z) / camera.focal_length
+        result.xy += camera.p.xy
     }
     
     result -= transform.offset
     
+    return result
+}
+
+get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangle2) {
+    result = get_camera_rectangle_at_distance(group, group.camera.p.z)
+    return result
+}
+
+get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle2) {
+    camera_half_dim := -unproject_with_transform(group.camera, default_flat_transform(), group.monitor_half_dim_in_meters).xy
+    result = rectangle_center_half_dimension(v2{}, camera_half_dim)
+    
+    return result
+}
+
+fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meters: f32, half_dim_in_meters: $V) -> (result: V) {
+    result = focal_length * (half_dim_in_meters / monitor_half_dim_in_meters)
     return result
 }
 

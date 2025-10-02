@@ -120,6 +120,7 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
     return result
 }
 
+// @todo(viktor): Naming vec_max max_vec
 @(require_results) min_vec :: proc (a,b: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = min(a[i], b[i])

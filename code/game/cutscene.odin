@@ -252,6 +252,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     // @todo(viktor): Why does this fade seem to be wrong?  It appears nonlinear, but if it is in linear brightness, shouldn't it _appear_ linear?
     color := v4{scene_fade_value, scene_fade_value, scene_fade_value, 1}
     
+    // @todo(viktor): We could potentially simplify this by making better use of the camera.p
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
         perspective(render_group, camera_params.meters_to_pixels, camera_params.focal_length, 0)

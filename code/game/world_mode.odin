@@ -6,7 +6,8 @@ World_Mode :: struct {
     camera: Game_Camera,
     ////////////////////////////////////////////////
     // General
-    typical_floor_height:    f32,
+    tile_size_in_meters:  f32,
+    typical_floor_height: f32,
     standard_room_dimension: v3,
     
     null_collision, 
@@ -17,7 +18,6 @@ World_Mode :: struct {
     hero_head_collision, 
     glove_collision,
     monstar_collision, 
-    room_collision, 
     familiar_collision: ^EntityCollisionVolumeGroup, 
     
     last_used_entity_id: EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
@@ -46,9 +46,7 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     
     mode.effects_entropy = seed_random_series(500)
     
-    // :RoomSize
-    _tiles_per_screen :: v2i{17, 9}
-    tile_size_in_meters: f32 = 1.4
+    mode.tile_size_in_meters = 1.4
     
     mode.typical_floor_height = 3
     
@@ -68,8 +66,7 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     mode.monstar_collision   = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
     mode.familiar_collision  = mode.null_collision//make_simple_grounded_collision(world, {0.5, 0.5, 1})
     
-    mode.room_collision    = make_simple_grounded_collision(mode, {17, 9, 1} * v3{tile_size_in_meters, tile_size_in_meters, mode.typical_floor_height})
-    mode.floor_collision    = make_simple_floor_collision(mode, v3{tile_size_in_meters, tile_size_in_meters, mode.typical_floor_height})
+    mode.floor_collision    = make_simple_floor_collision(mode, v3{mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height})
     
     ////////////////////////////////////////////////
     // "World Gen"
@@ -83,8 +80,8 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
     
     room_center: v3i
     choice: u32
-    for screen_index in 0 ..< 10 {
-        
+    screen_count :: 10
+    for screen_index in 0 ..< screen_count {
         room_radius := v2i {8, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
         room_size := room_radius * 2 + 1
         
@@ -160,6 +157,8 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
         stair_up   = false
         stair_down = false
         
+        if screen_index + 1 == screen_count do break
+        
         switch choice {
           case 0: room_center.x += room_radius.x + 1
           case 1: room_center.y += room_radius.y + 1
@@ -170,7 +169,7 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
         }
     }
     
-    new_camera_p := chunk_position_from_tile_positon(mode.world, room_center)
+    new_camera_p := chunk_position_from_tile_positon(mode, room_center)
     
     mode.camera.p = new_camera_p
     mode.camera.last_p = mode.camera.p
@@ -234,10 +233,11 @@ add_wall :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableRefe
     
     entity.flags += {.Collides}
     entity.occupying = occupying
-    append(&entity.pieces, VisiblePiece{
+    append(&entity.pieces, VisiblePiece {
         asset = .Tree,
         height = 2.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
         color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
+        
     })
 }
 
@@ -411,7 +411,7 @@ StandartRoom :: struct {
 add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> (result: StandartRoom) {
     for offset_x in -radius.x ..= radius.x {
         for offset_y in -radius.y ..= radius.y {
-            p := chunk_position_from_tile_positon(mode.world, tile_p + {offset_x, offset_y, 0})
+            p := chunk_position_from_tile_positon(mode, tile_p + {offset_x, offset_y, 0})
             result.p[offset_x+radius.x][offset_y+radius.y] = p
             
             if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
@@ -432,9 +432,14 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
         }
     }
     
-    p := chunk_position_from_tile_positon(mode.world, tile_p)
-    room := begin_grounded_entity(mode, mode.room_collision)
+    p := chunk_position_from_tile_positon(mode, tile_p)
+    scale := v3{mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height}
+    room_collision := make_simple_grounded_collision(mode, V3(vec_cast(f32, radius) * 2 + 1, 1) * scale)
+    room := begin_grounded_entity(mode, room_collision)
+    
     room.brain_kind = .Room
+    diff := radius - {8, 4} // :RoomSize
+    room.camera_height = 11 + cast(f32) max(max(diff.x, diff.y), 0)
     end_entity(mode, room, p)
     
     return result

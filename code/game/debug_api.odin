@@ -141,19 +141,18 @@ debug_end_data_block :: proc() {
 ////////////////////////////////////////////////
 // Timed Blocks and Functions
 
-@(common) TimedBlockInfo :: struct {
-    hit_count: i64, 
+@(common) 
+TimedBlockInfo :: struct {
     name: string,
-    loc: runtime.Source_Code_Location,
+    loc:  runtime.Source_Code_Location,
 }
 
 @(export)
-begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
+begin_timed_block :: proc(name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
     when !DebugEnabled do return result 
     
     debug_record_event(BeginTimedBlock{}, name, loc)
     
-    result.hit_count = hit_count
     result.name = name
     result.loc = loc
     return result
@@ -163,18 +162,18 @@ begin_timed_block :: proc(name: string, loc := #caller_location, #any_int hit_co
 end_timed_block :: proc(info: TimedBlockInfo) {
     when !DebugEnabled do return
     if info == {} do return
-    // @todo(viktor): record the hit count here
+    
     debug_record_event(EndTimedBlock{}, info.name, info.loc)
 }
 
 @(deferred_out=end_timed_block)
-timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
-    return begin_timed_block(name, loc, hit_count)
+timed_block :: proc(name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
+    return begin_timed_block(name, loc)
 }
 
 @(deferred_out = end_timed_block)
-timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) { 
-    return begin_timed_block(loc.procedure, loc, hit_count)
+timed_function :: proc(loc := #caller_location) -> (result: TimedBlockInfo) { 
+    return begin_timed_block(loc.procedure, loc)
 }
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }

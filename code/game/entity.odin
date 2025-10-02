@@ -53,6 +53,8 @@ Entity :: struct {
     pieces: FixedArray(4, VisiblePiece),
     
     auto_boost_to: TraversableReference,
+    
+    camera_height: f32,
 }
 
 EntityId :: distinct u32
@@ -140,7 +142,7 @@ get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (re
     return result
 }
 
-update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, camera_p: v3, typical_floor_height: f32, haze_color: v4, particle_cache: ^Particle_Cache) {
+update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, typical_floor_height: f32, haze_color: v4, particle_cache: ^Particle_Cache) {
     timed_function()
     
     fade_top_end      := .9 * typical_floor_height
@@ -151,12 +153,15 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
     MinimumLayer :: -4
     MaximumLayer :: 1
     
+    camera_p_z := render_group != nil ? render_group.camera.p.z - 11 : 0
+    
     fog_amount: [MaximumLayer - MinimumLayer + 1] f32
     camera_relative_ground_z: [len(fog_amount)] f32
+    
     test_alpha: f32
     for &fog_amount, index in fog_amount {
         relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z[index] = typical_floor_height * cast(f32) relative_layer_index - camera_p.z
+        camera_relative_ground_z[index] = typical_floor_height * cast(f32) relative_layer_index - camera_p_z
         
         test_alpha = clamp_01_map_to_range(fade_top_end,      camera_relative_ground_z[index], fade_top_start)
         fog_amount = clamp_01_map_to_range(fade_bottom_start, camera_relative_ground_z[index], fade_bottom_end)
@@ -264,7 +269,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     entity.p = pt
                     entity.came_from = entity.occupying
                     
-                    camera_relative_ground_z := typical_floor_height * cast(f32) (entity.z_layer - sim_region.origin.chunk.z) - camera_p.z
+                    camera_relative_ground_z := typical_floor_height * cast(f32) (entity.z_layer - sim_region.origin.chunk.z) - camera_p_z
                     spawn_fire(particle_cache, entity.p, camera_relative_ground_z, entity.z_layer)
                 }
                 
@@ -291,7 +296,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 if !(MinimumLayer <= relative_layer && relative_layer <= MaximumLayer) do continue
                 
                 transform := default_upright_transform()
-                transform.offset = get_entity_ground_point(&entity) - camera_p
+                transform.offset = get_entity_ground_point(&entity)
                 transform.manual_sort_key = entity.manual_sort_key
                 transform.chunk_z = entity.z_layer
                 transform.floor_z = camera_relative_ground_z[relative_layer - MinimumLayer]
@@ -311,7 +316,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 }
                 
                 shadow_transform := default_flat_transform()
-                shadow_transform.offset = get_entity_ground_point(&entity) - camera_p
+                shadow_transform.offset = get_entity_ground_point(&entity)
                 shadow_transform.offset.y -= 0.5
                 
                 if entity.pieces.count > 1 do begin_aggregate_sort_key(render_group)

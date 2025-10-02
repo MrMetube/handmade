@@ -72,19 +72,20 @@ get_last_write_time :: proc(filename: cstring16) -> (last_write_time: u64) {
 
 ////////////////////////////////////////////////
 // reimplement to allow the deferred_out to work
+// @todo(viktor): is this still necessary?
 
 end_timed_block :: proc(info: TimedBlockInfo) {
     game.end_timed_block(info)
 }
 
 @(deferred_out=end_timed_block)
-timed_block :: proc(name: string, loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) {
-    return game.begin_timed_block(name, loc, hit_count)
+timed_block :: proc(name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
+    return game.begin_timed_block(name, loc)
 }
 
 @(deferred_out = end_timed_block)
-timed_function :: proc(loc := #caller_location, #any_int hit_count: i64 = 1) -> (result: TimedBlockInfo) { 
-    return game.begin_timed_block(loc.procedure, loc, hit_count)
+timed_function :: proc(loc := #caller_location) -> (result: TimedBlockInfo) { 
+    return game.begin_timed_block(loc.procedure, loc)
 }
 
 debug_end_data_block :: proc() {

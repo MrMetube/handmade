@@ -50,9 +50,10 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ Worl
     return result
 }
 
-chunk_position_from_tile_positon :: proc(world: ^World, tile_p: v3i) -> (result: WorldPosition) {
-    // @volatile
-    tile_size_in_meters  :: 1.4
+chunk_position_from_tile_positon :: proc(mode: ^World_Mode, tile_p: v3i) -> (result: WorldPosition) {
+    world := mode.world
+    tile_size_in_meters  := mode.tile_size_in_meters
+    
     tile_depth_in_meters := world.chunk_dim_meters.z
     
     offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_p) + {0.5, 0.5, 0})
@@ -67,62 +68,67 @@ chunk_position_from_tile_positon :: proc(world: ^World, tile_p: v3i) -> (result:
 update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
     
-    camera := get_standard_camera_params(get_dimension(render_group.screen_area).x, 0.3)
-    distance_above_ground: f32 = 11
-    perspective(render_group, camera.meters_to_pixels, camera.focal_length, distance_above_ground)
     
-    screen_bounds := get_camera_rectangle_at_target(render_group)
-    camera_bounds := Rect3(screen_bounds, -5 * mode.typical_floor_height, 4 * mode.typical_floor_height)
-    
-    // @todo(viktor): by how much should we expand the sim region?
-    sim_bounds := rectangle_center_dimension(get_center(camera_bounds), 3 * mode.standard_room_dimension)
-    
-    debug_set_mouse_p(input.mouse.p)
+    when false {
+        temp := begin_temporary_memory(&tran_state.arena)
+        
+        N: i32 : 5
+        works := push(temp.arena, World_Sim_Work, N*N)
+        for sim_x in 0..<N {
+            for sim_y in 0..<N {
+                middle :: N/2
+                if sim_x == middle && sim_y == middle do continue
+                
+                work := &works[sim_x + sim_y * N]
+                work.dt = input.delta_time
+                work.mode = mode
+                work.center = mode.camera.p
+                work.center.chunk += {sim_x - middle, sim_y - middle, 0} * 70
+                work.bounds = sim_bounds
+                
+                when false {
+                    do_world_simulation_immediatly(work)
+                } else {
+                    Platform.enqueue_work(tran_state.high_priority_queue, work, do_world_simulation_immediatly)
+                }
+            }
+        }
+        
+        Platform.complete_all_work(tran_state.high_priority_queue)
+        end_temporary_memory(temp)
+    }
     
     ////////////////////////////////////////////////
     
-    haze_color := DarkBlue
-    push_clear(render_group, haze_color)
-    
-    N: i32 : 5
-    temp := begin_temporary_memory(&tran_state.arena)
-    works := push(temp.arena, World_Sim_Work, N*N)
-    for sim_x in 0..<N {
-        for sim_y in 0..<N {
-            middle :: N/2
-            if sim_x == middle && sim_y == middle do continue
-            
-            work := &works[sim_x + sim_y * N]
-            work.dt = input.delta_time
-            work.mode = mode
-            work.center = mode.camera.p
-            work.center.chunk += {sim_x - middle, sim_y - middle, 0} * 70
-            work.bounds = sim_bounds
-            
-            when false {
-                do_world_simulation_immediatly(work)
-            } else {
-                Platform.enqueue_work(tran_state.high_priority_queue, work, do_world_simulation_immediatly)
-            }
-        }
-    }
-    
     {
-        camera := &mode.camera
-        simulation := begin_sim(&tran_state.arena, mode.world, camera.p, sim_bounds, input.delta_time)
+        debug_set_mouse_p(input.mouse.p)
+        
+        haze_color := DarkBlue
+        push_clear(render_group, haze_color)
+        
+        ////////////////////////////////////////////////
+        
+        camera := get_standard_camera_params(get_dimension(render_group.screen_area).x, 0.3)
+        perspective(render_group, camera.meters_to_pixels, camera.focal_length, mode.camera.offset)
+        
+        screen_bounds := get_camera_rectangle_at_target(render_group)
+        
+        // @todo(viktor): by how much should we expand the sim region?
+        sim_bounds := rectangle_center_dimension(V3(get_center(screen_bounds), 0), 3 * mode.standard_room_dimension)
+        
+        simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.p, sim_bounds, input.delta_time)
         
         check_for_joining_player(state, input, simulation.region, mode)
         
-        simulate(&simulation, input.delta_time, &mode.world.game_entropy, mode.typical_floor_height, camera.offset, render_group, state, input, haze_color, mode.particle_cache)
+        simulate(&simulation, input.delta_time, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, haze_color, mode.particle_cache)
         
-        frame_to_frame_camera_delta := world_distance(mode.world, camera.last_p, camera.p)
-        camera.last_p = camera.p
+        frame_to_frame_camera_delta := world_distance(mode.world, mode.camera.last_p, mode.camera.p)
+        mode.camera.last_p = mode.camera.p
         
-        update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta, camera.offset)
+        update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta)
         
         if ShowRenderAndSimulationBounds {
             world_transform := default_flat_transform()
-            world_transform.offset -= camera.offset
             push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
             push_rectangle_outline(render_group, simulation.region.bounds,           world_transform, Blue,   0.2)
             push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
@@ -130,7 +136,7 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
             bounds := get_chunk_bounds(mode.world, 0)
             push_rectangle_outline(render_group, bounds, world_transform, Red, 0.1)
         }
-
+        
         camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
         if camera_entity != nil {
             update_camera(simulation.region, mode.world, &mode.camera, camera_entity)
@@ -139,8 +145,6 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
         end_sim(&simulation)
     }
     
-    Platform.complete_all_work(tran_state.high_priority_queue)
-    end_temporary_memory(temp)
     ////////////////////////////////////////////////
     
     check_arena(mode.world.arena)
@@ -178,7 +182,7 @@ do_world_simulation_immediatly :: proc (data: pmm) {
     defer clear_arena(&arena)
     
     simulation := begin_sim(&arena, mode.world, center, bounds, dt)
-    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, 0, nil,  nil, nil, 0, nil)
+    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, nil,  nil, nil, 0, nil)
     end_sim(&simulation)
 }
 
@@ -201,6 +205,7 @@ check_for_joining_player :: proc (state: ^State, input: ^Input, region: ^SimRegi
 }
 
 update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, entity: ^Entity) {
+    // @note(viktor): It is _mandatory_ that the camera "center" be the sim region center for this code to work properly, because it cannot add the offset from the sim center to the camera as a displacement or it will fail when moving between room at the changeover point.
     assert(entity.id == camera.following_id)
     
     in_room: ^Entity
@@ -261,6 +266,8 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
         t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
         camera.offset.z = t * -half_room_delta.z
     }
+    
+    camera.offset.z += in_room.camera_height
 }
 
 ////////////////////////////////////////////////

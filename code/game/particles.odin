@@ -33,11 +33,11 @@ init_particle_cache :: proc (cache: ^Particle_Cache, assets: ^Assets) {
     cache.fire_system.bitmap_id = first_bitmap_from(assets, .Head)
 }
 
-update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group: ^RenderGroup, dt: f32, frame_displacement: v3, camera_p: v3) {
-    update_and_render_fire(&cache.fire_system, render_group, dt, frame_displacement, camera_p)
+update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group: ^RenderGroup, dt: f32, frame_displacement: v3) {
+    update_and_render_fire(&cache.fire_system, render_group, dt, frame_displacement)
 }
 
-update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, frame_displacement_init: v3, camera_p: v3) {
+update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, frame_displacement_init: v3) {
     timed_function()
     
     frame_displacement := vec_cast(lane_f32, frame_displacement_init)
@@ -126,13 +126,11 @@ update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGr
         // }
         
         // @note(viktor): render the particles
-        transform.floor_z = particle.floor_z - camera_p.z
+        transform.floor_z = particle.floor_z
         transform.chunk_z = particle.chunk_z
         for i in 0..<LaneWidth {
             color_ := extract_v4(color, i)
             p := extract_v3(particle.p, i)
-            
-            transform.offset = -camera_p
             
             if color_.a > 0 {
                 push_bitmap(render_group, system.bitmap_id, transform, 0.4, p, color_)
