@@ -68,7 +68,6 @@ chunk_position_from_tile_positon :: proc(mode: ^World_Mode, tile_p: v3i) -> (res
 update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
     
-    
     when false {
         temp := begin_temporary_memory(&tran_state.arena)
         
