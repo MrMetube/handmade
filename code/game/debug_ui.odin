@@ -150,11 +150,9 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
 
     if debug.render_group.assets == nil do return
 
-    orthographic(&debug.render_group, 1)
-    
     debug.default_clip_rect = debug.render_group.current_clip_rect_index
 
-    mouse_p := unproject_with_transform(debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
+    mouse_p := unproject_with_transform(&debug.render_group, debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
     
     debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p, input.delta_time)
     draw_trees(debug, mouse_p, input.delta_time)

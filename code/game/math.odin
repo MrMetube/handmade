@@ -485,16 +485,20 @@ when LaneWidth != 1 {} else {
 // Rectangle operations
 
 rectangle_min_dimension         :: proc { rectangle_min_dimension_2, rectangle_min_dimension_v }
-rectangle_min_dimension_2       :: proc (x: $E, y, w, h: E)             -> Rectangle([2]E) { return rectangle_min_dimension_v([2]E{x, y}, [2]E{w, h}) }
-rectangle_min_dimension_v       :: proc (min: $T, dimension: T)         -> Rectangle(T)    { return { min,                      min + dimension          } }
-rectangle_min_max               :: proc (min, max: $T)                  -> Rectangle(T)    { return { min,                      max                      } }
-rectangle_center_dimension      :: proc (center: $T, dimension: T)      -> Rectangle(T)    { return { center - (dimension / 2), center + (dimension / 2) } }
-rectangle_center_half_dimension :: proc (center: $T, half_dimension: T) -> Rectangle(T)    { return { center - half_dimension,  center + half_dimension  } }
+rectangle_zero_dimension        :: proc { rectangle_zero_dimension_2, rectangle_zero_dimension_v }
+
+rectangle_min_dimension_2       :: proc (x: $E, y, w, h: E)             -> Rectangle([2] E) { return { {x, y},                   {w, h}                   } }
+rectangle_min_dimension_v       :: proc (min: $T, dimension: T)         -> Rectangle(T)     { return { min,                      min + dimension          } }
+rectangle_zero_dimension_2      :: proc (w: $E, h: E)                   -> Rectangle([2] E) { return { 0,                        {w, h}                   } }
+rectangle_zero_dimension_v      :: proc (dimension: $T)                 -> Rectangle(T)     { return { 0,                        dimension                } }
+rectangle_min_max               :: proc (min, max: $T)                  -> Rectangle(T)     { return { min,                      max                      } }
+rectangle_center_dimension      :: proc (center: $T, dimension: T)      -> Rectangle(T)     { return { center - (dimension / 2), center + (dimension / 2) } }
+rectangle_center_half_dimension :: proc (center: $T, half_dimension: T) -> Rectangle(T)     { return { center - half_dimension,  center + half_dimension  } }
 
 rectangle_origin_axis :: proc (origin, x_axis, y_axis: v2) -> (result: Rectangle2i) {
     result = rectangle_inverted_infinity(Rectangle2i)
     
-    points := [?]v2{
+    points := [?] v2 {
         origin, 
         origin + x_axis, 
         origin          + y_axis, 

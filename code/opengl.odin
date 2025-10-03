@@ -328,6 +328,18 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
     glMatrixMode(gl.PROJECTION)
     glLoadIdentity()
     
+    if true do unimplemented()
+    
+    // // b := safe_ratio_1(cast(f32) size.x, cast(f32) size.y)
+    // // transform := m4 {
+    // //     1, 0, 0, 0,
+    // //     0, b, 0, 0,
+    // //     0, 0, 1, 0,
+    // //     0, 0, 1, 0,
+    // // }
+    
+    // glLoadMatrixf(&transform[0,0])
+    
     gl_rectangle({-1, -1, 0}, {1, 1, 0}, {1,1,1,1}, 0, 1)
 }
 
@@ -346,6 +358,9 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
     glMatrixMode(gl.TEXTURE)
+    glLoadIdentity()
+    
+    glMatrixMode(gl.MODELVIEW)
     glLoadIdentity()
     
     // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
@@ -382,8 +397,6 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         gl.Clear(gl.COLOR_BUFFER_BIT)
     }
     
-    gl_set_screenspace({commands.width, commands.height})
-    
     commands_dim := vec_cast(f32, commands.width, commands.height)
     dim := get_dimension(draw_region)
     clip_scale_x := safe_ratio_0(cast(f32) dim.x, commands_dim.x)
@@ -391,16 +404,29 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
     
     clip_rect_index      := max(u16)
     current_target_index := max(u32)
-    for sort_entry_offset in prep.sorted_offsets {
-        offset := sort_entry_offset
-        
-        // :PointerArithmetic 
-        header := cast(^RenderEntryHeader) &commands.push_buffer[offset]
-        entry_data := &commands.push_buffer[offset + size_of(RenderEntryHeader)]
+    
+    
+    for header_offset: u32; header_offset < commands.push_buffer_data_at; {
+        // :PointerArithmetic
+        header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
+        header_offset += size_of(RenderEntryHeader)
+        entry_data := &commands.push_buffer[header_offset]
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
             clip := prep.clip_rects.data[clip_rect_index]
+
+            glMatrixMode(gl.PROJECTION)
+            b := safe_ratio_1(cast(f32) commands.width, cast(f32) commands.height)
+            f := 1 / clip.focal_length
+            transform := m4 {
+                1, 0, 0, 0,
+                0, b, 0, 0,
+                0, 0, 1, 0,
+                0, 0, f, 0,
+            }
+            
+            glLoadMatrixf(&transform[0,0])
             
             if current_target_index != clip.render_target_index {
                 current_target_index = clip.render_target_index
@@ -420,10 +446,13 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         
         switch header.type {
           case .None: unreachable()
-          case .RenderEntryClip: // @note(viktor): clip rects are handled before rendering
-          
+          case .RenderEntryClip: 
+            // @note(viktor): clip rects are handled before rendering
+            header_offset += size_of(RenderEntryClip)
+            
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
+            header_offset += size_of(RenderEntryBlendRenderTargets)
             
             gl_bind_frame_buffer(entry.dest_index, draw_region)
             defer gl_bind_frame_buffer(current_target_index, draw_region)
@@ -438,6 +467,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
+            header_offset += size_of(RenderEntryRectangle)
             
             color := entry.premultiplied_color
             color.r = square(color.r)
@@ -474,6 +504,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
+            header_offset += size_of(RenderEntryBitmap)
             
             bitmap := entry.bitmap
             assert(bitmap.texture_handle != 0)
@@ -498,73 +529,9 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
             panic("Unhandled Entry")
         }
     }
-    
-    if GlobalDebugShowRenderSortGroups {
-        timed_block("show render sort groups")
-        
-        // @todo(viktor): this broke since the separation of the layers with sort barriers
-        if commands.render_entry_count != 0 {
-            bounds := slice(commands.sort_entries)
-            
-            color_wheel := color_wheel
-            color_index: u32
-            for bound, index in bounds {
-                if bound.offset == SpriteBarrierValue do continue
-                if .DebugBox in bound.flags do continue
-            
-                if .Cycle in bound.flags {
-                    color := color_wheel[color_index]
-                    color_index += 1
-                    if color_index >= len(color_wheel) {
-                        color_index = 0
-                    }
-                    
-                    gl.Disable(gl.TEXTURE_2D)
-                    
-                    glBegin(gl.LINES)
-                    glColor4fv(&color[0])
-                    draw_bounds_recursive(bounds, auto_cast index)
-                    glEnd()
-                        
-                    gl.Enable(gl.TEXTURE_2D)
-                }
-            }
-        }
-    }
 }
 
 ////////////////////////////////////////////////
-
-draw_bounds_recursive :: proc(bounds: [] SortSpriteBounds, index: u16) {
-    bound := &bounds[index]
-    if .DebugBox in bound.flags do return
-    bound.flags += { .DebugBox }
-    
-    bound_center := get_center(bound.screen_bounds)
-    for edge := bound.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
-        behind := bounds[edge.behind]
-        behind_center := get_center(behind.screen_bounds)
-        
-        glVertex2f(bound_center.x, bound_center.y)
-        glVertex2f(behind_center.x, behind_center.y)
-        
-        draw_bounds_recursive(bounds, edge.behind)
-    }
-    
-    min := bound.screen_bounds.min
-    max := bound.screen_bounds.max
-    glVertex2f(min.x, min.y)
-    glVertex2f(min.x, max.y)
-    
-    glVertex2f(min.x, max.y)
-    glVertex2f(max.x, max.y)
-    
-    glVertex2f(max.x, max.y)
-    glVertex2f(max.x, min.y)
-    
-    glVertex2f(max.x, min.y)
-    glVertex2f(min.x, min.y)
-}
 
 gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i) {
     render_target := FramebufferHandles.data[render_target_index]
@@ -578,24 +545,7 @@ gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i)
     }
 }
 
-gl_set_screenspace :: proc(size: v2i) {
-    glMatrixMode(gl.MODELVIEW)
-    glLoadIdentity()
-    
-    glMatrixMode(gl.PROJECTION)
-    a := safe_ratio_1(cast(f32) 2, 1)
-    b := safe_ratio_1(cast(f32) size.x * 2, cast(f32) size.y)
-    transform := m4 {
-        a, 0, 0, 0,
-        0, b, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    }
-    
-    glLoadMatrixf(&transform[0,0])
-}
-
-gl_rectangle :: proc(min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
+gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
     glBegin(gl.TRIANGLES)
     
     glColor4f(color.r, color.g, color.b, color.a)

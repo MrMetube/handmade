@@ -439,18 +439,17 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
     
     room.brain_kind = .Room
     diff := radius - {8, 4} // :RoomSize
-    room.camera_height = 11 + cast(f32) max(max(diff.x, diff.y), 0)
+    room.camera_height = BaseCamHeight + cast(f32) max(max(diff.x, diff.y), 0)
     end_entity(mode, room, p)
     
     return result
 }
 
-init_hitpoints :: proc(entity: ^Entity, count: u32) {
-    assert(count < len(entity.hit_points))
+BaseCamHeight :: 6
 
-    entity.hit_point_max = count
-    for &hit_point in entity.hit_points[:count] {
-        hit_point = { filled_amount = HitPointPartCount }
+init_hitpoints :: proc(entity: ^Entity, count: u32) {
+    for i in 0..<count {
+        append(&entity.hit_points, HitPoint { filled_amount = HitPointPartCount })
     }
 }
 

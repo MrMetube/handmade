@@ -12,7 +12,7 @@ SoundPanningWithMouse:         b32
 SoundPitchingWithMouse:        b32
 UseDebugCamera:                b32
 DebugCameraDistance:           f32 = 5
-ShowRenderAndSimulationBounds: b32
+ShowRenderAndSimulationBounds: b32 = true
 TimestepPercentage:            f32 = 100
 RenderCollisionOutlineAndTraversablePoints: b32 = true
 

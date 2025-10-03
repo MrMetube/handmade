@@ -238,8 +238,7 @@ render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mo
 }
 
 render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene: Layered_Scene, t_normal: f32) {
-    width := render_group == nil ? 0 : get_dimension(render_group.screen_area).x
-    camera_params := get_standard_camera_params(width, 0.25)
+    camera_params := get_standard_camera_params(0.25)
     
     scene_fade_value: f32 = 1
     if t_normal < scene.t_fade_in {
@@ -255,7 +254,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     // @todo(viktor): We could potentially simplify this by making better use of the camera.p
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
-        perspective(render_group, camera_params.world_scale, camera_params.focal_length, 0)
+        perspective(render_group, camera_params.focal_length, 0)
         
         if len(scene.layers) == 0 {
             push_clear(render_group, 0)

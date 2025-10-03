@@ -456,12 +456,7 @@ main :: proc() {
         { debug_data_block("Platform")
             {debug_data_block("Renderer")
                 game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-                game.debug_record_b32(&GlobalDebugShowRenderSortGroups)
                 game.debug_record_b32(&GlobalUseSoftwareRenderer)
-                
-                {debug_data_block("Environment")
-                    game.debug_record_b32(&GlobalDebugShowLightingSampling)
-                }
             }
             
             game.debug_record_b32(&GlobalPause)

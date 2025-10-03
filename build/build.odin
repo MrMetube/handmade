@@ -112,8 +112,8 @@ main :: proc() {
     if tasks & BuildTasks == {} do tasks += { .game, .platform }
     
     if tasks & Tool_Tasks != {} {
-        if !did_change(debug_exe_path, code_dir) && !did_change(debug_exe_path, game_dir) {
-            fmt.println("INFO: No changes detected. Skipping build.")
+        if !did_change(debug_exe_path, code_dir, game_dir, `.\`) {
+            fmt.println("INFO: Skipping build, because no changes to the source files were detected.")
             tasks -= BuildTasks
         }
     }
@@ -343,19 +343,19 @@ did_change :: proc (output_path: string, inputs: .. string, extension: string = 
         result = true
     } else {
         search: for input in inputs {
-            files : [] os2.File_Info
+            files: [] os2.File_Info
             error: os2.Error
             if os.is_dir(input) {
                 files, error = os2.read_all_directory_by_path(input, context.allocator)
                 if error != nil {
-                    fmt.printfln("ERROR: failed to read directory '%v' when checking for changes", input, error)
+                    fmt.printfln("ERROR: failed to read directory '%v' when checking for changes: %v", input, error)
                     break search
                 }
             } else {
                 file, stat_error := os2.stat(input, context.allocator)
                 files = { file }
                 if stat_error != nil {
-                    fmt.printfln("ERROR: failed to read file '%v' when checking for changes", input, error)
+                    fmt.printfln("ERROR: failed to read file '%v' when checking for changes: %v", input, error)
                     break search
                 }
             }

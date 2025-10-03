@@ -9,17 +9,16 @@ Entity :: struct {
     
     z_layer: i32,
     
-    // @todo(viktor): @metaprogram
-    manual_sort_key: ManualSortKey, // @transient
+    // @todo(viktor): if load from world and store to world become more complex we could use a @metaprogram to generate the code and mark members with @transient if needed
     
     ////////////////////////////////////////////////
     // @note(viktor): Everything below here is not worked out
-
+    
     flags: Entity_Flags,
     
     p, dp: v3,
     ddp: v3, // @transient 
-
+    
     t_bob, dt_bob: f32,
     ddt_bob:  f32, // @transient
     
@@ -27,8 +26,7 @@ Entity :: struct {
     
     distance_limit: f32,
     
-    hit_point_max: u32, // :Array
-    hit_points: [16]HitPoint,
+    hit_points: FixedArray(16, HitPoint),
     
     movement_mode: MovementMode,
     t_movement:    f32,
@@ -153,7 +151,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
     MinimumLayer :: -4
     MaximumLayer :: 1
     
-    camera_p_z := render_group != nil ? render_group.camera.p.z - 11 : 0
+    // @volatile
+    camera_p_z := render_group != nil ? render_group.camera.p.z - BaseCamHeight : 0
     
     fog_amount: [MaximumLayer - MinimumLayer + 1] f32
     camera_relative_ground_z: [len(fog_amount)] f32
@@ -173,7 +172,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
     alpha_floor_clip_rect: u16
     if render_group != nil {
         normal_floor_clip_rect= render_group.current_clip_rect_index
-        alpha_floor_clip_rect = push_clip_rect(render_group, render_group.screen_area, alpha_render_target)
+        screen_area := rectangle_zero_dimension(render_group.screen_size)
+        alpha_floor_clip_rect = push_clip_rect(render_group, screen_area, alpha_render_target, render_group.camera.focal_length)
     }
     defer if render_group != nil {
         render_group.current_clip_rect_index = normal_floor_clip_rect
@@ -297,7 +297,6 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 
                 transform := default_upright_transform()
                 transform.offset = get_entity_ground_point(&entity)
-                transform.manual_sort_key = entity.manual_sort_key
                 transform.chunk_z = entity.z_layer
                 transform.floor_z = camera_relative_ground_z[relative_layer - MinimumLayer]
                 
@@ -319,7 +318,6 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 shadow_transform.offset = get_entity_ground_point(&entity)
                 shadow_transform.offset.y -= 0.5
                 
-                if entity.pieces.count > 1 do begin_aggregate_sort_key(render_group)
                 for piece in slice(&entity.pieces) {
                     offset := piece.offset
                     color  := piece.color
@@ -347,7 +345,6 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
                     push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
                 }
-                if entity.pieces.count > 1 do end_aggregate_sort_key(render_group)
                 
                 draw_hitpoints(render_group, &entity, 0.5, transform)
                 
@@ -395,7 +392,7 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
         
         for volume in entity.collision.volumes {
             mouse_p := debug_get_mouse_p()
-            local_mouse_p := unproject_with_transform(render_group.camera, transform, mouse_p)
+            local_mouse_p := unproject_with_transform(render_group, render_group.camera, transform, mouse_p)
             
             if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
                 debug_hit(debug_id, local_mouse_p.z)
@@ -418,13 +415,12 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
 }
 
 draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
-    if entity.hit_point_max > 1 {
+    if entity.hit_points.count > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
-        health_x := -0.5 * (cast(f32) entity.hit_point_max - 1) * spacing_between
+        health_x := -0.5 * (cast(f32) entity.hit_points.count - 1) * spacing_between
 
-        for index in 0..<entity.hit_point_max {
-            hit_point := entity.hit_points[index]
+        for hit_point in slice(&entity.hit_points) {
             color := hit_point.filled_amount == 0 ? Gray : Red
             // @cleanup rect
             push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)

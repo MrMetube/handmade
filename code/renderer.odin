@@ -5,8 +5,6 @@ package main
 import "core:simd"
 
 GlobalDebugRenderSingleThreaded: b32 = false
-GlobalDebugShowLightingSampling: b32
-GlobalDebugShowRenderSortGroups: b32
 
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
@@ -16,30 +14,16 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-SortGridEntry :: struct {
-    next:           ^SortGridEntry,
-    occupant_index: u16,
-}
-
-SpriteGraphWalk :: struct {
-    nodes:   [] SortSpriteBounds,
-    offsets: ^Array(u32),
-    hit_cycle: b32,
-}
-
 init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
     commands ^= {
         width  = width, 
         height = height,
         
-        render_entry_count = 1,
         push_buffer = push_buffer,
-        push_buffer_data_at = auto_cast len(push_buffer),
     }
 }
 
 prep_for_render :: proc(commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
-    sort_render_elements(commands, &result, temp_arena)
     linearize_clip_rects(commands, &result, temp_arena)
     
     return result
@@ -76,173 +60,6 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
     }
     
     return result
-}
-
-sort_render_elements :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
-    timed_function()
-    
-    element_count := commands.render_entry_count
-    if element_count == 0 do return
-    
-    nodes := slice(commands.sort_entries)
-    offsets := make_array(arena, u32, len(nodes))
-    
-    barrier_count: i64
-    should_sort := true
-    for start: i32; start < auto_cast len(nodes); {
-        count: i32
-        hit_barrier: b32
-        if should_sort {
-            count, hit_barrier = build_sprite_graph(nodes[start:], arena, vec_cast(f32, commands.width, commands.height))
-            
-            if hit_barrier {
-                assert(nodes[start:][count-1].offset == SpriteBarrierValue)
-                barrier_count += 1
-            }
-            
-            sub_nodes := nodes[start:][: count - (hit_barrier ? 1 : 0)]
-            walk := SpriteGraphWalk { sub_nodes, &offsets, false }
-            for at, index in walk.nodes {
-                assert(at.offset != SpriteBarrierValue)
-                
-                walk.hit_cycle = false
-                if at.offset == SpriteBarrierValue {
-                    assert(false)
-                    continue
-                }
-                walk_sprite_graph_front_to_back(&walk, auto_cast index)
-            }
-        } else {
-            sub_nodes := nodes[start:]
-            walk := SpriteGraphWalk { sub_nodes, &offsets, false }
-            count, hit_barrier = unsorted_output(&walk, sub_nodes)
-            
-            if hit_barrier {
-                barrier_count += 1
-            }
-        }
-        
-        if hit_barrier {
-            terminator := &nodes[start:][count-1]
-            should_sort = (transmute(u16) terminator.flags & SpriteBarrierTurnsOffSorting) == 0
-        }
-        start += count
-    }
-    
-    prep.sorted_offsets =  slice(offsets)
-    assert(offsets.count + barrier_count == auto_cast len(nodes))
-}
-
-////////////////////////////////////////////////
-
-build_sprite_graph :: proc(nodes: [] SortSpriteBounds, arena: ^Arena, screen_size: v2) -> (count: i32, hit_barrier: b32) {
-    timed_function()
-    
-    // assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
-    if len(nodes) == 0 do return
-    // Grid Factor vs cycles in "bucketing"
-    //  o:none   / o:speed
-    // 1 - 200 M / 
-    // 2 -  85 M / 15 M
-    // 4 -  60 M / 11 M
-    // 8 -  55 M / 10 M
-    // 12 - 55 M / 10 M
-    Width  :: 8*16
-    Height :: 8*9
-    
-    grid: [Width] [Height] ^SortGridEntry
-    inv_cell_size := v2{Width, Height} / screen_size
-    screen_rect := rectangle_min_dimension(v2{}, screen_size)
-    
-    for &a, index_a in nodes {
-        count = cast(i32) index_a+1
-        if a.offset == SpriteBarrierValue {
-            hit_barrier = true
-            break
-        }
-        
-        index_a := cast(u16) index_a
-        if !intersects(a.screen_bounds, screen_rect) do continue
-        
-        grid_span := rectangle_min_max(truncate(i32, inv_cell_size * a.screen_bounds.min), truncate(i32, inv_cell_size * a.screen_bounds.max))
-        
-        grid_span = get_intersection(grid_span, Rectangle2i{ min = {0,0}, max = ({Width, Height}-1) })
-        
-        for grid_x in grid_span.min.x ..= grid_span.max.x {
-            for grid_y in grid_span.min.y ..= grid_span.max.y {
-                entry := push(arena, SortGridEntry, no_clear())
-                entry.occupant_index = auto_cast index_a
-                
-                slot := &grid[grid_x][grid_y]
-                // :ListPush why is this half-deferred ?
-                entry.next = slot^
-                defer slot ^= entry
-                
-                for entry_b := slot^; entry_b != nil; entry_b = entry_b.next {
-                    index_b := entry_b.occupant_index
-                    b := &nodes[index_b]
-                    
-                    if b.generation_count == index_a || !intersects(a.screen_bounds, b.screen_bounds) do continue
-                    b.generation_count = index_a
-                    
-                    front_index, behind_index := index_a, index_b
-                    if sort_sprite_bounds_is_in_front_of(b.bounds, a.bounds) {
-                        swap(&front_index, &behind_index)
-                    }
-                    
-                    edge := push(arena, SpriteEdge, no_clear())
-                    front := &nodes[front_index]
-                    
-                    edge.front  = auto_cast front_index
-                    edge.behind = auto_cast behind_index
-                    
-                    edge.next_edge_with_same_front = front.first_edge_with_me_as_the_front
-                    front.first_edge_with_me_as_the_front = edge
-                    
-                }
-            }
-        }
-    }
-    
-    return count, hit_barrier
-}
-
-unsorted_output :: proc (walk: ^SpriteGraphWalk, nodes: [] SortSpriteBounds) -> (count: i32, hit_barrier: b32) {
-    timed_function()
-    
-    // assert(cast(u64) len(nodes) < cast(u64) max(type_of(SortSpriteBounds{}.generation_count)))
-    if len(nodes) == 0 do return
-    
-    for &a, index_a in nodes {
-        count = cast(i32) index_a+1
-        if a.offset == SpriteBarrierValue {
-            hit_barrier = true
-            break
-        }
-        
-        append(walk.offsets, a.offset)
-    }
-    
-    return count, hit_barrier
-}
-
-walk_sprite_graph_front_to_back :: proc(walk: ^SpriteGraphWalk, index: u16) {
-    at := &walk.nodes[index]
-    
-    walk.hit_cycle ||= .Cycle in at.flags
-    if .Visited in at.flags do return
-    
-    at.flags += { .Visited, .Cycle }
-    
-    for edge := at.first_edge_with_me_as_the_front; edge != nil; edge = edge.next_edge_with_same_front {
-        walk_sprite_graph_front_to_back(walk, edge.behind)
-    }
-    
-    append(walk.offsets, at.offset)
-    
-    if !walk.hit_cycle {
-        at.flags -= { .Cycle }
-    }
 }
 
 ////////////////////////////////////////////////
@@ -321,10 +138,11 @@ do_tile_render_work :: proc(data: pmm) {
     }
     
     target: Bitmap
-    for sort_entry_index in prep.sorted_offsets {
+    for header_offset: u32; header_offset < commands.push_buffer_data_at; {
         // :PointerArithmetic
-        header := cast(^RenderEntryHeader) &commands.push_buffer[sort_entry_index]
-        entry_data := &commands.push_buffer[sort_entry_index + size_of(RenderEntryHeader)]
+        header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
+        header_offset += size_of(RenderEntryHeader)
+        entry_data := &commands.push_buffer[header_offset]
         
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
@@ -339,10 +157,13 @@ do_tile_render_work :: proc(data: pmm) {
         
         switch header.type {
           case .None: unreachable()
-          case .RenderEntryClip: // @note(viktor): clip rects are handled before rendering
+          case .RenderEntryClip: 
+            // @note(viktor): clip rects are handled before rendering
+            header_offset += size_of(RenderEntryClip)
           
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
+            header_offset += size_of(RenderEntryBlendRenderTargets)
             
             source := targets[entry.source_index]
             dest   := targets[entry.dest_index]
@@ -350,11 +171,15 @@ do_tile_render_work :: proc(data: pmm) {
             
           case .RenderEntryRectangle:
             entry := cast(^RenderEntryRectangle) entry_data
+            header_offset += size_of(RenderEntryRectangle)
+            
             rect := rectangle_min_dimension(entry.p, V3(entry.dim, 0))
             draw_rectangle_fill_color_axis_aligned(target, clip_rect, rect, entry.premultiplied_color)
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
+            header_offset += size_of(RenderEntryBitmap)
+            
             draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis, entry.y_axis, entry.bitmap, entry.premultiplied_color)
         }
     }
@@ -590,10 +415,6 @@ Shader_Context :: struct {
     // Per row
     u_row: lane_f32,
     v_row: lane_f32,
-}
-
-Shader_Sampler :: struct {
-
 }
 
 ////////////////////////////////////////////////

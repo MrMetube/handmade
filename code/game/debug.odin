@@ -278,7 +278,10 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
-    push_clip_rect(&debug.render_group, debug.render_group.screen_area, debug.render_target_index)
+    orthographic(&debug.render_group)
+    
+    screen_area := rectangle_zero_dimension(debug.render_group.screen_size)
+    push_clip_rect(&debug.render_group, screen_area, debug.render_target_index, debug.render_group.camera.focal_length)
     
     push_sort_barrier(&debug.render_group, true)
     

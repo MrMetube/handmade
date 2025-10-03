@@ -107,10 +107,11 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
         
         ////////////////////////////////////////////////
         
-        camera := get_standard_camera_params(get_dimension(render_group.screen_area).x, 0.3)
-        perspective(render_group, camera.world_scale, camera.focal_length, mode.camera.offset)
+        camera := get_standard_camera_params(0.3)
+        perspective(render_group, camera.focal_length, mode.camera.offset)
         
-        screen_bounds := get_camera_rectangle_at_target(render_group)
+        world_camera_rect := get_camera_rectangle_at_target(render_group)
+        screen_bounds := rectangle_center_dimension(v2{0,0}, get_dimension(world_camera_rect).xy)
         
         // @todo(viktor): by how much should we expand the sim region?
         sim_bounds := rectangle_center_dimension(V3(get_center(screen_bounds), 0), 3 * mode.standard_room_dimension)
@@ -131,9 +132,6 @@ update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, rend
             push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
             push_rectangle_outline(render_group, simulation.region.bounds,           world_transform, Blue,   0.2)
             push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
-            
-            bounds := get_chunk_bounds(mode.world, 0)
-            push_rectangle_outline(render_group, bounds, world_transform, Red, 0.1)
         }
         
         camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
