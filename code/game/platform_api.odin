@@ -22,8 +22,9 @@ WorkQueue :: struct {}
     arena_previous_block: ^Platform_Memory_Block,
 }
 
-@(common) Platform_Allocation_Flags :: bit_set [Platform_Allocation_Flag; u64]
-@(common) Platform_Allocation_Flag :: enum { 
+@(common) 
+Platform_Allocation_Flags :: bit_set [Platform_Allocation_Flag; u64]
+Platform_Allocation_Flag :: enum { 
     not_restored,
     check_overflow,
     check_underflow,

@@ -66,7 +66,7 @@ set_minimum_block_size :: proc (arena: ^Arena, size: umm) {
     arena.minimum_block_size = size
 }
 
-clear_arena :: proc(arena: ^Arena) {
+clear_arena :: proc (arena: ^Arena) {
     assert(arena.temp_count == 0)
     
     for arena.current_block != nil {
@@ -85,7 +85,7 @@ free_last_block :: proc (arena: ^Arena) {
 
 push :: proc { push_slice, push_struct, push_size, copy_string }
 @(require_results)
-push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
+push_slice :: proc (arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: []Element) {
     params := params
     if params.alignment == DefaultAlignment {
         params.alignment = align_of(Element)
@@ -97,7 +97,7 @@ push_slice :: proc(arena: ^Arena, $Element: typeid, #any_int count: u64, params 
 }
 
 @(require_results)
-push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
+push_struct :: proc (arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
     params := params
     if params.alignment == DefaultAlignment {
         params.alignment = align_of(T)
@@ -108,7 +108,7 @@ push_struct :: proc(arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (
 }
 
 @(require_results)
-push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushParams) -> (result: pmm) {
+push_size :: proc (arena: ^Arena, #any_int size_init: umm, params := DefaultPushParams) -> (result: pmm) {
     alignment_offset: umm
     if arena.current_block != nil {
         alignment_offset = arena_alignment_offset(arena, params.alignment)
@@ -146,7 +146,7 @@ push_size :: proc(arena: ^Arena, #any_int size_init: umm, params := DefaultPushP
     return result
 }
 
-arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> (result: umm) {
+arena_alignment_offset :: proc (arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> (result: umm) {
     if arena.current_block.storage == nil do return 0
     if arena.current_block.used == auto_cast len(arena.current_block.storage) do return 0
     
@@ -161,17 +161,17 @@ arena_alignment_offset :: proc(arena: ^Arena, #any_int alignment: umm = DefaultA
 }
 
 zero :: proc { zero_size, zero_slice }
-zero_size :: proc(memory: pmm, size: u64) {
+zero_size :: proc (memory: pmm, size: u64) {
     intrinsics.mem_zero(memory, size)
 }
-zero_slice :: proc(data: []$T){
+zero_slice :: proc (data: []$T){
     intrinsics.mem_zero(raw_data(data), len(data) * size_of(T))
 }
 
 // @note(viktor): This is generally not for production use, this is probably
 // only really something we need during testing, but who knows
 @(require_results)
-copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
+copy_string :: proc (arena: ^Arena, s: string) -> (result: string) {
     // @todo(viktor): handle zero sized allocations better in push_size
     if s == "" do return
     buffer := push_slice(arena, u8, len(s), no_clear())
@@ -186,7 +186,7 @@ copy_string :: proc(arena: ^Arena, s: string) -> (result: string) {
 
 ////////////////////////////////////////////////
 
-begin_temporary_memory :: proc(arena: ^Arena) -> (result: TemporaryMemory) {
+begin_temporary_memory :: proc (arena: ^Arena) -> (result: TemporaryMemory) {
     result.arena = arena
     result.block = arena.current_block
     if result.block != nil {
@@ -198,7 +198,7 @@ begin_temporary_memory :: proc(arena: ^Arena) -> (result: TemporaryMemory) {
     return result 
 }
 
-end_temporary_memory :: proc(temp_mem: TemporaryMemory) {
+end_temporary_memory :: proc (temp_mem: TemporaryMemory) {
     arena := temp_mem.arena
     assert(arena.temp_count > 0)
     
@@ -214,6 +214,6 @@ end_temporary_memory :: proc(temp_mem: TemporaryMemory) {
     arena.temp_count -= 1
 }
 
-check_arena :: proc(arena: ^Arena) {
+check_arena :: proc (arena: ^Arena) {
     assert(arena.temp_count == 0)
 }

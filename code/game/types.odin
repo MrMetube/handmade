@@ -21,28 +21,28 @@ append :: proc {
     append_fixed_array, append_array, append_array_, append_fixed_array_, append_array_many, append_fixed_array_many, append_string, 
     builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
 }
-@(require_results) append_array_ :: proc(a: ^Array($T)) -> (result: ^T) {
+@(require_results) append_array_ :: proc (a: ^Array($T)) -> (result: ^T) {
     result = &a.data[a.count]
     a.count += 1
     return result
 }
-@(require_results) append_fixed_array_ :: proc(a: ^FixedArray($N, $T)) -> (result: ^T) {
+@(require_results) append_fixed_array_ :: proc (a: ^FixedArray($N, $T)) -> (result: ^T) {
     result = &a.data[a.count]
     a.count += 1
     return result
 }
-append_array :: proc(a: ^Array($T), value: T) -> (result: ^T) {
+append_array :: proc (a: ^Array($T), value: T) -> (result: ^T) {
     a.data[a.count] = value
     result = append_array_(a)
     return result
 }
-append_fixed_array :: proc(a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
+append_fixed_array :: proc (a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
     a.data[a.count] = value
     result = &a.data[a.count]
     a.count += 1
     return result
 }
-append_array_many :: proc(a: ^Array($T), values: []T) -> (result: []T) {
+append_array_many :: proc (a: ^Array($T), values: []T) -> (result: []T) {
     start := a.count
     for &value in values {
         a.data[a.count] = value
@@ -52,7 +52,7 @@ append_array_many :: proc(a: ^Array($T), values: []T) -> (result: []T) {
     result = a.data[start:a.count]
     return result
 }
-append_fixed_array_many :: proc(a: ^FixedArray($N, $T), values: []T) -> (result: []T) {
+append_fixed_array_many :: proc (a: ^FixedArray($N, $T), values: []T) -> (result: []T) {
     start := a.count
     for &value in values {
         a.data[a.count] = value
@@ -63,22 +63,22 @@ append_fixed_array_many :: proc(a: ^FixedArray($N, $T), values: []T) -> (result:
     return result
 }
 
-append_string :: proc(a: ^String_Builder, value: string) -> (result: string) {
+append_string :: proc (a: ^String_Builder, value: string) -> (result: string) {
     append(a, (transmute([]u8) value))
     return cast(string) a.data[:a.count]
 }
 
 make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
-make_string_builder_buffer :: proc(buffer: []u8) -> (result: String_Builder) {
+make_string_builder_buffer :: proc (buffer: []u8) -> (result: String_Builder) {
     result.data = buffer
     return result
 }
-make_string_builder_arena :: proc(arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
+make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
     buffer := push_slice(arena, u8, len, params)
     result = make_string_builder_buffer(buffer)
     return result
 }
-make_array :: proc(arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
+make_array :: proc (arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
     result.data = push_slice(arena, T, len, params)
     return result
 }
@@ -89,29 +89,29 @@ peek :: proc (a: [dynamic] $T) -> (result: ^T) {
     return result
 }
 
-slice :: proc{ slice_fixed_array, slice_array, slice_array_pointer }
-slice_fixed_array :: proc(array: ^FixedArray($N, $T)) -> []T {
+slice :: proc { slice_fixed_array, slice_array, slice_array_pointer }
+slice_fixed_array :: proc (array: ^FixedArray($N, $T)) -> []T {
     return array.data[:array.count]
 }
-slice_array :: proc(array: Array($T)) -> []T {
+slice_array :: proc (array: Array($T)) -> []T {
     return array.data[:array.count]
 }
-slice_array_pointer :: proc(array: ^Array($T)) -> []T {
+slice_array_pointer :: proc (array: ^Array($T)) -> []T {
     return array.data[:array.count]
 }
 
-to_string :: proc(sb: String_Builder) -> string {
+to_string :: proc (sb: String_Builder) -> string {
     return cast(string) sb.data[:sb.count]
 }
 
-rest :: proc{ rest_fixed_array, rest_array, rest_dynamic_array }
-rest_fixed_array :: proc(array: ^FixedArray($N, $T)) -> []T {
+rest :: proc { rest_fixed_array, rest_array, rest_dynamic_array }
+rest_fixed_array :: proc (array: ^FixedArray($N, $T)) -> []T {
     return array.data[array.count:]
 }
-rest_array :: proc(array: Array($T)) -> []T {
+rest_array :: proc (array: Array($T)) -> []T {
     return array.data[array.count:]
 }
-rest_dynamic_array :: proc(array: [dynamic] $T) -> []T {
+rest_dynamic_array :: proc (array: [dynamic] $T) -> []T {
     return slice_from_parts(raw_data(array), cap(array))
 }
 
@@ -121,18 +121,18 @@ set_len :: proc (array: ^[dynamic] $T, len: int) {
 }
 
 clear :: proc { array_clear, builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array }
-array_clear :: proc(a: ^$A) {
+array_clear :: proc (a: ^$A) {
     a.count = 0
 }
 
 ordered_remove :: proc { builtin.ordered_remove, ordered_remove_array }
-ordered_remove_array :: proc(a: ^Array($T), #any_int index: i64) {
+ordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
     data := slice(a^)
     copy(data[index:], data[index+1:])
     a.count -= 1
 }
 unordered_remove :: proc { builtin.unordered_remove, unordered_remove_array }
-unordered_remove_array :: proc(a: ^Array($T), #any_int index: i64) {
+unordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
     a.data[index] = a.data[a.count-1]
     a.count -= 1
 }
@@ -143,7 +143,7 @@ Deque :: struct($L: typeid) {
     first, last: ^L,
 }
 
-deque_prepend :: proc(deque: ^Deque($L), element: ^L) {
+deque_prepend :: proc (deque: ^Deque($L), element: ^L) {
     if deque.first == nil {
         assert(deque.last == nil)
         deque.last  = element
@@ -154,7 +154,7 @@ deque_prepend :: proc(deque: ^Deque($L), element: ^L) {
     }
 }
 
-deque_append :: proc(deque: ^Deque($L), element: ^L) {
+deque_append :: proc (deque: ^Deque($L), element: ^L) {
     if deque.first == nil {
         assert(deque.last == nil)
         deque.last  = element
@@ -165,7 +165,7 @@ deque_append :: proc(deque: ^Deque($L), element: ^L) {
     }
 }
 
-deque_remove_from_end :: proc(deque: ^Deque($L)) -> (result: ^L) {
+deque_remove_from_end :: proc (deque: ^Deque($L)) -> (result: ^L) {
     result = deque.last
     
     if result != nil {
@@ -185,12 +185,12 @@ deque_remove_from_end :: proc(deque: ^Deque($L)) -> (result: ^L) {
 // [Sentinel] -> <- [..] ->
 //  -> <- [..] -> ...    <-
 
-list_init_sentinel :: proc(sentinel: ^$T) {
+list_init_sentinel :: proc (sentinel: ^$T) {
     sentinel.next = sentinel
     sentinel.prev = sentinel
 }
 
-list_prepend :: proc(list: ^$T, element: ^T) {
+list_prepend :: proc (list: ^$T, element: ^T) {
     element.prev = list.prev
     element.next = list
     
@@ -198,7 +198,7 @@ list_prepend :: proc(list: ^$T, element: ^T) {
     element.prev.next = element
 }
 
-list_append :: proc(list: ^$T, element: ^T) {
+list_append :: proc (list: ^$T, element: ^T) {
     element.next = list.next
     element.prev = list
     
@@ -206,7 +206,7 @@ list_append :: proc(list: ^$T, element: ^T) {
     element.prev.next = element
 }
 
-list_remove :: proc(element: ^$T) {
+list_remove :: proc (element: ^$T) {
     element.prev.next = element.next
     element.next.prev = element.prev
     

@@ -3,7 +3,7 @@ package main
 import win "core:sys/windows"
 import "vendor:directx/dxgi"
 
-init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) {
+init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) {
     assert(GlobalSoundBuffer == nil, "DSound has already been initialized")
     
     dSound_lib := win.LoadLibraryW(win.utf8_to_wstring("dsound.dll"))
@@ -71,7 +71,7 @@ init_dSound :: proc(window: win.HWND, buffer_size_in_bytes, samples_per_second: 
 
 
 @(private="file")
-ProcDirectSoundCreate :: #type proc(lpGuid: win.LPGUID, ppDS: ^^IDirectSound,   pUnkOuter: win.LPUNKNOWN) -> win.HRESULT
+ProcDirectSoundCreate :: #type proc (lpGuid: win.LPGUID, ppDS: ^^IDirectSound,   pUnkOuter: win.LPUNKNOWN) -> win.HRESULT
 
 //
 // -----------------------------------------------------------------

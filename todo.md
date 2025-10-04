@@ -14,9 +14,16 @@
     - per-entity clocking
     - sim region merging?  for multiple players?
 
-# 3D
 
 ### Graphics Upgrade
+    - Freely rotatable world for debug
+    - Turn on the Depth-Buffer
+    - Draw the world in a logical way
+        - Stand-up cards for some things
+        - cubes for other things
+    - fix unproject
+    - 3D
+        - 3D pipeline
     - Particle Systems
     - Transition to "real" artwork
     - Lighting

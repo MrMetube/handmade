@@ -14,7 +14,7 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
+init_render_commands :: proc (commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
     commands ^= {
         width  = width, 
         height = height,
@@ -23,13 +23,13 @@ init_render_commands :: proc(commands: ^RenderCommands, push_buffer: []u8, width
     }
 }
 
-prep_for_render :: proc(commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
+prep_for_render :: proc (commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
     linearize_clip_rects(commands, &result, temp_arena)
     
     return result
 }
 
-linearize_clip_rects :: proc(commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
+linearize_clip_rects :: proc (commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
     timed_function()
     
     count := commands.clip_rects_count
@@ -64,7 +64,7 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc(queue: ^WorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
+software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
     timed_function()
     
     targets := push_slice(arena, Bitmap, commands.max_render_target_index + 1)
@@ -120,7 +120,7 @@ software_render_commands :: proc(queue: ^WorkQueue, commands: ^RenderCommands, p
     complete_all_work(queue)
 }
 
-do_tile_render_work :: proc(data: pmm) {
+do_tile_render_work :: proc (data: pmm) {
     timed_function()
     
     using work := cast(^TileRenderWork) data
@@ -200,7 +200,7 @@ MaxColorValue :: 255 * 255
 //  46Mcy 8  /// (133 / 46 - 1) * 100
 //  38Mcy 16 /// (133 / 36 - 1) * 100
 
-clear_render_target :: proc(dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
+clear_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
     timed_function()
     
     ctx: Shader_Context
@@ -219,7 +219,7 @@ clear_render_target :: proc(dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
     }
 }
 
-blend_render_target :: proc(dest: Bitmap, clip_rect: Rectangle2i, source: Bitmap, alpha: f32) {
+blend_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, source: Bitmap, alpha: f32) {
     timed_function()
     
     ctx: Shader_Context
@@ -282,7 +282,7 @@ draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Recta
     }
 }
 
-draw_rectangle_fill_color :: proc(buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, color: v4) {
+draw_rectangle_fill_color :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, color: v4) {
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx, buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return

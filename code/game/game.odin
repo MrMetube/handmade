@@ -1,16 +1,15 @@
 package game
 
-// @cleanup #placeholder
 @(common) INTERNAL :: #config(INTERNAL, false)
-@(common) SlowCode :: INTERNAL
+SlowCode :: INTERNAL
 
 ////////////////////////////////////////////////
 // @todo(viktor): Find a better place for these configurations
 
-LoadAssetsSingleThreaded:      b32
-SoundPanningWithMouse:         b32
-SoundPitchingWithMouse:        b32
-UseDebugCamera:                b32
+LoadAssetsSingleThreaded:      b32 = false
+SoundPanningWithMouse:         b32 = false
+SoundPitchingWithMouse:        b32 = false
+UseDebugCamera:                b32 = false
 DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32 = true
 TimestepPercentage:            f32 = 100
@@ -30,23 +29,21 @@ InputController :: struct {
     is_connected: b32,
     is_analog:    b32,
     
-    stick_average: [2]f32,
+    stick_average: v2,
     
-    using _buttons_array_and_enum : struct #raw_union {
-        buttons: [18]InputButton,
-        using _buttons_enum : struct {
-            stick_up,  stick_down,  stick_left,  stick_right, 
-            button_up, button_down, button_left, button_right,
-            dpad_up,   dpad_down,   dpad_left,   dpad_right,  
-            
-            start, back,
-            shoulder_left, shoulder_right,
-            thumb_left,    thumb_right:    InputButton,
-        },
-    },
-    
+    buttons: [Controller_Button] InputButton,
 }
-#assert(size_of(InputController{}._buttons_array_and_enum.buttons) == size_of(InputController{}._buttons_array_and_enum._buttons_enum))
+
+@(common) 
+Controller_Button :: enum {
+    stick_up,  stick_down,  stick_left,  stick_right, 
+    button_up, button_down, button_left, button_right,
+    dpad_up,   dpad_down,   dpad_left,   dpad_right,  
+    
+    start, back,
+    shoulder_left, shoulder_right,
+    thumb_left,    thumb_right,
+}
 
 @(common) 
 Input :: struct {
@@ -57,16 +54,7 @@ Input :: struct {
         
     // @note(viktor): this is for debugging only
     mouse: struct {
-        using _buttons_array_and_enum : struct #raw_union {
-            buttons: [5]InputButton,
-            using _buttons_enum : struct {
-                left, 
-                right, 
-                middle,
-                extra1, 
-                extra2: InputButton,
-            },
-        },
+        buttons: [Mouse_Button] InputButton,
         p:     v2,
         wheel: f32,
     },
@@ -75,18 +63,25 @@ Input :: struct {
     alt_down, 
     control_down: b32,
 }
-#assert(size_of(Input{}.mouse._buttons_array_and_enum.buttons) == size_of(Input{}.mouse._buttons_array_and_enum._buttons_enum))
+
+Mouse_Button :: enum {
+    left,
+    right,
+    middle,
+    extra1,
+    extra2,
+}
 
 @(common) 
 GameMemory :: struct {
     reloaded_executable: b32,
-    // @note(viktor): REQUIRED to be cleared to zero at startup
-    state:           pmm, // ^State
-    transient_state: pmm, // ^TransientState
     
-    debug_state:   (pmm         when INTERNAL else struct {}), // ^DebugState
-    debug_table:   (^DebugTable when INTERNAL else struct {}),
-        
+    state:           ^State,
+    transient_state: ^TransientState,
+    
+    debug_state: (^DebugState when INTERNAL else struct {}),
+    debug_table: (^DebugTable when INTERNAL else struct {}),
+    
     high_priority_queue: ^WorkQueue,
     low_priority_queue:  ^WorkQueue,
     
@@ -116,7 +111,7 @@ TransientState :: struct {
     
     assets:        ^Assets,
     generation_id: AssetGenerationId,
-        
+    
     tasks: [4] TaskWithMemory,
     
     high_priority_queue: ^WorkQueue,
@@ -126,7 +121,7 @@ TransientState :: struct {
     next_generation:            AssetGenerationId,
     memory_operation_lock:      u32,
     in_flight_generation_count: u32,
-    in_flight_generations:      [32] AssetGenerationId,    
+    in_flight_generations:      [32] AssetGenerationId,
 }
 
 Game_Mode :: union {
@@ -149,7 +144,7 @@ ControlledHero :: struct {
 }
 
 @(export)
-update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^RenderCommands) {
+update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: ^RenderCommands) {
     input := input
     Platform = memory.Platform_api
     
@@ -162,20 +157,20 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
     
     ////////////////////////////////////////////////
 
-    state := cast(^State) memory.state
+    state := memory.state
     if state == nil {
         memory.state = bootstrap_arena(State, "total_arena")
-        state = cast(^State) memory.state
+        state = memory.state
         
         init_mixer(&state.mixer, &state.audio_arena)
         
         when DebugEnabled do debug_set_event_recording(true)
     }
 
-    tran_state := cast(^TransientState) memory.transient_state
+    tran_state := memory.transient_state
     if tran_state == nil {
         memory.transient_state = bootstrap_arena(TransientState, "arena")
-        tran_state = cast(^TransientState) memory.transient_state
+        tran_state = memory.transient_state
         
         tran_state.high_priority_queue = memory.high_priority_queue
         tran_state.low_priority_queue  = memory.low_priority_queue
@@ -244,7 +239,7 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
         }
         
         delta: f32
-        if was_pressed(input.mouse.middle) {
+        if was_pressed(input.mouse.buttons[.middle]) {
             if input.mouse.p.x > 10  do delta = 0.1
             if input.mouse.p.x < -10 do delta = -0.1
             change_pitch(&state.mixer, state.music, state.music.d_sample + delta)
@@ -258,8 +253,8 @@ update_and_render :: proc(memory: ^GameMemory, input: ^Input, render_commands: ^
         play_intro_cutscene(state, tran_state)
         when true { // go directly into the game
             controller := &input.controllers[0]
-            controller.start.ended_down = true
-            controller.start.half_transition_count = 1
+            controller.buttons[.start].ended_down = true
+            controller.buttons[.start].half_transition_count = 1
         }
     }
     
@@ -314,17 +309,17 @@ set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid
 // @todo(viktor): reduce the pressure on the performance of this function by measuring
 // @todo(viktor): Allow sample offsets here for more robust platform options
 @(export) 
-output_sound_samples :: proc(memory: ^GameMemory, sound_buffer: GameSoundBuffer) {
-    state      := cast(^State)          memory.state
-    tran_state := cast(^TransientState) memory.transient_state
+output_sound_samples :: proc (memory: ^GameMemory, sound_buffer: GameSoundBuffer) {
+    state      := memory.state
+    tran_state := memory.transient_state
     
     output_playing_sounds(&state.mixer, &tran_state.arena, tran_state.assets, sound_buffer)
 }
 
 ////////////////////////////////////////////////
 
-debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) -> (assets: ^Assets, generation_id: AssetGenerationId) {
-    tran_state := cast(^TransientState) memory.transient_state
+debug_get_game_assets_work_queue_and_generation_id :: proc (memory: ^GameMemory) -> (assets: ^Assets, generation_id: AssetGenerationId) {
+    tran_state := memory.transient_state
     if tran_state != nil {
         assets = tran_state.assets
         generation_id = tran_state.generation_id
@@ -335,7 +330,7 @@ debug_get_game_assets_work_queue_and_generation_id :: proc(memory: ^GameMemory) 
 
 ////////////////////////////////////////////////
 
-begin_task_with_memory :: proc(tran_state: ^TransientState, depends_on_game_mode: b32) -> (result: ^TaskWithMemory) {
+begin_task_with_memory :: proc (tran_state: ^TransientState, depends_on_game_mode: b32) -> (result: ^TaskWithMemory) {
     for &task in tran_state.tasks {
         if !task.in_use {
             result = &task
@@ -361,7 +356,7 @@ end_task_with_memory :: proc (task: ^TaskWithMemory) {
 ////////////////////////////////////////////////
 // @cleanup
 
-make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
+make_pyramid_normal_map :: proc (bitmap: Bitmap, roughness: f32) {
     for y in 0..<bitmap.height {
         for x in 0..<bitmap.width {
             inv_x := bitmap.width - x
@@ -389,7 +384,7 @@ make_pyramid_normal_map :: proc(bitmap: Bitmap, roughness: f32) {
     }
 }
 
-make_sphere_normal_map :: proc(buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
+make_sphere_normal_map :: proc (buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
     inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
     
     for y in 0..<buffer.height {
@@ -414,7 +409,7 @@ make_sphere_normal_map :: proc(buffer: Bitmap, roughness: f32, c:= v2{1,1}) {
     }
 }
 
-make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
+make_sphere_diffuse_map :: proc (buffer: Bitmap, c := v2{1,1}) {
     inv_size: v2 = 1 / (vec_cast(f32, buffer.width, buffer.height) - 1)
     
     for y in 0..<buffer.height {
@@ -438,7 +433,7 @@ make_sphere_diffuse_map :: proc(buffer: Bitmap, c := v2{1,1}) {
     }
 }
 
-make_empty_bitmap :: proc(arena: ^Arena, dim: v2i, clear_to_zero: b32 = true) -> (result: Bitmap) {
+make_empty_bitmap :: proc (arena: ^Arena, dim: v2i, clear_to_zero: b32 = true) -> (result: Bitmap) {
     result = {
         memory = push(arena, Color, (dim.x * dim.y), align_clear(32, clear_to_zero)),
         width  = dim.x,

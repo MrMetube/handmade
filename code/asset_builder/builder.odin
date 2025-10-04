@@ -29,11 +29,11 @@ HHA :: struct {
 
 SourceSound :: struct {
     channel_count: u32,
-    channels:      [2][]i16, // 1 or 2 channels of samples
+    channels:      [2][] i16, // 1 or 2 channels of samples
 }
 
 SourceBitmap :: struct {
-    memory:        [][4]u8,
+    memory:        [][4] u8,
     width, height: i32, 
 }
 
@@ -45,11 +45,11 @@ SourceFont :: struct {
     glyph_count:     u32,
     
     codepoint_count:     u32,
-    glyphs:              []GlyphInfo,
-    horizontal_advances: []f32,
+    glyphs:              [] GlyphInfo,
+    horizontal_advances: [] f32,
     
     one_past_highest_codepoint: rune,
-    glyph_index_from_codepoint: []u32,
+    glyph_index_from_codepoint: [] u32,
 }
 
 SourceAsset :: union {
@@ -77,17 +77,17 @@ SourceFontGlyphInfo :: struct {
     codepoint: rune,
 }
 
-main :: proc() {
+main :: proc () {
     write_fonts()
     when false {
-        assert(false, "I am now using the official art packs")
+        #assert(false, "I am now using the official art packs")
         write_hero()
         write_non_hero()
         write_sounds()
     }
 }
 
-make_hha :: proc() -> (hha: ^HHA) {
+make_hha :: proc () -> (hha: ^HHA) {
     hha = new(HHA)
     hha ^= {
         tag_count   = 1,
@@ -179,7 +179,7 @@ write_non_hero :: proc () {
     end_asset_type(hha)
 }
 
-write_fonts :: proc() {
+write_fonts :: proc () {
     hha := make_hha()
     defer output_hha_file(`.\data\fonts.hha`, hha)
     
@@ -205,7 +205,7 @@ write_fonts :: proc() {
     end_asset_type(hha)
 }
 
-write_sounds :: proc() {
+write_sounds :: proc () {
     hha := make_hha()
     defer output_hha_file(`.\sounds.hha`, hha)
     
@@ -258,7 +258,7 @@ write_sounds :: proc() {
     end_asset_type(hha)
 }
 
-output_hha_file :: proc(file_name: string, hha: ^HHA) {
+output_hha_file :: proc (file_name: string, hha: ^HHA) {
     out, err := os.open(file_name, os.O_RDWR + os.O_CREATE)
     if err != nil {
         fmt.eprintln("could not open asset file:", file_name)
@@ -342,13 +342,13 @@ output_hha_file :: proc(file_name: string, hha: ^HHA) {
     write_slice(out, &at, hha.data[:header.asset_count])
 }
 
-write_slice :: proc(out: os.Handle, at: ^i64, slice: []$T) {
+write_slice :: proc (out: os.Handle, at: ^i64, slice: []$T) {
     size := len(slice) * size_of(T)
     written, _ := os.write_at(out, (cast([^]u8) raw_data(slice))[:size], at^)
     at^ += auto_cast written
 }
 
-begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId, override:= 0) {
+begin_asset_type :: proc (hha: ^HHA, id: AssetTypeId, override:= 0) {
     assert(hha.type == nil)
     assert(hha.asset_index == 0)
     
@@ -359,7 +359,7 @@ begin_asset_type :: proc(hha: ^HHA, id: AssetTypeId, override:= 0) {
     hha.type.one_past_last_index = hha.type.first_asset_index
 }
 
-add_asset :: proc(hha: ^HHA) -> (asset_index: u32, data: ^AssetData, src: ^SourceAsset) {
+add_asset :: proc (hha: ^HHA) -> (asset_index: u32, data: ^AssetData, src: ^SourceAsset) {
     assert(hha.type != nil)
     
     asset_index = hha.type.one_past_last_index
@@ -375,7 +375,7 @@ add_asset :: proc(hha: ^HHA) -> (asset_index: u32, data: ^AssetData, src: ^Sourc
     return
 }
 
-add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.5, 0.5}) -> (u32) {
+add_bitmap_asset :: proc (hha: ^HHA, filename: string, align_percentage: v2 = {0.5, 0.5}) -> (u32) {
     result, data, src := add_asset(hha)
     
     src ^= SourceBitmapInfo{ filename }
@@ -385,7 +385,7 @@ add_bitmap_asset :: proc(hha: ^HHA, filename: string, align_percentage: v2 = {0.
     return result
 }
 
-add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (u32) {
+add_sound_asset :: proc (hha: ^HHA, filename: string, first_sample_index: u32 = 0, sample_count: u32 = 0) -> (u32) {
     result, data, src := add_asset(hha)
     
     src ^= SourceSoundInfo{
@@ -399,7 +399,7 @@ add_sound_asset :: proc(hha: ^HHA, filename: string, first_sample_index: u32 = 0
     return result
 }
 
-add_font_asset :: proc(hha: ^HHA, source: ^SourceFont) -> (u32) {
+add_font_asset :: proc (hha: ^HHA, source: ^SourceFont) -> (u32) {
     result, data, src := add_asset(hha)
     
     src ^= SourceFontInfo{ source }
@@ -414,7 +414,7 @@ add_font_asset :: proc(hha: ^HHA, source: ^SourceFont) -> (u32) {
     return result
 }
 
-add_character_asset :: proc(hha: ^HHA, font: ^SourceFont, codepoint: rune) {
+add_character_asset :: proc (hha: ^HHA, font: ^SourceFont, codepoint: rune) {
     bitmap_id, data, src := add_asset(hha)
     
     src ^= SourceFontGlyphInfo{
@@ -434,7 +434,7 @@ add_character_asset :: proc(hha: ^HHA, font: ^SourceFont, codepoint: rune) {
     font.glyph_index_from_codepoint[codepoint] = glyph_index
 }
 
-add_tag :: proc(hha: ^HHA, id: AssetTagId, value: f32) {
+add_tag :: proc (hha: ^HHA, id: AssetTagId, value: f32) {
     assert(hha.type != nil)
     assert(hha.asset_index != 0)
     
@@ -448,7 +448,7 @@ add_tag :: proc(hha: ^HHA, id: AssetTagId, value: f32) {
     tag.value = value
 }
 
-end_asset_type :: proc(hha: ^HHA) {
+end_asset_type :: proc (hha: ^HHA) {
     assert(hha.type != nil)
     
     hha.asset_count = hha.type.one_past_last_index
@@ -456,7 +456,7 @@ end_asset_type :: proc(hha: ^HHA) {
     hha.asset_index = 0
 }
 
-load_font :: proc(pixels: f32, path_to_font: string) -> (result: ^SourceFont) {
+load_font :: proc (pixels: f32, path_to_font: string) -> (result: ^SourceFont) {
     font_file, ok := os.read_entire_file(path_to_font)
     if !ok {
         fmt.println(os.error_string(cast(os.Platform_Error) win.GetLastError()))
@@ -486,7 +486,7 @@ load_font :: proc(pixels: f32, path_to_font: string) -> (result: ^SourceFont) {
     return result
 }
 
-finalize_font_kerning :: proc(font: ^SourceFont) {
+finalize_font_kerning :: proc (font: ^SourceFont) {
     assert(font.scale != 0)
     kerning_count := tt.GetKerningTableLength(&font.font)
     kerning_table := make([]tt.kerningentry, kerning_count)
@@ -504,7 +504,7 @@ finalize_font_kerning :: proc(font: ^SourceFont) {
     }
 }
 
-load_glyph_bitmap :: proc(font: ^SourceFont, codepoint: rune, info: ^BitmapInfo) -> (result: SourceBitmap) {
+load_glyph_bitmap :: proc (font: ^SourceFont, codepoint: rune, info: ^BitmapInfo) -> (result: SourceBitmap) {
     assert(font.scale != 0)
     glyph_index := font.glyph_index_from_codepoint[codepoint]
     assert(glyph_index != 0)
@@ -688,14 +688,14 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
         assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
         
-        parse_chunk_at :: proc(at: pmm, stop: pmm) -> (result: RiffIterator) {
+        parse_chunk_at :: proc (at: pmm, stop: pmm) -> (result: RiffIterator) {
             result.at    = cast([^]u8) at
             result.stop  = stop
             
             return result
         }
         
-        is_valid_riff_iter :: proc(it: RiffIterator) -> (result: b32) {
+        is_valid_riff_iter :: proc (it: RiffIterator) -> (result: b32) {
             at := cast(uintpointer) it.at
             stop := cast(uintpointer) it.stop
             result = at < stop 
@@ -703,7 +703,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             return result
         }
         
-        next_chunk :: proc(it: RiffIterator) -> (result: RiffIterator) {
+        next_chunk :: proc (it: RiffIterator) -> (result: RiffIterator) {
             chunk := cast(^WAVE_Chunk)it.at
             size := chunk.size
             if size % 2 != 0 {
@@ -714,19 +714,19 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
             return result
         }
         
-        get_chunk_data :: proc(it: RiffIterator) -> (result: pmm) {
+        get_chunk_data :: proc (it: RiffIterator) -> (result: pmm) {
             result = &it.at[size_of(WAVE_Chunk)]
             return result
         }
         
-        get_chunk_size :: proc(it: RiffIterator) -> (result: u32) {
+        get_chunk_size :: proc (it: RiffIterator) -> (result: u32) {
             chunk := cast(^WAVE_Chunk)it.at
             result = chunk.size
             
             return result
         }
         
-        get_type :: proc(it: RiffIterator) -> (result: WAVE_Chunk_ID) {
+        get_type :: proc (it: RiffIterator) -> (result: WAVE_Chunk_ID) {
             chunk := cast(^WAVE_Chunk)it.at
             result = chunk.id
             return result
@@ -797,7 +797,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
     return result
 }
 
-premuliply_alpha :: proc(r, g, b, a: u8) -> (result: [4]u8) {
+premuliply_alpha :: proc (r, g, b, a: u8) -> (result: [4]u8) {
     texel := vec_cast(f32, r, g, b, a)
     
     texel = srgb_255_to_linear_1(texel)
@@ -830,27 +830,27 @@ vec_cast :: proc {
 }
 
 @(require_results)
-cast_vec_2 :: proc($T: typeid, x, y: $E) -> [2]T where T != E {
+cast_vec_2 :: proc ($T: typeid, x, y: $E) -> [2]T where T != E {
     return {cast(T) x, cast(T) y}
 }
 
 @(require_results)
-cast_vec_4 :: proc($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
+cast_vec_4 :: proc ($T: typeid, x, y, z, w: $E) -> [4]T where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
 
 @(require_results)
-cast_vec_v4 :: proc($T: typeid, v:[4]$E) -> [4]T where T != E {
+cast_vec_v4 :: proc ($T: typeid, v:[4]$E) -> [4]T where T != E {
     return vec_cast(T, v.x, v.y, v.z, v.w)
 }
 
 
 @(require_results)
-srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
+srgb_255_to_linear_1 :: proc (srgb: v4) -> (result: v4) {
     // @note(viktor): srgb_to_linear and linear_to_srgb assume a gamma of 2 instead of the usual 2.2
     @(require_results)
-    srgb_to_linear :: proc(srgb: v4) -> (result: v4) {
-        @(require_results) square :: proc(x: f32) -> f32 { return x * x}
+    srgb_to_linear :: proc (srgb: v4) -> (result: v4) {
+        @(require_results) square :: proc (x: f32) -> f32 { return x * x}
         
         result.r = square(srgb.r)
         result.g = square(srgb.g)
@@ -869,9 +869,9 @@ srgb_255_to_linear_1 :: proc(srgb: v4) -> (result: v4) {
 
 
 @(require_results)
-linear_1_to_srgb_255 :: proc(linear: v4) -> (result: v4) {
+linear_1_to_srgb_255 :: proc (linear: v4) -> (result: v4) {
     @(require_results)
-    linear_to_srgb :: proc(linear: v4) -> (result: v4) {
+    linear_to_srgb :: proc (linear: v4) -> (result: v4) {
         result.r = math.sqrt(linear.r)
         result.g = math.sqrt(linear.g)
         result.b = math.sqrt(linear.b)

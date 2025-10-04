@@ -9,11 +9,11 @@ DebugEventLink :: struct {
     element:  ^DebugElement,
 }
 
-sentinel :: proc(from: ^DebugEventLink) -> (result: ^DebugEventLink) {
+sentinel :: proc (from: ^DebugEventLink) -> (result: ^DebugEventLink) {
     result = cast(^DebugEventLink) &from.first_child
     return result
 }
-has_children :: proc(link: ^DebugEventLink) -> (result: b32) {
+has_children :: proc (link: ^DebugEventLink) -> (result: b32) {
     result = sentinel(link) != link.first_child
     return result
 }
@@ -145,7 +145,7 @@ TextRenderOperation:: enum {
 
 ////////////////////////////////////////////////
 
-overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
+overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     timed_function()
 
     if debug.render_group.assets == nil do return
@@ -173,7 +173,7 @@ overlay_debug_info :: proc(debug: ^DebugState, input: Input) {
     interact(debug, input, mouse_p)
 }
 
-draw_trees :: proc(debug: ^DebugState, mouse_p: v2, dt: f32) {
+draw_trees :: proc (debug: ^DebugState, mouse_p: v2, dt: f32) {
     timed_function()
     
     assert(debug.font_info != nil)
@@ -186,7 +186,7 @@ draw_trees :: proc(debug: ^DebugState, mouse_p: v2, dt: f32) {
     }
 }
 
-draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEventLink) {
+draw_tree :: proc (layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEventLink) {
     group := tree.root
     debug := layout.debug
     
@@ -243,7 +243,7 @@ draw_tree :: proc(layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEv
     }
 }
 
-draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement) {
+draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement) {
     timed_function()
     
     view := get_view_for_variable(debug, id)
@@ -458,7 +458,7 @@ draw_element :: proc(using layout: ^Layout, id: DebugId, element: ^DebugElement)
     }
 }
 
-draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rect: Rectangle2) {
+draw_arena_occupancy :: proc (debug: ^DebugState, arena: ^Arena, mouse_p: v2, rect: Rectangle2) {
     timed_function()
     
     push_rectangle(&debug.render_group, rect, debug.backing_transform, DarkGreen)
@@ -509,7 +509,7 @@ draw_arena_occupancy :: proc(debug: ^DebugState, arena: ^Arena, mouse_p: v2, rec
     }
 }
 
-add_tooltip :: proc(debug: ^DebugState, text: string) {
+add_tooltip :: proc (debug: ^DebugState, text: string) {
     // @todo(viktor): we could return this buffer and let the caller fill it, to not need to copy it
     assert(len(text) < len(debug.tooltips.data[0]))
     
@@ -522,7 +522,7 @@ add_tooltip :: proc(debug: ^DebugState, text: string) {
     copy_slice(slot[:len(text)], transmute([] u8) text)
 }
 
-draw_tooltips :: proc(debug: ^DebugState) {
+draw_tooltips :: proc (debug: ^DebugState) {
     for &tooltip in slice(&debug.tooltips) {
         text: string = cast(string) transmute(cstring) &tooltip
         
@@ -559,14 +559,14 @@ draw_tooltips :: proc(debug: ^DebugState) {
     clear(&debug.tooltips)
 }
 
-get_total_clocks :: proc(frame: ^DebugElementFrame) -> (result: i64) {
+get_total_clocks :: proc (frame: ^DebugElementFrame) -> (result: i64) {
     for event := frame.events.last; event != nil; event = event.next {
         result += event.node.duration
     }
     return result
 }
 
-draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
     
     dim := get_dimension(rect)
@@ -616,7 +616,7 @@ draw_frame_slider :: proc(debug: ^DebugState, mouse_p: v2, rect: Rectangle2, roo
     }
 }
 
-draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     timed_function()
     
     link_count: u32
@@ -704,7 +704,7 @@ draw_top_clocks :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2,
 
 longest_frame_span: f32
 d_longest_frame_span: f32
-draw_frame_bars :: proc(debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
+draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
     timed_function()
     // @todo(viktor): zooming and panning
     
@@ -877,7 +877,7 @@ debug_get_element_color :: proc (element: ^DebugElement) -> (result: v4) {
 
 ///////////////////////////////////////////////
 
-begin_layout :: proc(debug: ^DebugState, p: v2, mouse_p: v2, dt: f32) -> (result: Layout) {
+begin_layout :: proc (debug: ^DebugState, p: v2, mouse_p: v2, dt: f32) -> (result: Layout) {
     result = {
         debug   = debug,
         mouse_p = mouse_p,
@@ -892,23 +892,23 @@ begin_layout :: proc(debug: ^DebugState, p: v2, mouse_p: v2, dt: f32) -> (result
     return result
 }
 
-end_layout :: proc(layout: ^Layout) {
+end_layout :: proc (layout: ^Layout) {
     
 }
 
-begin_ui_element_rectangle :: proc(layout: ^Layout, size: ^v2) -> (result: LayoutElement) {
+begin_ui_element_rectangle :: proc (layout: ^Layout, size: ^v2) -> (result: LayoutElement) {
     result.layout  = layout
     result.size    = size
     
     return result
 }
 
-set_ui_element_default_interaction :: proc(element: ^LayoutElement, interaction: DebugInteraction) {
+set_ui_element_default_interaction :: proc (element: ^LayoutElement, interaction: DebugInteraction) {
     element.flags += {.HasInteraction}
     element.interaction = interaction
 }
 
-end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) {
+end_ui_element :: proc (using element: ^LayoutElement, use_generic_spacing: b32) {
     if !layout.line_initialized {
         layout.line_initialized = true
         layout.p.x = layout.base_p.x + layout.depth * 2 * layout.line_advance
@@ -958,7 +958,7 @@ end_ui_element :: proc(using element: ^LayoutElement, use_generic_spacing: b32) 
     advance_element(layout, total_bounds)
 }
 
-advance_element :: proc(layout: ^Layout, element_rect: Rectangle2) {
+advance_element :: proc (layout: ^Layout, element_rect: Rectangle2) {
     layout.next_line_dy = min(layout.next_line_dy, element_rect.min.y - layout.p.y)
     
     if layout.no_line_feed == 0 {
@@ -969,26 +969,26 @@ advance_element :: proc(layout: ^Layout, element_rect: Rectangle2) {
     }
 }
 
-begin_ui_row :: proc(layout: ^Layout) {
+begin_ui_row :: proc (layout: ^Layout) {
     layout.no_line_feed += 1
 }
 
-action_button :: proc(layout: ^Layout, label: string, interaction: DebugInteraction, backdrop_color :v4= DarkGreen) {
+action_button :: proc (layout: ^Layout, label: string, interaction: DebugInteraction, backdrop_color :v4= DarkGreen) {
     basic_text_element(layout, label, interaction, padding = 5, backdrop_color = backdrop_color)
 }
 
-boolean_button :: proc(layout: ^Layout, label: string, highlighted: $bool,  interaction: DebugInteraction) {
+boolean_button :: proc (layout: ^Layout, label: string, highlighted: $bool,  interaction: DebugInteraction) {
     basic_text_element(layout, label, interaction, highlighted ? Green : Jasmine, padding = 5, backdrop_color = DarkGreen)
 }
 
-end_ui_row :: proc(layout: ^Layout) {
+end_ui_row :: proc (layout: ^Layout) {
     assert(layout.no_line_feed > 0)
     layout.no_line_feed -= 1
     
     advance_element(layout, rectangle_min_max(layout.p, layout.p))
 }
 
-basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInteraction = {}, item_color := Jasmine, hot_color := Isabelline, padding :v2 = 0, backdrop_color :v4= 0) {
+basic_text_element :: proc (layout: ^Layout, text: string, interaction: DebugInteraction = {}, item_color := Jasmine, hot_color := Isabelline, padding :v2 = 0, backdrop_color :v4= 0) {
     color := interaction_is_hot(layout.debug, interaction) ? hot_color : item_color
     
     debug := layout.debug
@@ -1009,7 +1009,7 @@ basic_text_element :: proc(layout: ^Layout, text: string, interaction: DebugInte
 
 ////////////////////////////////////////////////
 
-set_value_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
+set_value_interaction :: proc (id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
     result.id = id
     result.kind = .SetValue
     result.target = target
@@ -1018,7 +1018,7 @@ set_value_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: De
     return result
 }
 
-set_value_continously_interaction :: proc(id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
+set_value_continously_interaction :: proc (id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
     result.id = id
     result.kind = .SetValueContinously
     result.target = target
@@ -1027,14 +1027,14 @@ set_value_continously_interaction :: proc(id: DebugId, target: ^$T, value: T) ->
     return result
 }
 
-interaction_is_hot :: proc(debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
+interaction_is_hot :: proc (debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
     if interaction.kind != .None {
         result = debug.hot_interaction.id == interaction.id
     }
     return result
 }
 
-interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
+interact :: proc (debug: ^DebugState, input: Input, mouse_p: v2) {
     mouse_dp := mouse_p - debug.last_mouse_p
     defer debug.last_mouse_p = mouse_p
     
@@ -1129,29 +1129,29 @@ interact :: proc(debug: ^DebugState, input: Input, mouse_p: v2) {
         }
         
         // Click interaction
-        for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
+        for transition_index := input.mouse.buttons[.left].half_transition_count; transition_index > 1; transition_index -= 1 {
             end_click_interaction(debug, input)
             begin_click_interaction(debug, input)
         }
         
-        if !input.mouse.left.ended_down {
+        if !is_down(input.mouse.buttons[.left]) {
             end_click_interaction(debug, input)
         }
     } else {
         debug.hot_interaction = debug.next_hot_interaction
         
-        for transition_index := input.mouse.left.half_transition_count; transition_index > 1; transition_index -= 1 {
+        for transition_index := input.mouse.buttons[.left].half_transition_count; transition_index > 1; transition_index -= 1 {
             begin_click_interaction(debug, input)
             end_click_interaction(debug, input)
         }
         
-        if input.mouse.left.ended_down {
+        if is_down(input.mouse.buttons[.left]) {
             begin_click_interaction(debug, input)
         }
     }
 }
 
-begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
+begin_click_interaction :: proc (debug: ^DebugState, input: Input) {
     frame_ordinal := debug.most_recent_frame_ordinal
     
     if debug.hot_interaction.kind != .None {
@@ -1195,7 +1195,7 @@ begin_click_interaction :: proc(debug: ^DebugState, input: Input) {
     }
 }
 
-end_click_interaction :: proc(debug: ^DebugState, input: Input) {
+end_click_interaction :: proc (debug: ^DebugState, input: Input) {
     interaction := &debug.interaction
     defer interaction ^= {}
     
@@ -1257,7 +1257,7 @@ end_click_interaction :: proc(debug: ^DebugState, input: Input) {
 
 ////////////////////////////////////////////////
 
-add_tree :: proc(debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^DebugTree) {
+add_tree :: proc (debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^DebugTree) {
     result = push(&debug.arena, DebugTree, no_clear())
     result ^= {
         root = root,
@@ -1269,7 +1269,7 @@ add_tree :: proc(debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^
     return result
 }
 
-get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: b32) -> (result: ^DebugEventLink) {
+get_group_by_hierarchical_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: b32) -> (result: ^DebugEventLink) {
     assert(parent != nil)
     result = parent
 
@@ -1281,7 +1281,7 @@ get_group_by_hierarchical_name :: proc(debug: ^DebugState, parent: ^DebugEventLi
     return result
 }
 
-get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventLink, name: string) -> (result: ^DebugEventLink) {
+get_or_create_group_with_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string) -> (result: ^DebugEventLink) {
     if has_children(parent) {
         for link := parent.first_child; link != sentinel(parent); link = link.next {
             if link != nil && link.name == name {
@@ -1298,7 +1298,7 @@ get_or_create_group_with_name :: proc(debug: ^DebugState, parent: ^DebugEventLin
     return result
 }
 
-create_link :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEventLink) {
+create_link :: proc (debug: ^DebugState, name: string) -> (result: ^DebugEventLink) {
     result = push(&debug.arena, DebugEventLink)
     result.name = copy_string(&debug.arena, name)
     
@@ -1308,7 +1308,7 @@ create_link :: proc(debug: ^DebugState, name: string) -> (result: ^DebugEventLin
     return result
 }
 
-add_element_to_group :: proc(debug: ^DebugState, parent: ^DebugEventLink, element: ^DebugElement) -> (result: ^DebugEventLink) {
+add_element_to_group :: proc (debug: ^DebugState, parent: ^DebugEventLink, element: ^DebugElement) -> (result: ^DebugEventLink) {
     result = create_link(debug, "")
     
     if parent != nil {
@@ -1335,13 +1335,13 @@ clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^
     return result
 }
 
-id_from_link :: proc(tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
+id_from_link :: proc (tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
     result.value[0] = tree
     result.value[1] = link
     return result
 }
 
-get_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
+get_view_for_variable :: proc (debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
     timed_function()
     // @todo(viktor): BETTER HASH FUNCTION
     hash_index := ((cast(umm) id.value[0] >> 2) + (cast(umm) id.value[1] >> 2)) % len(debug.view_hash)
@@ -1365,23 +1365,23 @@ get_view_for_variable :: proc(debug: ^DebugState, id: DebugId) -> (result: ^Debu
 
 ////////////////////////////////////////////////
 
-debug_get_baseline :: proc(debug: ^DebugState) -> (result: f32) {
+debug_get_baseline :: proc (debug: ^DebugState) -> (result: f32) {
     result = get_baseline(debug.font_info) * debug.font_scale
     return result
 }
 
-debug_get_line_advance :: proc(debug: ^DebugState) -> (result: f32) {
+debug_get_line_advance :: proc (debug: ^DebugState) -> (result: f32) {
     result = get_line_advance(debug.font_info) * debug.font_scale
     return result
 }
 
-push_text :: proc(debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine, pz:f32=0) {
+push_text :: proc (debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine, pz:f32=0) {
     if debug.font != nil && debug.font_info != nil {
         text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color, pz)
     }
 }
 
-measure_text :: proc(debug: ^DebugState, text: string) -> (result: Rectangle2) {
+measure_text :: proc (debug: ^DebugState, text: string) -> (result: Rectangle2) {
     if debug.font != nil && debug.font_info != nil {
         result = text_op(debug, .Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
     }

@@ -66,7 +66,7 @@ BrainMonster :: struct {
     body: ^Entity,
 }
 
-brain_slot_for :: proc($base: typeid, $member: string, index: u32 = 0) -> BrainSlot {
+brain_slot_for :: proc ($base: typeid, $member: string, index: u32 = 0) -> BrainSlot {
     // @study(viktor): can this be done better by using enumerated arrays?
     return { auto_cast offset_of_by_string(base, member) / size_of(^Entity) + index }
 }
@@ -88,7 +88,7 @@ mark_brain_active :: proc (brain: ^Brain) {
     }
 }
 
-execute_brain :: proc(region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State, input: ^Input, entropy: ^RandomSeries) {
+execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State, input: ^Input, entropy: ^RandomSeries) {
     switch brain.kind {
       case .None: unreachable()
       case .Room: unreachable() // @note(viktor): See the comment in the definition above.
@@ -110,7 +110,7 @@ execute_brain :: proc(region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State,
         if input != nil {
             controller := input.controllers[controller_index]
             
-            if was_pressed(controller.back) {
+            if was_pressed(controller.buttons[.back]) {
                 mark_for_deletion(body)
                 mark_for_deletion(head)
                 con_hero.brain_id = 0
@@ -122,32 +122,32 @@ execute_brain :: proc(region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State,
                 con_ddp.xy = controller.stick_average
             } else {
                 // @note(viktor): Use digital movement tuning
-                if is_down(controller.stick_left) {
+                if is_down(controller.buttons[.stick_left]) {
                     con_ddp.y  = 0
                     con_ddp.x -= 1
                 }
-                if is_down(controller.stick_right) {
+                if is_down(controller.buttons[.stick_right]) {
                     con_ddp.y  = 0
                     con_ddp.x += 1
                 }
-                if is_down(controller.stick_up) {
+                if is_down(controller.buttons[.stick_up]) {
                     con_ddp.x  = 0
                     con_ddp.y += 1
                 }
-                if is_down(controller.stick_down) {
+                if is_down(controller.buttons[.stick_down]) {
                     con_ddp.x  = 0
                     con_ddp.y -= 1
                 }
                 
-                if !is_down(controller.stick_left) && !is_down(controller.stick_right) {
+                if !is_down(controller.buttons[.stick_left]) && !is_down(controller.buttons[.stick_right]) {
                     con_ddp.x = 0
-                    if is_down(controller.stick_up)   do con_ddp.y =  1
-                    if is_down(controller.stick_down) do con_ddp.y = -1
+                    if is_down(controller.buttons[.stick_up])   do con_ddp.y =  1
+                    if is_down(controller.buttons[.stick_down]) do con_ddp.y = -1
                 }
-                if !is_down(controller.stick_up) && !is_down(controller.stick_down) {
+                if !is_down(controller.buttons[.stick_up]) && !is_down(controller.buttons[.stick_down]) {
                     con_ddp.y = 0
-                    if is_down(controller.stick_left)  do con_ddp.x = -1
-                    if is_down(controller.stick_right) do con_ddp.x =  1
+                    if is_down(controller.buttons[.stick_left])  do con_ddp.x = -1
+                    if is_down(controller.buttons[.stick_right]) do con_ddp.x =  1
                 }
             }
             
@@ -155,13 +155,13 @@ execute_brain :: proc(region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State,
                 con_hero.recenter_t = 1
             }
             
-            if controller.button_up.ended_down    { dfacing =  {0, 1}; attacked = true }
-            if controller.button_down.ended_down  { dfacing = -{0, 1}; attacked = true }
-            if controller.button_left.ended_down  { dfacing = -{1, 0}; attacked = true }
-            if controller.button_right.ended_down { dfacing =  {1, 0}; attacked = true }
+            if is_down(controller.buttons[.button_up])    { dfacing =  {0, 1}; attacked = true }
+            if is_down(controller.buttons[.button_down])  { dfacing = -{0, 1}; attacked = true }
+            if is_down(controller.buttons[.button_left])  { dfacing = -{1, 0}; attacked = true }
+            if is_down(controller.buttons[.button_right]) { dfacing =  {1, 0}; attacked = true }
             
             when false {
-                if was_pressed(controller.start) {
+                if was_pressed(controller.buttons[.start]) {
                     standing_on, ok := get_closest_traversable(region, head.p, {.Unoccupied})
                     if ok {
                         add_hero(mode, region, standing_on, 0)

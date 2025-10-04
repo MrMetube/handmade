@@ -18,7 +18,7 @@ Procedure :: struct {
     return_count: int,
 }
 
-check_printlikes :: proc(using mp: ^Metaprogram, dir: string) -> (succes: bool) {
+check_printlikes :: proc (using mp: ^Metaprogram, dir: string) -> (succes: bool) {
     context.user_ptr = mp
     
     collect_all_files(&files, dir)
@@ -29,7 +29,7 @@ check_printlikes :: proc(using mp: ^Metaprogram, dir: string) -> (succes: bool) 
     return check_printlikes_by_package(code_package)
 }
 
-check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: bool) {
+check_printlikes_by_package :: proc (pkg: ^ast.Package) -> (success: bool) {
     using mp := cast(^Metaprogram) context.user_ptr
     
     v := ast.Visitor{ visit = visit_and_collect_printlikes_and_procedures }
@@ -41,7 +41,7 @@ check_printlikes_by_package :: proc(pkg: ^ast.Package) -> (success: bool) {
     return !mp.printlikes_failed
 }
 
-visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
+visit_and_collect_printlikes_and_procedures :: proc (visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
     if node == nil do return visitor
     
     using mp := cast(^Metaprogram) context.user_ptr
@@ -109,7 +109,7 @@ visit_and_collect_printlikes_and_procedures :: proc(visitor: ^ast.Visitor, node:
     return visitor
 }
 
-visit_and_check_printlikes :: proc(visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
+visit_and_check_printlikes :: proc (visitor: ^ast.Visitor, node: ^ast.Node) -> ^ast.Visitor {
     using mp := cast(^Metaprogram) context.user_ptr
     
     if node == nil do return visitor
@@ -260,7 +260,7 @@ report_unchecked_printlike_call :: proc (call: ^ast.Call_Expr) {
 }
 
 // :PrintlikeChecking @copypasta the loop structure must be the same as in format_string 
-get_expected_format_string_arg_count :: proc(format: string, indices: ^[dynamic]int) -> (ok: bool) {
+get_expected_format_string_arg_count :: proc (format: string, indices: ^[dynamic]int) -> (ok: bool) {
     if format[0] == '"' || format[0] == '`' {
         ok = true
         

@@ -168,7 +168,7 @@ play_intro_cutscene :: proc (state: ^State, tran_state: ^TransientState) {
 
 ////////////////////////////////////////////////
 
-update_and_render_title_screen :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^Titlescreen_Mode) -> (rerun: bool) {
+update_and_render_title_screen :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^Titlescreen_Mode) -> (rerun: bool) {
     rerun = check_for_meta_input(state, tran_state, input)
     
     if !rerun {
@@ -183,7 +183,7 @@ update_and_render_title_screen :: proc(state: ^State, tran_state: ^TransientStat
     return rerun
 }
 
-update_and_render_cutscene :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^Cutscene_Mode) -> (rerun: bool) {
+update_and_render_cutscene :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^Cutscene_Mode) -> (rerun: bool) {
     assets := tran_state.assets
     rerun = check_for_meta_input(state, tran_state, input)
     
@@ -204,10 +204,10 @@ update_and_render_cutscene :: proc(state: ^State, tran_state: ^TransientState, r
 
 check_for_meta_input :: proc (state: ^State, tran_state: ^TransientState, input: ^Input) -> (result: bool) {
     for controller in input.controllers {
-        if was_pressed(controller.back) {
+        if was_pressed(controller.buttons[.back]) {
             input.quit_requested = true
             break
-        } else if was_pressed(controller.start) {
+        } else if was_pressed(controller.buttons[.start]) {
             play_world(state, tran_state)
             result = true
             break

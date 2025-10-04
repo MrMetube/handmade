@@ -128,13 +128,13 @@ TraversableReference :: struct {
 
 // @cleanup
 get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
-get_entity_ground_point_ :: proc(entity: ^Entity) -> (result: v3) {
+get_entity_ground_point_ :: proc (entity: ^Entity) -> (result: v3) {
     result = get_entity_ground_point(entity, entity.p) 
     
     return result
 }
 
-get_entity_ground_point_with_p :: proc(entity: ^Entity, for_entity_p: v3) -> (result: v3) {
+get_entity_ground_point_with_p :: proc (entity: ^Entity, for_entity_p: v3) -> (result: v3) {
     result = for_entity_p
 
     return result
@@ -414,7 +414,7 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
     }
 }
 
-draw_hitpoints :: proc(group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
+draw_hitpoints :: proc (group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
     if entity.hit_points.count > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5

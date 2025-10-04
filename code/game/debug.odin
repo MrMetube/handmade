@@ -263,7 +263,7 @@ ClockEntry :: struct {
 ////////////////////////////////////////////////
 
 @(export)
-debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
+debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
     when !DebugEnabled do return
     
     timed_function()
@@ -274,7 +274,7 @@ debug_frame_end :: proc(memory: ^GameMemory, input: Input, render_commands: ^Ren
     if memory.debug_state == nil {
         memory.debug_state = debug_init(render_commands.width, render_commands.height)
     }
-    debug := cast(^DebugState) memory.debug_state
+    debug := memory.debug_state
     
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
@@ -356,7 +356,7 @@ debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
     return debug
 }
 
-get_debug_state :: proc() -> (result: ^DebugState) {
+get_debug_state :: proc () -> (result: ^DebugState) {
     if GlobalDebugMemory != nil {
         result = auto_cast GlobalDebugMemory.debug_state
     }
@@ -365,7 +365,7 @@ get_debug_state :: proc() -> (result: ^DebugState) {
 
 ////////////////////////////////////////////////
 
-collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
+collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
     timed_function()
     
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
@@ -495,7 +495,7 @@ collate_events :: proc(debug: ^DebugState, events: []DebugEvent) {
     }
 }
 
-store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElement) -> (result: ^DebugStoredEvent) {
+store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugElement) -> (result: ^DebugStoredEvent) {
     if debug.root_group == nil do return
     
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
@@ -515,18 +515,18 @@ store_event :: proc(debug: ^DebugState, event: DebugEvent, element: ^DebugElemen
     return result 
 }
 
-increment_frame_ordinal :: proc(value:^i32) {
+increment_frame_ordinal :: proc (value:^i32) {
     value ^= (value^+1) % len(DebugState{}.frames)
 }
 
-init_frame :: proc(debug: ^DebugState, frame: ^DebugFrame, begin_clock: i64) {
+init_frame :: proc (debug: ^DebugState, frame: ^DebugFrame, begin_clock: i64) {
     frame ^= {
         frame_index = debug.total_frame_count,
         begin_clock = begin_clock,
     }
 }
 
-free_oldest_frame :: proc(debug: ^DebugState) {
+free_oldest_frame :: proc (debug: ^DebugState) {
     if debug.oldest_frame_ordinal_that_is_already_freed == debug.most_recent_frame_ordinal {
         increment_frame_ordinal(&debug.most_recent_frame_ordinal)
     }
@@ -535,7 +535,7 @@ free_oldest_frame :: proc(debug: ^DebugState) {
     free_frame(debug, debug.oldest_frame_ordinal_that_is_already_freed)
 }
 
-free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
+free_frame :: proc (debug: ^DebugState, frame_ordinal: i32) {
     freed_count: u32
     for element in debug.element_hash {
         for element := element; element != nil; element = element.next {
@@ -556,7 +556,7 @@ free_frame :: proc(debug: ^DebugState, frame_ordinal: i32) {
     frame ^= {}
 }
 
-get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {
+get_hash_from_guid :: proc (guid: DebugGUID) -> (result: u32) {
     // @todo(viktor): BETTER HASH FUNCTION
     for i in 0..<len(guid.name)      do result = result * 65599 + cast(u32) guid.name[i]
     for i in 0..<len(guid.file_path) do result = result * 65599 + cast(u32) guid.file_path[i]
@@ -567,7 +567,7 @@ get_hash_from_guid :: proc(guid: DebugGUID) -> (result: u32) {
 }
 
 get_element_from_guid :: proc { get_element_from_guid_by_hash, get_element_from_guid_by_parent, get_element_from_guid_raw }
-get_element_from_guid_raw :: proc(debug: ^DebugState, guid: DebugGUID) -> (result: ^DebugElement) {
+get_element_from_guid_raw :: proc (debug: ^DebugState, guid: DebugGUID) -> (result: ^DebugElement) {
     hash_value := get_hash_from_guid(guid)
     if hash_value != 0 {
         result = get_element_from_guid_by_hash(debug, guid, hash_value)
@@ -600,7 +600,7 @@ get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash
 ElementOp :: enum { CreateHierarchy, AddToParent }
 ElementOps :: bit_set[ElementOp]
 
-get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, parent: ^DebugEventLink, ops: ElementOps) -> (result: ^DebugElement) {
+get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, parent: ^DebugEventLink, ops: ElementOps) -> (result: ^DebugElement) {
     if event.guid != {} {   
         hash_value := get_hash_from_guid(event.guid)
         
@@ -645,7 +645,7 @@ get_element_from_guid_by_parent :: proc(debug: ^DebugState, event: DebugEvent, p
     return result
 }
 
-alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
+alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
     result = thread.first_free_block
     if result != nil {
         thread.first_free_block = result.next_free
@@ -666,7 +666,7 @@ alloc_open_block :: proc(debug: ^DebugState, thread: ^DebugThread, frame_index: 
     return result
 }
 
-free_open_block :: proc(thread: ^DebugThread, first_open_block: ^^DebugOpenBlock) {
+free_open_block :: proc (thread: ^DebugThread, first_open_block: ^^DebugOpenBlock) {
     free_block := first_open_block^
     first_open_block ^= free_block.parent
     
@@ -676,20 +676,20 @@ free_open_block :: proc(thread: ^DebugThread, first_open_block: ^^DebugOpenBlock
 
 ////////////////////////////////////////////////
 
-begin_debug_statistic :: proc(stat: ^DebugStatistic) {
+begin_debug_statistic :: proc (stat: ^DebugStatistic) {
     stat ^= {
         min = max(f32),
         max = min(f32),
     }
 }
 
-accumulate_debug_statistic :: proc(stat: ^DebugStatistic, value: f32) {
+accumulate_debug_statistic :: proc (stat: ^DebugStatistic, value: f32) {
     stat.sum += value
     stat.min = min(stat.min, value)
     stat.max = max(stat.max, value)
     stat.count += 1
 }
 
-end_debug_statistic :: proc(stat: ^DebugStatistic) {
+end_debug_statistic :: proc (stat: ^DebugStatistic) {
     stat.avg = safe_ratio_0(stat.sum, cast(f32) stat.count)
 }

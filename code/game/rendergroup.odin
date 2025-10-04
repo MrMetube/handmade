@@ -28,7 +28,7 @@ Bitmap :: struct {
     // @todo(viktor): the length of the slice and either width or height are redundant
     memory: [] Color,
     
-    align_percentage:  [2] f32,
+    align_percentage:  v2,
     width_over_height: f32,
     
     width, height: i32,
@@ -104,7 +104,7 @@ RenderEntryType :: enum u8 {
 }
 
 @(common)
-RenderEntryHeader :: struct { // @todo(viktor): Don't store type here, store in sort index?
+RenderEntryHeader :: struct {
     clip_rect_index: u16,
     type: RenderEntryType,
 }
@@ -114,7 +114,7 @@ RenderEntryClip :: struct {
     rect: Rectangle2i,
     next: ^RenderEntryClip,
     render_target_index: u32,
-    focal_length:        f32,
+    projection:          m4,
 }
 
 @(common)
@@ -168,7 +168,7 @@ get_standard_camera_params :: proc (focal_length: f32) -> (result: Camera_Params
 
 ////////////////////////////////////////////////
 
-init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
+init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
     group ^= {
         assets   = assets,
         commands = commands,
@@ -180,8 +180,8 @@ init_render_group :: proc(group: ^RenderGroup, assets: ^Assets, commands: ^Rende
 
 ////////////////////////////////////////////////
 
-default_flat_transform    :: proc() -> Transform { return { scale = 1 } }
-default_upright_transform :: proc() -> Transform { return { scale = 1, is_upright = true } }
+default_flat_transform    :: proc () -> Transform { return { scale = 1 } }
+default_upright_transform :: proc () -> Transform { return { scale = 1, is_upright = true } }
 
 perspective  :: proc (group: ^RenderGroup, focal_length: f32, p: v3) { set_camera(group, false, focal_length, p) }
 orthographic :: proc (group: ^RenderGroup)                           { set_camera(group, true, 1, 0)             }
@@ -199,21 +199,7 @@ set_camera :: proc (group: ^RenderGroup, orthographic: bool, focal_length: f32, 
 
 ////////////////////////////////////////////////
 
-render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
-    // @note(viktor): The result is _always_ cleared to zero.
-    size     := cast(u32) size_of(T)
-    capacity := cast(u32) len(group.commands.push_buffer)
-    assert(group.commands.push_buffer_data_at + size < capacity)
-    
-    // :PointerArithmetic
-    result = cast(^T) &group.commands.push_buffer[group.commands.push_buffer_data_at]
-    result ^= {}
-    group.commands.push_buffer_data_at += size
-    
-    return result
-}
-
-push_render_element :: proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     assert(group.camera.mode != nil)
     
     type: RenderEntryType
@@ -221,7 +207,7 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
       case RenderEntryBitmap:             type = .RenderEntryBitmap
       case RenderEntryRectangle:          type = .RenderEntryRectangle
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
-      case RenderEntryClip:               unreachable()
+      case RenderEntryClip:               type = .RenderEntryClip
       case:                               unreachable()
     }
     assert(type != .None)
@@ -236,26 +222,44 @@ push_render_element :: proc(group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     return result
 }
 
+render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+    // @note(viktor): The result is _always_ cleared to zero.
+    size     := cast(u32) size_of(T)
+    capacity := cast(u32) len(group.commands.push_buffer)
+    assert(group.commands.push_buffer_data_at + size < capacity)
+    
+    // :PointerArithmetic
+    result = cast(^T) &group.commands.push_buffer[group.commands.push_buffer_data_at]
+    group.commands.push_buffer_data_at += size
+    
+    result ^= {}
+    return result
+}
+
+////////////////////////////////////////////////
+
 push_clip_rect :: proc { push_clip_rect_direct, push_clip_rect_with_transform }
-push_clip_rect_direct :: proc(group: ^RenderGroup, rect: Rectangle2, render_target_index: u32, focal_length: f32) -> (result: u16) {
-    // @todo(viktor): just use push render element and make pushing a header optional
-    entry := render_group_push_size(group, RenderEntryClip)
+push_clip_rect_direct :: proc (group: ^RenderGroup, rect: Rectangle2, render_target_index: u32, focal_length: f32) -> (result: u16) {
+    entry := push_render_element(group, RenderEntryClip)
+    
+    entry.rect = rec_cast(i32, rect)
+    entry.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
+    entry.render_target_index = render_target_index
+    
+    aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
+    one_over_focal_length := 1 / focal_length
+    entry.projection = projection(aspect_width_over_height, one_over_focal_length)
     
     result = cast(u16) group.commands.clip_rects_count
     deque_append(&group.commands.rects, entry)
     group.commands.clip_rects_count += 1
     group.current_clip_rect_index = result
     
-    entry.rect = rec_cast(i32, rect)
-    entry.rect.min.y += 1 // Correction for rounding, because the y-axis is inverted
-    entry.render_target_index = render_target_index
-    entry.focal_length = focal_length
-    
     group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
     
     return result
 }
-push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, render_target_index: u32, transform: Transform) -> (result: u16) {
+push_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, render_target_index: u32, transform: Transform) -> (result: u16) {
     rect3 := Rect3(rect, 0, 0)
     
     center := get_center(rect3)
@@ -270,7 +274,7 @@ push_clip_rect_with_transform :: proc(group: ^RenderGroup, rect: Rectangle2, ren
     return result
 }
 
-push_blend_render_targets :: proc(group: ^RenderGroup, source_index: u32, alpha: f32) {
+push_blend_render_targets :: proc (group: ^RenderGroup, source_index: u32, alpha: f32) {
     push_sort_barrier(group)
     entry := push_render_element(group, RenderEntryBlendRenderTargets)
     entry ^= {
@@ -280,15 +284,15 @@ push_blend_render_targets :: proc(group: ^RenderGroup, source_index: u32, alpha:
     push_sort_barrier(group)
 }
 
-push_sort_barrier :: proc(group: ^RenderGroup, turn_of_sorting := false) {
+push_sort_barrier :: proc (group: ^RenderGroup, turn_of_sorting := false) {
     // @todo(viktor): Do we want the sort barrier again?
 }
 
-push_clear :: proc(group: ^RenderGroup, color: v4) {
+push_clear :: proc (group: ^RenderGroup, color: v4) {
     group.commands.clear_color = store_color({}, color)
 }
 
-push_bitmap :: proc(
+push_bitmap :: proc (
     group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, 
     offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1},
 ) {
@@ -303,7 +307,7 @@ push_bitmap :: proc(
     }
 }
 
-push_bitmap_raw :: proc(
+push_bitmap_raw :: proc (
     group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
     offset := v3{}, color := v4{1, 1, 1, 1}, asset_id: BitmapId = 0, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1},
 ) {
@@ -328,10 +332,10 @@ push_bitmap_raw :: proc(
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
-push_rectangle2 :: proc(group: ^RenderGroup, rect: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
+push_rectangle2 :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
     push_rectangle(group, Rect3(rect, 0, 0), transform, color)
 }
-push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
+push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
     basis := project_with_transform(group.camera, transform, rect.min)
     dimension := get_dimension(rect)
     
@@ -344,10 +348,10 @@ push_rectangle3 :: proc(group: ^RenderGroup, rect: Rectangle3, transform: Transf
 }
 
 push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
-push_rectangle_outline2 :: proc(group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: v2 = 0.1) {
+push_rectangle_outline2 :: proc (group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: v2 = 0.1) {
     push_rectangle_outline(group, Rect3(rec, 0, 0), transform, color, thickness)
 }
-push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: v2 = 0.1) {
+push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: v2 = 0.1) {
     center         := get_center(rec)
     half_dimension := get_dimension(rec) * 0.5
     
@@ -372,7 +376,7 @@ push_rectangle_outline3 :: proc(group: ^RenderGroup, rec: Rectangle3, transform:
 
 ////////////////////////////////////////////////
 
-store_color :: proc(transform: Transform, color: v4) -> (result: v4) {
+store_color :: proc (transform: Transform, color: v4) -> (result: v4) {
     result = linear_blend(color, transform.color, transform.t_color)
     result.rgb *= result.a
     return result
@@ -380,7 +384,7 @@ store_color :: proc(transform: Transform, color: v4) -> (result: v4) {
 
 ////////////////////////////////////////////////
 
-get_used_bitmap_dim :: proc(
+get_used_bitmap_dim :: proc (
     group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
     offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
 ) -> (result: UsedBitmapDim) {
@@ -394,7 +398,7 @@ get_used_bitmap_dim :: proc(
     return result
 }
 
-project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3) -> (result: v3) {
+project_with_transform :: proc (camera: Camera, transform: Transform, base_p: v3) -> (result: v3) {
     p := base_p + transform.offset
     
     switch camera.mode {
@@ -424,7 +428,7 @@ project_with_transform :: proc(camera: Camera, transform: Transform, base_p: v3)
     return result
 }
 
-unproject_with_transform :: proc(group: ^RenderGroup, camera: Camera, transform: Transform, pixel_p: v2) -> (result: v3) {
+unproject_with_transform :: proc (group: ^RenderGroup, camera: Camera, transform: Transform, pixel_p: v2) -> (result: v3) {
     // @todo(viktor): make this conform with project with transform
     screen_center := group.screen_size * 0.5
     result.xy = (pixel_p - screen_center)
@@ -450,12 +454,12 @@ unproject_with_transform :: proc(group: ^RenderGroup, camera: Camera, transform:
     return result
 }
 
-get_camera_rectangle_at_target :: proc(group: ^RenderGroup) -> (result: Rectangle3) {
+get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> (result: Rectangle3) {
     result = get_camera_rectangle_at_distance(group, group.camera.p.z)
     return result
 }
 
-get_camera_rectangle_at_distance :: proc(group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle3) {
+get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle3) {
     transform := default_flat_transform()
     transform.offset.z = -distance_from_camera
     

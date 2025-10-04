@@ -6,9 +6,9 @@ SortEntry :: struct {
     index:    u32,
 }
 
-compare_sort_entries :: proc(a, b: SortEntry) -> b32 { return a.sort_key < b.sort_key }
+compare_sort_entries :: proc (a, b: SortEntry) -> b32 { return a.sort_key < b.sort_key }
 
-radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
+radix_sort :: proc (entries: []SortEntry, temp_space: []SortEntry) #no_bounds_check {
     source, dest := entries, temp_space
     for byte_index in u32(0)..<4 {
         sort_key_offsets: [256]u32
@@ -42,7 +42,7 @@ radix_sort :: proc(entries: []SortEntry, temp_space: []SortEntry) #no_bounds_che
     }
 }
 
-merge_sort :: proc(entries: []$T, temp_space: []T, comes_before: proc(a, b: T) -> b32) #no_bounds_check {
+merge_sort :: proc (entries: []$T, temp_space: []T, comes_before: proc (a, b: T) -> b32) #no_bounds_check {
     count := len(entries)
     
     switch count {
@@ -89,7 +89,7 @@ merge_sort :: proc(entries: []$T, temp_space: []T, comes_before: proc(a, b: T) -
     }
 }
 
-bubble_sort :: proc(entries: []SortEntry) {
+bubble_sort :: proc (entries: []SortEntry) {
     count := len(entries)
     for _ in 0 ..< count {
         sorted := true
@@ -109,7 +109,7 @@ bubble_sort :: proc(entries: []SortEntry) {
 
 ////////////////////////////////////////////////
 
-sort_key_to_u32 :: proc(sort_key: f32) -> (result: u32) {
+sort_key_to_u32 :: proc (sort_key: f32) -> (result: u32) {
     result = transmute(u32) sort_key
 
     SignBit :: 0x8000_0000

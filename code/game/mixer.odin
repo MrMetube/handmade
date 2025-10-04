@@ -4,12 +4,12 @@ import "core:simd/x86"
 
 
 @(common) 
-Sample :: [2]i16
+Sample :: [2] i16
 
 @(common) 
 GameSoundBuffer :: struct {
     // @note(viktor): Samples length must be padded to a multiple of 4 samples.
-    samples:            []Sample,
+    samples:            [] Sample,
     samples_per_second: u32,
 }
 
@@ -25,7 +25,7 @@ Sound :: struct {
     // @todo(viktor): should channel_count be implicit, or does that make the underlying memory too messy?
     // @todo(viktor): should sample_count be explicit, or does that make the underlying memory too messy?
     channel_count: u8,
-    channels: [2][]i16, // 1 or 2 channels of [sample_count]samples
+    channels: [2][] i16, // 1 or 2 channels of [sample_count]samples
 }
 
 PlayingSound :: struct {
@@ -36,17 +36,17 @@ PlayingSound :: struct {
     samples_played: f32,
     d_sample:       f32, 
     
-    current_volume:   [2]f32,
-    target_volume:    [2]f32,
-    d_current_volume: [2]f32,
+    current_volume:   [2] f32,
+    target_volume:    [2] f32,
+    d_current_volume: [2] f32,
 }
 
-init_mixer :: proc(mixer: ^Mixer, arena: ^Arena) {
+init_mixer :: proc (mixer: ^Mixer, arena: ^Arena) {
     mixer.master_volume = 0.2
     mixer.permanent_arena = arena
 }
 
-play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
+play_sound :: proc (mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
     playing_sound := list_pop_head(&mixer.first_free_playing_sound) or_else push(mixer.permanent_arena, PlayingSound, no_clear())
     
     // @todo(viktor): should volume default to [0.5,0.5] to be centered?
@@ -63,7 +63,7 @@ play_sound :: proc(mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 
     list_push(&mixer.first_playing_sound, playing_sound)
 }
 
-change_volume :: proc(mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2]f32) {
+change_volume :: proc (mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2]f32) {
     if fade_duration_in_seconds <= 0 {
         sound.current_volume = volume
         sound.target_volume  = volume
@@ -73,12 +73,12 @@ change_volume :: proc(mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seco
     }
 }
 
-change_pitch :: proc(mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
+change_pitch :: proc (mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
     sound.d_sample = pitch
 }
 
 @(enable_target_feature="sse,sse2")
-output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
+output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
     timed_function()
     
     mixer_memory := begin_temporary_memory(temporary_arena)
@@ -268,22 +268,22 @@ output_playing_sounds :: proc(mixer: ^Mixer, temporary_arena: ^Arena, assets: ^A
         
         sample_out := cast([^]x86.__m128i)raw_data(sound_buffer.samples)
         for sample_index: i32; sample_index < chunk_count; sample_index += 1 {
-        s0 := x86._mm_load_ps(cast([^]f32) source_0)
-        s1 := x86._mm_load_ps(cast([^]f32) source_1)
-        
-        source_0 = source_0[1:]
-        source_1 = source_1[1:]
-        
-        l := x86._mm_cvtps_epi32(s0)
-        r := x86._mm_cvtps_epi32(s1)
-        
-        lr0 := x86._mm_unpacklo_epi32(l, r)
-        lr1 := x86._mm_unpackhi_epi32(l, r)
-        
-        s01 := x86._mm_packs_epi32(lr0, lr1)
-        
-        sample_out[0] = s01
-        sample_out = sample_out[1:]
+            s0 := x86._mm_load_ps(cast([^]f32) source_0)
+            s1 := x86._mm_load_ps(cast([^]f32) source_1)
+            
+            source_0 = source_0[1:]
+            source_1 = source_1[1:]
+            
+            l := x86._mm_cvtps_epi32(s0)
+            r := x86._mm_cvtps_epi32(s1)
+            
+            lr0 := x86._mm_unpacklo_epi32(l, r)
+            lr1 := x86._mm_unpackhi_epi32(l, r)
+            
+            s01 := x86._mm_packs_epi32(lr0, lr1)
+            
+            sample_out[0] = s01
+            sample_out = sample_out[1:]
         }
     }
 }

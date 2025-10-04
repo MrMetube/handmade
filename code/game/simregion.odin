@@ -190,7 +190,7 @@ end_world_changes :: proc (region: ^SimRegion) {
 
 ////////////////////////////////////////////////
 
-pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
+pack_entity_reference :: proc (region: ^SimRegion, ref: ^EntityReference) {
     if ref.pointer != nil {
         if .MarkedForDeletion in ref.pointer.flags {
             ref.id = 0
@@ -204,7 +204,7 @@ pack_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
     }
 }
 
-pack_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReference) {
+pack_traversable_reference :: proc (region: ^SimRegion, ref: ^TraversableReference) {
     pack_entity_reference(region, &ref.entity)
 }
 
@@ -226,7 +226,7 @@ create_entity :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity) {
     return result
 }
 
-mark_for_deletion :: proc(entity: ^Entity) {
+mark_for_deletion :: proc (entity: ^Entity) {
     if entity != nil {
         entity.flags += { .MarkedForDeletion }
     }
@@ -241,7 +241,7 @@ get_entity_by_id :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity)
 ////////////////////////////////////////////////
 // @cleanup spacial queries and sim functions
 
-get_closest_entity_by_brain_kind :: proc(region: ^SimRegion, from: v3, kind: BrainKind, max_radius: f32) -> (result: ^Entity, distance_squared: f32) {
+get_closest_entity_by_brain_kind :: proc (region: ^SimRegion, from: v3, kind: BrainKind, max_radius: f32) -> (result: ^Entity, distance_squared: f32) {
     distance_squared = square(max_radius)
     // @todo(viktor): We could return the delta and more as we already computed them but do we need that?
         
@@ -258,7 +258,7 @@ get_closest_entity_by_brain_kind :: proc(region: ^SimRegion, from: v3, kind: Bra
     return result, distance_squared
 }
 
-get_closest_traversable_along_ray :: proc(region: ^SimRegion, from_p: v3, dir: v3, skip: TraversableReference, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
+get_closest_traversable_along_ray :: proc (region: ^SimRegion, from_p: v3, dir: v3, skip: TraversableReference, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
     timed_function()
     // @todo(viktor): Actually implement a smarter spatial query
     for probe in 0..<10 {
@@ -274,7 +274,7 @@ get_closest_traversable_along_ray :: proc(region: ^SimRegion, from_p: v3, dir: v
     return result, ok
 }
 
-get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: bool) {
+get_closest_traversable :: proc (region: ^SimRegion, from_p: v3, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: bool) {
     timed_function()
     // @todo(viktor): make spatial queries easy for things
     closest_point_dsq :f32= 1000
@@ -308,22 +308,22 @@ get_closest_traversable :: proc(region: ^SimRegion, from_p: v3, flags: bit_set[e
     return result, ok
 }
 
-entity_overlaps_rectangle :: proc(bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
+entity_overlaps_rectangle :: proc (bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
     grown := add_radius(bounds, 0.5 * get_dimension(volume))
     result = contains(grown, p + get_center(volume))
     return result
 }
 
-get_brain_hash_from_id :: proc(region: ^SimRegion, id: BrainId) -> (result: ^BrainHash) {
+get_brain_hash_from_id :: proc (region: ^SimRegion, id: BrainId) -> (result: ^BrainHash) {
     result = get_hash_from_id(region.brain_hash[:], region.brain_hash_occupancy[:], cast(u32) id)
     return result
 }
-get_entity_hash_from_id :: proc(region: ^SimRegion, id: EntityId) -> (result: ^EntityHash) {
+get_entity_hash_from_id :: proc (region: ^SimRegion, id: EntityId) -> (result: ^EntityHash) {
     result = get_hash_from_id(region.entity_hash[:], region.entity_hash_occupancy[:], cast(u32) id)
     return result
 }
 
-get_hash_from_id :: proc(hashes: [] $T, occupancy: [] u64, id: u32) -> (result: ^T) {
+get_hash_from_id :: proc (hashes: [] $T, occupancy: [] u64, id: u32) -> (result: ^T) {
     assert(id != 0)
     
     hash := cast(u32) id
@@ -365,7 +365,7 @@ add_entity_to_hash :: proc (region: ^SimRegion, entity: ^Entity) {
     assert(test.pointer == entity)
 }
 
-get_or_add_brain :: proc(region: ^SimRegion, id: BrainId, kind: BrainKind) -> (result: ^Brain) {
+get_or_add_brain :: proc (region: ^SimRegion, id: BrainId, kind: BrainKind) -> (result: ^Brain) {
     entry := get_brain_hash_from_id(region, id)
     result = entry.pointer
     
@@ -422,7 +422,7 @@ is_empty :: proc (array: [] u64, #any_int index: u64) -> (result: bool) {
 
 ////////////////////////////////////////////////
 
-connect_entity_references :: proc(region: ^SimRegion) {
+connect_entity_references :: proc (region: ^SimRegion) {
     timed_function()
     
     for &entity in slice(region.entities) {
@@ -436,24 +436,24 @@ connect_entity_references :: proc(region: ^SimRegion) {
     }
 }
 
-load_entity_reference :: proc(region: ^SimRegion, ref: ^EntityReference) {
+load_entity_reference :: proc (region: ^SimRegion, ref: ^EntityReference) {
     if ref.id != 0 {
         entry := get_entity_hash_from_id(region, ref.id)
         ref.pointer = entry == nil ? nil : entry.pointer
     }
 }
 
-load_traversable_reference :: proc(region: ^SimRegion, ref: ^TraversableReference) {
+load_traversable_reference :: proc (region: ^SimRegion, ref: ^TraversableReference) {
     load_entity_reference(region, &ref.entity)
 }
 
 ////////////////////////////////////////////////
 
 get_traversable :: proc { get_traversable_ref, get_traversable_raw }
-get_traversable_ref :: proc(ref: TraversableReference) -> (result: ^TraversablePoint) {
+get_traversable_ref :: proc (ref: TraversableReference) -> (result: ^TraversablePoint) {
     return get_traversable_raw(ref.entity.pointer, ref.index)
 }
-get_traversable_raw :: proc(entity: ^Entity, index: i64) -> (result: ^TraversablePoint) {
+get_traversable_raw :: proc (entity: ^Entity, index: i64) -> (result: ^TraversablePoint) {
     if entity != nil {
         result = &entity.traversables.data[index]
     }
@@ -461,10 +461,10 @@ get_traversable_raw :: proc(entity: ^Entity, index: i64) -> (result: ^Traversabl
 }
 
 get_sim_space_traversable :: proc { get_sim_space_traversable_ref, get_sim_space_traversable_raw }
-get_sim_space_traversable_ref :: proc(ref: TraversableReference) -> (result: TraversablePoint) {
+get_sim_space_traversable_ref :: proc (ref: TraversableReference) -> (result: TraversablePoint) {
     return get_sim_space_traversable_raw(ref.entity.pointer, ref.index)
 }
-get_sim_space_traversable_raw :: proc(entity: ^Entity, index: i64) -> (result: TraversablePoint) {
+get_sim_space_traversable_raw :: proc (entity: ^Entity, index: i64) -> (result: TraversablePoint) {
     if entity != nil {
         point := get_traversable(entity, index)
         if point != nil {
@@ -477,7 +477,7 @@ get_sim_space_traversable_raw :: proc(entity: ^Entity, index: i64) -> (result: T
     return result
 }
 
-transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, desired_ref: TraversableReference) -> (result: b32) {
+transactional_occupy :: proc (entity: ^Entity, dest_ref: ^TraversableReference, desired_ref: TraversableReference) -> (result: b32) {
     desired := get_traversable(desired_ref)
     if desired.occupant == nil {
         dest := get_traversable(dest_ref^)
@@ -494,7 +494,7 @@ transactional_occupy :: proc(entity: ^Entity, dest_ref: ^TraversableReference, d
 
 ////////////////////////////////////////////////
 
-move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
+move_entity :: proc (region: ^SimRegion, entity: ^Entity, dt: f32) {
     timed_function()
     
     entity_delta := 0.5*entity.ddp * square(dt) + entity.dp * dt
@@ -624,7 +624,7 @@ move_entity :: proc(region: ^SimRegion, entity: ^Entity, dt: f32) {
     }
 }
 
-can_collide :: proc(a, b: ^Entity) -> (result: b32) {
+can_collide :: proc (a, b: ^Entity) -> (result: b32) {
     if a != b {
         a, b := a, b
         if a.id > b.id do a, b = b, a
@@ -637,7 +637,7 @@ can_collide :: proc(a, b: ^Entity) -> (result: b32) {
 }
 
 
-handle_collision :: proc(a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc (a, b: ^Entity) -> (stops_on_collision: b32) {
     when false {
         a, b := a, b
     

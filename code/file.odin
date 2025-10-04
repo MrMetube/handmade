@@ -50,7 +50,7 @@ begin_processing_all_files_of_type :: proc (type: PlatformFileType) -> (result: 
 }
 
 @(api)
-open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle) {
+open_next_file :: proc (group: ^PlatformFileGroup) -> (result: PlatformFileHandle) {
     file_group := cast(^FileGroup) group._platform
     
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
@@ -78,7 +78,7 @@ open_next_file :: proc(group: ^PlatformFileGroup) -> (result: PlatformFileHandle
 }
 
 @(api)
-read_data_from_file :: proc(handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm) {
+read_data_from_file :: proc (handle: ^PlatformFileHandle, #any_int position, amount: u64, destination: pmm) {
     file_handle := cast(^FileHandle) handle._platform
     if Platform_no_file_errors(handle) {
         overlap_info := win.OVERLAPPED{
@@ -97,7 +97,7 @@ read_data_from_file :: proc(handle: ^PlatformFileHandle, #any_int position, amou
 }
 
 @(api)
-end_processing_all_files_of_type :: proc(group: ^PlatformFileGroup) {
+end_processing_all_files_of_type :: proc (group: ^PlatformFileGroup) {
     file_group := cast(^FileGroup) group._platform
     if file_group != nil {
         win.FindClose(file_group.find_handle)
@@ -107,7 +107,7 @@ end_processing_all_files_of_type :: proc(group: ^PlatformFileGroup) {
 }
 
 @(api)
-mark_file_error :: proc(handle: ^PlatformFileHandle, error_message: string) {
+mark_file_error :: proc (handle: ^PlatformFileHandle, error_message: string) {
     when INTERNAL {
         print("FILE ERROR: %\n", error_message)
         

@@ -721,7 +721,7 @@ d2d_small_int :: proc (ieeeMantissa: u64, ieeeExponent: i32, v: ^floating_decima
 }
 
 @(private="package")
-d2s :: proc(f: f64, allocator := context.allocator) -> (result: string) {
+d2s :: proc (f: f64, allocator := context.allocator) -> (result: string) {
     buffer := make([]u8, 25, allocator)
     result = d2s_buffered(f, buffer) 
     return result

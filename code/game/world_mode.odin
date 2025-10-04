@@ -37,7 +37,7 @@ Game_Camera :: struct {
 
 ////////////////////////////////////////////////
 
-play_world :: proc(state: ^State, tran_state: ^TransientState) {
+play_world :: proc (state: ^State, tran_state: ^TransientState) {
     mode := set_game_mode(state, tran_state, World_Mode)
     
     ////////////////////////////////////////////////
@@ -184,7 +184,7 @@ play_world :: proc(state: ^State, tran_state: ^TransientState) {
 
 ////////////////////////////////////////////////
 
-begin_entity :: proc(mode: ^World_Mode) -> (result: ^Entity) {
+begin_entity :: proc (mode: ^World_Mode) -> (result: ^Entity) {
     result = create_entity(mode.creation_region, allocate_entity_id(mode))
  
     // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
@@ -205,19 +205,19 @@ allocate_entity_id :: proc (mode: ^World_Mode) -> (result: EntityId) {
     return result
 }
 
-end_entity :: proc(mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
+end_entity :: proc (mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
     entity.p = world_distance(mode.world, p, mode.creation_region.origin)
 }
 
 // @cleanup
-begin_grounded_entity :: proc(mode: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
+begin_grounded_entity :: proc (mode: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
     result = begin_entity(mode)
     result.collision = collision
     
     return result
 }
 
-add_brain :: proc(mode: ^World_Mode) -> (result: BrainId) {
+add_brain :: proc (mode: ^World_Mode) -> (result: BrainId) {
     mode.last_used_entity_id += 1
     for mode.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
         mode.last_used_entity_id += 1
@@ -227,7 +227,7 @@ add_brain :: proc(mode: ^World_Mode) -> (result: BrainId) {
     return result
 }
 
-add_wall :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
+add_wall :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(mode, mode.wall_collision)
     defer end_entity(mode, entity, p)
     
@@ -241,7 +241,7 @@ add_wall :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableRefe
     })
 }
 
-add_hero :: proc(mode: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
+add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableReference, brain_id: BrainId) {
     mode.creation_region = region
     defer mode.creation_region = nil
     
@@ -322,7 +322,7 @@ add_hero :: proc(mode: ^World_Mode, region: ^SimRegion, occupying: TraversableRe
     end_entity(mode, glove, p)
 }
 
-add_snake_piece :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
+add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
     entity := begin_grounded_entity(mode, mode.monstar_collision)
     defer end_entity(mode, entity, p)
     
@@ -350,7 +350,7 @@ add_snake_piece :: proc(mode: ^World_Mode, p: WorldPosition, occupying: Traversa
     init_hitpoints(entity, 3)
 }
 
-add_monster :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
+add_monster :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(mode, mode.monstar_collision)
     defer end_entity(mode, entity, p)
     
@@ -378,7 +378,7 @@ add_monster :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableR
     init_hitpoints(entity, 3)
 }
 
-add_familiar :: proc(mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
+add_familiar :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
     entity := begin_grounded_entity(mode, mode.familiar_collision)
     defer end_entity(mode, entity, p)
     
@@ -447,7 +447,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
 
 BaseCamHeight :: 6
 
-init_hitpoints :: proc(entity: ^Entity, count: u32) {
+init_hitpoints :: proc (entity: ^Entity, count: u32) {
     for i in 0..<count {
         append(&entity.hit_points, HitPoint { filled_amount = HitPointPartCount })
     }
@@ -456,7 +456,7 @@ init_hitpoints :: proc(entity: ^Entity, count: u32) {
 ////////////////////////////////////////////////
 // @cleanup
 
-make_null_collision :: proc(mode: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
+make_null_collision :: proc (mode: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {}
@@ -464,7 +464,7 @@ make_null_collision :: proc(mode: ^World_Mode) -> (result: ^EntityCollisionVolum
     return result
 }
 
-make_simple_grounded_collision :: proc(mode: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_grounded_collision :: proc (mode: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {
@@ -476,7 +476,7 @@ make_simple_grounded_collision :: proc(mode: ^World_Mode, size: v3, offset_z:f32
     return result
 }
 
-make_simple_floor_collision :: proc(mode: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
+make_simple_floor_collision :: proc (mode: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
     // @todo(viktor): not world arena! change to using the fundamental types arena
     result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
     result ^= {

@@ -9,7 +9,7 @@ game := game_stubs
 @(private="file")
 game_lib: win.HMODULE
 
-load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: b32, last_write_time: u64) {
+load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: b32, last_write_time: u64) {
     if game_lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
     } else {
@@ -42,7 +42,7 @@ load_game_lib :: proc(source_dll_name, temp_dll_name, lock_name: cstring16) -> (
     return is_valid, last_write_time
 }
 
-unload_game_lib :: proc() {
+unload_game_lib :: proc () {
     if game_lib != nil {
         if !win.FreeLibrary(game_lib) {
             // @logging 
@@ -52,7 +52,7 @@ unload_game_lib :: proc() {
     game = game_stubs
 }
 
-get_last_write_time :: proc(filename: cstring16) -> (last_write_time: u64) {
+get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
     FILE_ATTRIBUTE_DATA :: struct {
         dwFileAttributes: win.DWORD,
         ftCreationTime:   win.FILETIME,
@@ -74,25 +74,25 @@ get_last_write_time :: proc(filename: cstring16) -> (last_write_time: u64) {
 // reimplement to allow the deferred_out to work
 // @todo(viktor): is this still necessary?
 
-end_timed_block :: proc(info: TimedBlockInfo) {
+end_timed_block :: proc (info: TimedBlockInfo) {
     game.end_timed_block(info)
 }
 
 @(deferred_out=end_timed_block)
-timed_block :: proc(name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
+timed_block :: proc (name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
     return game.begin_timed_block(name, loc)
 }
 
 @(deferred_out = end_timed_block)
-timed_function :: proc(loc := #caller_location) -> (result: TimedBlockInfo) { 
+timed_function :: proc (loc := #caller_location) -> (result: TimedBlockInfo) { 
     return game.begin_timed_block(loc.procedure, loc)
 }
 
-debug_end_data_block :: proc() {
+debug_end_data_block :: proc () {
     game.debug_end_data_block()
 }
 
 @(deferred_out = debug_end_data_block)
-debug_data_block :: proc(name: string, loc := #caller_location) {
+debug_data_block :: proc (name: string, loc := #caller_location) {
     game.debug_begin_data_block(name, loc)
 }

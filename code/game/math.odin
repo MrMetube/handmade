@@ -21,7 +21,7 @@ v4i :: [4] i32
 
 m4 :: #column_major matrix[4,4] f32
 
-Rectangle   :: struct($T: typeid) { min, max: T }
+Rectangle   :: struct ($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
 Rectangle2i :: Rectangle(v2i)
@@ -97,7 +97,7 @@ square_root :: proc (x: $T) -> (result: T) where intrinsics.type_is_numeric(T) |
  
  power :: math.pow
 
-linear_blend  :: proc{ linear_blend_v_e, linear_blend_e }
+linear_blend  :: proc { linear_blend_v_e, linear_blend_e }
 linear_blend_v_e :: proc (from: $V/[$N]$E, to: V, t: E) -> V {
     result := (1-t) * from + t * to
     
@@ -161,7 +161,7 @@ clamp_01_map_to_range :: proc (min: $T, t, max: T ) -> (result: T) {
     return result
 }
 
-sign :: proc{ sign_i, sign_f }
+sign :: proc { sign_i, sign_f }
 sign_i  :: proc (i: i32) -> i32 { return i >= 0 ? 1 : -1 }
 sign_f  :: proc (x: f32) -> f32 { return x >= 0 ? 1 : -1 }
 
@@ -661,6 +661,130 @@ get_area_or_zero_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: T) {
 has_area_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: b32) {
     area := get_area_or_zero_inclusive(rect)
     result = area != 0
+    return result
+}
+
+////////////////////////////////////////////////
+
+Identity :: m4 { 
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1,
+}
+
+////////////////////////////////////////////////
+// @note(viktor): this is written to be instructive, not optimal
+
+multiply :: proc { multiply_m, multiply_v }
+multiply_v :: proc (a: m4, p: v3, w: f32 = 1) -> (result: v3) {
+    // result = (a * V4(p, w)).xyz
+    
+    result.x = p.x * a[0, 0] + p.y * a[1, 0] + p.z * a[2, 0] + w * a[3, 0]
+    result.y = p.x * a[0, 1] + p.y * a[1, 1] + p.z * a[2, 1] + w * a[3, 1]
+    result.z = p.x * a[0, 2] + p.y * a[1, 2] + p.z * a[2, 2] + w * a[3, 2]
+    
+    return result
+}
+multiply_m :: proc (a, b: m4) -> (result: m4) {
+    // result = a * b
+    
+    for r in 0 ..= 3 { // @note(viktor): rows of a
+        for c in 0 ..= 3 { // @note(viktor): columns of b
+            for i in 0 ..= 3 { // @note(viktor): columns of a and rows of b
+                result[c, r] += a[i, r] * b[c, i]
+            }
+        }
+    }
+    
+    return result
+}
+
+////////////////////////////////////////////////
+
+transpose :: proc (a: m4) -> (result: m4) {
+    for c in 0 ..= 3 {
+        for r in 0 ..= 3 {
+            result[c, r] = a[r, c]
+        }
+    }
+    return result
+}
+
+z_rotation :: xy_rotation
+xy_rotation :: proc (angle: f32) -> (result: m4) {
+    c := cos(angle)
+    s := sin(angle)
+    result = {
+         c, s, 0, 0,
+        -s, c, 0, 0,
+         0, 0, 1, 0,
+         0, 0, 0, 1,
+    }
+    return result
+}
+
+x_rotation :: yz_rotation
+yz_rotation :: proc (angle: f32) -> (result: m4) {
+    c := cos(angle)
+    s := sin(angle)
+    result = {
+        1,  0, 0, 0,
+        0,  c, s, 0,
+        0, -s, c, 0,
+        0,  0, 0, 1,
+    }
+    return result
+}
+
+y_rotation :: xz_rotation
+xz_rotation :: proc (angle: f32) -> (result: m4) {
+    c := cos(angle)
+    s := sin(angle)
+    result = {
+        c, 0, -s, 0,
+        0, 1,  0, 0,
+        s, 0,  c, 0,
+        0, 0,  0, 1,
+    }
+    return result
+}
+
+projection :: proc (aspect_width_over_height: f32, one_over_focal_length: f32) -> (result: m4) {
+    a := aspect_width_over_height
+    f := one_over_focal_length
+    
+    result = {
+        1, 0, 0, 0,
+        0, a, 0, 0,
+        0, 0, 1, 0,
+        0, 0, f, 0,
+    }
+    
+    return result
+}
+
+camera_transform :: proc (x, y, z, p: v3) -> (result: m4) {
+    result = m4 {
+        x.x, x.y, x.z, 0,
+        y.x, y.y, y.z, 0,
+        z.x, z.y, z.z, 0,
+          0,   0,   0, 1,
+    }
+    
+    cp := -multiply(result, p)
+    result = translate(result, cp)
+    
+    return result
+}
+
+translate :: proc (a: m4, t: v3) -> (result: m4) {
+    result = a
+    
+    result[3, 0] += t.x
+    result[3, 1] += t.y
+    result[3, 2] += t.z
+    
     return result
 }
 

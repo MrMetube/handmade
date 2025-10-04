@@ -5,7 +5,7 @@ import win "core:sys/windows"
 XInputGetState : ProcXInputGetState = XInputGetStateStub
 XInputSetState : ProcXInputSetState = XInputSetStateStub
 
-init_xInput :: proc() {
+init_xInput :: proc () {
     assert(XInputGetState == XInputGetStateStub, "xInput has already been initialized")
 
     xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
@@ -75,8 +75,8 @@ XINPUT_GAMEPAD_TRIGGER_THRESHOLD    :: 30
 
 // ---------------------- Internal stuff
 
-@(private="file") ProcXInputGetState :: #type proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD
-@(private="file") ProcXInputSetState :: #type proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD
+@(private="file") ProcXInputGetState :: #type proc (dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD
+@(private="file") ProcXInputSetState :: #type proc (dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD
 
-@(private="file") XInputGetStateStub : ProcXInputGetState = proc(dwUserIndex: win.DWORD, pState: ^XINPUT_STATE )        -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }
-@(private="file") XInputSetStateStub : ProcXInputSetState = proc(dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }
+@(private="file") XInputGetStateStub : ProcXInputGetState = proc (dwUserIndex: win.DWORD, pState: ^XINPUT_STATE )        -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }
+@(private="file") XInputSetStateStub : ProcXInputSetState = proc (dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }

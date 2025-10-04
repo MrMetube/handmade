@@ -1,6 +1,6 @@
 package game
 
-import hha "asset_builder"
+import hha "../asset_builder"
 
 Assets :: struct {
     arena: Arena,
@@ -132,7 +132,7 @@ TextureOp :: struct {
 
 ////////////////////////////////////////////////
 
-make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_queue: ^TextureOpQueue) -> (assets: ^Assets) {
+make_assets :: proc (memory_size: u64, tran_state: ^TransientState, texture_op_queue: ^TextureOpQueue) -> (assets: ^Assets) {
     assets = bootstrap_arena(Assets, "arena", allocation_flags = { .not_restored })
     
     list_init_sentinel(&assets.memory_sentinel)
@@ -148,10 +148,10 @@ make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_qu
     }
     assets.tag_ranges[.FacingDirection] = Tau
     
-    read_data_from_file_into_struct :: proc(handle: ^PlatformFileHandle, #any_int position: u64, destination: ^$T) {
+    read_data_from_file_into_struct :: proc (handle: ^PlatformFileHandle, #any_int position: u64, destination: ^$T) {
         Platform.read_data_from_file(handle, position, size_of(T), destination)
     }
-    read_data_from_file_into_slice :: proc(handle: ^PlatformFileHandle, #any_int position: u64, destination: $T/[]$E) {
+    read_data_from_file_into_slice :: proc (handle: ^PlatformFileHandle, #any_int position: u64, destination: $T/[]$E) {
         Platform.read_data_from_file(handle, position, len(destination) * size_of(E), raw_data(destination))
     }
     
@@ -267,7 +267,7 @@ make_assets :: proc(memory_size: u64, tran_state: ^TransientState, texture_op_qu
 
 ////////////////////////////////////////////////
 
-get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) -> (result: ^AssetMemoryHeader) {
+get_asset :: proc (assets: ^Assets, id: u32, generation_id: AssetGenerationId) -> (result: ^AssetMemoryHeader) {
     if is_valid_asset(id) {
         asset := &assets.assets[id]
         
@@ -291,7 +291,7 @@ get_asset :: proc(assets: ^Assets, id: u32, generation_id: AssetGenerationId) ->
 }
 
 // @todo(viktor): optional ok?
-get_bitmap :: proc(assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
+get_bitmap :: proc (assets: ^Assets, id: BitmapId, generation_id: AssetGenerationId) -> (result: ^Bitmap) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         if _, ok := header.value.(Bitmap); ok {
@@ -302,7 +302,7 @@ get_bitmap :: proc(assets: ^Assets, id: BitmapId, generation_id: AssetGeneration
     return result
 }
 
-get_sound :: proc(assets: ^Assets, id: SoundId, generation_id: AssetGenerationId) -> (result: ^Sound) {
+get_sound :: proc (assets: ^Assets, id: SoundId, generation_id: AssetGenerationId) -> (result: ^Sound) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.value.(Sound)
@@ -310,7 +310,7 @@ get_sound :: proc(assets: ^Assets, id: SoundId, generation_id: AssetGenerationId
     return result
 }
 
-get_font :: proc(assets: ^Assets, id: FontId, generation_id: AssetGenerationId) -> (result: ^Font) {
+get_font :: proc (assets: ^Assets, id: FontId, generation_id: AssetGenerationId) -> (result: ^Font) {
     header := get_asset(assets, cast(u32) id, generation_id)
     if header != nil {
         result = &header.value.(Font)
@@ -321,33 +321,33 @@ get_font :: proc(assets: ^Assets, id: FontId, generation_id: AssetGenerationId) 
 ////////////////////////////////////////////////
 // Additional Information
 
-is_valid_asset :: proc(id: $T/u32) -> (result: b32) {
+is_valid_asset :: proc (id: $T/u32) -> (result: b32) {
     result = id != 0
     return result
 }
 
-get_bitmap_info :: proc(assets: ^Assets, id: BitmapId) -> (result: ^BitmapInfo) {
+get_bitmap_info :: proc (assets: ^Assets, id: BitmapId) -> (result: ^BitmapInfo) {
     if is_valid_asset(id) {
         result = &assets.assets[id].info.bitmap
     }
     return result
 }
 
-get_sound_info :: proc(assets: ^Assets, id: SoundId) -> (result: ^SoundInfo) {
+get_sound_info :: proc (assets: ^Assets, id: SoundId) -> (result: ^SoundInfo) {
     if is_valid_asset(id) {
         result = &assets.assets[id].info.sound
     }
     return result
 }
 
-get_font_info :: proc(assets: ^Assets, id: FontId) -> (result: ^FontInfo) {
+get_font_info :: proc (assets: ^Assets, id: FontId) -> (result: ^FontInfo) {
     if is_valid_asset(id) {
         result = &assets.assets[id].info.font
     }
     return result
 }
 
-get_next_sound_in_chain :: proc(assets: ^Assets, id: SoundId) -> (result: SoundId) {
+get_next_sound_in_chain :: proc (assets: ^Assets, id: SoundId) -> (result: SoundId) {
     switch get_sound_info(assets, id).chain {
     case .None:    result = 0
     case .Advance: result = id + 1
@@ -356,7 +356,7 @@ get_next_sound_in_chain :: proc(assets: ^Assets, id: SoundId) -> (result: SoundI
     return result
 }
 
-get_horizontal_advance_for_pair :: proc(font: ^Font, info: ^FontInfo, previous_codepoint, codepoint: rune) -> (result: f32) {
+get_horizontal_advance_for_pair :: proc (font: ^Font, info: ^FontInfo, previous_codepoint, codepoint: rune) -> (result: f32) {
     previous_glyph := get_glyph_from_codepoint(font, info, previous_codepoint)
     glyph          := get_glyph_from_codepoint(font, info, codepoint)
     
@@ -365,17 +365,17 @@ get_horizontal_advance_for_pair :: proc(font: ^Font, info: ^FontInfo, previous_c
     return result
 }
 
-get_baseline :: proc(info: ^FontInfo) -> (result: f32) {
+get_baseline :: proc (info: ^FontInfo) -> (result: f32) {
     result = info.ascent
     return result
 }
 
-get_line_advance :: proc(info: ^FontInfo) -> (result: f32) {
+get_line_advance :: proc (info: ^FontInfo) -> (result: f32) {
     result = info.ascent - info.descent + info.linegap
     return result
 }
 
-get_bitmap_for_glyph :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: BitmapId) {
+get_bitmap_for_glyph :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: BitmapId) {
     glyph := get_glyph_from_codepoint(font, info, codepoint)
     result = font.glyphs[glyph].bitmap
     
@@ -385,7 +385,7 @@ get_bitmap_for_glyph :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (
     return result
 }
 
-get_glyph_from_codepoint :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: u16) {
+get_glyph_from_codepoint :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: u16) {
     if codepoint < info.one_past_highest_codepoint {
         result = font.unicode_map[codepoint]
     }
@@ -395,19 +395,19 @@ get_glyph_from_codepoint :: proc(font: ^Font, info: ^FontInfo, codepoint: rune) 
 ////////////////////////////////////////////////
 // Queries
 
-first_sound_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: SoundId) {
+first_sound_from :: proc (assets: ^Assets, id: AssetTypeId) -> (result: SoundId) {
     result = cast(SoundId) first_asset_from(assets, id)
     return result
 }
-first_bitmap_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
+first_bitmap_from :: proc (assets: ^Assets, id: AssetTypeId) -> (result: BitmapId) {
     result = cast(BitmapId) first_asset_from(assets, id)
     return result
 }
-first_font_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: FontId) {
+first_font_from :: proc (assets: ^Assets, id: AssetTypeId) -> (result: FontId) {
     result = cast(FontId) first_asset_from(assets, id)
     return result
 }
-first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: u32) {
+first_asset_from :: proc (assets: ^Assets, id: AssetTypeId) -> (result: u32) {
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
@@ -417,16 +417,16 @@ first_asset_from :: proc(assets: ^Assets, id: AssetTypeId) -> (result: u32) {
     return result
 }
 
-best_match_sound_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> SoundId {
+best_match_sound_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> SoundId {
     return cast(SoundId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
-best_match_bitmap_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> BitmapId {
+best_match_bitmap_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> BitmapId {
     return cast(BitmapId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
-best_match_font_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> FontId {
+best_match_font_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> FontId {
     return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
 }
-best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
+best_match_asset_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
     type := assets.types[id]
 
     if type.first_asset_index != type.one_past_last_index {
@@ -459,15 +459,15 @@ best_match_asset_from :: proc(assets: ^Assets, id: AssetTypeId, match_vector, we
     return result
 }
 
-random_sound_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: SoundId) {
+random_sound_from :: proc (assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: SoundId) {
     result = cast(SoundId) random_asset_from(assets, id, series)
     return result
 }
-random_bitmap_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
+random_bitmap_from :: proc (assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: BitmapId) {
     result = cast(BitmapId) random_asset_from(assets, id, series)
     return result
 }
-random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: u32) {
+random_asset_from :: proc (assets: ^Assets, id: AssetTypeId, series: ^RandomSeries) -> (result: u32) {
     type := assets.types[id]
     
     if type.first_asset_index != type.one_past_last_index {
@@ -481,7 +481,7 @@ random_asset_from :: proc(assets: ^Assets, id: AssetTypeId, series: ^RandomSerie
 ////////////////////////////////////////////////
 // Memory Management
 
-begin_generation :: proc(assets: ^Assets) -> (result: AssetGenerationId) {
+begin_generation :: proc (assets: ^Assets) -> (result: AssetGenerationId) {
     timed_function()
     begin_asset_lock(assets)
     
@@ -496,7 +496,7 @@ begin_generation :: proc(assets: ^Assets) -> (result: AssetGenerationId) {
     return result
 }
 
-end_generation :: proc(assets: ^Assets, generation: AssetGenerationId) {
+end_generation :: proc (assets: ^Assets, generation: AssetGenerationId) {
     begin_asset_lock(assets)
     tran_state := assets.tran_state
     for &in_flight in tran_state.in_flight_generations[:tran_state.in_flight_generation_count] {
@@ -510,7 +510,7 @@ end_generation :: proc(assets: ^Assets, generation: AssetGenerationId) {
     end_asset_lock(assets)
 }
 
-generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (result: b32) {
+generation_has_completed :: proc (assets: ^Assets, check: AssetGenerationId) -> (result: b32) {
     result = true
     
     tran_state :=  assets.tran_state
@@ -524,7 +524,7 @@ generation_has_completed :: proc(assets: ^Assets, check: AssetGenerationId) -> (
     return result
 }
 
-begin_asset_lock :: proc(assets: ^Assets) {
+begin_asset_lock :: proc (assets: ^Assets) {
     tran_state := assets.tran_state
     for {
         if ok, _ := atomic_compare_exchange(&tran_state.memory_operation_lock, 0, 1); ok {
@@ -532,13 +532,13 @@ begin_asset_lock :: proc(assets: ^Assets) {
         }
     }
 }
-end_asset_lock :: proc(assets: ^Assets) {
+end_asset_lock :: proc (assets: ^Assets) {
     complete_previous_writes_before_future_writes()
     tran_state := assets.tran_state
     volatile_store(&tran_state.memory_operation_lock, 0)
 }
 
-acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
+acquire_asset_memory :: proc (assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> (result: ^AssetMemoryHeader) {
     timed_function()
     size := div.total + size_of(AssetMemoryHeader)
     begin_asset_lock(assets)
@@ -618,7 +618,7 @@ acquire_asset_memory :: proc(assets: ^Assets, asset_index: $Id/u32, div: ^Divide
     return result
 }
 
-insert_block :: proc(previous: ^AssetMemoryBlock, memory: pmm, size: u64) -> (result: ^AssetMemoryBlock) {
+insert_block :: proc (previous: ^AssetMemoryBlock, memory: pmm, size: u64) -> (result: ^AssetMemoryBlock) {
     assert(size > size_of(AssetMemoryBlock))
     result = cast(^AssetMemoryBlock) memory
     result.size = size - size_of(AssetMemoryBlock)
@@ -630,7 +630,7 @@ insert_block :: proc(previous: ^AssetMemoryBlock, memory: pmm, size: u64) -> (re
     return result
 }
 
-find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemoryBlock) {
+find_block_for_size :: proc (assets: ^Assets, size: u64) -> (result: ^AssetMemoryBlock) {
     // @todo(viktor): find best matched block
     // @todo(viktor): this will probably need to be accelarated in the 
     // future as the resident asset count grows.
@@ -646,7 +646,7 @@ find_block_for_size :: proc(assets: ^Assets, size: u64) -> (result: ^AssetMemory
     return result
 }
 
-merge_if_possible :: proc(assets: ^Assets, first, second: ^AssetMemoryBlock) -> (result: b32) {
+merge_if_possible :: proc (assets: ^Assets, first, second: ^AssetMemoryBlock) -> (result: b32) {
     if first != &assets.memory_sentinel && second != &assets.memory_sentinel && second != nil {
         if .Used not_in first.flags && .Used not_in second.flags {
             // :PointerArithmetic
@@ -677,20 +677,20 @@ LoadAssetWork :: struct {
     kind: AssetKind,
 }
 
-prefetch_sound  :: proc(assets: ^Assets, id: SoundId)  { load_sound(assets,  id)  }
-prefetch_bitmap :: proc(assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
-prefetch_font   :: proc(assets: ^Assets, id: FontId)   { load_font(assets,   id, false) }
+prefetch_sound  :: proc (assets: ^Assets, id: SoundId)  { load_sound(assets,  id)  }
+prefetch_bitmap :: proc (assets: ^Assets, id: BitmapId) { load_bitmap(assets, id, false) }
+prefetch_font   :: proc (assets: ^Assets, id: FontId)   { load_font(assets,   id, false) }
 
-load_sound  :: proc(assets: ^Assets, id: SoundId)                  { load_asset(assets, .Sound,  cast(u32) id, false)}
-load_bitmap :: proc(assets: ^Assets, id: BitmapId, immediate: b32) { load_asset(assets, .Bitmap, cast(u32) id, immediate)}
-load_font   :: proc(assets: ^Assets, id: FontId,   immediate: b32) { load_asset(assets, .Font,   cast(u32) id, immediate)}
+load_sound  :: proc (assets: ^Assets, id: SoundId)                  { load_asset(assets, .Sound,  cast(u32) id, false)}
+load_bitmap :: proc (assets: ^Assets, id: BitmapId, immediate: b32) { load_asset(assets, .Bitmap, cast(u32) id, immediate)}
+load_font   :: proc (assets: ^Assets, id: FontId,   immediate: b32) { load_asset(assets, .Font,   cast(u32) id, immediate)}
 
-get_file :: proc(assets: ^Assets, file_index: u32) -> (result: ^AssetFile) {
+get_file :: proc (assets: ^Assets, file_index: u32) -> (result: ^AssetFile) {
     result = &assets.files[file_index]
     return result
 }
 
-get_file_handle_for :: proc(assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
+get_file_handle_for :: proc (assets: ^Assets, file_index: u32) -> (result: ^PlatformFileHandle) {
     result = &get_file(assets, file_index).handle
     return result
 }
@@ -709,7 +709,7 @@ add_texture_op :: proc (queue: ^TextureOpQueue, source: TextureOp) {
     deque_prepend(&queue.ops, dest)
 }
 
-load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
+load_asset_work_immediatly :: proc (work: ^LoadAssetWork) {
     timed_function()
     
     Platform.read_data_from_file(work.handle, work.position, work.amount, work.destination)
@@ -754,7 +754,7 @@ load_asset_work_immediatly :: proc(work: ^LoadAssetWork) {
     work.asset.state = .Loaded
 }
 
-do_load_asset_work :: proc(data: pmm) {
+do_load_asset_work :: proc (data: pmm) {
     work := cast(^LoadAssetWork) data
     
     load_asset_work_immediatly(work)
@@ -763,7 +763,7 @@ do_load_asset_work :: proc(data: pmm) {
 }
 
 AssetKind :: enum {Font, Bitmap, Sound}
-load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
+load_asset :: proc (assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
     immediate := immediate 
     immediate ||= LoadAssetsSingleThreaded
     
@@ -809,7 +809,7 @@ load_asset :: proc(assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
     }
 }
 
-allocate_asset_memory:: proc(assets: ^Assets, kind: AssetKind, #any_int id: u32, asset: ^Asset) -> (memory: pmm, memory_size: u64 ) {
+allocate_asset_memory:: proc (assets: ^Assets, kind: AssetKind, #any_int id: u32, asset: ^Asset) -> (memory: pmm, memory_size: u64 ) {
     timed_function()
     divider: Divider
     switch kind {
@@ -901,7 +901,7 @@ Divider :: struct {
     entries:     [4]DividerEntry,
 }
 
-divider_acquire :: proc(divider: ^Divider, header: ^AssetMemoryHeader) -> (total_memory: pmm) {
+divider_acquire :: proc (divider: ^Divider, header: ^AssetMemoryHeader) -> (total_memory: pmm) {
     // :PointerArithmetic
     HeaderSize :: size_of(AssetMemoryHeader)
     total_memory   = ((cast([^]u8) header)[HeaderSize:])
@@ -910,7 +910,7 @@ divider_acquire :: proc(divider: ^Divider, header: ^AssetMemoryHeader) -> (total
     return total_memory
 }
 
-divider_reserve :: proc(divider: ^Divider, $E: typeid, #any_int count: u64) {
+divider_reserve :: proc (divider: ^Divider, $E: typeid, #any_int count: u64) {
     entry := &divider.entries[divider.size_count]
     divider.size_count += 1
     
@@ -921,14 +921,14 @@ divider_reserve :: proc(divider: ^Divider, $E: typeid, #any_int count: u64) {
     divider.total += cast(u64) info.size * entry.count
 }
 
-divider_designate :: proc(divider: ^Divider, slice: ^[]$E) {
+divider_designate :: proc (divider: ^Divider, slice: ^[]$E) {
     entry := &divider.entries[divider.slice_count]
     divider.slice_count += 1
     entry.slice = cast(^[]u8) slice
     assert(entry.element == E)
 }
 
-divider_hand_over :: proc(divider: ^Divider) {
+divider_hand_over :: proc (divider: ^Divider) {
     // @note(viktor): all the memory after the header should have been divvied up
     assert(divider.slice_count == divider.size_count)
     for entry in divider.entries[:divider.slice_count] {

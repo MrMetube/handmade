@@ -23,7 +23,7 @@ glBegin:        proc (_: u32)
 glEnd:          proc ()
 glMatrixMode:   proc (_: i32)
 glLoadIdentity: proc ()
-glLoadMatrixf:  proc (_:[^] f32)
+glLoadMatrixf:  proc (_: ^m4)
 glTexCoord2f:   proc (_,_: f32)
 glVertex2f:     proc (_,_: f32)
 glVertex3f:     proc (_,_,_: f32)
@@ -49,7 +49,7 @@ FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
 
 ////////////////////////////////////////////////
 
-init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
+init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
     framebuffer_supports_srgb := load_wgl_extensions()
     set_pixel_format(dc, framebuffer_supports_srgb)
     
@@ -90,7 +90,7 @@ init_opengl :: proc(dc: win.HDC) -> (gl_context: win.HGLRC) {
     return gl_context
 }
 
-load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
+load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
     window_class := win.WNDCLASSW {
         lpfnWndProc = win.DefWindowProcW,
         hInstance = auto_cast win.GetModuleHandleW(nil),
@@ -162,7 +162,7 @@ load_wgl_extensions :: proc() -> (framebuffer_supports_srgb: b32) {
     return framebuffer_supports_srgb
 }
 
-opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
+opengl_get_extensions :: proc (modern_context: b32) -> (result: OpenGlInfo) {
     result.modern_context = modern_context
     
     result.vendor     = gl.GetString(gl.VENDOR)
@@ -204,7 +204,7 @@ opengl_get_extensions :: proc(modern_context: b32) -> (result: OpenGlInfo) {
     return result
 }
 
-set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
+set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: b32) {
     suggested_pixel_format_index: i32
     extended_pick: u32
     
@@ -247,7 +247,7 @@ set_pixel_format :: proc(dc: win.HDC, framebuffer_supports_srgb: b32) {
 
 ////////////////////////////////////////////////
 
-gl_manage_textures :: proc(last: ^TextureOp) {
+gl_manage_textures :: proc (last: ^TextureOp) {
     timed_function()
     
     allocs, deallocs: u32
@@ -270,7 +270,7 @@ gl_manage_textures :: proc(last: ^TextureOp) {
     print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
 }
 
-gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {
+gl_allocate_texture :: proc (width, height: i32, data: pmm) -> (result: u32) {
     timed_function()
     
     handle: u32
@@ -294,7 +294,7 @@ gl_allocate_texture :: proc(width, height: i32, data: pmm) -> (result: u32) {
 
 ////////////////////////////////////////////////
 
-gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
+gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
     timed_function()
 
     gl_bind_frame_buffer(0, draw_region)
@@ -345,7 +345,7 @@ gl_display_bitmap :: proc(bitmap: Bitmap, draw_region: Rectangle2i, clear_color:
 
 ////////////////////////////////////////////////
 
-gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i) {
+gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     draw_dim := get_dimension(draw_region)
@@ -415,18 +415,10 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
         if clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
             clip := prep.clip_rects.data[clip_rect_index]
-
-            glMatrixMode(gl.PROJECTION)
-            b := safe_ratio_1(cast(f32) commands.width, cast(f32) commands.height)
-            f := 1 / clip.focal_length
-            transform := m4 {
-                1, 0, 0, 0,
-                0, b, 0, 0,
-                0, 0, 1, 0,
-                0, 0, f, 0,
-            }
             
-            glLoadMatrixf(&transform[0,0])
+            glMatrixMode(gl.PROJECTION)
+            assert(cast(pmm) &clip.projection == cast(pmm) &clip.projection[0,0])
+            glLoadMatrixf(&clip.projection)
             
             if current_target_index != clip.render_target_index {
                 current_target_index = clip.render_target_index
@@ -533,7 +525,7 @@ gl_render_commands :: proc(commands: ^RenderCommands, prep: RenderPrep, draw_reg
 
 ////////////////////////////////////////////////
 
-gl_bind_frame_buffer :: proc(render_target_index: u32, draw_region: Rectangle2i) {
+gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i) {
     render_target := FramebufferHandles.data[render_target_index]
     gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
     

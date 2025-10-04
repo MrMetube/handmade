@@ -13,10 +13,10 @@ DebugGUID :: struct {
     column: u32,
 }
 
-@(export) debug_record_f32 :: proc(value: ^f32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
-@(export) debug_record_b32 :: proc(value: ^b32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
-@(export) debug_record_i64 :: proc(value: ^i64, name: string = #caller_expression(value)) { debug_record_value(value, name) }
-debug_record_value :: proc(value: ^$Value, name: string = #caller_expression(value)) { 
+@(export) debug_record_f32 :: proc (value: ^f32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
+@(export) debug_record_b32 :: proc (value: ^b32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
+@(export) debug_record_i64 :: proc (value: ^i64, name: string = #caller_expression(value)) { debug_record_value(value, name) }
+debug_record_value :: proc (value: ^$Value, name: string = #caller_expression(value)) { 
     if GlobalDebugTable == nil do return
     guid := DebugGUID{ name = name }
     
@@ -80,7 +80,7 @@ debug_highlighted :: proc (id: DebugId) -> (highlighted: b32, color: v4) {
     return highlighted, color
 }
 
-debug_requested :: proc(id: DebugId) -> (result: b32) {
+debug_requested :: proc (id: DebugId) -> (result: b32) {
     when !DebugEnabled do return
     
     debug := get_debug_state()
@@ -93,18 +93,18 @@ debug_requested :: proc(id: DebugId) -> (result: b32) {
     return result
 }
 
-select :: proc(debug: ^DebugState, id: DebugId) {
+select :: proc (debug: ^DebugState, id: DebugId) {
     if !is_selected(debug, id) {
         debug.selected_ids[debug.selected_count] = id
         debug.selected_count += 1
     }
 }
 
-clear_selection :: proc(debug: ^DebugState) {
+clear_selection :: proc (debug: ^DebugState) {
     debug.selected_count = 0
 }
 
-is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
+is_selected :: proc (debug: ^DebugState, id: DebugId) -> (result: b32) {
     for it in debug.selected_ids[:debug.selected_count] {
         if it == id {
             result = true
@@ -119,22 +119,22 @@ is_selected :: proc(debug: ^DebugState, id: DebugId) -> (result: b32) {
 // Record Insertion
 
 @(export)
-debug_ui_element :: proc(kind: DebugValue, name:= #caller_expression(kind), loc := #caller_location) {
+debug_ui_element :: proc (kind: DebugValue, name:= #caller_expression(kind), loc := #caller_location) {
     debug_record_event(kind, name, loc)
 }
 
 @(deferred_none=debug_end_data_block)
-debug_data_block :: proc(name: string, loc := #caller_location) {
+debug_data_block :: proc (name: string, loc := #caller_location) {
     debug_record_event(BeginDataBlock{}, name, loc)
 }
 
 @(export)
-debug_begin_data_block :: proc(name: string, loc := #caller_location) {
+debug_begin_data_block :: proc (name: string, loc := #caller_location) {
     debug_record_event(BeginDataBlock{}, name, loc)
 }
 
 @(export)
-debug_end_data_block :: proc() {
+debug_end_data_block :: proc () {
     debug_record_event(EndDataBlock{}, "EndDataBlock")
 }
 
@@ -148,7 +148,7 @@ TimedBlockInfo :: struct {
 }
 
 @(export)
-begin_timed_block :: proc(name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
+begin_timed_block :: proc (name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
     when !DebugEnabled do return result 
     
     debug_record_event(BeginTimedBlock{}, name, loc)
@@ -159,7 +159,7 @@ begin_timed_block :: proc(name: string, loc := #caller_location) -> (result: Tim
 }
 
 @(export)
-end_timed_block :: proc(info: TimedBlockInfo) {
+end_timed_block :: proc (info: TimedBlockInfo) {
     when !DebugEnabled do return
     if info == {} do return
     
@@ -167,20 +167,20 @@ end_timed_block :: proc(info: TimedBlockInfo) {
 }
 
 @(deferred_out=end_timed_block)
-timed_block :: proc(name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
+timed_block :: proc (name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
     return begin_timed_block(name, loc)
 }
 
 @(deferred_out = end_timed_block)
-timed_function :: proc(loc := #caller_location) -> (result: TimedBlockInfo) { 
+timed_function :: proc (loc := #caller_location) -> (result: TimedBlockInfo) { 
     return begin_timed_block(loc.procedure, loc)
 }
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }
-debug_record_event_loc :: proc(value: DebugValue, name: string, loc := #caller_location) -> (result: ^DebugEvent) {
+debug_record_event_loc :: proc (value: DebugValue, name: string, loc := #caller_location) -> (result: ^DebugEvent) {
     return debug_record_event_guid(value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
 }
-debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: ^DebugEvent) {
+debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> (result: ^DebugEvent) {
     when !DebugEnabled do return
     if GlobalDebugTable == nil do return
     
@@ -205,7 +205,7 @@ debug_record_event_guid :: proc(value: DebugValue, guid: DebugGUID) -> (result: 
 // Only used by the platform layer
 
 @(export)
-debug_set_event_recording :: proc(active: b32, table := GlobalDebugTable) {
+debug_set_event_recording :: proc (active: b32, table := GlobalDebugTable) {
     if !DebugEnabled do return
     if table == nil do return
     
@@ -213,7 +213,7 @@ debug_set_event_recording :: proc(active: b32, table := GlobalDebugTable) {
 }
 
 @(export)
-frame_marker :: proc(seconds_elapsed: f32, loc := #caller_location) {
+frame_marker :: proc (seconds_elapsed: f32, loc := #caller_location) {
     if !DebugEnabled do return
     
     debug_record_event(FrameMarker{seconds_elapsed}, "Frame Marker", loc)

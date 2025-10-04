@@ -37,7 +37,7 @@ update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group
     update_and_render_fire(&cache.fire_system, render_group, dt, frame_displacement)
 }
 
-update_and_render_fire :: proc(system: ^Particle_System, render_group: ^RenderGroup, dt: f32, frame_displacement_init: v3) {
+update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderGroup, dt: f32, frame_displacement_init: v3) {
     timed_function()
     
     frame_displacement := vec_cast(lane_f32, frame_displacement_init)

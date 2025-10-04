@@ -27,7 +27,7 @@ data_dir  :: `.\data`
 
 code_dir          :: `..\code` 
 game_dir          :: `..\code\game` 
-asset_builder_dir :: `..\code\game\asset_builder` 
+asset_builder_dir :: `..\code\asset_builder` 
 
 ////////////////////////////////////////////////
 
@@ -64,7 +64,7 @@ Tool_Tasks := Tasks { .debugger, .renderdoc }
 
 tasks: Tasks
 
-main :: proc() {
+main :: proc () {
     context.allocator = context.temp_allocator
 
     for arg in os.args[1:] {
@@ -172,6 +172,7 @@ main :: proc() {
                 fmt.println("ERROR: Could not generate game api")
                 os.exit(1)
             }
+            
             if !generate_commons(&metaprogram, `..\code\generated-commons.odin`) {
                 fmt.println("ERROR: Could not extract declarations marked with @common")
                 os.exit(1)
@@ -298,7 +299,7 @@ Handle_Running_Exe :: enum {
     Kill,
 }
 
-handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running_Exe) -> (ok: b32) {
+handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Running_Exe) -> (ok: b32) {
     pid: u32
     ok, pid = is_running(exe_name)
     if ok {
@@ -322,7 +323,7 @@ handle_running_exe_gracefully :: proc(exe_name: string, handling: Handle_Running
     return true
 }
 
-odin_build :: proc(cmd: ^[dynamic]string, dir: string, out: string) {
+odin_build :: proc (cmd: ^[dynamic]string, dir: string, out: string) {
     append(cmd, "odin")
     append(cmd, "build")
     append(cmd, dir)
@@ -374,11 +375,11 @@ did_change :: proc (output_path: string, inputs: .. string, extension: string = 
     return result
 }
 
-remove_if_exists :: proc(path: string) {
+remove_if_exists :: proc (path: string) {
     if os.exists(path) do os.remove(path)
 }
 
-delete_all_like :: proc(pattern: string) {
+delete_all_like :: proc (pattern: string) {
     files := all_like(pattern)
     if len(files) == 0 do return
     
@@ -388,7 +389,7 @@ delete_all_like :: proc(pattern: string) {
     fmt.printfln("INFO: deleted %v files with pattern '%v'", len(files), pattern)
 }
 
-all_like :: proc(pattern: string, allocator := context.temp_allocator) -> (result: [] string) {
+all_like :: proc (pattern: string, allocator := context.temp_allocator) -> (result: [] string) {
     files: [dynamic] string
     files.allocator = allocator
     
@@ -411,7 +412,7 @@ all_like :: proc(pattern: string, allocator := context.temp_allocator) -> (resul
     return files[:]
 }
 
-is_running :: proc(exe_name: string) -> (running: b32, pid: u32) {
+is_running :: proc (exe_name: string) -> (running: b32, pid: u32) {
     snapshot := win.CreateToolhelp32Snapshot(win.TH32CS_SNAPALL, 0)
     assert(snapshot != win.INVALID_HANDLE_VALUE, "could not take a snapshot of the running programms")
     defer win.CloseHandle(snapshot)
@@ -488,7 +489,7 @@ kill :: proc (pid: u32) {
     }
 }
 
-make_directory_if_not_exists :: proc(path: string) -> (result: b32) {
+make_directory_if_not_exists :: proc (path: string) -> (result: b32) {
     if !os.exists(path) {
         os.make_directory(path)
         result = true
@@ -496,6 +497,6 @@ make_directory_if_not_exists :: proc(path: string) -> (result: b32) {
     return result
 }
 
-random_number :: proc() -> (result: u8) {
+random_number :: proc () -> (result: u8) {
     return cast(u8) intrinsics.read_cycle_counter()
 }

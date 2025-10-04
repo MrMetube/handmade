@@ -50,7 +50,7 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ Worl
     return result
 }
 
-chunk_position_from_tile_positon :: proc(mode: ^World_Mode, tile_p: v3i) -> (result: WorldPosition) {
+chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i) -> (result: WorldPosition) {
     world := mode.world
     tile_size_in_meters  := mode.tile_size_in_meters
     
@@ -65,7 +65,7 @@ chunk_position_from_tile_positon :: proc(mode: ^World_Mode, tile_p: v3i) -> (res
     return result
 }
 
-update_and_render_world :: proc(state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
+update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
     
     when false {
@@ -189,7 +189,7 @@ check_for_joining_player :: proc (state: ^State, input: ^Input, region: ^SimRegi
     for controller, controller_index in input.controllers {
         con_hero := &state.controlled_heroes[controller_index]
         if con_hero.brain_id == 0 {
-            if was_pressed(controller.start) {
+            if was_pressed(controller.buttons[.start]) {
                 standing_on, ok := get_closest_traversable(region, {0, 0, 0}, {.Unoccupied} )
                 assert(ok) // @todo(viktor): Game UI that tells you there is no safe space...maybe keep trying on subsequent frames?
                 
@@ -296,7 +296,7 @@ world_distance :: proc (world: ^World, a, b: WorldPosition) -> (result: v3) {
     return result
 }
 
-is_canonical :: proc(world: ^World, offset: v3) -> bool {
+is_canonical :: proc (world: ^World, offset: v3) -> bool {
     epsilon: f32 = 0.0001
     half_size := 0.5 * world.chunk_dim_meters + epsilon
     return -half_size.x <= offset.x && offset.x <= half_size.x &&
@@ -306,7 +306,7 @@ is_canonical :: proc(world: ^World, offset: v3) -> bool {
 
 ////////////////////////////////////////////////
 
-get_chunk :: proc(arena: ^Arena, world: ^World, point: WorldPosition) -> (result: ^Chunk) {
+get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> (result: ^Chunk) {
     chunk_p := point.chunk
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
@@ -324,7 +324,7 @@ get_chunk :: proc(arena: ^Arena, world: ^World, point: WorldPosition) -> (result
     return result
 }
 
-get_chunk_internal :: proc(world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
+get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
     ChunkSafeMargin :: 256
     
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -350,7 +350,7 @@ get_chunk_internal :: proc(world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
 
 ////////////////////////////////////////////////
 
-extract_chunk :: proc(world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
+extract_chunk :: proc (world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
     begin_ticket_mutex(&world.change_ticket)
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
@@ -378,7 +378,7 @@ add_to_free_list :: proc (world: ^World, chunk: ^Chunk, first_block, last_block:
     end_ticket_mutex(&world.change_ticket)
 }
 
-use_space_in_world :: proc(world: ^World, pack_size: i64, p: WorldPosition) -> (result: ^Entity) {
+use_space_in_world :: proc (world: ^World, pack_size: i64, p: WorldPosition) -> (result: ^Entity) {
     begin_ticket_mutex(&world.change_ticket)
     
     chunk := get_chunk(world.arena, world, p)
@@ -391,7 +391,7 @@ use_space_in_world :: proc(world: ^World, pack_size: i64, p: WorldPosition) -> (
     return result
 }
 
-use_space_in_chunk :: proc(world: ^World, pack_size: i64, chunk: ^Chunk) -> (result: ^Entity) {
+use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (result: ^Entity) {
     assert(chunk != nil)
     
     if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
@@ -413,12 +413,12 @@ use_space_in_chunk :: proc(world: ^World, pack_size: i64, chunk: ^Chunk) -> (res
     return result
 }
 
-clear_world_entity_block :: proc(block: ^WorldEntityBlock) {
+clear_world_entity_block :: proc (block: ^WorldEntityBlock) {
     block.entity_count = 0
     block.entity_data.count = 0
     block.next = nil
 }
 
-block_has_room :: proc(block: ^WorldEntityBlock, size: i64) -> bool {
+block_has_room :: proc (block: ^WorldEntityBlock, size: i64) -> bool {
     return block.entity_data.count + size < len(block.entity_data.data)
 }

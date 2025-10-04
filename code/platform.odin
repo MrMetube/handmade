@@ -108,7 +108,7 @@ Saved_Memory_Block :: struct {
 
 ////////////////////////////////////////////////
 
-main :: proc() {
+main :: proc () {
     unused(verify_memory_block_integrity)
     
     list_init_sentinel(&GlobalPlatformState.block_sentinel)
@@ -314,9 +314,9 @@ main :: proc() {
         {
             new_input.delta_time = target_seconds_per_frame
             
-            is_down :: proc(vk: win.INT) -> b32 {
-                is_down_mask :: min(i16) // 1 << 15
-                return cast(b32) (win.GetKeyState(vk)  & is_down_mask)
+            is_down :: proc (vk: win.INT) -> b32 {
+                is_down_mask :: transmute(i16) (cast(u16) 1 << 15)
+                return (win.GetKeyState(vk) & is_down_mask) != 0
             }
             
             { // Modifiers
@@ -345,11 +345,11 @@ main :: proc() {
                 // @todo(viktor): support mouse wheel
                 new_input.mouse.wheel = 0
                 // @todo(viktor): Do we need to update the input button on every event?
-                process_win_keyboard_message(&new_input.mouse.left,   is_down(win.VK_LBUTTON))
-                process_win_keyboard_message(&new_input.mouse.right,  is_down(win.VK_RBUTTON))
-                process_win_keyboard_message(&new_input.mouse.middle, is_down(win.VK_MBUTTON))
-                process_win_keyboard_message(&new_input.mouse.extra1, is_down(win.VK_XBUTTON1))
-                process_win_keyboard_message(&new_input.mouse.extra2, is_down(win.VK_XBUTTON2))
+                process_win_keyboard_message(&new_input.mouse.buttons[.left],   is_down(win.VK_LBUTTON))
+                process_win_keyboard_message(&new_input.mouse.buttons[.right],  is_down(win.VK_RBUTTON))
+                process_win_keyboard_message(&new_input.mouse.buttons[.middle], is_down(win.VK_MBUTTON))
+                process_win_keyboard_message(&new_input.mouse.buttons[.extra1], is_down(win.VK_XBUTTON1))
+                process_win_keyboard_message(&new_input.mouse.buttons[.extra2], is_down(win.VK_XBUTTON2))
             }
             
             { // Keyboard Input
@@ -390,31 +390,39 @@ main :: proc() {
                     // @todo(viktor): see if dwPacketNumber increments too rapidly
                     pad := controller_state.Gamepad
                     
-                    process_Xinput_button :: proc(new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
+                    process_Xinput_button :: proc (new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
                         new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
                         new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
                     }
                     
-                    process_Xinput_button(&new_controller.button_up    , old_controller.button_up    , pad.wButtons, XINPUT_GAMEPAD_Y)
-                    process_Xinput_button(&new_controller.button_down  , old_controller.button_down  , pad.wButtons, XINPUT_GAMEPAD_A)
-                    process_Xinput_button(&new_controller.button_left  , old_controller.button_left  , pad.wButtons, XINPUT_GAMEPAD_X)
-                    process_Xinput_button(&new_controller.button_right , old_controller.button_right , pad.wButtons, XINPUT_GAMEPAD_B)
+                    xx := #partial [Controller_Button] win.WORD {
+                        .button_up      = XINPUT_GAMEPAD_Y,
+                        .button_down    = XINPUT_GAMEPAD_A,
+                        .button_left    = XINPUT_GAMEPAD_X,
+                        .button_right   = XINPUT_GAMEPAD_B,
+                        
+                        .start          = XINPUT_GAMEPAD_START,
+                        .back           = XINPUT_GAMEPAD_BACK,
+                        
+                        .shoulder_left  = XINPUT_GAMEPAD_LEFT_SHOULDER,
+                        .shoulder_right = XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                        
+                        .dpad_up        = XINPUT_GAMEPAD_DPAD_UP,
+                        .dpad_down      = XINPUT_GAMEPAD_DPAD_DOWN,
+                        .dpad_left      = XINPUT_GAMEPAD_DPAD_LEFT,
+                        .dpad_right     = XINPUT_GAMEPAD_DPAD_RIGHT,
+                        
+                        .thumb_left     = XINPUT_GAMEPAD_LEFT_THUMB,
+                        .thumb_right    = XINPUT_GAMEPAD_RIGHT_THUMB,
+                        
+                        // @note(viktor): stick_xx "buttons" are handled separately below
+                    }
                     
-                    process_Xinput_button(&new_controller.start, old_controller.start, pad.wButtons, XINPUT_GAMEPAD_START)
-                    process_Xinput_button(&new_controller.back, old_controller.back, pad.wButtons, XINPUT_GAMEPAD_BACK)
+                    for xinput_bit, button in xx {
+                        process_Xinput_button(&new_controller.buttons[button], old_controller.buttons[button], pad.wButtons, xinput_bit)
+                    }
                     
-                    process_Xinput_button(&new_controller.shoulder_left , old_controller.shoulder_left , pad.wButtons, XINPUT_GAMEPAD_LEFT_SHOULDER)
-                    process_Xinput_button(&new_controller.shoulder_right, old_controller.shoulder_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_SHOULDER)
-                    
-                    process_Xinput_button(&new_controller.dpad_up    , old_controller.dpad_up    , pad.wButtons, XINPUT_GAMEPAD_DPAD_UP)
-                    process_Xinput_button(&new_controller.dpad_down  , old_controller.dpad_down  , pad.wButtons, XINPUT_GAMEPAD_DPAD_DOWN)
-                    process_Xinput_button(&new_controller.dpad_left  , old_controller.dpad_left  , pad.wButtons, XINPUT_GAMEPAD_DPAD_LEFT)
-                    process_Xinput_button(&new_controller.dpad_right , old_controller.dpad_right , pad.wButtons, XINPUT_GAMEPAD_DPAD_RIGHT)
-                    
-                    process_Xinput_button(&new_controller.thumb_left , old_controller.thumb_left , pad.wButtons, XINPUT_GAMEPAD_LEFT_THUMB)
-                    process_Xinput_button(&new_controller.thumb_right, old_controller.thumb_right, pad.wButtons, XINPUT_GAMEPAD_RIGHT_THUMB)
-                    
-                    process_Xinput_stick :: proc(thumbstick: win.SHORT, deadzone: i16) -> f32 {
+                    process_Xinput_stick :: proc (thumbstick: win.SHORT, deadzone: i16) -> f32 {
                         if thumbstick < -deadzone {
                             return cast(f32) (thumbstick + deadzone) / (32768 - cast(f32) deadzone)
                         } else if thumbstick > deadzone {
@@ -440,12 +448,14 @@ main :: proc() {
                     if (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
                     
                     Threshold :: 0.5
-                    process_Xinput_button(&new_controller.stick_left , old_controller.stick_left , 1, new_controller.stick_average.x < -Threshold ? 1 : 0)
-                    process_Xinput_button(&new_controller.stick_right, old_controller.stick_right, 1, new_controller.stick_average.x >  Threshold ? 1 : 0)
-                    process_Xinput_button(&new_controller.stick_down , old_controller.stick_down , 1, new_controller.stick_average.y < -Threshold ? 1 : 0)
-                    process_Xinput_button(&new_controller.stick_up   , old_controller.stick_up   , 1, new_controller.stick_average.y >  Threshold ? 1 : 0)
+                    // @cleanup process_Xinput_button is leaking its abstraction here
+                    process_Xinput_button(&new_controller.buttons[.stick_left],  old_controller.buttons[.stick_left],  1, new_controller.stick_average.x < -Threshold ? 1 : 0)
+                    process_Xinput_button(&new_controller.buttons[.stick_right], old_controller.buttons[.stick_right], 1, new_controller.stick_average.x >  Threshold ? 1 : 0)
+                    process_Xinput_button(&new_controller.buttons[.stick_down],  old_controller.buttons[.stick_down],  1, new_controller.stick_average.y < -Threshold ? 1 : 0)
+                    process_Xinput_button(&new_controller.buttons[.stick_up],    old_controller.buttons[.stick_up],    1, new_controller.stick_average.y >  Threshold ? 1 : 0)
                     
-                    if cast(b16) (pad.wButtons & XINPUT_GAMEPAD_BACK) do GlobalRunning = false
+                    // @cleanup This is probably vestigial and can safely be removed
+                    if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 do GlobalRunning = false
                 } else {
                     new_controller.is_connected = false
                     xbox_controller_present[controller_index] = false
@@ -656,7 +666,7 @@ main :: proc() {
             }
             
             if seconds_elapsed_for_frame < target_seconds_per_frame {
-                // Sleep
+                // @note(viktor): Sleep
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
                     if sleep_ms > 0 { 
@@ -667,7 +677,7 @@ main :: proc() {
                 test_seconds_elapsed := get_seconds_elapsed_until_now(last_counter)
                 if test_seconds_elapsed > target_seconds_per_frame {
                     if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                        print("Missed sleep - % / % - %\n", 
+                        print("Missed sleep - actual % target % over %\n", 
                             view_seconds(seconds_elapsed_for_frame, precision = 3),
                             view_seconds(target_seconds_per_frame, precision = 3),
                             view_seconds(test_seconds_elapsed - desired_scheduler_ms, precision = 3),
@@ -675,14 +685,14 @@ main :: proc() {
                     }
                 }
                 
-                // Busy Waiting
+                // @note(viktor): Busy Waiting
                 for seconds_elapsed_for_frame < target_seconds_per_frame {
                     seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
                 }
             } else {
                 // @logging Missed frame, maybe because window was moved
                 if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                    print("Missed frame - % / % - %\n", 
+                    print("Missed frame - actual % target % over %\n",
                         view_seconds(seconds_elapsed_for_frame, precision = 3),
                         view_seconds(target_seconds_per_frame, precision = 3),
                         view_seconds(seconds_elapsed_for_frame - target_seconds_per_frame, precision = 3),
@@ -720,7 +730,7 @@ main :: proc() {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
+render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
     commands.clear_color.rgb = square(commands.clear_color.rgb)
     
     if GlobalUseSoftwareRenderer {
@@ -738,7 +748,7 @@ render_to_window :: proc(commands: ^RenderCommands, render_queue: ^WorkQueue, dr
 PageSize :: 4096 // @todo(viktor): you can get this from the OS, too!
 
 @(api)
-allocate_memory_block :: proc(#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {
+allocate_memory_block :: proc (#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {
     total_size := size + size_of(Memory_Block)
     
     base_offset: umm = size_of(Memory_Block)
@@ -842,7 +852,7 @@ is_in_loop :: proc (state: ^PlatformState) -> (result: bool) {
     return result
 }
 
-get_record_replay_filepath :: proc(index: i32) -> cstring16 {
+get_record_replay_filepath :: proc (index: i32) -> cstring16 {
     buffer: [64] u8
     return build_exe_path(format_string(buffer[:], "editloop_%.input", index))
 }
@@ -858,7 +868,7 @@ verify_memory_block_integrity :: proc (state: ^PlatformState) {
     end_ticket_mutex(&state.block_mutex)
 }
 
-begin_recording_input :: proc(state: ^PlatformState, index: i32) {
+begin_recording_input :: proc (state: ^PlatformState, index: i32) {
     path := get_record_replay_filepath(index)
     state.recording_handle = win.CreateFileW(path, win.GENERIC_WRITE, 0, nil, win.CREATE_ALWAYS, 0, nil)
     
@@ -890,19 +900,19 @@ begin_recording_input :: proc(state: ^PlatformState, index: i32) {
     }
 }
 
-record_input :: proc(state: ^PlatformState, input: ^Input) {
+record_input :: proc (state: ^PlatformState, input: ^Input) {
     bytes_written: u32
     ok := cast(bool) win.WriteFile(state.recording_handle, input, cast(u32) size_of(Input), &bytes_written, nil)
     assert(ok)
 }
 
-end_recording_input :: proc(state: ^PlatformState) {
+end_recording_input :: proc (state: ^PlatformState) {
     ok := cast(bool) win.CloseHandle(state.recording_handle)
     assert(ok)
     state.recording_index = 0
 }
 
-begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
+begin_replaying_input :: proc (state: ^PlatformState, index: i32) {
     clear_blocks_by_mask(state, { .allocated_during_loop })
     
     path := get_record_replay_filepath(index)
@@ -926,7 +936,7 @@ begin_replaying_input :: proc(state: ^PlatformState, index: i32) {
     }
 }
 
-replay_input :: proc(state: ^PlatformState, input: ^Input) {
+replay_input :: proc (state: ^PlatformState, input: ^Input) {
     bytes_read: u32
     if win.ReadFile(state.replaying_handle, input, cast(u32) size_of(Input), &bytes_read, nil) {
         if bytes_read == 0 {
@@ -940,7 +950,7 @@ replay_input :: proc(state: ^PlatformState, input: ^Input) {
     }
 }
 
-end_replaying_input :: proc(state: ^PlatformState) {
+end_replaying_input :: proc (state: ^PlatformState) {
     clear_blocks_by_mask(state, { .freed_during_loop })
     
     ok := cast(bool) win.CloseHandle(state.replaying_handle)
@@ -951,16 +961,16 @@ end_replaying_input :: proc(state: ^PlatformState) {
 ////////////////////////////////////////////////
 // Performance Timers
 
-get_wall_clock :: proc() -> i64 {
+get_wall_clock :: proc () -> i64 {
     result: win.LARGE_INTEGER
     win.QueryPerformanceCounter(&result)
     return cast(i64) result
 }
 
-get_seconds_elapsed :: proc(start, end: i64) -> f32 {
+get_seconds_elapsed :: proc (start, end: i64) -> f32 {
     return cast(f32) (cast(f64) (end - start) / GlobalPerformanceCounterFrequency)
 }
-get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
+get_seconds_elapsed_until_now :: proc (start: i64) -> f32 {
     end := get_wall_clock()
     return get_seconds_elapsed(start, end)
 }
@@ -968,7 +978,7 @@ get_seconds_elapsed_until_now :: proc(start: i64) -> f32 {
 ////////////////////////////////////////////////   
 // Sound Buffer
 
-fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
+fill_sound_buffer :: proc (sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     region1, region2: pmm
     region1_size, region2_size: u32
     
@@ -1008,7 +1018,7 @@ fill_sound_buffer :: proc(sound_output: ^SoundOutput, byte_to_lock, bytes_to_wri
     }
 }
 
-clear_sound_buffer :: proc(sound_output: ^SoundOutput) {
+clear_sound_buffer :: proc (sound_output: ^SoundOutput) {
     region1, region2 : pmm
     region1_size, region2_size: u32
     // @copypasta
@@ -1050,7 +1060,7 @@ get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := fals
     return dimension
 }
 
-toggle_fullscreen :: proc(window: win.HWND) {
+toggle_fullscreen :: proc (window: win.HWND) {
     // @note(viktor): This follows Raymond Chen's prescription for fullscreen toggling, see:
     // http://blogs.msdn.com/b/oldnewthing/archive/2010/04/12/9994016.aspx
     
@@ -1145,14 +1155,14 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     return result
 }
 
-process_win_keyboard_message :: proc(new_state: ^InputButton, is_down: b32) {
+process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: b32) {
     if is_down != new_state.ended_down {
         new_state.ended_down             = is_down
         new_state.half_transition_count += 1
     }
 }
 
-process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^InputController) {
+process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController) {
     message: win.MSG
     for {
         // @note(viktor): We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
@@ -1191,18 +1201,18 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
             
             if was_down == is_down do continue
             switch vk_code {
-              case win.VK_W:      process_win_keyboard_message(&keyboard_controller.stick_up,       is_down)
-              case win.VK_A:      process_win_keyboard_message(&keyboard_controller.stick_left,     is_down)
-              case win.VK_S:      process_win_keyboard_message(&keyboard_controller.stick_down,     is_down)
-              case win.VK_D:      process_win_keyboard_message(&keyboard_controller.stick_right,    is_down)
-              case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.shoulder_left,  is_down)
-              case win.VK_E:      process_win_keyboard_message(&keyboard_controller.shoulder_right, is_down)
-              case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.button_up,      is_down)
-              case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.button_down,    is_down)
-              case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.button_left,    is_down)
-              case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.button_right,   is_down)
-              case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.start,          is_down)
-              case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.back,           is_down)
+              case win.VK_W:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_up],       is_down)
+              case win.VK_A:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_left],     is_down)
+              case win.VK_S:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_down],     is_down)
+              case win.VK_D:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_right],    is_down)
+              case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_left],  is_down)
+              case win.VK_E:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_right], is_down)
+              case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.buttons[.button_up],      is_down)
+              case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.buttons[.button_down],    is_down)
+              case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.buttons[.button_left],    is_down)
+              case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.buttons[.button_right],   is_down)
+              case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.buttons[.start],          is_down)
+              case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.buttons[.back],           is_down)
               case win.VK_L:
                 if is_down {
                     if state.replaying_index != 0 {
@@ -1229,8 +1239,9 @@ process_pending_messages :: proc(state: ^PlatformState, keyboard_controller: ^In
     }
 }
 
-build_exe_path :: proc(filename: string) -> cstring16 {
-    buffer: [256]u8
+build_exe_path :: proc (filename: string) -> (result: cstring16) {
+    buffer: [256] u8
     path := format_string(buffer[:], `%\%`, GlobalPlatformState.exe_path, filename)
-    return win.utf8_to_wstring(path)
+    result = win.utf8_to_wstring(path, context.temp_allocator)
+    return result
 }

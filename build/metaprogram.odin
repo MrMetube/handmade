@@ -31,7 +31,7 @@ Metaprogram :: struct {
     printlikes_failed: bool,
 }
 
-metaprogram_collect_data :: proc(using mp: ^Metaprogram, dir: string) -> (success: b32) {
+metaprogram_collect_data :: proc (using mp: ^Metaprogram, dir: string) -> (success: b32) {
     context.user_ptr = mp
     
     collect_all_files(&files, dir)
@@ -197,7 +197,7 @@ generate_commons :: proc (using mp: ^Metaprogram, path: string) -> (result: bool
     return true
 }
 
-generate_game_api :: proc(using mp: ^Metaprogram, output_file: string) -> (result: bool) {
+generate_game_api :: proc (using mp: ^Metaprogram, output_file: string) -> (result: bool) {
     remove_if_exists(output_file)
     out, err := os.open(output_file, os.O_CREATE)
     defer os.close(out)
@@ -263,10 +263,10 @@ generate_platform_api :: proc (using mp: ^Metaprogram, platform_path, game_path:
     api_files: [dynamic] File
     for file_name, infos in apis {
         append(&api_files, File { file_name, infos })
-        slice.sort_by(infos[:], proc(a, b: Info) -> bool { return strings.compare(a.name, b.name) <= 0 })
+        slice.sort_by(infos[:], proc (a, b: Info) -> bool { return strings.compare(a.name, b.name) <= 0 })
     }
     
-    slice.sort_by(api_files[:], proc(a, b: File) -> bool { return strings.compare(a.file_name, b.file_name) <= 0 })
+    slice.sort_by(api_files[:], proc (a, b: File) -> bool { return strings.compare(a.file_name, b.file_name) <= 0 })
     
     ////////////////////////////////////////////////
     
@@ -342,7 +342,7 @@ has_attribute :: proc (attributes: [] ^ast.Attribute, targets: ..string) -> (res
     return result
 }
 
-collect_all_files :: proc(files: ^map[string] string, directory: string) {
+collect_all_files :: proc (files: ^map[string] string, directory: string) {
     fi, _ := os2.read_directory_by_path(directory, -1, context.allocator)
     for f in fi {
         bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
@@ -351,7 +351,7 @@ collect_all_files :: proc(files: ^map[string] string, directory: string) {
     }
 }
 
-read_pos_or_fail :: proc(start, end: tokenizer.Pos) -> (result: string) {
+read_pos_or_fail :: proc (start, end: tokenizer.Pos) -> (result: string) {
     using mp := cast(^Metaprogram) context.user_ptr
     
     ok: bool
@@ -360,7 +360,7 @@ read_pos_or_fail :: proc(start, end: tokenizer.Pos) -> (result: string) {
     return result
 }
 
-read_pos :: proc(start, end: tokenizer.Pos) -> (result: string, ok: bool) {
+read_pos :: proc (start, end: tokenizer.Pos) -> (result: string, ok: bool) {
     using mp := cast(^Metaprogram) context.user_ptr
     
     file: string

@@ -34,8 +34,8 @@ default_views :: proc "contextless" () {
 ////////////////////////////////////////////////
 
 // @todo(viktor): make precision and width parameters
-view_percentage :: proc(a, b: $N)  -> (result: Temp_Views) { return view_percentage(cast(f64) a / cast(f64) b) }
-view_percentage_ratio :: proc(value: $F) -> (result: Temp_Views) {
+view_percentage :: proc (a, b: $N)  -> (result: Temp_Views) { return view_percentage(cast(f64) a / cast(f64) b) }
+view_percentage_ratio :: proc (value: $F) -> (result: Temp_Views) {
     begin_temp_views()
     append_temp_view(view_float(value * 100, precision = 2, width = 2))
     result = end_temp_views()
@@ -335,7 +335,7 @@ view_time :: proc (value: time.Time) -> (result: Temp_Views) {
 
 ////////////////////////////////////////////////
 
-view_source_code_location :: proc(value: runtime.Source_Code_Location, show_procedure := false) -> (result: Temp_Views) {
+view_source_code_location :: proc (value: runtime.Source_Code_Location, show_procedure := false) -> (result: Temp_Views) {
     begin_temp_views()
     
     append_temp_view(value.file_path)
