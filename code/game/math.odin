@@ -768,13 +768,27 @@ orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4) 
 
 perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32) -> (result: m4) {
     a := aspect_width_over_height
-    f := focal_length
+    b := focal_length
+    
+    near_clip :: -0.1
+    far_clip  :: -100
+    
+    n: f32 = near_clip
+    f: f32 = far_clip
+    when !false {
+        c := 2 / (n - f)
+        d := (n+f) / (n-f)
+    } else {
+        c := 1 + (2*f*n) / (n*(n-f))
+        d := (2*f*n) / (n-f)
+    }
+    
     
     result = {
-        f,   0,  0, 0,
-        0, a*f,  0, 0,
-        0,   0,  1, 0,
-        0,   0, -1, 0,
+        b,   0, 0, 0,
+        0, a*b, 0, 0,
+        0,   0, c, 0,
+        0,   0, d, 0,
     }
     
     return result

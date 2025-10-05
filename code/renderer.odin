@@ -180,7 +180,7 @@ do_tile_render_work :: proc (data: pmm) {
             entry := cast(^RenderEntryBitmap) entry_data
             header_offset += size_of(RenderEntryBitmap)
             
-            draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis, entry.y_axis, entry.bitmap, entry.premultiplied_color)
+            draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis.xy, entry.y_axis.xy, entry.bitmap, entry.premultiplied_color)
         }
     }
 }

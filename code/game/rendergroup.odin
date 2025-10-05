@@ -126,8 +126,8 @@ RenderEntryBitmap :: struct {
     
     p: v3,
     // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
-    x_axis: v2,
-    y_axis: v2,
+    x_axis: v3,
+    y_axis: v3,
 }
 
 @(common)
@@ -331,6 +331,9 @@ push_bitmap_raw :: proc (
     used_dim := get_used_bitmap_dim(group, bitmap, transform, height, offset, use_alignment, x_axis, y_axis)
     
     size := used_dim.size
+    
+    x_axis := V3(x_axis, 0)
+    y_axis := V3(y_axis, 0)
     
     element := push_render_element(group, RenderEntryBitmap)
     element ^= {

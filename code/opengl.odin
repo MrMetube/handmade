@@ -30,6 +30,7 @@ glVertex3f:     proc (_,_,_: f32)
 glColor4f:      proc (_,_,_,_: f32)
 glColor4fv:     proc (_: [^] f32)
 glTexEnvi:      proc (_: u32, _: u32, _: u32)
+glAlphaFunc:    proc (_: u32, _: f32)
 
 OpenGlInfo :: struct {
     modern_context: b32,
@@ -156,6 +157,7 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glVertex3f, "glVertex3f")
             win.gl_set_proc_address(&glColor4f, "glColor4f")
             win.gl_set_proc_address(&glColor4fv, "glColor4fv")
+            win.gl_set_proc_address(&glAlphaFunc, "glAlphaFunc")
         }
     }
     
@@ -211,18 +213,24 @@ set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: b32) {
     if win.wglChoosePixelFormatARB != nil {
         TRUE :: 1
         
-        int_attribs := [?]i32{
-            win.WGL_DRAW_TO_WINDOW_ARB,           TRUE,
-            win.WGL_ACCELERATION_ARB,             win.WGL_FULL_ACCELERATION_ARB,
-            win.WGL_SUPPORT_OPENGL_ARB,           TRUE,
-            win.WGL_DOUBLE_BUFFER_ARB,            TRUE,
-            win.WGL_PIXEL_TYPE_ARB,               win.WGL_TYPE_RGBA_ARB,
-            win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
+        int_attribs := [?] i32 {
+            /* 0 */ win.WGL_DRAW_TO_WINDOW_ARB, TRUE,
+            /* 1 */ win.WGL_ACCELERATION_ARB,   win.WGL_FULL_ACCELERATION_ARB,
+            /* 2 */ win.WGL_SUPPORT_OPENGL_ARB, TRUE,
+            /* 3 */ win.WGL_DOUBLE_BUFFER_ARB,  TRUE,
+            /* 4 */ win.WGL_PIXEL_TYPE_ARB,     win.WGL_TYPE_RGBA_ARB,
+            /* 5 */ win.WGL_RED_BITS_ARB,       8,
+            /* 6 */ win.WGL_GREEN_BITS_ARB,     8,
+            /* 7 */ win.WGL_BLUE_BITS_ARB,      8,
+            /* 8 */ win.WGL_ALPHA_BITS_ARB,     8,
+            /* 9 */ win.WGL_DEPTH_BITS_ARB,     24,
+            // @volatile see below
+            /* 10 */win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
             0,
         }
         
         if !framebuffer_supports_srgb {
-            int_attribs[10] = 0 // @volatile Coupled to the ordering of the attribs itself
+            int_attribs[20] = 0 // @volatile Coupled to the ordering of the attribs itself
         }
         
         win.wglChoosePixelFormatARB(dc, raw_data(int_attribs[:]), nil, 1, &suggested_pixel_format_index, &extended_pick)
@@ -236,6 +244,7 @@ set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: b32) {
             iPixelType = win.PFD_TYPE_RGBA,
             cColorBits = 32,
             cAlphaBits = 8,
+            cDepthBits = 24,
             iLayerType = win.PFD_MAIN_PLANE,
         }
         
@@ -351,6 +360,13 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     gl_bind_frame_buffer(0, draw_region)
     defer gl_bind_frame_buffer(0, draw_region)
     
+    gl.DepthMask(true)
+    gl.ColorMask(true, true, true, true)
+    gl.DepthFunc(gl.LEQUAL)
+    gl.Enable(gl.DEPTH_TEST)
+    glAlphaFunc(gl.GEQUAL, 0.1)
+    gl.Enable(gl.ALPHA_TEST)
+    
     gl.Enable(gl.TEXTURE_2D)
     gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.BLEND)
@@ -377,6 +393,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
             gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture^, 0)
+            // @todo(viktor): Create a depth buffer for this framebuffer
+            // gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texture^, 0)
             
             assert(gl.FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(gl.FRAMEBUFFER))
         }
@@ -393,7 +411,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
         }
         
         gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
-        gl.Clear(gl.COLOR_BUFFER_BIT)
+        gl.ClearDepth(1)
+        gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     }
     
     commands_dim := vec_cast(f32, commands.width, commands.height)
@@ -511,7 +530,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 max_uv := v2{1-texel_x, 1-texel_y}
                 
                 min := entry.p
-                max := entry.p + V3(entry.x_axis, 0) + V3(entry.y_axis, 0)
+                max := entry.p + entry.x_axis + entry.y_axis
                 
                 gl_rectangle(min, max, entry.premultiplied_color, min_uv, max_uv)
             }
@@ -541,26 +560,25 @@ gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1
     
     glColor4f(color.r, color.g, color.b, color.a)
     
-    z := max.z
     // @note(viktor): Lower triangle
     glTexCoord2f(min_uv.x, min_uv.y)
-    glVertex3f(min.x, min.y, z)
+    glVertex3f(min.x, min.y, min.z)
     
     glTexCoord2f(max_uv.x, min_uv.y)
-    glVertex3f(max.x, min.y, z)
+    glVertex3f(max.x, min.y, min.z)
     
     glTexCoord2f(max_uv.x, max_uv.y)
-    glVertex3f(max.x, max.y, z)
+    glVertex3f(max.x, max.y, max.z)
     
     // @note(viktor): Upper triangle
     glTexCoord2f(min_uv.x, min_uv.y)
-    glVertex3f(min.x, min.y, z)
+    glVertex3f(min.x, min.y, min.z)
     
     glTexCoord2f(max_uv.x, max_uv.y)
-    glVertex3f(max.x, max.y, z)
+    glVertex3f(max.x, max.y, max.z)
     
     glTexCoord2f(min_uv.x, max_uv.y)
-    glVertex3f(min.x, max.y, z)
+    glVertex3f(min.x, max.y, max.z)
     
     glEnd()
 }
