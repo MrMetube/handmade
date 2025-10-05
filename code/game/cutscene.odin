@@ -248,13 +248,13 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     match_vector  := #partial AssetVector { .ShotIndex = cast(f32) scene.shot_index }
     weight_vector := #partial AssetVector { .ShotIndex = 1, .LayerIndex = 1 }
     
-    // @todo(viktor): Why does this fade seem to be wrong?  It appears nonlinear, but if it is in linear brightness, shouldn't it _appear_ linear?
+    // @todo(viktor): Why does this fade seem to be wrong? It appears nonlinear, but if it is in linear brightness, shouldn't it _appear_ linear?
     color := v4{scene_fade_value, scene_fade_value, scene_fade_value, 1}
     
     // @todo(viktor): We could potentially simplify this by making better use of the camera.p
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
-        push_camera(render_group, false, camera_params.focal_length, identity())
+        push_perspective(render_group, camera_params.focal_length)
         
         if len(scene.layers) == 0 {
             push_clear(render_group, 0)

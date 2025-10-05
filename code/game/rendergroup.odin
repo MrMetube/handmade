@@ -66,6 +66,10 @@ RenderGroup :: struct {
     screen_size: v2,
     
     // camera: Camera,
+    cam_p: v3,
+    cam_x: v3,
+    cam_y: v3,
+    cam_z: v3,
     last_projection:    m4,
     last_clip_rect:     Rectangle2i,
     last_render_target: u32,
@@ -271,7 +275,14 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
     group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
 }
 
-push_camera :: proc (group: ^RenderGroup, is_orthographic: bool, focal_length: f32, camera_transform: m4) {
+push_perspective :: proc (group: ^RenderGroup, focal_length: f32, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}) {
+    push_camera(group, false, focal_length, x, y, z, p)
+}
+push_orthographic :: proc (group: ^RenderGroup) {
+    push_camera(group, true, 1, v3{1,0,0}, v3{0,1,0}, v3{0,0,1}, v3{0,0,0})
+}
+
+push_camera :: proc (group: ^RenderGroup, is_orthographic: bool, focal_length: f32, x, y, z, p: v3) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
     
     projection: m4
@@ -280,6 +291,12 @@ push_camera :: proc (group: ^RenderGroup, is_orthographic: bool, focal_length: f
     } else { 
         projection = perspective_projection(aspect_width_over_height, focal_length)
     }
+    
+    group.cam_p = p
+    group.cam_x = x
+    group.cam_y = y
+    group.cam_z = z
+    camera_transform := camera_transform(x, y, z, p)
     
     projection = projection * camera_transform
     
@@ -332,9 +349,6 @@ push_bitmap_raw :: proc (
     
     size := used_dim.size
     
-    x_axis := V3(x_axis, 0)
-    y_axis := V3(y_axis, 0)
-    
     element := push_render_element(group, RenderEntryBitmap)
     element ^= {
         premultiplied_color = store_color(transform, color),
@@ -342,8 +356,25 @@ push_bitmap_raw :: proc (
         bitmap = bitmap,
         
         p      = used_dim.basis,
-        x_axis = x_axis * size.x,
-        y_axis = y_axis * size.y,
+        x_axis = V3(x_axis, 0) * size.x,
+        y_axis = V3(y_axis, 0) * size.y,
+    }
+    
+    if transform.is_upright {
+        when false {
+            cam_pyz := group.cam_p.yz
+            cam_ryz := element.p.yz + size.y * group.cam_y.yz - group.cam_p.yz
+            card_pyz := element.p.yz
+            card_ryz := v2{.25, .75}
+            
+            ok, t := ray_intersection(card_pyz, card_ryz, cam_pyz, cam_ryz)
+            assert(ok)
+            
+            element.y_axis = t.y * V3(cast(f32) 0, card_ryz)
+        } else {
+            element.x_axis = size.x * group.cam_x
+            element.y_axis = size.y * group.cam_y
+        }
     }
 }
 

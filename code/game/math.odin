@@ -770,25 +770,27 @@ perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32
     a := aspect_width_over_height
     b := focal_length
     
-    near_clip :: -0.1
-    far_clip  :: -100
+    near_clip :: 0.1
+    far_clip  :: 100
     
     n: f32 = near_clip
     f: f32 = far_clip
-    when !false {
-        c := 2 / (n - f)
-        d := (n+f) / (n-f)
-    } else {
-        c := 1 + (2*f*n) / (n*(n-f))
+    when true {
+        // @note(viktor): perspective, for when you divide by -z
+        c :=   (n+f) / (n-f)
         d := (2*f*n) / (n-f)
+    } else {
+        // @note(viktor): orthographic
+        c :=   (2  ) / (n-f)
+        d :=   (n+f) / (n-f)
     }
     
     
     result = {
-        b,   0, 0, 0,
-        0, a*b, 0, 0,
-        0,   0, c, 0,
-        0,   0, d, 0,
+        b,   0,  0, 0,
+        0, a*b,  0, 0,
+        0,   0,  c, d,
+        0,   0, -1, 0,
     }
     
     return result
@@ -849,6 +851,26 @@ columns_3x3 :: proc (x, y, z: v3) -> (result: m4) {
           0,   0,   0, 1,
     }
     return result
+}
+
+////////////////////////////////////////////////
+
+ray_intersection :: proc (pa, ra, pb, rb: v2) -> (ok: bool, t: v2) {
+    determinant := rb.x * ra.y - rb.y * ra.x
+    // @todo(viktor): use an epsilon here
+    if determinant == 0 do return false, 0
+    
+    /*  
+        pa.x + ta * ra.x = pb.x + tb * rb.x
+        pa.y + ta * ra.y = pb.y + tb * rb.y
+     */
+    
+    d := pb - pa
+    tb := (d.y * ra.x + (-d.x) * ra.y) / determinant
+    ta := (d.y * rb.x + (-d.x) * rb.y) / determinant
+    
+    t = {ta, tb}
+    return true, t
 }
 
 ////////////////////////////////////////////////

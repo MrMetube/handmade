@@ -434,8 +434,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             clip := prep.clip_rects.data[clip_rect_index]
             
             glMatrixMode(gl.PROJECTION)
-            projection := clip.projection
-            glLoadMatrixf(&projection)
+            glLoadMatrixf(&clip.projection)
             
             if current_target_index != clip.render_target_index {
                 current_target_index = clip.render_target_index

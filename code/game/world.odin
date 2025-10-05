@@ -131,8 +131,10 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
         offset.z += mode.debug_camera_dolly
         offset = multiply(camera_object, offset)
-        camera_camera := camera_transform(get_column(camera_object, 0), get_column(camera_object, 1), get_column(camera_object, 2), offset)
-        push_camera(render_group, false, camera.focal_length, camera_camera)
+        x := get_column(camera_object, 0)
+        y := get_column(camera_object, 1)
+        z := get_column(camera_object, 2)
+        push_perspective(render_group, camera.focal_length, x, y, z, offset)
         
         world_camera_rect := get_camera_rectangle_at_target(render_group)
         screen_bounds := rectangle_center_dimension(v2{0,0}, get_dimension(world_camera_rect).xy)
