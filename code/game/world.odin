@@ -107,8 +107,32 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         ////////////////////////////////////////////////
         
-        camera := get_standard_camera_params(0.3)
-        perspective(render_group, camera.focal_length, mode.camera.offset)
+        camera := get_standard_camera_params(0.6)
+        offset := mode.camera.offset
+        if input != nil {
+            dmousep := input.mouse.p - mode.debug_last_mouse_p
+            defer mode.debug_last_mouse_p = input.mouse.p
+            
+            if input.alt_down {
+                if is_down(input.mouse.buttons[.left]) {
+                    rotation_speed :: 0.001 * Tau
+                    mode.debug_camera_orbit += -dmousep.x * rotation_speed
+                    mode.debug_camera_pitch += dmousep.y * rotation_speed
+                } else if is_down(input.mouse.buttons[.right]) {
+                    zoom_speed: f32 = 0.005 * (mode.camera.offset.z + mode.debug_camera_dolly)
+                    mode.debug_camera_dolly += -dmousep.y * zoom_speed
+                } else if is_down(input.mouse.buttons[.middle]) {
+                    mode.debug_camera_orbit = 0
+                    mode.debug_camera_pitch = 0
+                    mode.debug_camera_dolly = 0
+                }
+            }
+        }
+        camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
+        offset.z += mode.debug_camera_dolly
+        offset = multiply(camera_object, offset)
+        camera_camera := camera_transform(get_column(camera_object, 0), get_column(camera_object, 1), get_column(camera_object, 2), offset)
+        push_camera(render_group, false, camera.focal_length, camera_camera)
         
         world_camera_rect := get_camera_rectangle_at_target(render_group)
         screen_bounds := rectangle_center_dimension(v2{0,0}, get_dimension(world_camera_rect).xy)

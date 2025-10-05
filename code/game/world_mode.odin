@@ -25,6 +25,11 @@ World_Mode :: struct {
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
     particle_cache:  ^Particle_Cache,
     creation_region: ^SimRegion,
+    
+    debug_last_mouse_p: v2,
+    debug_camera_pitch: f32,
+    debug_camera_orbit: f32,
+    debug_camera_dolly: f32,
 }
 
 Game_Camera :: struct {
@@ -445,7 +450,8 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
     return result
 }
 
-BaseCamHeight :: 6
+// @cleanup
+BaseCamHeight :: 8
 
 init_hitpoints :: proc (entity: ^Entity, count: u32) {
     for i in 0..<count {

@@ -126,8 +126,6 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                                 dest.p += chunk_delta
                                 
                                 // @todo(viktor): @transient marked members should not be unpacked
-                                dest.z_layer = chunk_z
-                                
                                 add_entity_to_hash(region, dest)
                                 
                                 if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {

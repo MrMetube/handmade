@@ -126,8 +126,6 @@ update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderG
         // }
         
         // @note(viktor): render the particles
-        transform.floor_z = particle.floor_z
-        transform.chunk_z = particle.chunk_z
         for i in 0..<LaneWidth {
             color_ := extract_v4(color, i)
             p := extract_v3(particle.p, i)
@@ -139,13 +137,13 @@ update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderG
     }
 }
 
-spawn_fire :: proc (cache: ^Particle_Cache, at_init: v3, floor_z: f32, chunk_z: i32) {
+spawn_fire :: proc (cache: ^Particle_Cache, at: v3) {
     if cache == nil do return
     
     system  := &cache.fire_system
     entropy := &cache.entropy
     
-    at := vec_cast(lane_f32, at_init)
+    at := vec_cast(lane_f32, at)
     
     index := system.next_lane_particle
     system.next_lane_particle += 1
@@ -159,7 +157,4 @@ spawn_fire :: proc (cache: ^Particle_Cache, at_init: v3, floor_z: f32, chunk_z: 
     particle.ddp    = {0, -9.8, 0}
     particle.color  = V4(random_unilateral(entropy, lane_v3), 1)
     particle.dcolor = {0,0,0,-0.2}
-    
-    particle.floor_z = floor_z
-    particle.chunk_z = chunk_z
 }

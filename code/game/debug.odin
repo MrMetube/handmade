@@ -25,7 +25,7 @@ GlobalDebugTable:  ^DebugTable
 DebugMaxEventCount :: 500_000 when DebugEnabled else 0
 MaxFrameCount :: 512
 
-DebugPrintBuffer: [1024]u8
+DebugPrintBuffer: [1024] u8
 
 ////////////////////////////////////////////////
 
@@ -48,18 +48,18 @@ DebugState :: struct {
     first_free_thread: ^DebugThread,
     max_thread_count:  u32,
     
-    element_hash: [1024]^DebugElement,
+    element_hash: [1024] ^DebugElement,
     
     root_group:    ^DebugEventLink,
     profile_group: ^DebugEventLink,
     initialization_clock: i64,
     
     
-    view_hash:     [4096]^DebugView,
+    view_hash:     [4096] ^DebugView,
     tree_sentinel: DebugTree,
     
     selected_count: u32,
-    selected_ids:   [64]DebugId,
+    selected_ids:   [64] DebugId,
     
     alt_ui:               b32,
     last_mouse_p:         v2,
@@ -72,7 +72,6 @@ DebugState :: struct {
     // Overlay rendering
     render_group: RenderGroup,
     default_clip_rect: u16,
-    render_target_index: u32,
     
     // @todo(viktor): remove all these as they are no longer necessary
     text_transform:    Transform,
@@ -87,7 +86,7 @@ DebugState :: struct {
     font:      ^Font,
     font_info: ^FontInfo,
     
-    root_info: []u8,
+    root_info: [] u8,
     
     // Per-frame storage management
     per_frame_arena:         Arena,
@@ -145,13 +144,12 @@ DebugTable :: struct {
     // their output prior to the swap of the event array index.
     current_events_index: u32,
     events_state:   DebugEventsState,
-    events:         [2][DebugMaxEventCount]DebugEvent,
+    events:         [2][DebugMaxEventCount] DebugEvent,
 }
 
 // @todo(viktor): we now only need 1 bit to know the debugtable events array index
 DebugEventsState :: bit_field u64 {
-    // @volatile Later on we transmute this to a u64 to 
-    // atomically increment the events_index
+    // @volatile Later on we transmute this to a u64 to atomically increment the events_index
     events_index: u32 | 32,
     array_index:  u32 | 32,
 }
@@ -176,7 +174,7 @@ DebugValue :: union {
     
     b32, i32, u32, f32, i64,
     v2, v3, v4,
-    Rectangle2,Rectangle3,
+    Rectangle2, Rectangle3,
     
     BitmapId, SoundId, FontId,
     
@@ -219,7 +217,7 @@ DebugElement :: struct {
     next:   ^DebugElement,
     guid:   DebugGUID,
     type:   DebugValue,
-    frames: [MaxFrameCount]DebugElementFrame,
+    frames: [MaxFrameCount] DebugElementFrame,
 }
 
 DebugStoredEvent :: struct {
@@ -278,10 +276,9 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
-    orthographic(&debug.render_group)
-    
+    push_camera(&debug.render_group, true, 1, identity())
     screen_area := rectangle_zero_dimension(debug.render_group.screen_size)
-    push_clip_rect(&debug.render_group, screen_area, debug.render_target_index, debug.render_group.camera.focal_length)
+    push_clip_rect(&debug.render_group, screen_area)
     
     push_sort_barrier(&debug.render_group, true)
     
@@ -314,8 +311,6 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     }
     
     draw_tooltips(debug)
-    
-    push_blend_render_targets(&debug.render_group, debug.render_target_index, 1.0)
 }
 
 debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
@@ -346,12 +341,10 @@ debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
     debug.shadow_transform  = default_flat_transform()
     debug.text_transform    = default_flat_transform()
     
-    debug.backing_transform.chunk_z = 16_000
-    debug.ui_transform.chunk_z      = 20_000
-    debug.shadow_transform.chunk_z  = 24_000
-    debug.text_transform.chunk_z    = 28_000
-    
-    debug.render_target_index = 1
+    debug.backing_transform.offset.z = 16_000
+    debug.ui_transform.offset.z      = 20_000
+    debug.shadow_transform.offset.z  = 24_000
+    debug.text_transform.offset.z    = 28_000
     
     return debug
 }
@@ -617,7 +610,7 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
             }
             // @todo(viktor): There should be a better way of copying just the tag.
             raw_union :: struct{
-                data: [size_of(DebugValue)-size_of(u64)]u8,
+                data: [size_of(DebugValue)-size_of(u64)] u8,
                 tag: u64,
             }
             #assert(size_of(raw_union) == size_of(DebugValue))

@@ -152,7 +152,7 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
 
     debug.default_clip_rect = debug.render_group.current_clip_rect_index
 
-    mouse_p := unproject_with_transform(&debug.render_group, debug.render_group.camera, default_flat_transform(), input.mouse.p).xy
+    mouse_p := unproject_with_transform(&debug.render_group, default_flat_transform(), input.mouse.p).xy
     
     debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p, input.delta_time)
     draw_trees(debug, mouse_p, input.delta_time)
@@ -439,7 +439,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
         old_clip_rect := debug.render_group.current_clip_rect_index
-        debug.render_group.current_clip_rect_index = push_clip_rect(&debug.render_group, rect, debug.render_target_index, debug.backing_transform)
+        debug.render_group.current_clip_rect_index = push_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform)
         defer debug.render_group.current_clip_rect_index = old_clip_rect
         
         if contains(rect, mouse_p) {
@@ -545,12 +545,12 @@ draw_tooltips :: proc (debug: ^DebugState) {
         before := debug.text_transform
         defer debug.text_transform = before
         
-        debug.text_transform.chunk_z += 1000
+        // @todo(viktor): Just add another debug.transform for overlays and overlay shadows
+        debug.text_transform.offset.z += 1000
         push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
-        debug.text_transform.chunk_z += 1000
         
-        color := Isabelline
-        push_text(debug, text, p, color)
+        debug.text_transform.offset.z += 1000
+        push_text(debug, text, p, Isabelline)
     }
     
     for &tooltip in slice(&debug.tooltips) {
@@ -754,13 +754,14 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             height := y_max - y_min
             if bar_width > 1 && height > 1 {
                 border_color := color * {.2,.2,.2, 1}
+                // @todo(viktor): find a better way to highlight the current frame
                 if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
                     border_color = 1
-                    transform.chunk_z += 10
+                    transform.offset.z += 10
                 }
                 push_rectangle(&debug.render_group, region_rect, transform, color)
                 
-                transform.chunk_z += 10
+                transform.offset.z += 10
                 push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
                 
                 if contains(region_rect, mouse_p) {
@@ -839,14 +840,15 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
      
         color := debug_get_element_color(element)
         
-        if x_max - x_min >= 1 {
-            transform := debug.ui_transform
-            transform.chunk_z += cast(i32) (1000/lane_height)
-            push_rectangle(&debug.render_group, region_rect, transform, color)
-            
-            transform.chunk_z += 10
-            push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2,.2,.2, 1}, 1)
-        }
+        if x_max - x_min < 1 do continue
+        
+        transform := debug.ui_transform
+        // @todo(viktor): find a better way to layer the children on top of the parent rectangles
+        transform.offset.z += 1000 / lane_height
+        push_rectangle(&debug.render_group, region_rect, transform, color)
+        
+        transform.offset.z += 10
+        push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2,.2,.2, 1}, 1)
         
         if contains(region_rect, mouse_p) {
             text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
@@ -1375,7 +1377,7 @@ debug_get_line_advance :: proc (debug: ^DebugState) -> (result: f32) {
     return result
 }
 
-push_text :: proc (debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine, pz:f32=0) {
+push_text :: proc (debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine, pz: f32 =0) {
     if debug.font != nil && debug.font_info != nil {
         text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color, pz)
     }

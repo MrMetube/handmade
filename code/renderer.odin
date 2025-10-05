@@ -144,11 +144,11 @@ do_tile_render_work :: proc (data: pmm) {
         header_offset += size_of(RenderEntryHeader)
         entry_data := &commands.push_buffer[header_offset]
         
-        if clip_rect_index != header.clip_rect_index {
+        if header.type != .RenderEntryClip && clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
             
             clip := prep.clip_rects.data[clip_rect_index]
-            clip_rect = get_intersection(base_clip_rect, clip.rect)
+            clip_rect = get_intersection(base_clip_rect, clip.clip_rect)
             
             target_index := clip.render_target_index
             target = targets[target_index]

@@ -7,8 +7,6 @@ Entity :: struct {
     brain_slot: BrainSlot,
     brain_id:   BrainId,
     
-    z_layer: i32,
-    
     // @todo(viktor): if load from world and store to world become more complex we could use a @metaprogram to generate the code and mark members with @transient if needed
     
     ////////////////////////////////////////////////
@@ -143,45 +141,6 @@ get_entity_ground_point_with_p :: proc (entity: ^Entity, for_entity_p: v3) -> (r
 update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, typical_floor_height: f32, haze_color: v4, particle_cache: ^Particle_Cache) {
     timed_function()
     
-    fade_top_end      := .9 * typical_floor_height
-    fade_top_start    := .5 * typical_floor_height
-    fade_bottom_start := -1 * typical_floor_height
-    fade_bottom_end   := -4 * typical_floor_height
-    
-    MinimumLayer :: -4
-    MaximumLayer :: 1
-    
-    // @volatile
-    camera_p_z := render_group != nil ? render_group.camera.p.z - BaseCamHeight : 0
-    
-    fog_amount: [MaximumLayer - MinimumLayer + 1] f32
-    camera_relative_ground_z: [len(fog_amount)] f32
-    
-    test_alpha: f32
-    for &fog_amount, index in fog_amount {
-        relative_layer_index := MinimumLayer + index
-        camera_relative_ground_z[index] = typical_floor_height * cast(f32) relative_layer_index - camera_p_z
-        
-        test_alpha = clamp_01_map_to_range(fade_top_end,      camera_relative_ground_z[index], fade_top_start)
-        fog_amount = clamp_01_map_to_range(fade_bottom_start, camera_relative_ground_z[index], fade_bottom_end)
-    }
-    
-    alpha_render_target: u32 = 2
-    
-    normal_floor_clip_rect: u16 
-    alpha_floor_clip_rect: u16
-    if render_group != nil {
-        normal_floor_clip_rect= render_group.current_clip_rect_index
-        screen_area := rectangle_zero_dimension(render_group.screen_size)
-        alpha_floor_clip_rect = push_clip_rect(render_group, screen_area, alpha_render_target, render_group.camera.focal_length)
-    }
-    defer if render_group != nil {
-        render_group.current_clip_rect_index = normal_floor_clip_rect
-        push_blend_render_targets(render_group, alpha_render_target, test_alpha)
-    }
-    
-    current_absolute_layer := sim_region.entities.count > 0 ? slice(sim_region.entities)[0].z_layer : 0
-    
     for &entity in slice(sim_region.entities) {
         if .active in entity.flags {
             // @todo(viktor): Should non-active entities not do simmy stuff?
@@ -269,8 +228,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     entity.p = pt
                     entity.came_from = entity.occupying
                     
-                    camera_relative_ground_z := typical_floor_height * cast(f32) (entity.z_layer - sim_region.origin.chunk.z) - camera_p_z
-                    spawn_fire(particle_cache, entity.p, camera_relative_ground_z, entity.z_layer)
+                    spawn_fire(particle_cache, entity.p)
                 }
                 
                 hop_duration :f32: 0.2
@@ -285,89 +243,71 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 move_entity(sim_region, &entity, dt)
             }
             
+            if render_group == nil do continue
             ////////////////////////////////////////////////
             // Rendering
             
-            if render_group != nil {
-                facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
-                facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-                            
-                relative_layer := entity.z_layer - sim_region.origin.chunk.z
-                if !(MinimumLayer <= relative_layer && relative_layer <= MaximumLayer) do continue
-                
-                transform := default_upright_transform()
-                transform.offset = get_entity_ground_point(&entity)
-                transform.chunk_z = entity.z_layer
-                transform.floor_z = camera_relative_ground_z[relative_layer - MinimumLayer]
-                
-                if current_absolute_layer != entity.z_layer {
-                    assert(current_absolute_layer < entity.z_layer)
-                    current_absolute_layer = entity.z_layer
-                    push_sort_barrier(render_group)
-                }
-                
-                if relative_layer == MaximumLayer {
-                    render_group.current_clip_rect_index = alpha_floor_clip_rect
-                } else {
-                    render_group.current_clip_rect_index = normal_floor_clip_rect
-                    transform.color = haze_color
-                    transform.t_color.rgb = fog_amount[relative_layer - MinimumLayer]
-                }
-                
-                shadow_transform := default_flat_transform()
-                shadow_transform.offset = get_entity_ground_point(&entity)
-                shadow_transform.offset.y -= 0.5
-                
-                for piece in slice(&entity.pieces) {
-                    offset := piece.offset
-                    color  := piece.color
-                    x_axis := entity.x_axis
-                    y_axis := entity.y_axis
-                    
-                    if .BobUpAndDown in piece.flags {
-                        // @todo(viktor): Reenable this floating animation
-                        // entity.t_bob += dt
-                        // if entity.t_bob > Tau {
-                        //     entity.t_bob -= Tau
-                        // }
-                        // hz :: 4
-                        // coeff := sin(entity.t_bob * hz)
-                        // z := (coeff) * 0.3 + 0.1
+            facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
+            facing_weights := #partial AssetVector{ .FacingDirection = 1 }
                         
-                        // offset += {0, z, 0}
-                        // color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
-                    }
+            transform := default_upright_transform()
+            transform.offset = get_entity_ground_point(&entity)
+            transform.color = haze_color
+            transform.t_color = 0
+            
+            shadow_transform := default_flat_transform()
+            shadow_transform.offset = get_entity_ground_point(&entity)
+            shadow_transform.offset.y -= 0.5
+            
+            for piece in slice(&entity.pieces) {
+                offset := piece.offset
+                color  := piece.color
+                x_axis := entity.x_axis
+                y_axis := entity.y_axis
+                
+                if .BobUpAndDown in piece.flags {
+                    // @todo(viktor): Reenable this floating animation
+                    // entity.t_bob += dt
+                    // if entity.t_bob > Tau {
+                    //     entity.t_bob -= Tau
+                    // }
+                    // hz :: 4
+                    // coeff := sin(entity.t_bob * hz)
+                    // z := (coeff) * 0.3 + 0.1
                     
-                    if .SquishAxis in piece.flags {
-                        y_axis *= 0.4
-                    }
-                    
-                    bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
-                    push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
+                    // offset += {0, z, 0}
+                    // color = {1,1,1,1 - 0.5 / 2 * (coeff+1)}
                 }
                 
-                draw_hitpoints(render_group, &entity, 0.5, transform)
-                
-                for volume in entity.collision.volumes {
-                    push_rectangle_outline(render_group, volume, default_upright_transform(), SeaGreen, 0.1)
+                if .SquishAxis in piece.flags {
+                    y_axis *= 0.4
                 }
                 
-                if RenderCollisionOutlineAndTraversablePoints {
-                    flat_transform := transform
-                    flat_transform.is_upright = false
-                    
-                    for traversable in slice(entity.traversables) {
-                        rect := rectangle_center_dimension(traversable.p, 1.5)
-                        color := traversable.occupant != nil ? Red : Green
-                        if get_traversable(entity.auto_boost_to) != nil {
-                            color = Blue
-                        }
-                        push_rectangle(render_group, rect, flat_transform, color)
-                    }
-                }
-                
-                debug_pick_entity(&entity, transform, render_group)
+                bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
+                push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
             }
+            
+            draw_hitpoints(render_group, &entity, 0.5, transform)
+            
+            for volume in entity.collision.volumes {
+                push_rectangle_outline(render_group, volume, default_upright_transform(), SeaGreen, 0.1)
+            }
+            
+            if RenderCollisionOutlineAndTraversablePoints {
+                flat_transform := transform
+                flat_transform.is_upright = false
+                
+                for traversable in slice(entity.traversables) {
+                    rect := rectangle_center_dimension(traversable.p, 1.4)
+                    color := traversable.occupant != nil ? Red : Green
+                    if get_traversable(entity.auto_boost_to) != nil {
+                        color = Blue
+                    }
+                    push_rectangle(render_group, rect, flat_transform, color)
+                }
+            }
+            
+            debug_pick_entity(&entity, transform, render_group)
         }
     }
 }
@@ -392,7 +332,7 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
         
         for volume in entity.collision.volumes {
             mouse_p := debug_get_mouse_p()
-            local_mouse_p := unproject_with_transform(render_group, render_group.camera, transform, mouse_p)
+            local_mouse_p := unproject_with_transform(render_group, transform, mouse_p)
             
             if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
                 debug_hit(debug_id, local_mouse_p.z)

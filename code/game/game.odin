@@ -9,7 +9,7 @@ SlowCode :: INTERNAL
 LoadAssetsSingleThreaded:      b32 = false
 SoundPanningWithMouse:         b32 = false
 SoundPitchingWithMouse:        b32 = false
-UseDebugCamera:                b32 = false
+UseDebugCamera:                b32 = false // @todo(viktor): reenable this feature
 DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32 = true
 TimestepPercentage:            f32 = 100
@@ -50,13 +50,13 @@ Input :: struct {
     delta_time:     f32,
     quit_requested: bool,
     
-    controllers: [5]InputController,
+    controllers: [5] InputController,
         
     // @note(viktor): this is for debugging only
     mouse: struct {
         buttons: [Mouse_Button] InputButton,
         p:     v2,
-        wheel: f32,
+        wheel: f32, // @todo(viktor): this seems to always be 0
     },
     
     shift_down, 

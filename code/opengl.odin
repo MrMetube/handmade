@@ -303,7 +303,6 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
     gl.Disable(gl.BLEND)
     defer gl.Enable(gl.BLEND)
     
-    
     gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
     defer gl.BindTexture(gl.TEXTURE_2D, 0)
     
@@ -405,27 +404,26 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     clip_rect_index      := max(u16)
     current_target_index := max(u32)
     
-    
     for header_offset: u32; header_offset < commands.push_buffer_data_at; {
         // :PointerArithmetic
         header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
         header_offset += size_of(RenderEntryHeader)
         entry_data := &commands.push_buffer[header_offset]
         
-        if clip_rect_index != header.clip_rect_index {
+        if header.type != .RenderEntryClip && clip_rect_index != header.clip_rect_index {
             clip_rect_index = header.clip_rect_index
             clip := prep.clip_rects.data[clip_rect_index]
             
             glMatrixMode(gl.PROJECTION)
-            assert(cast(pmm) &clip.projection == cast(pmm) &clip.projection[0,0])
-            glLoadMatrixf(&clip.projection)
+            projection := clip.projection
+            glLoadMatrixf(&projection)
             
             if current_target_index != clip.render_target_index {
                 current_target_index = clip.render_target_index
                 gl_bind_frame_buffer(current_target_index, draw_region)
             }
             
-            rect := clip.rect
+            rect := clip.clip_rect
             rect.min.x = round(i32, cast(f32) rect.min.x * clip_scale_x)
             rect.min.y = round(i32, cast(f32) rect.min.y * clip_scale_y)
             rect.max.x = round(i32, cast(f32) rect.max.x * clip_scale_x)
@@ -446,14 +444,15 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
             header_offset += size_of(RenderEntryBlendRenderTargets)
             
-            gl_bind_frame_buffer(entry.dest_index, draw_region)
-            defer gl_bind_frame_buffer(current_target_index, draw_region)
-            
-            gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-            defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+            // @todo(viktor): if blending works without binding the dest then we can also remove that member from the Entry
+            // gl_bind_frame_buffer(entry.dest_index, draw_region)
+            // defer gl_bind_frame_buffer(current_target_index, draw_region)
             
             // @todo(viktor): If the window has black bars the rectangle will be offset incorrectly. thanks global variables!
             gl.BindTexture(gl.TEXTURE_2D, FramebufferTextures.data[entry.source_index])
+            
+            gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+            defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
             
             gl_rectangle(v3{0, 0, 0}, V3(commands_dim, 0), v4{1, 1, 1, entry.alpha})
             
@@ -467,6 +466,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             color.b = square(color.b)
             
             gl.Disable(gl.TEXTURE_2D)
+            defer gl.Enable(gl.TEXTURE_2D)
+            
             gl_rectangle(entry.p, entry.p + V3(entry.dim, 0), color)
                 
             when !false {
@@ -491,8 +492,6 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                     
                 glEnd()
             }
-            
-            gl.Enable(gl.TEXTURE_2D)
             
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data

@@ -19,6 +19,7 @@ v2i :: [2] i32
 v3i :: [3] i32
 v4i :: [4] i32
 
+m3 :: #column_major matrix[3,3] f32
 m4 :: #column_major matrix[4,4] f32
 
 Rectangle   :: struct ($T: typeid) { min, max: T }
@@ -664,43 +665,24 @@ has_area_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: b32) {
     return result
 }
 
-////////////////////////////////////////////////
-
-Identity :: m4 { 
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    0, 0, 0, 1,
-}
-
-////////////////////////////////////////////////
-// @note(viktor): this is written to be instructive, not optimal
-
-multiply :: proc { multiply_m, multiply_v }
-multiply_v :: proc (a: m4, p: v3, w: f32 = 1) -> (result: v3) {
-    // result = (a * V4(p, w)).xyz
-    
-    result.x = p.x * a[0, 0] + p.y * a[1, 0] + p.z * a[2, 0] + w * a[3, 0]
-    result.y = p.x * a[0, 1] + p.y * a[1, 1] + p.z * a[2, 1] + w * a[3, 1]
-    result.z = p.x * a[0, 2] + p.y * a[1, 2] + p.z * a[2, 2] + w * a[3, 2]
-    
+round_outer :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) {
+    result.min = floor(i32, rect.min)
+    result.max = ceil(i32, rect.max)
     return result
 }
-multiply_m :: proc (a, b: m4) -> (result: m4) {
-    // result = a * b
-    
-    for r in 0 ..= 3 { // @note(viktor): rows of a
-        for c in 0 ..= 3 { // @note(viktor): columns of b
-            for i in 0 ..= 3 { // @note(viktor): columns of a and rows of b
-                result[c, r] += a[i, r] * b[c, i]
-            }
-        }
-    }
-    
+
+round_inner :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) {
+    result.min = ceil(i32, rect.min)
+    result.max = floor(i32, rect.max)
     return result
 }
 
 ////////////////////////////////////////////////
+
+identity :: proc () -> (result: m4) {
+    result = 1
+    return result
+}
 
 transpose :: proc (a: m4) -> (result: m4) {
     for c in 0 ..= 3 {
@@ -711,66 +693,95 @@ transpose :: proc (a: m4) -> (result: m4) {
     return result
 }
 
+////////////////////////////////////////////////
+
+multiply :: proc (a: m4, p: v3, w: f32 = 1) -> (result: v3) {
+    result.x = a[0, 0] * p.x + a[0, 1] * p.y + a[0, 2] * p.z + a[0, 3] * w
+    result.y = a[1, 0] * p.x + a[1, 1] * p.y + a[1, 2] * p.z + a[1, 3] * w
+    result.z = a[2, 0] * p.x + a[2, 1] * p.y + a[2, 2] * p.z + a[2, 3] * w
+    
+    return result
+}
+
+////////////////////////////////////////////////
+
+x_rotation :: yz_rotation
+y_rotation :: xz_rotation
 z_rotation :: xy_rotation
+
 xy_rotation :: proc (angle: f32) -> (result: m4) {
     c := cos(angle)
     s := sin(angle)
+    
     result = {
-         c, s, 0, 0,
-        -s, c, 0, 0,
-         0, 0, 1, 0,
-         0, 0, 0, 1,
+        c, -s, 0, 0,
+        s,  c, 0, 0,
+        0,  0, 1, 0,
+        0,  0, 0, 1,
     }
+    
     return result
 }
 
-x_rotation :: yz_rotation
 yz_rotation :: proc (angle: f32) -> (result: m4) {
     c := cos(angle)
     s := sin(angle)
+    
     result = {
-        1,  0, 0, 0,
-        0,  c, s, 0,
-        0, -s, c, 0,
-        0,  0, 0, 1,
+        1, 0,  0, 0,
+        0, c, -s, 0,
+        0, s,  c, 0,
+        0, 0,  0, 1,
     }
+    
     return result
 }
 
-y_rotation :: xz_rotation
 xz_rotation :: proc (angle: f32) -> (result: m4) {
     c := cos(angle)
     s := sin(angle)
+
     result = {
-        c, 0, -s, 0,
-        0, 1,  0, 0,
-        s, 0,  c, 0,
-        0, 0,  0, 1,
+         c, 0, s, 0,
+         0, 1, 0, 0,
+        -s, 0, c, 0,
+         0, 0, 0, 1,
     }
+
     return result
 }
 
-projection :: proc (aspect_width_over_height: f32, one_over_focal_length: f32) -> (result: m4) {
+////////////////////////////////////////////////
+
+orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4) {
     a := aspect_width_over_height
-    f := one_over_focal_length
     
     result = {
         1, 0, 0, 0,
         0, a, 0, 0,
         0, 0, 1, 0,
-        0, 0, f, 0,
+        0, 0, 0, 1,
+    }
+    
+    return result
+}
+
+perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32) -> (result: m4) {
+    a := aspect_width_over_height
+    f := focal_length
+    
+    result = {
+        f,   0,  0, 0,
+        0, a*f,  0, 0,
+        0,   0,  1, 0,
+        0,   0, -1, 0,
     }
     
     return result
 }
 
 camera_transform :: proc (x, y, z, p: v3) -> (result: m4) {
-    result = m4 {
-        x.x, x.y, x.z, 0,
-        y.x, y.y, y.z, 0,
-        z.x, z.y, z.z, 0,
-          0,   0,   0, 1,
-    }
+    result = rows_3x3(x, y, z)
     
     cp := -multiply(result, p)
     result = translate(result, cp)
@@ -781,10 +792,48 @@ camera_transform :: proc (x, y, z, p: v3) -> (result: m4) {
 translate :: proc (a: m4, t: v3) -> (result: m4) {
     result = a
     
-    result[3, 0] += t.x
-    result[3, 1] += t.y
-    result[3, 2] += t.z
+    result[0, 3] += t.x
+    result[1, 3] += t.y
+    result[2, 3] += t.z
     
+    return result
+}
+
+////////////////////////////////////////////////
+
+get_column :: proc (a: m4, column: u32) -> (result: v3) {
+    result.x = a[0, column]
+    result.y = a[1, column]
+    result.z = a[2, column]
+
+    return result
+}
+
+get_row :: proc (a: m4, row: u32) -> (result: v3) {
+    result.x = a[row, 0]
+    result.y = a[row, 1]
+    result.z = a[row, 2]
+
+    return result
+}
+
+rows_3x3 :: proc (x, y, z: v3) -> (result: m4) {
+    result = m4 {
+        x.x, x.y, x.z, 0,
+        y.x, y.y, y.z, 0,
+        z.x, z.y, z.z, 0,
+          0,   0,   0, 1,
+    }
+    return result
+}
+
+columns_3x3 :: proc (x, y, z: v3) -> (result: m4) {
+    result = m4 {
+        x.x, y.x, z.x, 0,
+        x.y, y.y, z.y, 0,
+        x.z, y.z, z.z, 0,
+          0,   0,   0, 1,
+    }
     return result
 }
 
