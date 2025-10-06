@@ -43,7 +43,7 @@ begin_sim :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosition, boun
     return simulation
 }
 
-simulate :: proc (simulation: ^World_Sim, dt: f32, game_entropy: ^RandomSeries, typical_floor_height: f32, render_group: ^RenderGroup, state: ^State, input: ^Input, haze_color: v4, particle_cache: ^Particle_Cache) {
+simulate :: proc (simulation: ^World_Sim, dt: f32, game_entropy: ^RandomSeries, typical_floor_height: f32, render_group: ^RenderGroup, state: ^State, input: ^Input, particle_cache: ^Particle_Cache) {
     timed_function()
     
     region := simulation.region
@@ -58,7 +58,7 @@ simulate :: proc (simulation: ^World_Sim, dt: f32, game_entropy: ^RandomSeries, 
         }
     }
     
-    update_and_render_entities(region, dt, render_group, typical_floor_height, haze_color, particle_cache)
+    update_and_render_entities(region, dt, render_group, typical_floor_height, particle_cache)
 }
 
 end_sim :: proc (simulation: ^World_Sim) {

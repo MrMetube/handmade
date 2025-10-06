@@ -181,6 +181,12 @@ do_tile_render_work :: proc (data: pmm) {
             header_offset += size_of(RenderEntryBitmap)
             
             draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis.xy, entry.y_axis.xy, entry.bitmap, entry.premultiplied_color)
+            
+          case .RenderEntryCube:
+            entry := cast(^RenderEntryCube) entry_data
+            header_offset += size_of(RenderEntryCube)
+            
+            unimplemented("move the software renderer to 3D")
         }
     }
 }

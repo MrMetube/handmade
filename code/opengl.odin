@@ -23,14 +23,20 @@ glBegin:        proc (_: u32)
 glEnd:          proc ()
 glMatrixMode:   proc (_: i32)
 glLoadIdentity: proc ()
-glLoadMatrixf:  proc (_: ^m4)
+
+glTexEnvi:      proc (_: u32, _: u32, _: u32)
+glAlphaFunc:    proc (_: u32, _: f32)
+
 glTexCoord2f:   proc (_,_: f32)
 glVertex2f:     proc (_,_: f32)
 glVertex3f:     proc (_,_,_: f32)
 glColor4f:      proc (_,_,_,_: f32)
-glColor4fv:     proc (_: [^] f32)
-glTexEnvi:      proc (_: u32, _: u32, _: u32)
-glAlphaFunc:    proc (_: u32, _: f32)
+
+glLoadMatrixf:  proc (_: ^m4)
+glTexCoord2fv:  proc (_: ^v2)
+glVertex2fv:    proc (_: ^v2)
+glVertex3fv:    proc (_: ^v3)
+glColor4fv:     proc (_: ^v4)
 
 OpenGlInfo :: struct {
     modern_context: b32,
@@ -146,18 +152,23 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
                 }
             }
             
-            win.gl_set_proc_address(&glBegin, "glBegin")
-            win.gl_set_proc_address(&glEnd, "glEnd")
+            win.gl_set_proc_address(&glBegin,        "glBegin")
+            win.gl_set_proc_address(&glEnd,          "glEnd")
             win.gl_set_proc_address(&glMatrixMode,   "glMatrixMode")
             win.gl_set_proc_address(&glLoadIdentity, "glLoadIdentity")
-            win.gl_set_proc_address(&glLoadMatrixf, "glLoadMatrixf")
-            win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
-            win.gl_set_proc_address(&glTexEnvi, "glTexEnvi")
-            win.gl_set_proc_address(&glVertex2f, "glVertex2f")
-            win.gl_set_proc_address(&glVertex3f, "glVertex3f")
-            win.gl_set_proc_address(&glColor4f, "glColor4f")
-            win.gl_set_proc_address(&glColor4fv, "glColor4fv")
-            win.gl_set_proc_address(&glAlphaFunc, "glAlphaFunc")
+            win.gl_set_proc_address(&glTexEnvi,      "glTexEnvi")
+            win.gl_set_proc_address(&glAlphaFunc,    "glAlphaFunc")
+            
+            win.gl_set_proc_address(&glTexCoord2f,   "glTexCoord2f")
+            win.gl_set_proc_address(&glVertex2f,     "glVertex2f")
+            win.gl_set_proc_address(&glVertex3f,     "glVertex3f")
+            win.gl_set_proc_address(&glColor4f,      "glColor4f")
+            
+            win.gl_set_proc_address(&glLoadMatrixf,  "glLoadMatrixf")
+            win.gl_set_proc_address(&glTexCoord2fv,  "glTexCoord2fv")
+            win.gl_set_proc_address(&glVertex2fv,    "glVertex2fv")
+            win.gl_set_proc_address(&glVertex3fv,    "glVertex3fv")
+            win.gl_set_proc_address(&glColor4fv,     "glColor4fv")
         }
     }
     
@@ -488,29 +499,6 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             gl_rectangle(entry.p, entry.p + V3(entry.dim, 0), color)
                 
-            when !false {
-                min := entry.p
-                max := entry.p + V3(entry.dim, 0)
-                z := max.z
-                
-                glBegin(gl.LINES)
-                    color.rgb = 0
-                    glColor4fv(&color[0])
-                    glVertex3f(min.x, min.y, z)
-                    glVertex3f(max.x, min.y, z)
-                    
-                    glVertex3f(max.x, min.y, z)
-                    glVertex3f(max.x, max.y, z)
-                    
-                    glVertex3f(max.x, max.y, z)
-                    glVertex3f(min.x, max.y, z)
-                    
-                    glVertex3f(min.x, max.y, z)
-                    glVertex3f(min.x, min.y, z)
-                    
-                glEnd()
-            }
-            
           case .RenderEntryBitmap:
             entry := cast(^RenderEntryBitmap) entry_data
             header_offset += size_of(RenderEntryBitmap)
@@ -521,17 +509,63 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             if bitmap.width != 0 && bitmap.height != 0 {
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
-                // @todo(viktor): skewing with x_axis and y_axis is missing
-                texel_x := 1 / cast(f32) bitmap.width
-                texel_y := 1 / cast(f32) bitmap.height
+                d_texel := 1 / vec_cast(f32, bitmap.width, bitmap.height)
                 
-                min_uv := v2{0+texel_x, 0+texel_y}
-                max_uv := v2{1-texel_x, 1-texel_y}
+                // @note(viktor): step in one texel because the bitmaps are padded on all sides with a blank strip of pixels
+                min_uv := 0 + d_texel
+                max_uv := 1 - d_texel
                 
                 min := entry.p
                 max := entry.p + entry.x_axis + entry.y_axis
                 
                 gl_rectangle(min, max, entry.premultiplied_color, min_uv, max_uv)
+            }
+            
+          case .RenderEntryCube:
+            entry := cast(^RenderEntryCube) entry_data
+            header_offset += size_of(RenderEntryCube)
+            
+            bitmap := entry.bitmap
+            assert(bitmap.texture_handle != 0)
+            
+            if bitmap.width != 0 && bitmap.height != 0 {
+                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
+                
+                glBegin(gl.TRIANGLES)
+                
+                p := entry.p
+                n := entry.p
+                p.xy += entry.radius
+                n.xy -= entry.radius
+                n.z  -= entry.height
+                
+                p0 := v3{n.x, n.y, n.z}
+                p1 := v3{n.x, n.y, p.z}
+                p2 := v3{n.x, p.y, n.z}
+                p3 := v3{n.x, p.y, p.z}
+                p4 := v3{p.x, n.y, n.z}
+                p5 := v3{p.x, n.y, p.z}
+                p6 := v3{p.x, p.y, n.z}
+                p7 := v3{p.x, p.y, p.z}
+                
+                c0 := entry.premultiplied_color
+                c1 := entry.premultiplied_color
+                c2 := entry.premultiplied_color
+                c3 := entry.premultiplied_color
+                
+                t0 := v2{0, 0}
+                t1 := v2{1, 0}
+                t2 := v2{1, 1}
+                t3 := v2{0, 1}
+                
+                gl_quad({p0, p1, p3, p2}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                gl_quad({p0, p2, p6, p4}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                gl_quad({p0, p4, p5, p1}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                gl_quad({p7, p5, p4, p6}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                gl_quad({p7, p6, p2, p3}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                gl_quad({p7, p3, p1, p5}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                
+                glEnd()
             }
             
           case:
@@ -552,6 +586,35 @@ gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i
     } else {
         gl.Viewport(0, 0, window_dim.x, window_dim.y)
     }
+}
+
+gl_quad :: proc (p: [4] v3, t: [4] v2, c: [4] v4) {
+    p, t, c := p, t, c
+    // @note(viktor): Lower triangle
+    glColor4fv(&c[0])
+    glTexCoord2fv(&t[0])
+    glVertex3fv(&p[0])
+    
+    glColor4fv(&c[1])
+    glTexCoord2fv(&t[1])
+    glVertex3fv(&p[1])
+    
+    glColor4fv(&c[2])
+    glTexCoord2fv(&t[2])
+    glVertex3fv(&p[2])
+    
+    // @note(viktor): Upper triangle
+    glColor4fv(&c[0])
+    glTexCoord2fv(&t[0])
+    glVertex3fv(&p[0])
+    
+    glColor4fv(&c[2])
+    glTexCoord2fv(&t[2])
+    glVertex3fv(&p[2])
+    
+    glColor4fv(&c[3])
+    glTexCoord2fv(&t[3])
+    glVertex3fv(&p[3])
 }
 
 gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {

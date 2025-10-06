@@ -63,14 +63,15 @@ Entity_Flag :: enum {
 Entity_Flags :: bit_set[Entity_Flag]
 
 VisiblePiece :: struct {
-    asset:  AssetTypeId,
-    height: f32,
-    offset: v3,
-    color:  v4,
+    asset:     AssetTypeId,
+    dimension: v2,
+    offset:    v3,
+    color:     v4,
     
     flags: bit_set[ enum {
         SquishAxis,
         BobUpAndDown,
+        cube
     }],
 }
 
@@ -138,7 +139,7 @@ get_entity_ground_point_with_p :: proc (entity: ^Entity, for_entity_p: v3) -> (r
     return result
 }
 
-update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, typical_floor_height: f32, haze_color: v4, particle_cache: ^Particle_Cache) {
+update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, typical_floor_height: f32, particle_cache: ^Particle_Cache) {
     timed_function()
     
     for &entity in slice(sim_region.entities) {
@@ -252,8 +253,6 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                         
             transform := default_upright_transform()
             transform.offset = get_entity_ground_point(&entity)
-            transform.color = haze_color
-            transform.t_color = 0
             
             shadow_transform := default_flat_transform()
             shadow_transform.offset = get_entity_ground_point(&entity)
@@ -284,7 +283,12 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 }
                 
                 bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
-                push_bitmap(render_group, bitmap_id, transform, piece.height, offset, color, x_axis = x_axis, y_axis = y_axis)
+                if .cube in piece.flags {
+                    p := transform.offset + offset
+                    push_cube(render_group, bitmap_id, p, piece.dimension.x, piece.dimension.y, color)
+                } else {
+                    push_bitmap(render_group, bitmap_id, transform, piece.dimension.y, offset, color, x_axis = x_axis, y_axis = y_axis)
+                }
             }
             
             draw_hitpoints(render_group, &entity, 0.5, transform)
@@ -293,7 +297,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 push_rectangle_outline(render_group, volume, default_upright_transform(), SeaGreen, 0.1)
             }
             
-            if RenderCollisionOutlineAndTraversablePoints {
+            when false do if RenderCollisionOutlineAndTraversablePoints {
                 flat_transform := transform
                 flat_transform.is_upright = false
                 

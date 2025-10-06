@@ -26,10 +26,15 @@ World_Mode :: struct {
     particle_cache:  ^Particle_Cache,
     creation_region: ^SimRegion,
     
+    use_debug_camera:   bool,
     debug_last_mouse_p: v2,
     debug_camera_pitch: f32,
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
+    
+    camera_pitch: f32,
+    camera_orbit: f32,
+    camera_dolly: f32,
 }
 
 Game_Camera :: struct {
@@ -240,7 +245,7 @@ add_wall :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableRef
     entity.occupying = occupying
     append(&entity.pieces, VisiblePiece {
         asset = .Tree,
-        height = 2.5, // random_between_f32(&world.general_entropy, 0.9, 1.7),
+        dimension = {0, 2.5}, // random_between_f32(&world.general_entropy, 0.9, 1.7),
         color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
         
     })
@@ -263,18 +268,18 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         
         append(&body.pieces, VisiblePiece{
             asset  = .Shadow,
-            height = hero_height*1,
+            dimension = {0, hero_height*1},
             color  = {1,1,1,0.5},
         })        
         append(&body.pieces, VisiblePiece{
             asset  = .Cape,
-            height = hero_height*1.2,
+            dimension = {0, hero_height*1.2},
             color  = 1,
             flags  = { .SquishAxis, .BobUpAndDown },
         })
         append(&body.pieces, VisiblePiece{
             asset  = .Torso,
-            height = hero_height*1.2,
+            dimension = {0, hero_height*1.2},
             offset = {0, -0.1, 0},
             color  = 1,
             flags  = { .SquishAxis },
@@ -293,7 +298,7 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         // @todo(viktor): should render above the body
         append(&head.pieces, VisiblePiece{
             asset  = .Head,
-            height = hero_height*1.2,
+            dimension = {0, hero_height*1.2},
             offset = {0, -0.7, 0},
             color  = 1,
         })
@@ -319,7 +324,7 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         
         append(&head.pieces, VisiblePiece{
             asset  = .Sword,
-            height = 0.25*hero_height,
+            dimension = {0, 0.25*hero_height},
             offset = 0,
             color  = 1,
         })
@@ -341,14 +346,14 @@ add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Travers
     height :: 1.5
     append(&entity.pieces, VisiblePiece{
         asset  = .Shadow,
-        height = height,
+        dimension = {0, height},
         offset = {0, 0, 0},
         color  = {1,1,1,0.5},
     })
     
     append(&entity.pieces, VisiblePiece{
         asset  = segment_index == 0 ? .Head : .Torso,
-        height = height,
+        dimension = {0, height},
         color  = 1,
     })
     
@@ -369,14 +374,14 @@ add_monster :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Traversable
     height :: 4.5
     append(&entity.pieces, VisiblePiece{
         asset  = .Shadow,
-        height = height,
+        dimension = {0, height},
         offset = {0, 0, 0},
         color  = {1,1,1,0.5},
     })
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Torso,
-        height = height,
+        dimension = {0, height},
         color  = 1,
     })
     
@@ -395,7 +400,7 @@ add_familiar :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Traversabl
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Head,
-        height = 2.5,
+        dimension = {0, 2.5},
         color  = 1,
         offset = {0, 0, 0},
         flags  = { .BobUpAndDown },
@@ -403,7 +408,7 @@ add_familiar :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Traversabl
     
     append(&entity.pieces, VisiblePiece{
         asset  = .Shadow,
-        height = 2.5,
+        dimension = {0, 2.5},
         color  = {1,1,1,0.5},
     })
 }
@@ -417,6 +422,11 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
     for offset_x in -radius.x ..= radius.x {
         for offset_y in -radius.y ..= radius.y {
             p := chunk_position_from_tile_positon(mode, tile_p + {offset_x, offset_y, 0})
+            
+            // p.offset.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            // p.offset.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            p.offset.z += random_bilateral(&mode.world.game_entropy, f32) * 0.1
+            
             result.p[offset_x+radius.x][offset_y+radius.y] = p
             
             if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
@@ -427,6 +437,12 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
                 entity := begin_grounded_entity(mode, mode.floor_collision)
                 entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
+                append(&entity.pieces, VisiblePiece {
+                    asset = .Tuft,
+                    dimension = {.75, 1},
+                    color = Green,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
+                    flags = {.cube},
+                })
                 end_entity(mode, entity, p)
                 
                 occupying: TraversableReference
@@ -440,8 +456,8 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
     p := chunk_position_from_tile_positon(mode, tile_p)
     scale := v3{mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height}
     room_collision := make_simple_grounded_collision(mode, V3(vec_cast(f32, radius) * 2 + 1, 1) * scale)
-    room := begin_grounded_entity(mode, room_collision)
     
+    room := begin_grounded_entity(mode, room_collision)
     room.brain_kind = .Room
     diff := radius - {8, 4} // :RoomSize
     room.camera_height = BaseCamHeight + cast(f32) max(max(diff.x, diff.y), 0)

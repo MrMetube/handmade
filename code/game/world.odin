@@ -102,39 +102,61 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     {
         debug_set_mouse_p(input.mouse.p)
         
-        haze_color := DarkBlue
-        push_clear(render_group, haze_color)
+        push_clear(render_group, DarkBlue)
         
         ////////////////////////////////////////////////
         
         camera := get_standard_camera_params(0.6)
+        
+            mode.camera_pitch = 0.0125 * Tau
+        mode.camera_orbit = 0
+        mode.camera_dolly = 0
+        
+        camera_object := xy_rotation(mode.camera_orbit) * yz_rotation(mode.camera_pitch)
         offset := mode.camera.offset
-        if input != nil {
-            dmousep := input.mouse.p - mode.debug_last_mouse_p
-            defer mode.debug_last_mouse_p = input.mouse.p
-            
-            if input.alt_down {
-                if is_down(input.mouse.buttons[.left]) {
-                    rotation_speed :: 0.001 * Tau
-                    mode.debug_camera_orbit += -dmousep.x * rotation_speed
-                    mode.debug_camera_pitch += dmousep.y * rotation_speed
-                } else if is_down(input.mouse.buttons[.right]) {
-                    zoom_speed: f32 = 0.005 * (mode.camera.offset.z + mode.debug_camera_dolly)
-                    mode.debug_camera_dolly += -dmousep.y * zoom_speed
-                } else if is_down(input.mouse.buttons[.middle]) {
-                    mode.debug_camera_orbit = 0
-                    mode.debug_camera_pitch = 0
-                    mode.debug_camera_dolly = 0
-                }
-            }
-        }
-        camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
-        offset.z += mode.debug_camera_dolly
+        offset.z += mode.camera_dolly
         offset = multiply(camera_object, offset)
         x := get_column(camera_object, 0)
         y := get_column(camera_object, 1)
         z := get_column(camera_object, 2)
         push_perspective(render_group, camera.focal_length, x, y, z, offset)
+        
+        if input != nil {
+            if was_pressed(input.mouse.buttons[.extra1]) {
+                mode.use_debug_camera = !mode.use_debug_camera
+            }
+        }
+        
+        if mode.use_debug_camera {
+            debug_offset := mode.camera.offset
+            if input != nil {
+                dmousep := input.mouse.p - mode.debug_last_mouse_p
+                defer mode.debug_last_mouse_p = input.mouse.p
+                
+                if mode.use_debug_camera {
+                    if is_down(input.mouse.buttons[.left]) {
+                        rotation_speed :: 0.001 * Tau
+                        mode.debug_camera_orbit += -dmousep.x * rotation_speed
+                        mode.debug_camera_pitch += dmousep.y * rotation_speed
+                    } else if is_down(input.mouse.buttons[.right]) {
+                        zoom_speed := 0.005 * (mode.camera.offset.z + mode.debug_camera_dolly)
+                        mode.debug_camera_dolly += -dmousep.y * zoom_speed
+                    } else if is_down(input.mouse.buttons[.middle]) {
+                        mode.debug_camera_orbit = 0
+                        mode.debug_camera_pitch = 0
+                        mode.debug_camera_dolly = 0
+                    }
+                }
+            }
+            
+            camera_object = xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
+            debug_offset.z += mode.debug_camera_dolly
+            debug_offset = multiply(camera_object, debug_offset)
+            x = get_column(camera_object, 0)
+            y = get_column(camera_object, 1)
+            z = get_column(camera_object, 2)
+            push_perspective(render_group, camera.focal_length, x, y, z, debug_offset, flags = {.debug})
+        }
         
         world_camera_rect := get_camera_rectangle_at_target(render_group)
         screen_bounds := rectangle_center_dimension(v2{0,0}, get_dimension(world_camera_rect).xy)
@@ -146,7 +168,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         check_for_joining_player(state, input, simulation.region, mode)
         
-        simulate(&simulation, input.delta_time, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, haze_color, mode.particle_cache)
+        simulate(&simulation, input.delta_time, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
         
         frame_to_frame_camera_delta := world_distance(mode.world, mode.camera.last_p, mode.camera.p)
         mode.camera.last_p = mode.camera.p
@@ -200,12 +222,12 @@ do_world_simulation_immediatly :: proc (data: pmm) {
     // @todo(viktor): with the new and improved Platform Api can we get back the polymorphic arguments so that the call site is better checked
     using work := cast(^World_Sim_Work) data
     
-    // @todo(viktor): It is inefficient to  reallocate every time - this should be something that is passed in as a property of the worker thread
+    // @todo(viktor): It is inefficient to reallocate every time - this should be something that is passed in as a property of the worker thread
     arena: Arena
     defer clear_arena(&arena)
     
     simulation := begin_sim(&arena, mode.world, center, bounds, dt)
-    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, nil,  nil, nil, 0, nil)
+    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, nil,  nil, nil, nil)
     end_sim(&simulation)
 }
 

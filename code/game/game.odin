@@ -9,8 +9,6 @@ SlowCode :: INTERNAL
 LoadAssetsSingleThreaded:      b32 = false
 SoundPanningWithMouse:         b32 = false
 SoundPitchingWithMouse:        b32 = false
-UseDebugCamera:                b32 = false // @todo(viktor): reenable this feature
-DebugCameraDistance:           f32 = 5
 ShowRenderAndSimulationBounds: b32 = true
 TimestepPercentage:            f32 = 100
 RenderCollisionOutlineAndTraversablePoints: b32 = true
@@ -201,8 +199,6 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
  
         { debug_data_block("Camera")
             debug_record_value(&ShowRenderAndSimulationBounds)
-            debug_record_value(&UseDebugCamera)
-            debug_record_value(&DebugCameraDistance)
         }
         
         debug_record_value(&RenderCollisionOutlineAndTraversablePoints)

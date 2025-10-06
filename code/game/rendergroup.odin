@@ -65,7 +65,6 @@ RenderGroup :: struct {
     
     screen_size: v2,
     
-    // camera: Camera,
     cam_p: v3,
     cam_x: v3,
     cam_y: v3,
@@ -86,16 +85,12 @@ Transform :: struct {
     
     offset: v3,  
     scale:  f32,
-    
-    color:   v4,
-    t_color: v4,
 }
     
-Camera :: struct {
-    mode: enum { None, Orthographic, Perspective },
-    focal_length: f32, // meters the player is sitting from their monitor
-    p: v3,
-}
+Camera_Flags :: bit_set[ enum {
+    orthographic,
+    debug,
+}]
 
 ////////////////////////////////////////////////
 
@@ -103,6 +98,7 @@ RenderEntryType :: enum u8 {
     None,
     RenderEntryBitmap,
     RenderEntryRectangle,
+    RenderEntryCube,
     RenderEntryClip,
     RenderEntryBlendRenderTargets,
 }
@@ -114,19 +110,9 @@ RenderEntryHeader :: struct {
 }
 
 @(common)
-RenderEntryClip :: struct { // @todo(viktor): rename this to some more camera-centric
-    next: ^RenderEntryClip,
-    
-    clip_rect:           Rectangle2i,
-    render_target_index: u32,
-    projection:          m4,
-}
-
-@(common)
 RenderEntryBitmap :: struct {
-    premultiplied_color: v4,
-    
     bitmap: Bitmap,
+    premultiplied_color: v4,
     
     p: v3,
     // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
@@ -136,9 +122,30 @@ RenderEntryBitmap :: struct {
 
 @(common)
 RenderEntryRectangle :: struct {
+    bitmap: Bitmap,
     premultiplied_color: v4,
+    
     p:   v3,
     dim: v2,
+}
+
+@(common)
+RenderEntryCube :: struct {
+    bitmap: Bitmap,
+    premultiplied_color: v4,
+    
+    p: v3, // @note(viktor): This is the middle of the top face of the cube
+    height: f32,
+    radius: f32,
+}
+
+@(common)
+RenderEntryClip :: struct { // @todo(viktor): rename this to some more camera-centric
+    next: ^RenderEntryClip,
+    
+    clip_rect:           Rectangle2i,
+    render_target_index: u32,
+    projection:          m4,
 }
 
 @(common)
@@ -159,11 +166,10 @@ UsedBitmapDim :: struct {
 
 ////////////////////////////////////////////////
 
+// @cleanup remove both of these
 Camera_Params :: struct {
     focal_length: f32,
 }
-
-////////////////////////////////////////////////
 
 get_standard_camera_params :: proc (focal_length: f32) -> (result: Camera_Params) {
     result.focal_length = focal_length
@@ -196,6 +202,7 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     switch typeid_of(T) {
       case RenderEntryBitmap:             type = .RenderEntryBitmap
       case RenderEntryRectangle:          type = .RenderEntryRectangle
+      case RenderEntryCube:               type = .RenderEntryCube
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
       case RenderEntryClip:               type = .RenderEntryClip
       case:                               unreachable()
@@ -275,27 +282,29 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
     group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
 }
 
-push_perspective :: proc (group: ^RenderGroup, focal_length: f32, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}) {
-    push_camera(group, false, focal_length, x, y, z, p)
+push_perspective :: proc (group: ^RenderGroup, focal_length: f32, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}, flags := Camera_Flags {}) {
+    push_camera(group, focal_length, x, y, z, p, flags)
 }
-push_orthographic :: proc (group: ^RenderGroup) {
-    push_camera(group, true, 1, v3{1,0,0}, v3{0,1,0}, v3{0,0,1}, v3{0,0,0})
+push_orthographic :: proc (group: ^RenderGroup, flags := Camera_Flags {}) {
+    push_camera(group, 1, v3{1,0,0}, v3{0,1,0}, v3{0,0,1}, v3{0,0,0}, flags + { .orthographic })
 }
 
-push_camera :: proc (group: ^RenderGroup, is_orthographic: bool, focal_length: f32, x, y, z, p: v3) {
+push_camera :: proc (group: ^RenderGroup, focal_length: f32, x, y, z, p: v3, flags: Camera_Flags) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
     
     projection: m4
-    if is_orthographic {
+    if .orthographic in flags {
         projection = orthographic_projection(aspect_width_over_height)
     } else { 
         projection = perspective_projection(aspect_width_over_height, focal_length)
     }
     
-    group.cam_p = p
-    group.cam_x = x
-    group.cam_y = y
-    group.cam_z = z
+    if .debug not_in flags {
+        group.cam_p = p
+        group.cam_x = x
+        group.cam_y = y
+        group.cam_z = z
+    }
     camera_transform := camera_transform(x, y, z, p)
     
     projection = projection * camera_transform
@@ -320,7 +329,7 @@ push_sort_barrier :: proc (group: ^RenderGroup, turn_of_sorting := false) {
 }
 
 push_clear :: proc (group: ^RenderGroup, color: v4) {
-    group.commands.clear_color = store_color({}, color)
+    group.commands.clear_color = store_color(color)
 }
 
 push_bitmap :: proc (
@@ -330,7 +339,6 @@ push_bitmap :: proc (
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap != nil && bitmap.texture_handle != 0 {
-        assert(bitmap.texture_handle != 0)
         push_bitmap_raw(group, bitmap^, transform, height, offset, color, use_alignment, x_axis, y_axis)
     } else {
         load_bitmap(group.assets, id, false)
@@ -351,7 +359,7 @@ push_bitmap_raw :: proc (
     
     element := push_render_element(group, RenderEntryBitmap)
     element ^= {
-        premultiplied_color = store_color(transform, color),
+        premultiplied_color = store_color(color),
         
         bitmap = bitmap,
         
@@ -361,20 +369,31 @@ push_bitmap_raw :: proc (
     }
     
     if transform.is_upright {
-        when false {
-            cam_pyz := group.cam_p.yz
-            cam_ryz := element.p.yz + size.y * group.cam_y.yz - group.cam_p.yz
-            card_pyz := element.p.yz
-            card_ryz := v2{.25, .75}
+        element.x_axis = size.x * (x_axis.x * group.cam_x + x_axis.y * group.cam_y)
+        element.y_axis = size.y * (y_axis.x * group.cam_x + y_axis.y * group.cam_y)
+    }
+}
+
+push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
+    bitmap := get_bitmap(group.assets, id, group.generation_id)
+    // @note(viktor): the handle is filled out always at the end of the frame in manage_textures
+    if bitmap != nil && bitmap.texture_handle != 0 {
+        assert(bitmap.width_over_height != 0)
+        assert(bitmap.texture_handle != 0)
+        
+        element := push_render_element(group, RenderEntryCube)
+        element ^= {
+            premultiplied_color = store_color(color),
             
-            ok, t := ray_intersection(card_pyz, card_ryz, cam_pyz, cam_ryz)
-            assert(ok)
+            bitmap = bitmap^,
             
-            element.y_axis = t.y * V3(cast(f32) 0, card_ryz)
-        } else {
-            element.x_axis = size.x * group.cam_x
-            element.y_axis = size.y * group.cam_y
+            p      = p,
+            height = height,
+            radius = radius,
         }
+    } else {
+        load_bitmap(group.assets, id, false)
+        group.missing_asset_count += 1
     }
 }
 
@@ -388,7 +407,7 @@ push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Trans
     
     element := push_render_element(group, RenderEntryRectangle)
     element ^= {
-        premultiplied_color = store_color(transform, color),
+        premultiplied_color = store_color(color),
         p   = basis,
         dim = dimension.xy,
     }
@@ -423,8 +442,8 @@ push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform
 
 ////////////////////////////////////////////////
 
-store_color :: proc (transform: Transform, color: v4) -> (result: v4) {
-    result = linear_blend(color, transform.color, transform.t_color)
+store_color :: proc (color: v4) -> (result: v4) {
+    result = color
     result.rgb *= result.a
     return result
 }
