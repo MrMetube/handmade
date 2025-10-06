@@ -380,7 +380,13 @@ normalize_or_zero :: proc (vec: $V/[$N]$T) -> (result: V) {
     return result
 }
 
-linear_to_srgb_exact :: proc (l: v3) -> (s: v3) {
+linear_to_srgb_exact :: proc { linear_to_srgb_exact3, linear_to_srgb_exact4 }
+linear_to_srgb_exact4 :: proc (l: v4) -> (s: v4) {
+    s.rgb = linear_to_srgb_exact(l.rgb)
+    s.a = l.a
+    return s
+}
+linear_to_srgb_exact3 :: proc (l: v3) -> (s: v3) {
     l := l
     l = clamp_01(l)
     #unroll for i in 0..<len(l) {
@@ -392,6 +398,18 @@ linear_to_srgb_exact :: proc (l: v3) -> (s: v3) {
     }
     
     return s
+}
+
+srgb_to_linear :: proc (color: $V) -> (result: V) {
+    result.rgb = square(color.rgb)
+    result.a = color.a
+    return result
+}
+
+linear_to_srgb :: proc (color: $V) -> (result: V) {
+    result.rgb = square_root(color.rgb)
+    result.a = color.a
+    return result
 }
 
 ////////////////////////////////////////////////

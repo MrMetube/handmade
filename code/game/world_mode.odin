@@ -244,10 +244,9 @@ add_wall :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableRef
     entity.flags += {.Collides}
     entity.occupying = occupying
     append(&entity.pieces, VisiblePiece {
-        asset = .Tree,
+        asset     = .Tree,
         dimension = {0, 2.5}, // random_between_f32(&world.general_entropy, 0.9, 1.7),
-        color = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
-        
+        color     = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
     })
 }
 
@@ -267,22 +266,22 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         body.occupying = occupying
         
         append(&body.pieces, VisiblePiece{
-            asset  = .Shadow,
+            asset     = .Shadow,
             dimension = {0, hero_height*1},
-            color  = {1,1,1,0.5},
-        })        
+            color     = {1,1,1,0.5},
+        }) 
         append(&body.pieces, VisiblePiece{
-            asset  = .Cape,
+            asset     = .Cape,
             dimension = {0, hero_height*1.2},
-            color  = 1,
-            flags  = { .SquishAxis, .BobUpAndDown },
+            color     = 1,
+            flags     = { .SquishAxis, .BobUpAndDown },
         })
         append(&body.pieces, VisiblePiece{
-            asset  = .Torso,
+            asset     = .Torso,
             dimension = {0, hero_height*1.2},
-            offset = {0, -0.1, 0},
-            color  = 1,
-            flags  = { .SquishAxis },
+            offset    = {0, -0.1, 0},
+            color     = 1,
+            flags     = { .SquishAxis },
         })
         
     end_entity(mode, body, p)
@@ -297,10 +296,10 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         hero_height :: 3.5
         // @todo(viktor): should render above the body
         append(&head.pieces, VisiblePiece{
-            asset  = .Head,
+            asset     = .Head,
             dimension = {0, hero_height*1.2},
-            offset = {0, -0.7, 0},
-            color  = 1,
+            offset    = {0, -0.7, 0},
+            color     = 1,
         })
         
         init_hitpoints(head, 3)
@@ -323,10 +322,10 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         glove.angle_current_offset = 0.3
         
         append(&head.pieces, VisiblePiece{
-            asset  = .Sword,
+            asset     = .Sword,
             dimension = {0, 0.25*hero_height},
-            offset = 0,
-            color  = 1,
+            offset    = 0,
+            color     = 1,
         })
         
     end_entity(mode, glove, p)
@@ -345,10 +344,10 @@ add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Travers
     
     height :: 1.5
     append(&entity.pieces, VisiblePiece{
-        asset  = .Shadow,
+        asset     = .Shadow,
         dimension = {0, height},
-        offset = {0, 0, 0},
-        color  = {1,1,1,0.5},
+        offset    = {0, 0, 0},
+        color     = {1,1,1,0.5},
     })
     
     append(&entity.pieces, VisiblePiece{
@@ -373,16 +372,16 @@ add_monster :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Traversable
     
     height :: 4.5
     append(&entity.pieces, VisiblePiece{
-        asset  = .Shadow,
+        asset     = .Shadow,
         dimension = {0, height},
-        offset = {0, 0, 0},
-        color  = {1,1,1,0.5},
+        offset    = {0, 0, 0},
+        color     = {1,1,1,0.5},
     })
     
     append(&entity.pieces, VisiblePiece{
-        asset  = .Torso,
+        asset     = .Torso,
         dimension = {0, height},
-        color  = 1,
+        color     = 1,
     })
     
     init_hitpoints(entity, 3)
@@ -399,17 +398,17 @@ add_familiar :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Traversabl
     entity.movement_mode = ._Floating
     
     append(&entity.pieces, VisiblePiece{
-        asset  = .Head,
+        asset     = .Head,
         dimension = {0, 2.5},
-        color  = 1,
-        offset = {0, 0, 0},
-        flags  = { .BobUpAndDown },
+        color     = 1,
+        offset    = {0, 0, 0},
+        flags     = { .BobUpAndDown },
     })
     
     append(&entity.pieces, VisiblePiece{
-        asset  = .Shadow,
+        asset     = .Shadow,
         dimension = {0, 2.5},
-        color  = {1,1,1,0.5},
+        color     = {1,1,1,0.5},
     })
 }
 
@@ -438,10 +437,10 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
                 entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
                 append(&entity.pieces, VisiblePiece {
-                    asset = .Tuft,
+                    asset     = .Tuft,
                     dimension = {.75, 1},
-                    color = Green,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
-                    flags = {.cube},
+                    color     = srgb_to_linear(Green),
+                    flags     = {.cube},
                 })
                 end_entity(mode, entity, p)
                 

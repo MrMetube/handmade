@@ -585,18 +585,6 @@ pack_pixel :: proc (value: lane_v4) -> (result: lane_u32) {
     return result
 }
 
-srgb_to_linear :: proc (color: lane_v4) -> (result: lane_v4) {
-    result.rgb = square(color.rgb)
-    result.a = color.a
-    return result
-}
-
-linear_to_srgb :: proc (color: lane_v4) -> (result: lane_v4) {
-    result.rgb = square_root(color.rgb)
-    result.a = color.a
-    return result
-}
-
 ////////////////////////////////////////////////
 
 when LaneWidth == 4 {

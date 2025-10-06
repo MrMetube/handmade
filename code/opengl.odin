@@ -4,12 +4,12 @@ import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
 
-GlDefaultTextureFormat: i32 = gl.RGBA8
+GlDefaultTextureFormat: u32 = gl.RGBA8
 
 GlMajorVersion :: 4
 GlMinorVersion :: 6
 
-GlAttribs := [?]i32{
+GlAttribs := [?] i32 {
     win.WGL_CONTEXT_MAJOR_VERSION_ARB, GlMajorVersion,
     win.WGL_CONTEXT_MINOR_VERSION_ARB, GlMinorVersion,
     
@@ -51,8 +51,8 @@ OpenGlInfo :: struct {
     GL_EXT_framebuffer_sRGB: b32,
 }
 
-FramebufferHandles  := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
-FramebufferTextures := FixedArray(256, u32) { data = { 0 = 0, }, count = 1 }
+FramebufferHandles  := FixedArray(256, u32) {}
+FramebufferTextures := FixedArray(256, u32) {}
 
 ////////////////////////////////////////////////
 
@@ -291,14 +291,12 @@ gl_manage_textures :: proc (last: ^TextureOp) {
 }
 
 gl_allocate_texture :: proc (width, height: i32, data: pmm) -> (result: u32) {
-    timed_function()
-    
     handle: u32
     gl.GenTextures(1, &handle)
     
     gl.BindTexture(gl.TEXTURE_2D, handle)
     
-    gl.TexImage2D(gl.TEXTURE_2D, 0, GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
+    gl.TexImage2D(gl.TEXTURE_2D, 0, cast(i32) GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
     
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
@@ -375,8 +373,11 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     gl.ColorMask(true, true, true, true)
     gl.DepthFunc(gl.LEQUAL)
     gl.Enable(gl.DEPTH_TEST)
-    glAlphaFunc(gl.GEQUAL, 0.1)
+    glAlphaFunc(gl.GREATER, 0)
     gl.Enable(gl.ALPHA_TEST)
+    gl.Enable(gl.SAMPLE_ALPHA_TO_COVERAGE)
+    gl.Enable(gl.SAMPLE_ALPHA_TO_ONE)
+    gl.Enable(gl.MULTISAMPLE)
     
     gl.Enable(gl.TEXTURE_2D)
     gl.Enable(gl.SCISSOR_TEST)
@@ -400,14 +401,38 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
         gl.GenFramebuffers(cast(i32) new_count, &FramebufferHandles.data[count])
         
         for render_target in slice(&FramebufferHandles)[count:] {
-            texture := append(&FramebufferTextures, gl_allocate_texture(draw_dim.x, draw_dim.y, nil))
+            {
+                width  := draw_dim.x 
+                height := draw_dim.y
+                
+                slot: u32 = gl.TEXTURE_2D_MULTISAMPLE when true else gl.TEXTURE_2D
+                texture: u32
+                gl.GenTextures(1, &texture)
+                
+                gl.BindTexture(slot, texture)
+                
+                max_sample_count: i32
+                gl.GetIntegerv(gl.MAX_SAMPLES, &max_sample_count)
+                max_sample_count = min(16, max_sample_count)
+                if slot == gl.TEXTURE_2D_MULTISAMPLE {
+                    gl.TexImage2DMultisample(slot, max_sample_count, GlDefaultTextureFormat, width, height, false)
+                } else {
+                    gl.TexImage2D(slot, 0, cast(i32) GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+                }
+                
+                gl.BindTexture(slot, 0)
+                
+                append(&FramebufferTextures, texture)
+                
+                gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
+                gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, texture, 0)
+                // @todo(viktor): Create a depth buffer for this framebuffer
+                // gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texture, 0)
+                
+                status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
+                assert(status == gl.FRAMEBUFFER_COMPLETE)
+            }
             
-            gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
-            gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture^, 0)
-            // @todo(viktor): Create a depth buffer for this framebuffer
-            // gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texture^, 0)
-            
-            assert(gl.FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(gl.FRAMEBUFFER))
         }
     }
     
@@ -531,8 +556,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             if bitmap.width != 0 && bitmap.height != 0 {
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
-                glBegin(gl.TRIANGLES)
+                gl.Disable(gl.TEXTURE_2D)
+                defer gl.Enable(gl.TEXTURE_2D)
                 
+                glBegin(gl.TRIANGLES)
                 p := entry.p
                 n := entry.p
                 p.xy += entry.radius
@@ -540,30 +567,31 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 n.z  -= entry.height
                 
                 p0 := v3{n.x, n.y, n.z}
-                p1 := v3{n.x, n.y, p.z}
                 p2 := v3{n.x, p.y, n.z}
-                p3 := v3{n.x, p.y, p.z}
                 p4 := v3{p.x, n.y, n.z}
-                p5 := v3{p.x, n.y, p.z}
                 p6 := v3{p.x, p.y, n.z}
+                p1 := v3{n.x, n.y, p.z}
+                p3 := v3{n.x, p.y, p.z}
+                p5 := v3{p.x, n.y, p.z}
                 p7 := v3{p.x, p.y, p.z}
+
+                top_color := entry.premultiplied_color
+                bot_color := v4{0, 0, 0, 1}
                 
-                c0 := entry.premultiplied_color
-                c1 := entry.premultiplied_color
-                c2 := entry.premultiplied_color
-                c3 := entry.premultiplied_color
-                
+                ct := V4(top_color.rgb * .75, top_color.a)
+                cb := V4(bot_color.rgb * .75, top_color.a)
+                                
                 t0 := v2{0, 0}
                 t1 := v2{1, 0}
                 t2 := v2{1, 1}
                 t3 := v2{0, 1}
                 
-                gl_quad({p0, p1, p3, p2}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
-                gl_quad({p0, p2, p6, p4}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
-                gl_quad({p0, p4, p5, p1}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
-                gl_quad({p7, p5, p4, p6}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
-                gl_quad({p7, p6, p2, p3}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
-                gl_quad({p7, p3, p1, p5}, {t0, t1, t2, t3}, {c0, c1, c2, c3})
+                gl_quad({p0, p1, p3, p2}, {t0, t1, t2, t3}, {cb, ct, ct, cb})
+                gl_quad({p0, p2, p6, p4}, {t0, t1, t2, t3}, bot_color)
+                gl_quad({p0, p4, p5, p1}, {t0, t1, t2, t3}, {cb, cb, ct, ct})
+                gl_quad({p7, p5, p4, p6}, {t0, t1, t2, t3}, {ct, ct, cb, cb})
+                gl_quad({p7, p6, p2, p3}, {t0, t1, t2, t3}, {ct, cb, cb, ct})
+                gl_quad({p7, p3, p1, p5}, {t0, t1, t2, t3}, top_color)
                 
                 glEnd()
             }
@@ -572,6 +600,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             panic("Unhandled Entry")
         }
     }
+    
+    gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+    // gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
+    // gl.BlitFramebuffer()
 }
 
 ////////////////////////////////////////////////
@@ -581,11 +613,7 @@ gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i
     gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
     
     window_dim := get_dimension(draw_region)
-    if render_target_index == 0 {
-        gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
-    } else {
-        gl.Viewport(0, 0, window_dim.x, window_dim.y)
-    }
+    gl.Viewport(0, 0, window_dim.x, window_dim.y)
 }
 
 gl_quad :: proc (p: [4] v3, t: [4] v2, c: [4] v4) {
