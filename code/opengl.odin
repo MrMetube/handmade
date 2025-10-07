@@ -12,7 +12,8 @@ GlAttribs := [?] i32 {
     
     win.WGL_CONTEXT_FLAGS_ARB, (win.WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
     
-    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    // win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
     0,
 }
 
@@ -74,10 +75,9 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
             win.wglSwapIntervalEXT(1)
         }
         
-        // @note(viktor): If we believe we can do full sRGB on the texture side
-        // and the framebuffer side, then we can enable it, otherwise it is
-        // safer for us to pass it straight through.
-        if extensions.GL_EXT_texture_sRGB && framebuffer_supports_srgb {
+        // @note(viktor): If we believe we can do full sRGB on the texture side and the framebuffer side, then we can enable it, otherwise it is safer for us to pass it straight through.
+        // @todo(viktor): Just require sRGB support and fault if it is unavailable. It should be supported nowadays
+        if extensions.GL_EXT_framebuffer_sRGB && framebuffer_supports_srgb {
             open_gl.default_texture_format = gl.SRGB8_ALPHA8
             gl.Enable(gl.FRAMEBUFFER_SRGB)
         }
@@ -215,6 +215,7 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glVertex3fv,    "glVertex3fv")
             win.gl_set_proc_address(&glVertex4fv,    "glVertex4fv")
             win.gl_set_proc_address(&glColor4fv,     "glColor4fv")
+            win.gl_set_proc_address(&glColor4ub,     "glColor4ub")
         }
     }
     
@@ -518,7 +519,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             gl.BindTexture(slot, depth_texture)
             // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
-            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT32F, width, height, false)
+            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT32, width, height, false)
             
             gl.BindTexture(slot, 0)
             
@@ -726,6 +727,41 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 glEnd()
             }
             
+          case .RenderEntry_Textured_Quads:
+            entry := cast(^RenderEntry_Textured_Quads) entry_data
+            header_offset += size_of(RenderEntry_Textured_Quads)
+            
+            gl.UseProgram(open_gl.basic_zbias_program)
+            defer gl.UseProgram(0)
+            
+            gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
+            gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
+            
+            for bitmap, quad_index in entry.bitmaps {
+                vertices := entry.vertices[quad_index*4 :][: 4]
+                
+                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
+                
+                glBegin(gl.QUADS)
+                defer glEnd()
+                
+                glColor4ub(&vertices[0].color)
+                glTexCoord2fv(&vertices[0].uv)
+                glVertex4fv(&vertices[0].p)
+                
+                glColor4ub(&vertices[1].color)
+                glTexCoord2fv(&vertices[1].uv)
+                glVertex4fv(&vertices[1].p)
+                
+                glColor4ub(&vertices[2].color)
+                glTexCoord2fv(&vertices[2].uv)
+                glVertex4fv(&vertices[2].p)
+                
+                glColor4ub(&vertices[3].color)
+                glTexCoord2fv(&vertices[3].uv)
+                glVertex4fv(&vertices[3].p)
+            }
+            
           case:
             panic("Unhandled Entry")
         }
@@ -830,3 +866,4 @@ glVertex2fv:    proc (_: ^v2)
 glVertex3fv:    proc (_: ^v3)
 glVertex4fv:    proc (_: ^v4)
 glColor4fv:     proc (_: ^v4)
+glColor4ub:     proc (_: ^Color)

@@ -52,6 +52,8 @@ RenderCommands :: struct {
     
     clip_rects_count: u32,
     rects: Deque(RenderEntryClip),
+    
+    vertex_buffer: Array(Textured_Vertex),
 }
 
 @(common)
@@ -78,6 +80,8 @@ RenderGroup :: struct {
     generation_id: AssetGenerationId,
     
     current_clip_rect_index: u16,
+    
+    current_quads: RenderEntry_Textured_Quads,
 }
 
 Transform :: struct {
@@ -96,6 +100,7 @@ Camera_Flags :: bit_set[ enum {
 
 RenderEntryType :: enum u8 {
     None,
+    RenderEntry_Textured_Quads,
     RenderEntryBitmap,
     RenderEntryRectangle,
     RenderEntryCube,
@@ -156,6 +161,19 @@ RenderEntryBlendRenderTargets :: struct {
     alpha:        f32,
 }
 
+@(common)
+RenderEntry_Textured_Quads :: struct {
+    bitmaps:  [] ^Bitmap,
+    vertices: [] Textured_Vertex, // a slice into commands.vertices with 4 vertices per quad
+}
+
+@(common)
+Textured_Vertex :: struct {
+    p:     v4,
+    uv:    v2,
+    color: Color,
+}
+
 ////////////////////////////////////////////////
 
 UsedBitmapDim :: struct {
@@ -206,6 +224,7 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
       case RenderEntryCube:               type = .RenderEntryCube
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
       case RenderEntryClip:               type = .RenderEntryClip
+      case RenderEntry_Textured_Quads:    type = .RenderEntry_Textured_Quads
       case:                               unreachable()
     }
     assert(type != .None)
@@ -340,7 +359,7 @@ push_bitmap :: proc (
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap != nil && bitmap.texture_handle != 0 {
-        push_bitmap_raw(group, bitmap^, transform, height, offset, color, use_alignment, x_axis, y_axis)
+        push_bitmap_raw(group, bitmap, transform, height, offset, color, use_alignment, x_axis, y_axis)
     } else {
         load_bitmap(group.assets, id, false)
         group.missing_asset_count += 1
@@ -348,31 +367,60 @@ push_bitmap :: proc (
 }
 
 push_bitmap_raw :: proc (
-    group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1},
+    group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, 
+    offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis2 := v2{1, 0}, y_axis2 := v2{0, 1},
 ) {
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle != 0)
     
-    used_dim := get_used_bitmap_dim(group, bitmap, transform, height, offset, use_alignment, x_axis, y_axis)
+    used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis2, y_axis2)
     
     size := used_dim.size
     
-    element := push_render_element(group, RenderEntryBitmap)
-    element ^= {
-        premultiplied_color = store_color(color),
-        bitmap = bitmap,
-        
-        p      = used_dim.basis,
-        x_axis = V3(x_axis, 0) * size.x,
-        y_axis = V3(y_axis, 0) * size.y,
-        z_bias = height,
-    }
+    // @hack find a better place for this allocation
+    bitmaps := make([] ^Bitmap, 1, context.allocator)
+    element := push_render_element(group, RenderEntry_Textured_Quads)
+    element.bitmaps = bitmaps
+    element.bitmaps[0] = bitmap
+    
+    premultiplied_color := store_color(color)
+    
+    min    := V4(used_dim.basis, 0)
+    x_axis := V3(x_axis2, 0) * size.x
+    y_axis := V3(y_axis2, 0) * size.y
+    z_bias := height
     
     if transform.is_upright {
-        element.x_axis = size.x * (x_axis.x * group.cam_x + x_axis.y * group.cam_y)
-        element.y_axis = size.y * (y_axis.x * group.cam_x + y_axis.y * group.cam_y)
+        x_axis = size.x * (x_axis2.x * group.cam_x + x_axis2.y * group.cam_y)
+        y_axis = size.y * (y_axis2.x * group.cam_x + y_axis2.y * group.cam_y)
     }
+    
+    // @note(viktor): step in one texel because the bitmaps are padded on all sides with a blank strip of pixels
+    d_texel := 1 / vec_cast(f32, bitmap.width, bitmap.height)
+    min_uv := 0 + d_texel
+    max_uv := 1 - d_texel
+    
+    max := min + V4(x_axis + y_axis, z_bias)
+    
+    color := v4_to_rgba(premultiplied_color)
+    
+    element.vertices = append(&group.commands.vertex_buffer, Textured_Vertex {
+        p = min,
+        uv = min_uv,
+        color = color,
+    }, Textured_Vertex {
+        p = {max.x, min.y, min.z, min.w},
+        uv = {max_uv.x, min_uv.y},
+        color = color,
+    }, Textured_Vertex {
+        p = max,
+        uv = max_uv,
+        color = color,
+    }, Textured_Vertex {
+        p = {min.x, max.y, max.z, max.w},
+        uv = {min_uv.x, max_uv.y},
+        color = color,
+    })
 }
 
 push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
@@ -439,6 +487,13 @@ push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform
     // Left and Right
     push_rectangle(group, rectangle_center_half_dimension(center_left,  half_dim_vertical), transform, color)
     push_rectangle(group, rectangle_center_half_dimension(center_right, half_dim_vertical), transform, color)
+}
+
+begin_quads :: proc (group: ^RenderGroup) {
+    
+}
+end_quads :: proc (group: ^RenderGroup) {
+    
 }
 
 ////////////////////////////////////////////////

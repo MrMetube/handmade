@@ -440,12 +440,14 @@ when LaneWidth != 1 {
         result.w = extract(a.w, n)
         return result
     }
+
     extract_v3 :: proc (a: lane_v3, #any_int n: u32) -> (result: v3) {
         result.x = extract(a.x, n)
         result.y = extract(a.y, n)
         result.z = extract(a.z, n)
         return result
     }
+
     extract :: proc (a: $T/#simd[$N]$E, #any_int n: u32) -> (result: E) {
         when intrinsics.type_is_array(T) {
             #unroll for i in 0..<len(T) {
@@ -454,6 +456,22 @@ when LaneWidth != 1 {
         } else {
             result = simd.extract(a, n)
         }
+        return result
+    }
+    
+    unpack_pixel :: proc (pixel: lane_u32) -> (color: lane_v4) {
+        color.r = cast(lane_f32) (0xff &          pixel      )
+        color.g = cast(lane_f32) (0xff & simd.shr(pixel,  8) )
+        color.b = cast(lane_f32) (0xff & simd.shr(pixel,  16))
+        color.a = cast(lane_f32) (0xff & simd.shr(pixel,  24))
+        
+        return color
+    }
+
+    pack_pixel :: proc (value: lane_v4) -> (result: lane_u32) {
+        color := vec_cast(lane_u32, value)
+        result = color.r | simd.shl_masked(color.g, 8) | simd.shl_masked(color.b, 16) | simd.shl_masked(color.a, 24)
+        
         return result
     }
 } else {

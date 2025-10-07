@@ -18,7 +18,10 @@ FixedArray :: struct ($N: i64, $T: typeid) {
 }
 
 append :: proc { 
-    append_fixed_array, append_array, append_array_, append_fixed_array_, append_array_many, append_fixed_array_many, append_string, 
+    append_fixed_array, append_array, append_array_, append_fixed_array_, 
+    append_array_many, append_fixed_array_many, 
+    append_array_many_slice, append_fixed_array_many_slice,
+    append_string, 
     builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
 }
 @(require_results) append_array_ :: proc (a: ^Array($T)) -> (result: ^T) {
@@ -42,7 +45,7 @@ append_fixed_array :: proc (a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
     a.count += 1
     return result
 }
-append_array_many :: proc (a: ^Array($T), values: []T) -> (result: []T) {
+append_array_many :: proc (a: ^Array($T), values: ..T) -> (result: []T) {
     start := a.count
     for &value in values {
         a.data[a.count] = value
@@ -52,7 +55,27 @@ append_array_many :: proc (a: ^Array($T), values: []T) -> (result: []T) {
     result = a.data[start:a.count]
     return result
 }
-append_fixed_array_many :: proc (a: ^FixedArray($N, $T), values: []T) -> (result: []T) {
+append_array_many_slice :: proc (a: ^Array($T), values: []T) -> (result: []T) {
+    start := a.count
+    for &value in values {
+        a.data[a.count] = value
+        a.count += 1
+    }
+    
+    result = a.data[start:a.count]
+    return result
+}
+append_fixed_array_many :: proc (a: ^FixedArray($N, $T), values: ..T) -> (result: []T) {
+    start := a.count
+    for &value in values {
+        a.data[a.count] = value
+        a.count += 1
+    }
+    
+    result = a.data[start:a.count]
+    return result
+}
+append_fixed_array_many_slice :: proc (a: ^FixedArray($N, $T), values: [] T) -> (result: []T) {
     start := a.count
     for &value in values {
         a.data[a.count] = value

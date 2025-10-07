@@ -14,13 +14,16 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: proc (commands: ^RenderCommands, push_buffer: [] u8, width, height: i32) {
+init_render_commands :: proc (commands: ^RenderCommands, push_buffer: [] u8, vertex_buffer: Array(Textured_Vertex), width, height: i32) {
     commands ^= {
         width  = width, 
         height = height,
         
         push_buffer = push_buffer,
+        vertex_buffer = vertex_buffer,
     }
+    
+    clear(&commands.vertex_buffer)
 }
 
 prep_for_render :: proc (commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
@@ -185,6 +188,12 @@ do_tile_render_work :: proc (data: pmm) {
           case .RenderEntryCube:
             entry := cast(^RenderEntryCube) entry_data
             header_offset += size_of(RenderEntryCube)
+            
+            unimplemented("move the software renderer to 3D")
+            
+          case .RenderEntry_Textured_Quads:
+            entry := cast(^RenderEntry_Textured_Quads) entry_data
+            header_offset += size_of(RenderEntry_Textured_Quads)
             
             unimplemented("move the software renderer to 3D")
         }
@@ -566,23 +575,6 @@ shader_store_pixels_at :: proc (ctx: ^Shader_Context, packed: lane_u32, x, y: i3
 
 shader_store_pixels :: proc (ctx: ^Shader_Context, packed: lane_u32) {
     simd.masked_store(ctx.at, packed, ctx.mask)
-}
-
-////////////////////////////////////////////////
-
-unpack_pixel :: proc (pixel: lane_u32) -> (color: lane_v4) {
-    color.r = cast(lane_f32) (0xff &          pixel      )
-    color.g = cast(lane_f32) (0xff & simd.shr(pixel,  8) )
-    color.b = cast(lane_f32) (0xff & simd.shr(pixel,  16))
-    color.a = cast(lane_f32) (0xff & simd.shr(pixel,  24))
-    
-    return color
-}
-
-pack_pixel :: proc (value: lane_v4) -> (result: lane_u32) {
-    color := vec_cast(lane_u32, value)
-    result = color.r | simd.shl_masked(color.g, 8) | simd.shl_masked(color.b, 16) | simd.shl_masked(color.a, 24)
-    return result
 }
 
 ////////////////////////////////////////////////

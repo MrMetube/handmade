@@ -271,6 +271,7 @@ main :: proc () {
     // @todo(viktor): decide what our push_buffer size is
     render_commands: RenderCommands
     push_buffer := push(&frame_arena, u8, 32 * Megabyte)
+    vertex_buffer := make_array(&frame_arena, Textured_Vertex, 65536)
     
     game_memory := GameMemory {
         high_priority_queue = auto_cast &high_queue,
@@ -305,7 +306,7 @@ main :: proc () {
         // Input
         input_processed := game.begin_timed_block("input processed")
         
-        init_render_commands(&render_commands, push_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
+        init_render_commands(&render_commands, push_buffer, vertex_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
         
         window_dim := get_window_dimension(window)
         draw_region := aspect_ratio_fit({render_commands.width, render_commands.height}, window_dim)
