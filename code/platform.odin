@@ -45,7 +45,6 @@ GlobalPerformanceCounterFrequency: f64
 
 GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
 
-GlobalBlitTextureHandle: u32
 
 // Debug Variables
 

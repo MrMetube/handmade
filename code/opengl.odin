@@ -3,9 +3,6 @@ package main
 import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
-
-GlDefaultTextureFormat: u32 = gl.RGBA8
-
 GlMajorVersion :: 4
 GlMinorVersion :: 6
 
@@ -19,24 +16,7 @@ GlAttribs := [?] i32 {
     0,
 }
 
-glBegin:        proc (_: u32)
-glEnd:          proc ()
-glMatrixMode:   proc (_: i32)
-glLoadIdentity: proc ()
-
-glTexEnvi:      proc (_: u32, _: u32, _: u32)
-glAlphaFunc:    proc (_: u32, _: f32)
-
-glTexCoord2f:   proc (_,_: f32)
-glVertex2f:     proc (_,_: f32)
-glVertex3f:     proc (_,_,_: f32)
-glColor4f:      proc (_,_,_,_: f32)
-
-glLoadMatrixf:  proc (_: ^m4)
-glTexCoord2fv:  proc (_: ^v2)
-glVertex2fv:    proc (_: ^v2)
-glVertex3fv:    proc (_: ^v3)
-glColor4fv:     proc (_: ^v4)
+////////////////////////////////////////////////
 
 OpenGlInfo :: struct {
     modern_context: b32,
@@ -51,8 +31,20 @@ OpenGlInfo :: struct {
     GL_EXT_framebuffer_sRGB: b32,
 }
 
-FramebufferHandles  := FixedArray(256, u32) {}
-FramebufferTextures := FixedArray(256, u32) {}
+OpenGL :: struct {
+    default_texture_format: u32,
+    
+    framebuffer_handles:  FixedArray(256, u32),
+    framebuffer_textures: FixedArray(256, u32),
+    
+    blit_texture_handle: u32,
+    
+    basic_zbias_program: u32,
+}
+
+open_gl := OpenGL {
+    default_texture_format = gl.RGBA8
+}
 
 ////////////////////////////////////////////////
 
@@ -64,35 +56,45 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         gl_context = win.wglCreateContextAttribsARB(dc, nil, raw_data(GlAttribs[:]))
     }
     
-    context_is_modern :b32= true
+    context_is_modern: b32 = true
     if gl_context == nil {
         context_is_modern = false
         gl_context = win.wglCreateContext(dc)
     }
+    assert(gl_context != nil)
     
-    if gl_context != nil {
-        if win.wglMakeCurrent(dc, gl_context) {
-            gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
-            
-            extensions := opengl_get_extensions(context_is_modern)
-            
-            // @note(viktor): If we believe we can do full sRGB on the texture side
-            // and the framebuffer side, then we can enable it, otherwise it is
-            // safer for us to pass it straight through.
-            if extensions.GL_EXT_texture_sRGB && framebuffer_supports_srgb {
-                GlDefaultTextureFormat = gl.SRGB8_ALPHA8
-                gl.Enable(gl.FRAMEBUFFER_SRGB)
-            }
-            
-            gl.GenTextures(1, &GlobalBlitTextureHandle)
-            
-            if win.wglSwapIntervalEXT != nil {
-                win.wglSwapIntervalEXT(1)
-            }
+    if win.wglMakeCurrent(dc, gl_context) {
+        gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
+        
+        extensions := opengl_get_extensions(context_is_modern)
+        
+        if win.wglSwapIntervalEXT != nil {
+            win.wglSwapIntervalEXT(1)
         }
+        
+        // @note(viktor): If we believe we can do full sRGB on the texture side
+        // and the framebuffer side, then we can enable it, otherwise it is
+        // safer for us to pass it straight through.
+        if extensions.GL_EXT_texture_sRGB && framebuffer_supports_srgb {
+            open_gl.default_texture_format = gl.SRGB8_ALPHA8
+            gl.Enable(gl.FRAMEBUFFER_SRGB)
+        }
+        
+        gl.GenTextures(1, &open_gl.blit_texture_handle)
+        
+        header_code: cstring = `
+        // header code
+        `
+        vertex_code: cstring = `
+        // vertex code
+        `
+        fragment_code: cstring = `
+        // fragment code
+        `
+        open_gl.basic_zbias_program = gl_create_program(header_code, vertex_code, fragment_code)
+        
+        glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
     }
-    
-    glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
     
     return gl_context
 }
@@ -162,12 +164,13 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glTexCoord2f,   "glTexCoord2f")
             win.gl_set_proc_address(&glVertex2f,     "glVertex2f")
             win.gl_set_proc_address(&glVertex3f,     "glVertex3f")
+            win.gl_set_proc_address(&glVertex4f,     "glVertex4f")
             win.gl_set_proc_address(&glColor4f,      "glColor4f")
             
             win.gl_set_proc_address(&glLoadMatrixf,  "glLoadMatrixf")
             win.gl_set_proc_address(&glTexCoord2fv,  "glTexCoord2fv")
             win.gl_set_proc_address(&glVertex2fv,    "glVertex2fv")
-            win.gl_set_proc_address(&glVertex3fv,    "glVertex3fv")
+            win.gl_set_proc_address(&glVertex4fv,    "glVertex4fv")
             win.gl_set_proc_address(&glColor4fv,     "glColor4fv")
         }
     }
@@ -230,25 +233,20 @@ set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: b32) {
             /* 2 */ win.WGL_SUPPORT_OPENGL_ARB, TRUE,
             /* 3 */ win.WGL_DOUBLE_BUFFER_ARB,  TRUE,
             /* 4 */ win.WGL_PIXEL_TYPE_ARB,     win.WGL_TYPE_RGBA_ARB,
-            /* 5 */ win.WGL_RED_BITS_ARB,       8,
-            /* 6 */ win.WGL_GREEN_BITS_ARB,     8,
-            /* 7 */ win.WGL_BLUE_BITS_ARB,      8,
-            /* 8 */ win.WGL_ALPHA_BITS_ARB,     8,
-            /* 9 */ win.WGL_DEPTH_BITS_ARB,     24,
             // @volatile see below
-            /* 10 */win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
+            /* 5 */win.WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB, TRUE,
             0,
         }
         
         if !framebuffer_supports_srgb {
-            int_attribs[20] = 0 // @volatile Coupled to the ordering of the attribs itself
+            int_attribs[10] = 0 // @volatile Coupled to the ordering of the attribs itself
         }
         
         win.wglChoosePixelFormatARB(dc, raw_data(int_attribs[:]), nil, 1, &suggested_pixel_format_index, &extended_pick)
     }
     
     if extended_pick == 0 {
-        desired_pixel_format := win.PIXELFORMATDESCRIPTOR{
+        desired_pixel_format := win.PIXELFORMATDESCRIPTOR {
             nSize      = size_of(win.PIXELFORMATDESCRIPTOR),
             nVersion   = 1,
             dwFlags    = win.PFD_SUPPORT_OPENGL | win.PFD_DRAW_TO_WINDOW | win.PFD_DOUBLEBUFFER,
@@ -296,7 +294,7 @@ gl_allocate_texture :: proc (width, height: i32, data: pmm) -> (result: u32) {
     
     gl.BindTexture(gl.TEXTURE_2D, handle)
     
-    gl.TexImage2D(gl.TEXTURE_2D, 0, cast(i32) GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
+    gl.TexImage2D(gl.TEXTURE_2D, 0, cast(i32) open_gl.default_texture_format, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
     
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
@@ -312,6 +310,56 @@ gl_allocate_texture :: proc (width, height: i32, data: pmm) -> (result: u32) {
 
 ////////////////////////////////////////////////
 
+gl_create_program :: proc (header_code, vertex_code, fragment_code: cstring) -> (result: u32) {
+    lengths := [?] i32 { 0..<20 = -1 }
+    
+    vertex_shader_code := [?] cstring {
+        header_code, vertex_code,
+    }
+    
+    fragment_shader_code := [?] cstring {
+        header_code, fragment_code,
+    }
+    
+    vertex_shader_id   := gl.CreateShader(gl.VERTEX_SHADER)
+    fragment_shader_id := gl.CreateShader(gl.FRAGMENT_SHADER)
+    
+    gl.ShaderSource(vertex_shader_id,   len(vertex_shader_code),   raw_data(vertex_shader_code[:]),   raw_data(lengths[:]))
+    gl.ShaderSource(fragment_shader_id, len(fragment_shader_code), raw_data(fragment_shader_code[:]), raw_data(lengths[:]))
+    
+    gl.CompileShader(vertex_shader_id)
+    gl.CompileShader(fragment_shader_id)
+    
+    result = gl.CreateProgram()
+    
+    gl.AttachShader(result, vertex_shader_id)
+    gl.AttachShader(result, fragment_shader_id)
+    
+    gl.LinkProgram(result)
+    
+    gl.ValidateProgram(result)
+    validated: b32 = false
+    gl.GetProgramiv(result, gl.VALIDATE_STATUS, cast(^i32) &validated)
+    
+    if !validated {
+        vertex_error_bytes, fragment_error_bytes, program_error_bytes: [4096] u8
+        vertex_length, fragment_length, program_length: i32
+        
+        gl.GetShaderInfoLog(vertex_shader_id,   len(vertex_error_bytes),   &vertex_length,   &vertex_error_bytes[0])
+        gl.GetShaderInfoLog(fragment_shader_id, len(fragment_error_bytes), &fragment_length, &fragment_error_bytes[0])
+        gl.GetProgramInfoLog(result,            len(program_error_bytes),  &program_length,  &program_error_bytes[0])
+        
+        vertex_error   := cast(string) vertex_error_bytes[:vertex_length]
+        fragment_error := cast(string) fragment_error_bytes[:fragment_length]
+        program_error  := cast(string) program_error_bytes[:program_length]
+    }
+    
+    return result
+}
+
+
+////////////////////////////////////////////////
+
 gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
     timed_function()
 
@@ -321,7 +369,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
     gl.Disable(gl.BLEND)
     defer gl.Enable(gl.BLEND)
     
-    gl.BindTexture(gl.TEXTURE_2D, GlobalBlitTextureHandle)
+    gl.BindTexture(gl.TEXTURE_2D, open_gl.blit_texture_handle)
     defer gl.BindTexture(gl.TEXTURE_2D, 0)
     
     gl.TexImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory))
@@ -392,47 +440,48 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     
     // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
     max_render_target_count := cast(i64) commands.max_render_target_index + 1
-    assert(max_render_target_count < len(FramebufferHandles.data))
-    if max_render_target_count >= FramebufferHandles.count {
-        count := FramebufferHandles.count
+    assert(max_render_target_count < len(open_gl.framebuffer_handles.data))
+    if max_render_target_count >= open_gl.framebuffer_handles.count {
+        count := open_gl.framebuffer_handles.count
         new_count := max_render_target_count - count
         
-        FramebufferHandles.count  += new_count
-        gl.GenFramebuffers(cast(i32) new_count, &FramebufferHandles.data[count])
+        open_gl.framebuffer_handles.count  += new_count
+        gl.GenFramebuffers(cast(i32) new_count, &open_gl.framebuffer_handles.data[count])
         
-        for render_target in slice(&FramebufferHandles)[count:] {
-            {
-                width  := draw_dim.x 
-                height := draw_dim.y
-                
-                slot: u32 = gl.TEXTURE_2D_MULTISAMPLE when true else gl.TEXTURE_2D
-                texture: u32
-                gl.GenTextures(1, &texture)
-                
-                gl.BindTexture(slot, texture)
-                
-                max_sample_count: i32
-                gl.GetIntegerv(gl.MAX_SAMPLES, &max_sample_count)
-                max_sample_count = min(16, max_sample_count)
-                if slot == gl.TEXTURE_2D_MULTISAMPLE {
-                    gl.TexImage2DMultisample(slot, max_sample_count, GlDefaultTextureFormat, width, height, false)
-                } else {
-                    gl.TexImage2D(slot, 0, cast(i32) GlDefaultTextureFormat, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
-                }
-                
-                gl.BindTexture(slot, 0)
-                
-                append(&FramebufferTextures, texture)
-                
-                gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
-                gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, texture, 0)
-                // @todo(viktor): Create a depth buffer for this framebuffer
-                // gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texture, 0)
-                
-                status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
-                assert(status == gl.FRAMEBUFFER_COMPLETE)
+        for render_target in slice(&open_gl.framebuffer_handles)[count:] {
+            width  := draw_dim.x 
+            height := draw_dim.y
+            
+            max_sample_count:i32
+            gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
+            max_sample_count = min(16, max_sample_count)
+            
+            slot: u32 = gl.TEXTURE_2D_MULTISAMPLE when true else gl.TEXTURE_2D
+            
+            using textures: struct { texture, depth_texture: u32 }
+            gl.GenTextures(2, auto_cast &textures)
+            
+            gl.BindTexture(slot, texture)
+            if slot == gl.TEXTURE_2D_MULTISAMPLE {
+                gl.TexImage2DMultisample(slot, max_sample_count, open_gl.default_texture_format, width, height, false)
+            } else {
+                gl.TexImage2D(slot, 0, cast(i32) open_gl.default_texture_format, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
             }
             
+            gl.BindTexture(slot, depth_texture)
+            // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
+            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT32F, width, height, false)
+            
+            gl.BindTexture(slot, 0)
+            
+            append(&open_gl.framebuffer_textures, texture)
+            
+            gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
+            gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, texture, 0)
+            gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,  slot, depth_texture, 0)
+            
+            status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
+            assert(status == gl.FRAMEBUFFER_COMPLETE)
         }
     }
     
@@ -503,7 +552,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             // defer gl_bind_frame_buffer(current_target_index, draw_region)
             
             // @todo(viktor): If the window has black bars the rectangle will be offset incorrectly. thanks global variables!
-            gl.BindTexture(gl.TEXTURE_2D, FramebufferTextures.data[entry.source_index])
+            gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffer_textures.data[entry.source_index])
             
             gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
@@ -540,10 +589,35 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 min_uv := 0 + d_texel
                 max_uv := 1 - d_texel
                 
-                min := entry.p
-                max := entry.p + entry.x_axis + entry.y_axis
+                min := V4(entry.p, 0)
+                max := V4(entry.p + entry.x_axis + entry.y_axis, entry.z_bias)
+                color := entry.premultiplied_color
                 
-                gl_rectangle(min, max, entry.premultiplied_color, min_uv, max_uv)
+                glBegin(gl.TRIANGLES)
+                
+                glColor4f(color.r, color.g, color.b, color.a)
+                
+                // @note(viktor): Lower triangle
+                glTexCoord2f(min_uv.x, min_uv.y)
+                glVertex4f(min.x, min.y, min.z, min.w)
+                
+                glTexCoord2f(max_uv.x, min_uv.y)
+                glVertex4f(max.x, min.y, min.z, min.w)
+                
+                glTexCoord2f(max_uv.x, max_uv.y)
+                glVertex4f(max.x, max.y, max.z, max.w)
+                
+                // @note(viktor): Upper triangle
+                glTexCoord2f(min_uv.x, min_uv.y)
+                glVertex4f(min.x, min.y, min.z, min.w)
+                
+                glTexCoord2f(max_uv.x, max_uv.y)
+                glVertex4f(max.x, max.y, max.z, max.w)
+                
+                glTexCoord2f(min_uv.x, max_uv.y)
+                glVertex4f(min.x, max.y, max.z, max.w)
+                
+                glEnd()
             }
             
           case .RenderEntryCube:
@@ -601,15 +675,20 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
         }
     }
     
-    gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
-    // gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
-    // gl.BlitFramebuffer()
+    gl.BindFramebuffer(gl.READ_FRAMEBUFFER, open_gl.framebuffer_handles.data[0])
+    gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+    gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
+    gl.BlitFramebuffer(
+        0, 0, draw_dim.x, draw_dim.y, 
+        draw_region.min.x, draw_region.min.y, draw_region.max.x, draw_region.max.y, 
+        gl.COLOR_BUFFER_BIT, gl.LINEAR
+    )
 }
 
 ////////////////////////////////////////////////
 
 gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i) {
-    render_target := FramebufferHandles.data[render_target_index]
+    render_target := open_gl.framebuffer_handles.data[render_target_index]
     gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
     
     window_dim := get_dimension(draw_region)
@@ -672,3 +751,26 @@ gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1
     
     glEnd()
 }
+
+////////////////////////////////////////////////
+
+glBegin:        proc (_: u32)
+glEnd:          proc ()
+glMatrixMode:   proc (_: i32)
+glLoadIdentity: proc ()
+
+glTexEnvi:      proc (_: u32, _: u32, _: u32)
+glAlphaFunc:    proc (_: u32, _: f32)
+
+glTexCoord2f:   proc (_,_: f32)
+glVertex2f:     proc (_,_: f32)
+glVertex3f:     proc (_,_,_: f32)
+glVertex4f:     proc (_,_,_,_: f32)
+glColor4f:      proc (_,_,_,_: f32)
+
+glLoadMatrixf:  proc (_: ^m4)
+glTexCoord2fv:  proc (_: ^v2)
+glVertex2fv:    proc (_: ^v2)
+glVertex3fv:    proc (_: ^v3)
+glVertex4fv:    proc (_: ^v4)
+glColor4fv:     proc (_: ^v4)

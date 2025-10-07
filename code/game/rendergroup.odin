@@ -118,6 +118,7 @@ RenderEntryBitmap :: struct {
     // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
     x_axis: v3,
     y_axis: v3,
+    z_bias: f32,
 }
 
 @(common)
@@ -360,12 +361,12 @@ push_bitmap_raw :: proc (
     element := push_render_element(group, RenderEntryBitmap)
     element ^= {
         premultiplied_color = store_color(color),
-        
         bitmap = bitmap,
         
         p      = used_dim.basis,
         x_axis = V3(x_axis, 0) * size.x,
         y_axis = V3(y_axis, 0) * size.y,
+        z_bias = height,
     }
     
     if transform.is_upright {
