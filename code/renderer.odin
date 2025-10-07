@@ -14,7 +14,7 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: proc (commands: ^RenderCommands, push_buffer: []u8, width, height: i32) {
+init_render_commands :: proc (commands: ^RenderCommands, push_buffer: [] u8, width, height: i32) {
     commands ^= {
         width  = width, 
         height = height,

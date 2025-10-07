@@ -112,7 +112,7 @@ mark_file_error :: proc (handle: ^PlatformFileHandle, error_message: string) {
         print("FILE ERROR: %\n", error_message)
         
         error_code := win.GetLastError()
-        buffer: [1024]u16
+        buffer: [1024] u16
         length := win.FormatMessageW(win.FORMAT_MESSAGE_FROM_SYSTEM, nil, error_code, 0, &buffer[0], len(buffer), nil, )
         message, _ := win.utf16_to_utf8(buffer[:length])
         print("ERROR: %\n", message)

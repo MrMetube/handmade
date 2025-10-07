@@ -22,6 +22,12 @@ import "core:mem"
  */
 
 @(printlike)
+print_asdjlasd :: proc (_: string, args: ..any, flags: Format_Context_Flags = {}, console := os.stdout) {
+}
+@(printlike)
+print_asdjlasasdadd :: proc (aaaaa,bbbb,bbbccc: string, args: ..any, flags: Format_Context_Flags = {}, console := os.stdout) {
+}
+@(printlike)
 print_to_console :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, console := os.stdout) {
     result := format_string(buffer = console_buffer[:], format = format, args = args, flags = flags)
     os.write(console, transmute([]u8) result)

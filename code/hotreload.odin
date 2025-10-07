@@ -27,11 +27,12 @@ load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> 
         if game_lib != nil {
             load_game_api(game_lib)
             
+            // @todo(viktor): do we really need to depent on debug_frame_end here?
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
         } else {
             // @logging 
-            print("Failed to initialize game api\n")
-            print("%\n", os.error_string(os.get_last_error()))
+            message := os.error_string(os.get_last_error())
+            print("Failed to initialize game api: %\n", message)
         }
     }
     

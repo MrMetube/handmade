@@ -32,15 +32,14 @@ i32x4 :: #simd [4] i32
 
 LaneWidth :: 16
 
-// @todo(viktor): @metaprogram cant see decls in when blocks for now, so we put them in global scope
-lane_f32 :: #simd [LaneWidth] f32
-lane_u32 :: #simd [LaneWidth] u32
-lane_i32 :: #simd [LaneWidth] i32
-
-lane_pmm :: #simd [LaneWidth] pmm
-lane_umm :: #simd [LaneWidth] umm
-lane_f64 :: #simd [LaneWidth] f64
 when LaneWidth != 1 {
+    lane_f32 :: #simd [LaneWidth] f32
+    lane_u32 :: #simd [LaneWidth] u32
+    lane_i32 :: #simd [LaneWidth] i32
+    
+    lane_pmm :: #simd [LaneWidth] pmm
+    lane_umm :: #simd [LaneWidth] umm
+    lane_f64 :: #simd [LaneWidth] f64
 } else {
     lane_f32 :: f32
     lane_u32 :: u32
@@ -415,50 +414,49 @@ linear_to_srgb :: proc (color: $V) -> (result: V) {
 ////////////////////////////////////////////////
 // Simd operations
 
-
-conditional_assign :: proc (mask: $M, dest: ^$D, value: D) {
-    when intrinsics.type_is_array(D) {
-        #unroll for i in 0..<len(D) {
-            conditional_assign(mask, &dest[i], value[i])
+when LaneWidth != 1 {
+    conditional_assign :: proc (mask: $M, dest: ^$D, value: D) {
+        when intrinsics.type_is_array(D) {
+            #unroll for i in 0..<len(D) {
+                conditional_assign(mask, &dest[i], value[i])
+            }
+        } else {
+            simd.masked_store(dest, value, mask)
         }
-    } else {
-        simd.masked_store(dest, value, mask)
     }
-}
-
-greater_equal :: simd.lanes_ge
-greater_than  :: simd.lanes_gt
-less_than     :: simd.lanes_lt
-shift_left    :: simd.shl
-shift_right   :: simd.shr
-horizontal_add :: simd.reduce_add_pairs
-maximum :: simd.max
-
-extract_v4 :: proc (a: lane_v4, #any_int n: u32) -> (result: v4) {
-    result.x = extract(a.x, n)
-    result.y = extract(a.y, n)
-    result.z = extract(a.z, n)
-    result.w = extract(a.w, n)
-    return result
-}
-extract_v3 :: proc (a: lane_v3, #any_int n: u32) -> (result: v3) {
-    result.x = extract(a.x, n)
-    result.y = extract(a.y, n)
-    result.z = extract(a.z, n)
-    return result
-}
-extract :: proc (a: $T/#simd[$N]$E, #any_int n: u32) -> (result: E) {
-    when intrinsics.type_is_array(T) {
-        #unroll for i in 0..<len(T) {
-            result[i] = simd.extract(a[i], n)
+    
+    greater_equal :: simd.lanes_ge
+    greater_than  :: simd.lanes_gt
+    less_than     :: simd.lanes_lt
+    shift_left    :: simd.shl
+    shift_right   :: simd.shr
+    horizontal_add :: simd.reduce_add_pairs
+    maximum :: simd.max
+    
+    extract_v4 :: proc (a: lane_v4, #any_int n: u32) -> (result: v4) {
+        result.x = extract(a.x, n)
+        result.y = extract(a.y, n)
+        result.z = extract(a.z, n)
+        result.w = extract(a.w, n)
+        return result
+    }
+    extract_v3 :: proc (a: lane_v3, #any_int n: u32) -> (result: v3) {
+        result.x = extract(a.x, n)
+        result.y = extract(a.y, n)
+        result.z = extract(a.z, n)
+        return result
+    }
+    extract :: proc (a: $T/#simd[$N]$E, #any_int n: u32) -> (result: E) {
+        when intrinsics.type_is_array(T) {
+            #unroll for i in 0..<len(T) {
+                result[i] = simd.extract(a[i], n)
+            }
+        } else {
+            result = simd.extract(a, n)
         }
-    } else {
-        result = simd.extract(a, n)
+        return result
     }
-    return result
-}
-
-when LaneWidth != 1 {} else {
+} else {
     conditional_assign :: proc (mask: $M, dest: ^$D, value: D) {
         mask := mask
         mask = mask == 0 ? 0 : 0xffffffff

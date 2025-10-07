@@ -40,6 +40,8 @@ OpenGL :: struct {
     blit_texture_handle: u32,
     
     basic_zbias_program: u32,
+    basic_zbias_transform: i32,
+    basic_zbias_texture_sampler: i32,
 }
 
 open_gl := OpenGL {
@@ -83,15 +85,55 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         gl.GenTextures(1, &open_gl.blit_texture_handle)
         
         header_code: cstring = `
-        // header code
-        `
+#version 130
+`
         vertex_code: cstring = `
-        // vertex code
-        `
+uniform mat4x4 transform;
+
+in vec2 in_uv;
+in vec4 in_color;
+
+// @volatile keep vertex outs in sync with fragment ins
+smooth out vec2 frag_uv;
+smooth out vec4 frag_color;
+
+void main (void) {
+    vec4 in_vertex = vec4(gl_Vertex.xyz, 1);
+    float z_bias = gl_Vertex.w;
+    
+    vec4 z_vertex = in_vertex;
+    z_vertex.z += z_bias;
+    
+    vec4 z_min_transform = transform * in_vertex;
+    vec4 z_max_transform = transform * z_vertex;
+    
+    gl_Position = vec4(z_min_transform.xy, z_max_transform.z, z_min_transform.w);
+    
+    // frag_uv = in_uv;
+    // frag_color = in_color;
+    
+    frag_uv = gl_MultiTexCoord0.xy;
+    frag_color = gl_Color;
+}
+`
         fragment_code: cstring = `
-        // fragment code
-        `
+uniform sampler2D texture_sampler;
+
+smooth in vec2 frag_uv;
+smooth in vec4 frag_color;
+
+out vec4 result_color;
+
+void main (void) {
+    vec4 texture_sample = texture(texture_sampler, frag_uv);
+    result_color = frag_color * texture_sample;
+}
+`
         open_gl.basic_zbias_program = gl_create_program(header_code, vertex_code, fragment_code)
+        
+        // @metaprogram
+        open_gl.basic_zbias_transform = gl.GetUniformLocation(open_gl.basic_zbias_program, "transform")
+        open_gl.basic_zbias_texture_sampler = gl.GetUniformLocation(open_gl.basic_zbias_program, "texture_sampler")
         
         glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
     }
@@ -170,6 +212,7 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
             win.gl_set_proc_address(&glLoadMatrixf,  "glLoadMatrixf")
             win.gl_set_proc_address(&glTexCoord2fv,  "glTexCoord2fv")
             win.gl_set_proc_address(&glVertex2fv,    "glVertex2fv")
+            win.gl_set_proc_address(&glVertex3fv,    "glVertex3fv")
             win.gl_set_proc_address(&glVertex4fv,    "glVertex4fv")
             win.gl_set_proc_address(&glColor4fv,     "glColor4fv")
         }
@@ -338,10 +381,10 @@ gl_create_program :: proc (header_code, vertex_code, fragment_code: cstring) -> 
     gl.LinkProgram(result)
     
     gl.ValidateProgram(result)
-    validated: b32 = false
-    gl.GetProgramiv(result, gl.VALIDATE_STATUS, cast(^i32) &validated)
+    linked: b32
+    gl.GetProgramiv(result, gl.LINK_STATUS, cast(^i32) &linked)
     
-    if !validated {
+    if !linked {
         vertex_error_bytes, fragment_error_bytes, program_error_bytes: [4096] u8
         vertex_length, fragment_length, program_length: i32
         
@@ -352,6 +395,11 @@ gl_create_program :: proc (header_code, vertex_code, fragment_code: cstring) -> 
         vertex_error   := cast(string) vertex_error_bytes[:vertex_length]
         fragment_error := cast(string) fragment_error_bytes[:fragment_length]
         program_error  := cast(string) program_error_bytes[:program_length]
+        if vertex_error   != "" do print("vertex error message:\n%\n", vertex_error)
+        if fragment_error != "" do print("fragment error message:\n%\n", fragment_error)
+        if program_error  != "" do print("program error message:\n%\n", program_error)
+        
+        assert(false)
     }
     
     return result
@@ -508,6 +556,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     clip_rect_index      := max(u16)
     current_target_index := max(u32)
     
+    projection: m4 = 1
     for header_offset: u32; header_offset < commands.push_buffer_data_at; {
         // :PointerArithmetic
         header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
@@ -518,8 +567,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             clip_rect_index = header.clip_rect_index
             clip := prep.clip_rects.data[clip_rect_index]
             
+            projection = clip.projection
             glMatrixMode(gl.PROJECTION)
-            glLoadMatrixf(&clip.projection)
+            glLoadMatrixf(&projection)
             
             if current_target_index != clip.render_target_index {
                 current_target_index = clip.render_target_index
@@ -592,6 +642,12 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 min := V4(entry.p, 0)
                 max := V4(entry.p + entry.x_axis + entry.y_axis, entry.z_bias)
                 color := entry.premultiplied_color
+                
+                gl.UseProgram(open_gl.basic_zbias_program)
+                defer gl.UseProgram(0)
+                
+                gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
+                gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
                 
                 glBegin(gl.TRIANGLES)
                 

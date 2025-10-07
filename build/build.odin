@@ -7,6 +7,7 @@ import "core:os"
 import "core:os/os2"
 import "core:strings"
 import "core:time"
+import "core:thread"
 import win "core:sys/windows"
 
 optimizations    := false ? "-o:speed" : "-o:none"
@@ -89,7 +90,7 @@ main :: proc () {
     make_directory_if_not_exists(data_dir)
     { err := os.set_current_directory(build_dir); assert(err == nil) }
     
-    // @todo(viktor): these can also be tasks
+    // @todo(viktor): these coult also be tasks
     metaprogram: Metaprogram
     if !metaprogram_collect_data(&metaprogram, code_dir) do os.exit(1)
     if !metaprogram_collect_data(&metaprogram, game_dir) do os.exit(1)
@@ -272,7 +273,8 @@ Options:
     os.exit(1)
 }
 
-Procs :: [dynamic] os2.Process
+Proc :: union { os2.Process, thread.Thread }
+Procs :: [dynamic] Proc
 Cmd   :: [dynamic] string
 
 
@@ -441,8 +443,8 @@ run_command :: proc (cmd: ^Cmd, or_exit := true, keep := false, stdout: ^string 
     process_description := os2.Process_Desc { command = cmd[:] }
     process: os2.Process
     state:   os2.Process_State
-	output:  []byte
-	error:   []byte
+	output:  [] byte
+	error:   [] byte
     err2:    os2.Error
     if async == nil {
         state, output, error, err2 = os2.process_exec(process_description, context.allocator)
