@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 #+private
 package hha
 

@@ -58,7 +58,7 @@ EntityId :: distinct u32
 Entity_Flag :: enum {
     Collides,
     MarkedForDeletion,
-    active
+    active,
 }
 Entity_Flags :: bit_set[Entity_Flag]
 
@@ -71,7 +71,7 @@ VisiblePiece :: struct {
     flags: bit_set[ enum {
         SquishAxis,
         BobUpAndDown,
-        cube
+        cube,
     }],
 }
 
@@ -282,11 +282,11 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     y_axis *= 0.4
                 }
                 
-                bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
                 if .cube in piece.flags {
                     p := transform.offset + offset
-                    push_cube(render_group, bitmap_id, p, piece.dimension.x, piece.dimension.y, color)
+                    push_cube_raw(render_group, &render_group.commands.white_bitmap, p, piece.dimension.x, piece.dimension.y, color)
                 } else {
+                    bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
                     push_bitmap(render_group, bitmap_id, transform, piece.dimension.y, offset, color, x_axis = x_axis, y_axis = y_axis)
                 }
             }

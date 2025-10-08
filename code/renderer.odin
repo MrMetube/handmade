@@ -14,16 +14,20 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: proc (commands: ^RenderCommands, push_buffer: [] u8, vertex_buffer: Array(Textured_Vertex), width, height: i32) {
+init_render_commands :: proc (commands: ^RenderCommands, width, height: i32, push_buffer: [] u8, vertex_buffer: Array(Textured_Vertex), quad_bitmap_buffer: Array(^Bitmap), white_bitmap: Bitmap) {
     commands ^= {
         width  = width, 
         height = height,
         
         push_buffer = push_buffer,
         vertex_buffer = vertex_buffer,
+        quad_bitmap_buffer = quad_bitmap_buffer,
+        
+        white_bitmap = white_bitmap,
     }
     
     clear(&commands.vertex_buffer)
+    clear(&commands.quad_bitmap_buffer)
 }
 
 prep_for_render :: proc (commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
@@ -172,28 +176,21 @@ do_tile_render_work :: proc (data: pmm) {
             dest   := targets[entry.dest_index]
             blend_render_target(dest, clip_rect, source, entry.alpha)
             
-          case .RenderEntryRectangle:
-            entry := cast(^RenderEntryRectangle) entry_data
-            header_offset += size_of(RenderEntryRectangle)
-            
-            rect := rectangle_min_dimension(entry.p, V3(entry.dim, 0))
-            draw_rectangle_fill_color_axis_aligned(target, clip_rect, rect, entry.premultiplied_color)
-            
-          case .RenderEntryBitmap:
-            entry := cast(^RenderEntryBitmap) entry_data
-            header_offset += size_of(RenderEntryBitmap)
-            
-            draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis.xy, entry.y_axis.xy, entry.bitmap, entry.premultiplied_color)
-            
-          case .RenderEntryCube:
-            entry := cast(^RenderEntryCube) entry_data
-            header_offset += size_of(RenderEntryCube)
-            
-            unimplemented("move the software renderer to 3D")
-            
           case .RenderEntry_Textured_Quads:
             entry := cast(^RenderEntry_Textured_Quads) entry_data
             header_offset += size_of(RenderEntry_Textured_Quads)
+            unused(entry)
+            
+            unused(draw_rectangle_fill_color_axis_aligned)
+            unused(draw_rectangle_fill_color)
+            unused(draw_rectangle_with_texture)
+            
+            // bitmap was this
+            // draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis.xy, entry.y_axis.xy, entry.bitmap, entry.premultiplied_color)
+            
+            // rectangle was this
+            // rect := rectangle_min_dimension(entry.p, V3(entry.dim, 0))
+            // draw_rectangle_fill_color_axis_aligned(target, clip_rect, rect, entry.premultiplied_color)
             
             unimplemented("move the software renderer to 3D")
         }
@@ -207,13 +204,6 @@ do_tile_render_work :: proc (data: pmm) {
 MaskFF :: 0xffffffff
 Inv255 :: 1.0 / 255
 MaxColorValue :: 255 * 255
-
-// 133Mcy
-// 133Mcy - with clear
-//  46Mcy - with blend !LETS GO!
-//  60Mcy 4  /// (133 / 60 - 1) * 100
-//  46Mcy 8  /// (133 / 46 - 1) * 100
-//  38Mcy 16 /// (133 / 36 - 1) * 100
 
 clear_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
     timed_function()

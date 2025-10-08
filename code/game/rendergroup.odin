@@ -28,6 +28,7 @@ Bitmap :: struct {
     // @todo(viktor): the length of the slice and either width or height are redundant
     memory: [] Color,
     
+    // @cleanup with the next asset pack
     align_percentage:  v2,
     width_over_height: f32,
     
@@ -44,7 +45,7 @@ RenderCommands :: struct {
     
     // @note(viktor): Packed array of disjoint elements.
     // Filled with pairs of [RenderEntryHeader + SomeRenderEntry]
-    // In between the entries is a linked list of RenderEntryCips. See '.rects'.
+    // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
     push_buffer: [] u8, // :Array or :Allocator
     push_buffer_data_at: u32,
     
@@ -54,6 +55,8 @@ RenderCommands :: struct {
     rects: Deque(RenderEntryClip),
     
     vertex_buffer: Array(Textured_Vertex),
+    quad_bitmap_buffer: Array(^Bitmap),
+    white_bitmap: Bitmap,
 }
 
 @(common)
@@ -81,7 +84,7 @@ RenderGroup :: struct {
     
     current_clip_rect_index: u16,
     
-    current_quads: RenderEntry_Textured_Quads,
+    current_quads: ^RenderEntry_Textured_Quads,
 }
 
 Transform :: struct {
@@ -100,49 +103,15 @@ Camera_Flags :: bit_set[ enum {
 
 RenderEntryType :: enum u8 {
     None,
-    RenderEntry_Textured_Quads,
-    RenderEntryBitmap,
-    RenderEntryRectangle,
-    RenderEntryCube,
     RenderEntryClip,
     RenderEntryBlendRenderTargets,
+    RenderEntry_Textured_Quads,
 }
 
 @(common)
 RenderEntryHeader :: struct {
     clip_rect_index: u16,
     type: RenderEntryType,
-}
-
-@(common)
-RenderEntryBitmap :: struct {
-    bitmap: Bitmap,
-    premultiplied_color: v4,
-    
-    p: v3,
-    // @note(viktor): X and Y axis are _already scaled_ by the full dimension.
-    x_axis: v3,
-    y_axis: v3,
-    z_bias: f32,
-}
-
-@(common)
-RenderEntryRectangle :: struct {
-    bitmap: Bitmap,
-    premultiplied_color: v4,
-    
-    p:   v3,
-    dim: v2,
-}
-
-@(common)
-RenderEntryCube :: struct {
-    bitmap: Bitmap,
-    premultiplied_color: v4,
-    
-    p: v3, // @note(viktor): This is the middle of the top face of the cube
-    height: f32,
-    radius: f32,
 }
 
 @(common)
@@ -163,8 +132,8 @@ RenderEntryBlendRenderTargets :: struct {
 
 @(common)
 RenderEntry_Textured_Quads :: struct {
-    bitmaps:  [] ^Bitmap,
-    vertices: [] Textured_Vertex, // a slice into commands.vertices with 4 vertices per quad
+    quad_count: u32,
+    bitmap_offset: u32,
 }
 
 @(common)
@@ -217,14 +186,12 @@ default_upright_transform :: proc () -> Transform { return { scale = 1, is_uprig
 ////////////////////////////////////////////////
 
 push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+    reset_quads := true
     type: RenderEntryType
     switch typeid_of(T) {
-      case RenderEntryBitmap:             type = .RenderEntryBitmap
-      case RenderEntryRectangle:          type = .RenderEntryRectangle
-      case RenderEntryCube:               type = .RenderEntryCube
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
       case RenderEntryClip:               type = .RenderEntryClip
-      case RenderEntry_Textured_Quads:    type = .RenderEntry_Textured_Quads
+      case RenderEntry_Textured_Quads:    type = .RenderEntry_Textured_Quads; reset_quads = false
       case:                               unreachable()
     }
     assert(type != .None)
@@ -235,6 +202,10 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
         type = type,
     }
     result = render_group_push_size(group, T)
+    
+    if reset_quads {
+        group.current_quads = nil
+    }
     
     return result
 }
@@ -276,7 +247,7 @@ push_setup :: proc (group: ^RenderGroup, rect: Rectangle2i, render_target_index:
 
 push_clip_rect :: proc (group: ^RenderGroup, rect: Rectangle2) -> (result: u16) {
     clip := round_outer(rect)
-    entry := push_setup(group, clip, group.last_render_target, group.last_projection)
+    push_setup(group, clip, group.last_render_target, group.last_projection)
     result = group.current_clip_rect_index
     return result
 }
@@ -334,6 +305,18 @@ push_camera :: proc (group: ^RenderGroup, focal_length: f32, x, y, z, p: v3, fla
 
 ////////////////////////////////////////////////
 
+get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Textured_Quads) {
+    if group.current_quads == nil {
+        group.current_quads = push_render_element(group, RenderEntry_Textured_Quads)
+        group.current_quads.bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count
+    }
+    
+    result = group.current_quads
+    return result
+}
+
+////////////////////////////////////////////////
+
 push_blend_render_targets :: proc (group: ^RenderGroup, source_index: u32, alpha: f32) {
     push_sort_barrier(group)
     entry := push_render_element(group, RenderEntryBlendRenderTargets)
@@ -352,10 +335,9 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
     group.commands.clear_color = store_color(color)
 }
 
-push_bitmap :: proc (
-    group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1},
-) {
+////////////////////////////////////////////////
+
+push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1}) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap != nil && bitmap.texture_handle != 0 {
@@ -366,22 +348,13 @@ push_bitmap :: proc (
     }
 }
 
-push_bitmap_raw :: proc (
-    group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, 
-    offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis2 := v2{1, 0}, y_axis2 := v2{0, 1},
-) {
+push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis2 := v2{1, 0}, y_axis2 := v2{0, 1}) {
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle != 0)
     
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis2, y_axis2)
     
     size := used_dim.size
-    
-    // @hack find a better place for this allocation
-    bitmaps := make([] ^Bitmap, 1, context.allocator)
-    element := push_render_element(group, RenderEntry_Textured_Quads)
-    element.bitmaps = bitmaps
-    element.bitmaps[0] = bitmap
     
     premultiplied_color := store_color(color)
     
@@ -404,46 +377,87 @@ push_bitmap_raw :: proc (
     
     color := v4_to_rgba(premultiplied_color)
     
-    element.vertices = append(&group.commands.vertex_buffer, Textured_Vertex {
-        p = min,
-        uv = min_uv,
-        color = color,
-    }, Textured_Vertex {
-        p = {max.x, min.y, min.z, min.w},
-        uv = {max_uv.x, min_uv.y},
-        color = color,
-    }, Textured_Vertex {
-        p = max,
-        uv = max_uv,
-        color = color,
-    }, Textured_Vertex {
-        p = {min.x, max.y, max.z, max.w},
-        uv = {min_uv.x, max_uv.y},
-        color = color,
-    })
+    ////////////////////////////////////////////////
+    
+    entry := get_current_quads(group)
+    entry.quad_count += 1
+    
+    append(&group.commands.quad_bitmap_buffer, bitmap)
+    append(&group.commands.vertex_buffer, 
+        Textured_Vertex {min, min_uv, color}, 
+        Textured_Vertex {{max.x, min.y, min.z, min.w}, {max_uv.x, min_uv.y}, color}, 
+        Textured_Vertex {max, max_uv, color}, 
+        Textured_Vertex {{min.x, max.y, max.z, max.w}, {min_uv.x, max_uv.y}, color},
+    )
 }
 
 push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
+    
     // @note(viktor): the handle is filled out always at the end of the frame in manage_textures
-    if bitmap != nil && bitmap.texture_handle != 0 {
-        assert(bitmap.width_over_height != 0)
-        assert(bitmap.texture_handle != 0)
-        
-        element := push_render_element(group, RenderEntryCube)
-        element ^= {
-            premultiplied_color = store_color(color),
-            
-            bitmap = bitmap^,
-            
-            p      = p,
-            height = height,
-            radius = radius,
-        }
-    } else {
+    if bitmap == nil || bitmap.texture_handle == 0 {
         load_bitmap(group.assets, id, false)
         group.missing_asset_count += 1
+    } else {
+        push_cube_raw(group, bitmap, p, radius, height, color)
     }
+}
+
+push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
+    assert(bitmap.width_over_height != 0)
+    assert(bitmap.texture_handle != 0)
+    
+    premultiplied_color := store_color(color)
+    
+    p := p
+    n := p
+    p.xy += radius
+    n.xy -= radius
+    n.z  -= height
+    
+    p0 := v4{n.x, n.y, n.z, 0}
+    p2 := v4{n.x, p.y, n.z, 0}
+    p4 := v4{p.x, n.y, n.z, 0}
+    p6 := v4{p.x, p.y, n.z, 0}
+    p1 := v4{n.x, n.y, p.z, 0}
+    p3 := v4{n.x, p.y, p.z, 0}
+    p5 := v4{p.x, n.y, p.z, 0}
+    p7 := v4{p.x, p.y, p.z, 0}
+    
+    top_color := premultiplied_color
+    bot_color := v4{0, 0, 0, 1}
+    
+    ct := v4_to_rgba(V4(top_color.rgb * .75, top_color.a))
+    cb := v4_to_rgba(V4(bot_color.rgb * .75, bot_color.a))
+    
+    bo := v4_to_rgba(bot_color)
+    op := v4_to_rgba(top_color)
+    
+    t0 := v2{0, 0}
+    t1 := v2{1, 0}
+    t2 := v2{1, 1}
+    t3 := v2{0, 1}
+    
+    entry := get_current_quads(group)
+    entry.quad_count += 6
+    
+    append(&group.commands.quad_bitmap_buffer, 
+        bitmap,
+        bitmap,
+        bitmap,
+        bitmap,
+        bitmap,
+        bitmap,
+    )
+    
+    append(&group.commands.vertex_buffer, [] Textured_Vertex {
+        {p0, t0, cb}, {p1, t1, ct}, {p3, t2, ct}, {p2, t3, cb}, 
+        {p0, t0, bo}, {p2, t1, bo}, {p6, t2, bo}, {p4, t3, bo}, 
+        {p0, t0, cb}, {p4, t1, cb}, {p5, t2, ct}, {p1, t3, ct}, 
+        {p7, t0, ct}, {p5, t1, ct}, {p4, t2, cb}, {p6, t3, cb}, 
+        {p7, t0, ct}, {p6, t1, cb}, {p2, t2, cb}, {p3, t3, ct}, 
+        {p7, t0, op}, {p3, t1, op}, {p1, t2, op}, {p5, t3, op}, 
+    })
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -454,12 +468,28 @@ push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Trans
     basis := project_with_transform(transform, rect.min)
     dimension := get_dimension(rect)
     
-    element := push_render_element(group, RenderEntryRectangle)
-    element ^= {
-        premultiplied_color = store_color(color),
-        p   = basis,
-        dim = dimension.xy,
-    }
+    color := color
+    color = srgb_to_linear(color)
+    color = store_color(color)
+    
+    c   := v4_to_rgba(color)
+    p   := basis
+    dim := dimension.xy
+    
+    p0 := V4(p, 0)
+    p1 := V4(p + {dim.x, 0, 0}, 0)
+    p2 := V4(p + {0, dim.y, 0}, 0)
+    p3 := V4(p + {dim.x, dim.y, 0}, 0)
+    
+    entry := get_current_quads(group)
+    entry.quad_count += 1
+    append(&group.commands.quad_bitmap_buffer, &group.commands.white_bitmap)
+    append(&group.commands.vertex_buffer, 
+        Textured_Vertex {p0, 0.5, c},
+        Textured_Vertex {p1, 0.5, c},
+        Textured_Vertex {p2, 0.5, c},
+        Textured_Vertex {p3, 0.5, c},
+    )
 }
 
 push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
@@ -487,13 +517,6 @@ push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform
     // Left and Right
     push_rectangle(group, rectangle_center_half_dimension(center_left,  half_dim_vertical), transform, color)
     push_rectangle(group, rectangle_center_half_dimension(center_right, half_dim_vertical), transform, color)
-}
-
-begin_quads :: proc (group: ^RenderGroup) {
-    
-}
-end_quads :: proc (group: ^RenderGroup) {
-    
 }
 
 ////////////////////////////////////////////////

@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 import hha "../asset_builder"

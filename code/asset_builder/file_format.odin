@@ -55,7 +55,7 @@ AssetTypeId :: enum u32 {
     Puhp,
     
     // @note(viktor): Cutscene
-    OpeningCutscene
+    OpeningCutscene,
 }
 
 AssetFontType :: enum u32 {

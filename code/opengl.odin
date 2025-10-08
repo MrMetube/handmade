@@ -12,8 +12,7 @@ GlAttribs := [?] i32 {
     
     win.WGL_CONTEXT_FLAGS_ARB, (win.WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
     
-    // win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
     0,
 }
 
@@ -43,10 +42,13 @@ OpenGL :: struct {
     basic_zbias_program: u32,
     basic_zbias_transform: i32,
     basic_zbias_texture_sampler: i32,
+    basic_zbias_in_p: u32,
+    basic_zbias_in_uv: u32,
+    basic_zbias_in_color: u32,
 }
 
 open_gl := OpenGL {
-    default_texture_format = gl.RGBA8
+    default_texture_format = gl.RGBA8,
 }
 
 ////////////////////////////////////////////////
@@ -90,6 +92,8 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         vertex_code: cstring = `
 uniform mat4x4 transform;
 
+// @volatile keep vertex ins in sync with renderloop code
+in vec4 in_p;
 in vec2 in_uv;
 in vec4 in_color;
 
@@ -98,8 +102,8 @@ smooth out vec2 frag_uv;
 smooth out vec4 frag_color;
 
 void main (void) {
-    vec4 in_vertex = vec4(gl_Vertex.xyz, 1);
-    float z_bias = gl_Vertex.w;
+    vec4 in_vertex = vec4(in_p.xyz, 1);
+    float z_bias = in_p.w;
     
     vec4 z_vertex = in_vertex;
     z_vertex.z += z_bias;
@@ -109,16 +113,14 @@ void main (void) {
     
     gl_Position = vec4(z_min_transform.xy, z_max_transform.z, z_min_transform.w);
     
-    // frag_uv = in_uv;
-    // frag_color = in_color;
-    
-    frag_uv = gl_MultiTexCoord0.xy;
-    frag_color = gl_Color;
+    frag_uv = in_uv;
+    frag_color = in_color;
 }
 `
         fragment_code: cstring = `
 uniform sampler2D texture_sampler;
 
+// @volatile see vertex shader
 smooth in vec2 frag_uv;
 smooth in vec4 frag_color;
 
@@ -134,6 +136,9 @@ void main (void) {
         // @metaprogram
         open_gl.basic_zbias_transform = gl.GetUniformLocation(open_gl.basic_zbias_program, "transform")
         open_gl.basic_zbias_texture_sampler = gl.GetUniformLocation(open_gl.basic_zbias_program, "texture_sampler")
+        open_gl.basic_zbias_in_p = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_p")
+        open_gl.basic_zbias_in_uv = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_uv")
+        open_gl.basic_zbias_in_color = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_color")
         
         glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
     }
@@ -342,8 +347,8 @@ gl_allocate_texture :: proc (width, height: i32, data: pmm) -> (result: u32) {
     
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP)
-    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     
     gl.BindTexture(gl.TEXTURE_2D, 0)
     
@@ -610,123 +615,6 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             gl_rectangle(v3{0, 0, 0}, V3(commands_dim, 0), v4{1, 1, 1, entry.alpha})
             
-          case .RenderEntryRectangle:
-            entry := cast(^RenderEntryRectangle) entry_data
-            header_offset += size_of(RenderEntryRectangle)
-            
-            color := entry.premultiplied_color
-            color.r = square(color.r)
-            color.g = square(color.g)
-            color.b = square(color.b)
-            
-            gl.Disable(gl.TEXTURE_2D)
-            defer gl.Enable(gl.TEXTURE_2D)
-            
-            gl_rectangle(entry.p, entry.p + V3(entry.dim, 0), color)
-                
-          case .RenderEntryBitmap:
-            entry := cast(^RenderEntryBitmap) entry_data
-            header_offset += size_of(RenderEntryBitmap)
-            
-            bitmap := entry.bitmap
-            assert(bitmap.texture_handle != 0)
-            
-            if bitmap.width != 0 && bitmap.height != 0 {
-                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
-                
-                d_texel := 1 / vec_cast(f32, bitmap.width, bitmap.height)
-                
-                // @note(viktor): step in one texel because the bitmaps are padded on all sides with a blank strip of pixels
-                min_uv := 0 + d_texel
-                max_uv := 1 - d_texel
-                
-                min := V4(entry.p, 0)
-                max := V4(entry.p + entry.x_axis + entry.y_axis, entry.z_bias)
-                color := entry.premultiplied_color
-                
-                gl.UseProgram(open_gl.basic_zbias_program)
-                defer gl.UseProgram(0)
-                
-                gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
-                gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
-                
-                glBegin(gl.TRIANGLES)
-                
-                glColor4f(color.r, color.g, color.b, color.a)
-                
-                // @note(viktor): Lower triangle
-                glTexCoord2f(min_uv.x, min_uv.y)
-                glVertex4f(min.x, min.y, min.z, min.w)
-                
-                glTexCoord2f(max_uv.x, min_uv.y)
-                glVertex4f(max.x, min.y, min.z, min.w)
-                
-                glTexCoord2f(max_uv.x, max_uv.y)
-                glVertex4f(max.x, max.y, max.z, max.w)
-                
-                // @note(viktor): Upper triangle
-                glTexCoord2f(min_uv.x, min_uv.y)
-                glVertex4f(min.x, min.y, min.z, min.w)
-                
-                glTexCoord2f(max_uv.x, max_uv.y)
-                glVertex4f(max.x, max.y, max.z, max.w)
-                
-                glTexCoord2f(min_uv.x, max_uv.y)
-                glVertex4f(min.x, max.y, max.z, max.w)
-                
-                glEnd()
-            }
-            
-          case .RenderEntryCube:
-            entry := cast(^RenderEntryCube) entry_data
-            header_offset += size_of(RenderEntryCube)
-            
-            bitmap := entry.bitmap
-            assert(bitmap.texture_handle != 0)
-            
-            if bitmap.width != 0 && bitmap.height != 0 {
-                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
-                
-                gl.Disable(gl.TEXTURE_2D)
-                defer gl.Enable(gl.TEXTURE_2D)
-                
-                glBegin(gl.TRIANGLES)
-                p := entry.p
-                n := entry.p
-                p.xy += entry.radius
-                n.xy -= entry.radius
-                n.z  -= entry.height
-                
-                p0 := v3{n.x, n.y, n.z}
-                p2 := v3{n.x, p.y, n.z}
-                p4 := v3{p.x, n.y, n.z}
-                p6 := v3{p.x, p.y, n.z}
-                p1 := v3{n.x, n.y, p.z}
-                p3 := v3{n.x, p.y, p.z}
-                p5 := v3{p.x, n.y, p.z}
-                p7 := v3{p.x, p.y, p.z}
-
-                top_color := entry.premultiplied_color
-                bot_color := v4{0, 0, 0, 1}
-                
-                ct := V4(top_color.rgb * .75, top_color.a)
-                cb := V4(bot_color.rgb * .75, top_color.a)
-                                
-                t0 := v2{0, 0}
-                t1 := v2{1, 0}
-                t2 := v2{1, 1}
-                t3 := v2{0, 1}
-                
-                gl_quad({p0, p1, p3, p2}, {t0, t1, t2, t3}, {cb, ct, ct, cb})
-                gl_quad({p0, p2, p6, p4}, {t0, t1, t2, t3}, bot_color)
-                gl_quad({p0, p4, p5, p1}, {t0, t1, t2, t3}, {cb, cb, ct, ct})
-                gl_quad({p7, p5, p4, p6}, {t0, t1, t2, t3}, {ct, ct, cb, cb})
-                gl_quad({p7, p6, p2, p3}, {t0, t1, t2, t3}, {ct, cb, cb, ct})
-                gl_quad({p7, p3, p1, p5}, {t0, t1, t2, t3}, top_color)
-                
-                glEnd()
-            }
-            
           case .RenderEntry_Textured_Quads:
             entry := cast(^RenderEntry_Textured_Quads) entry_data
             header_offset += size_of(RenderEntry_Textured_Quads)
@@ -734,32 +622,33 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             gl.UseProgram(open_gl.basic_zbias_program)
             defer gl.UseProgram(0)
             
+            // @volatile see vertex shader
+            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_uv)
+            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_color)
+            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_p)
+            
+            defer {
+                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_uv)
+                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_color)
+                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_p)
+            }
+            
+            data_base := cast(umm) raw_data(commands.vertex_buffer.data)
+            // @metaprogram
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), data_base + offset_of(Textured_Vertex, uv))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), data_base + offset_of(Textured_Vertex, color))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), data_base + offset_of(Textured_Vertex, p))
+            
             gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
             gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
             
-            for bitmap, quad_index in entry.bitmaps {
-                vertices := entry.vertices[quad_index*4 :][: 4]
-                
+            entry_bitmaps := slice(commands.quad_bitmap_buffer)[entry.bitmap_offset :][: entry.quad_count]
+            
+            for bitmap, index in entry_bitmaps {
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
-                glBegin(gl.QUADS)
-                defer glEnd()
-                
-                glColor4ub(&vertices[0].color)
-                glTexCoord2fv(&vertices[0].uv)
-                glVertex4fv(&vertices[0].p)
-                
-                glColor4ub(&vertices[1].color)
-                glTexCoord2fv(&vertices[1].uv)
-                glVertex4fv(&vertices[1].p)
-                
-                glColor4ub(&vertices[2].color)
-                glTexCoord2fv(&vertices[2].uv)
-                glVertex4fv(&vertices[2].p)
-                
-                glColor4ub(&vertices[3].color)
-                glTexCoord2fv(&vertices[3].uv)
-                glVertex4fv(&vertices[3].p)
+                vertex_index := cast(i32) index*4
+                gl.DrawArrays(gl.QUADS, vertex_index, 4)
             }
             
           case:
@@ -770,11 +659,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     gl.BindFramebuffer(gl.READ_FRAMEBUFFER, open_gl.framebuffer_handles.data[0])
     gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
     gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
-    gl.BlitFramebuffer(
-        0, 0, draw_dim.x, draw_dim.y, 
-        draw_region.min.x, draw_region.min.y, draw_region.max.x, draw_region.max.y, 
-        gl.COLOR_BUFFER_BIT, gl.LINEAR
-    )
+    
+    s := draw_dim
+    d := draw_region
+    gl.BlitFramebuffer(0, 0, s.x, s.y, d.min.x, d.min.y, d.max.x, d.max.y, gl.COLOR_BUFFER_BIT, gl.LINEAR)
 }
 
 ////////////////////////////////////////////////
@@ -785,35 +673,6 @@ gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i
     
     window_dim := get_dimension(draw_region)
     gl.Viewport(0, 0, window_dim.x, window_dim.y)
-}
-
-gl_quad :: proc (p: [4] v3, t: [4] v2, c: [4] v4) {
-    p, t, c := p, t, c
-    // @note(viktor): Lower triangle
-    glColor4fv(&c[0])
-    glTexCoord2fv(&t[0])
-    glVertex3fv(&p[0])
-    
-    glColor4fv(&c[1])
-    glTexCoord2fv(&t[1])
-    glVertex3fv(&p[1])
-    
-    glColor4fv(&c[2])
-    glTexCoord2fv(&t[2])
-    glVertex3fv(&p[2])
-    
-    // @note(viktor): Upper triangle
-    glColor4fv(&c[0])
-    glTexCoord2fv(&t[0])
-    glVertex3fv(&p[0])
-    
-    glColor4fv(&c[2])
-    glTexCoord2fv(&t[2])
-    glVertex3fv(&p[2])
-    
-    glColor4fv(&c[3])
-    glTexCoord2fv(&t[3])
-    glVertex3fv(&p[3])
 }
 
 gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
@@ -845,6 +704,7 @@ gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1
 }
 
 ////////////////////////////////////////////////
+// @cleanup get rid of as many as possible
 
 glBegin:        proc (_: u32)
 glEnd:          proc ()
@@ -859,6 +719,7 @@ glVertex2f:     proc (_,_: f32)
 glVertex3f:     proc (_,_,_: f32)
 glVertex4f:     proc (_,_,_,_: f32)
 glColor4f:      proc (_,_,_,_: f32)
+glColor4ub:     proc (_,_,_,_: u8)
 
 glLoadMatrixf:  proc (_: ^m4)
 glTexCoord2fv:  proc (_: ^v2)
@@ -866,4 +727,3 @@ glVertex2fv:    proc (_: ^v2)
 glVertex3fv:    proc (_: ^v3)
 glVertex4fv:    proc (_: ^v4)
 glColor4fv:     proc (_: ^v4)
-glColor4ub:     proc (_: ^Color)

@@ -7,7 +7,7 @@ Brain :: struct {
     kind: BrainKind,
     using blah: struct #raw_union {
         slots: [BrainSlotMaxCount] ^Entity,
-        using parts: BrainParts
+        using parts: BrainParts,
     },
 }
 

@@ -689,7 +689,7 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             tooltip := debug_print("average %cy - % %",
                 view_magnitude_decimal(entry.stats.avg),
                 view_magnitude(cast(u64) entry.stats.count), 
-                entry.stats.count == 1 ? "hit" : "hits"
+                entry.stats.count == 1 ? "hit" : "hits",
             )
             add_tooltip(debug, tooltip)
         }

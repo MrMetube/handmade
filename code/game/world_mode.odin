@@ -469,7 +469,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
 BaseCamHeight :: 8
 
 init_hitpoints :: proc (entity: ^Entity, count: u32) {
-    for i in 0..<count {
+    for _ in 0..<count {
         append(&entity.hit_points, HitPoint { filled_amount = HitPointPartCount })
     }
 }

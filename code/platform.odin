@@ -268,10 +268,20 @@ main :: proc () {
     
     frame_arena := Arena { allocation_flags = { .not_restored } }
     
-    // @todo(viktor): decide what our push_buffer size is
+    // @todo(viktor): decide what our sizes should be
     render_commands: RenderCommands
     push_buffer := push(&frame_arena, u8, 32 * Megabyte)
-    vertex_buffer := make_array(&frame_arena, Textured_Vertex, 65536)
+    vertex_buffer := make_array(&frame_arena, Textured_Vertex, 1 << 16)
+    quad_bitmap_buffer := make_array(&frame_arena, ^Bitmap, 1 << 16)
+    
+    // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
+    white_bitmap: Bitmap
+    white_bitmap.memory = push(&frame_arena, Color, 1)
+    white_bitmap.memory[0] = 255
+    white_bitmap.width = 1
+    white_bitmap.height = 1
+    white_bitmap.width_over_height = 1
+    white_bitmap.texture_handle = gl_allocate_texture(1, 1, raw_data(white_bitmap.memory))
     
     game_memory := GameMemory {
         high_priority_queue = auto_cast &high_queue,
@@ -306,7 +316,7 @@ main :: proc () {
         // Input
         input_processed := game.begin_timed_block("input processed")
         
-        init_render_commands(&render_commands, push_buffer, vertex_buffer, GlobalBackBuffer.width, GlobalBackBuffer.height)
+        init_render_commands(&render_commands, GlobalBackBuffer.width, GlobalBackBuffer.height, push_buffer, vertex_buffer, quad_bitmap_buffer, white_bitmap)
         
         window_dim := get_window_dimension(window)
         draw_region := aspect_ratio_fit({render_commands.width, render_commands.height}, window_dim)

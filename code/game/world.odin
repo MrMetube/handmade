@@ -363,7 +363,7 @@ get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> (resul
     if arena != nil && result == nil {
         result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk, no_clear())
         result ^= {
-            chunk = chunk_p
+            chunk = chunk_p,
         }
         
         list_push(next_pointer_of_the_chunks_previous_chunk, result) 
