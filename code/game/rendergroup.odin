@@ -74,7 +74,7 @@ RenderGroup :: struct {
     cam_x: v3,
     cam_y: v3,
     cam_z: v3,
-    last_projection:    m4,
+    last_projection:    m4_inv,
     last_clip_rect:     Rectangle2i,
     last_render_target: u32,
     
@@ -154,18 +154,6 @@ UsedBitmapDim :: struct {
 
 ////////////////////////////////////////////////
 
-// @cleanup remove both of these
-Camera_Params :: struct {
-    focal_length: f32,
-}
-
-get_standard_camera_params :: proc (focal_length: f32) -> (result: Camera_Params) {
-    result.focal_length = focal_length
-    return result
- }
-
-////////////////////////////////////////////////
-
 init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
     group ^= {
         assets   = assets,
@@ -175,7 +163,7 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         generation_id = generation_id,
     }
     
-    push_setup(group, rectangle_zero_dimension(commands.width, commands.height), 0, identity())
+    push_setup(group, rectangle_zero_dimension(commands.width, commands.height), 0, {identity(), identity()})
 }
 
 ////////////////////////////////////////////////
@@ -226,16 +214,16 @@ render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T)
 
 ////////////////////////////////////////////////
 
-push_setup :: proc (group: ^RenderGroup, rect: Rectangle2i, render_target_index: u32, projection: m4) -> (result: ^RenderEntryClip) {
+push_setup :: proc (group: ^RenderGroup, rect: Rectangle2i, render_target_index: u32, projection: m4_inv) -> (result: ^RenderEntryClip) {
     result = push_render_element(group, RenderEntryClip)
     
     result.clip_rect           = rect
     result.render_target_index = render_target_index
-    result.projection          = projection
+    result.projection          = projection.forward
     
-    group.last_projection    = result.projection
-    group.last_render_target = result.render_target_index
-    group.last_clip_rect     = result.clip_rect
+    group.last_projection    = projection
+    group.last_render_target = render_target_index
+    group.last_clip_rect     = rect
     
     current_clip_rect_index := cast(u16) group.commands.clip_rects_count
     deque_append(&group.commands.rects, result)
@@ -273,17 +261,10 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
     group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
 }
 
-push_perspective :: proc (group: ^RenderGroup, focal_length: f32, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}, flags := Camera_Flags {}) {
-    push_camera(group, focal_length, x, y, z, p, flags)
-}
-push_orthographic :: proc (group: ^RenderGroup, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}, flags := Camera_Flags {}) {
-    push_camera(group, 1, x, y, z, p, flags + { .orthographic })
-}
-
-push_camera :: proc (group: ^RenderGroup, focal_length: f32, x, y, z, p: v3, flags: Camera_Flags) {
+push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
     
-    projection: m4
+    projection: m4_inv
     if .orthographic in flags {
         projection = orthographic_projection(aspect_width_over_height)
     } else { 
@@ -296,23 +277,12 @@ push_camera :: proc (group: ^RenderGroup, focal_length: f32, x, y, z, p: v3, fla
         group.cam_y = y
         group.cam_z = z
     }
-    camera_transform := camera_transform(x, y, z, p)
+    camera := camera_transform(x, y, z, p)
     
-    projection = projection * camera_transform
+    projection.forward  = projection.forward * camera.forward
+    projection.backward = camera.backward * projection.backward
     
     push_setup(group, group.last_clip_rect, group.last_render_target, projection)
-}
-
-////////////////////////////////////////////////
-
-get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Textured_Quads) {
-    if group.current_quads == nil {
-        group.current_quads = push_render_element(group, RenderEntry_Textured_Quads)
-        group.current_quads.bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count
-    }
-    
-    result = group.current_quads
-    return result
 }
 
 ////////////////////////////////////////////////
@@ -349,6 +319,16 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
         Textured_Vertex {p1, t1, c1}, 
         Textured_Vertex {p2, t2, c2}, 
     )
+}
+
+get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Textured_Quads) {
+    if group.current_quads == nil {
+        group.current_quads = push_render_element(group, RenderEntry_Textured_Quads)
+        group.current_quads.bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count
+    }
+    
+    result = group.current_quads
+    return result
 }
 
 push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1}) {
@@ -474,8 +454,8 @@ push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Trans
     
     p0 := V4(p, 0)
     p1 := V4(p + {dimension.x, 0, 0}, 0)
-    p2 := V4(p + {0, dimension.y, 0}, 0)
-    p3 := V4(p + {dimension.x, dimension.y, 0}, 0)
+    p2 := V4(p + {dimension.x, dimension.y, 0}, 0)
+    p3 := V4(p + {0, dimension.y, 0}, 0)
     
     t: v2 = 0.5
     push_quad(group, &group.commands.white_bitmap, p0, p1, p2, p3, t, t, t, t, c, c, c, c)
@@ -489,7 +469,6 @@ push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform
     center         := get_center(rec)
     half_dimension := get_dimension(rec) * 0.5
     
-    // Top and Bottom
     center_top    := center + {0, half_dimension.y, 0}
     center_bottom := center - {0, half_dimension.y, 0}
     center_left   := center - {half_dimension.x, 0, 0}
@@ -500,6 +479,7 @@ push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform
     half_dim_horizontal := v3{half_dimension.x+half_thickness.x, half_thickness.y, half_dimension.z}
     half_dim_vertical   := v3{half_thickness.x, half_dimension.y-half_thickness.y, half_dimension.z}
     
+    // Top and Bottom
     push_rectangle(group, rectangle_center_half_dimension(center_top,    half_dim_horizontal), transform, color)
     push_rectangle(group, rectangle_center_half_dimension(center_bottom, half_dim_horizontal), transform, color)
     
@@ -518,10 +498,7 @@ store_color :: proc (color: v4) -> (result: v4) {
 
 ////////////////////////////////////////////////
 
-get_used_bitmap_dim :: proc (
-    group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, 
-    offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1},
-) -> (result: UsedBitmapDim) {
+get_used_bitmap_dim :: proc (group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1}) -> (result: UsedBitmapDim) {
     result.size  = v2{bitmap.width_over_height, 1} * height
     result.align = use_alignment ? bitmap.align_percentage * result.size : 0
     result.p.z   = offset.z
@@ -537,20 +514,19 @@ project_with_transform :: proc (transform: Transform, p: v3) -> (result: v3) {
     return result
 }
 
-unproject_with_transform :: proc (group: ^RenderGroup, transform: Transform, pixel_p: v2) -> (result: v3) {
-    // @todo(viktor): make this conform with project with transform
+unproject_with_transform :: proc (group: ^RenderGroup, transform: Transform, pixel_p: v2, world_z: f32) -> (result: v3) {
+    probe := v4{0, 0, world_z, 1}
+    probe = multiply(group.last_projection.forward, probe)
+    clip_z := probe.z / probe.w
+    
     screen_center := group.screen_size * 0.5
-    result.xy = (pixel_p - screen_center)
     
-    aspect := group.screen_size.x / group.screen_size.y
-    result.x *= 0.5 / group.screen_size.x
-    result.y *= 0.5 / (group.screen_size.y * aspect)
+    clip_p := V3(pixel_p - screen_center, 0)
+    clip_p.xy *= 2 / group.screen_size
+    clip_p.z = clip_z
     
-    result.z  = transform.offset.z
-    
-    result.xy *= (- result.z)
-    
-    result -= transform.offset
+    world_p := multiply(group.last_projection.backward, clip_p)
+    result = world_p - transform.offset
     
     return result
 }
@@ -563,10 +539,9 @@ get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> (result: Rectang
 
 get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle3) {
     transform := default_flat_transform()
-    transform.offset.z = -distance_from_camera
     
-    min := unproject_with_transform(group, transform, 0)
-    max := unproject_with_transform(group, transform, group.screen_size)
+    min := unproject_with_transform(group, transform, 0, distance_from_camera)
+    max := unproject_with_transform(group, transform, group.screen_size, distance_from_camera)
     
     result = rectangle_min_max(min, max)
     

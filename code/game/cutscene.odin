@@ -238,15 +238,14 @@ render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mo
 }
 
 render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene: Layered_Scene, t_normal: f32) {
-    camera_params := get_standard_camera_params(0.25)
+    focal_length :: 0.25
     
     scene_fade_value: f32 = 1
     if t_normal < scene.t_fade_in {
         scene_fade_value = clamp_01_map_to_range(cast(f32) 0, t_normal, scene.t_fade_in)
     }
     
-    match_vector  := #partial AssetVector { .ShotIndex = cast(f32) scene.shot_index }
-    weight_vector := #partial AssetVector { .ShotIndex = 1, .LayerIndex = 1 }
+    match_vector  := #partial AssetVector { .ShotIndex = {cast(f32) scene.shot_index, 1}, .LayerIndex = {0, 1} }
     
     // @todo(viktor): Why does this fade seem to be wrong? It appears nonlinear, but if it is in linear brightness, shouldn't it _appear_ linear?
     color := v4{scene_fade_value, scene_fade_value, scene_fade_value, 1}
@@ -254,7 +253,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     // @todo(viktor): We could potentially simplify this by making better use of the camera.p
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
-        push_perspective(render_group, camera_params.focal_length)
+        push_camera(render_group, {}, focal_length = focal_length)
         
         if len(scene.layers) == 0 {
             push_clear(render_group, 0)
@@ -269,8 +268,8 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
         
         if !active do continue
         
-        match_vector[.LayerIndex] = cast(f32) layer_index + 1
-        layer_image := best_match_bitmap_from(assets, scene.type, match_vector, weight_vector)
+        match_vector[.LayerIndex].match = cast(f32) layer_index + 1
+        layer_image := best_match_bitmap_from(assets, scene.type, match_vector)
         
         if render_group != nil {
             transform := default_flat_transform()

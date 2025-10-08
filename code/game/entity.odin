@@ -248,9 +248,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             ////////////////////////////////////////////////
             // Rendering
             
-            facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
-            facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-                        
+            facing_match   := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
+            
             transform := default_upright_transform()
             transform.offset = get_entity_ground_point(&entity)
             
@@ -286,7 +285,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     p := transform.offset + offset
                     push_cube_raw(render_group, &render_group.commands.white_bitmap, p, piece.dimension.x, piece.dimension.y, color)
                 } else {
-                    bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
+                    bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match)
                     push_bitmap(render_group, bitmap_id, transform, piece.dimension.y, offset, color, x_axis = x_axis, y_axis = y_axis)
                 }
             }
@@ -327,16 +326,16 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
     if .active in entity.flags {
         for piece in slice(&entity.pieces) {
             if debug_requested(debug_id) { 
-                facing_match   := #partial AssetVector{ .FacingDirection = entity.facing_direction }
-                facing_weights := #partial AssetVector{ .FacingDirection = 1 }
-                bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match, facing_weights)
+                facing_match   := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
+                bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match)
                 debug_record_value(&bitmap_id)
             }
         }
         
         for volume in entity.collision.volumes {
             mouse_p := debug_get_mouse_p()
-            local_mouse_p := unproject_with_transform(render_group, transform, mouse_p)
+            // @todo(viktor): This needs to do ray casting now, if we want to reenable it!
+            local_mouse_p := unproject_with_transform(render_group, transform, mouse_p, 1)
             
             if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
                 debug_hit(debug_id, local_mouse_p.z)

@@ -1,33 +1,12 @@
-# @todo
-- Types
-    - more :PlatformArena for files
-    - less :PointerArithmetic
-- Debug UI
-    - make better and hopefully unique colors
-    - Color per unit/file, Game, Debug, Renderer, Platform
-    - Top clocks select a parent to see its children top clocks
-    - Frame bars & threads view - add guide lines for ms and frame target ms
-    - (Ctrl) Clicking a ui with a guid opens that location in vscode
-    - other Arena Debug Views?
-    
-### Implement multiple sim regions per frame
-    - per-entity clocking
-    - sim region merging?  for multiple players?
-
+# @todo(viktor):
 
 ### Graphics Upgrade
-    - Freely rotatable world for debug
-    - Turn on the Depth-Buffer
-    - Draw the world in a logical way
-        - Stand-up cards for some things
-        - cubes for other things
     - fix unproject
-    - 3D
-        - 3D pipeline
     - Particle Systems
     - Transition to "real" artwork
     - Lighting
     - Font Rendering Robustness - Kerning
+
     
 ### Collision detection
     - Clean up predicate proliferation! Can we make a nice clean set of flags/rules so that it's easy to understand how things work in terms of special handling? This may involve making the iteration handle everything instead of handling overlap outside and so on.+-
@@ -72,3 +51,18 @@
 ## Extra Credit
     - Serious Optimization of the software renderer
     
+### Other
+- Types
+    - more :PlatformArena for files
+    - less :PointerArithmetic
+- Debug UI
+    - make better and hopefully unique colors
+    - Color per unit/file, Game, Debug, Renderer, Platform
+    - Top clocks select a parent to see its children top clocks
+    - Frame bars & threads view - add guide lines for ms and frame target ms
+    - (Ctrl) Clicking a ui with a guid opens that location in vscode
+    - other Arena Debug Views?
+    
+### Implement multiple sim regions per frame
+    - per-entity clocking
+    - sim region merging?  for multiple players?

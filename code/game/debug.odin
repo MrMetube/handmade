@@ -71,7 +71,6 @@ DebugState :: struct {
     
     // Overlay rendering
     render_group: RenderGroup,
-    default_clip_rect: u16,
     
     // @todo(viktor): remove all these as they are no longer necessary
     text_transform:    Transform,
@@ -277,11 +276,13 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
     width := cast(f32) render_commands.width
-    push_orthographic(&debug.render_group, x = {2/width, 0, 0}, y = {0, 2/width, 0})
+    x := v3{2 / width, 0, 0}
+    y := v3{0, 2 / width, 0}
+    push_camera(&debug.render_group, flags = { .orthographic }, x = x, y = y)
     push_sort_barrier(&debug.render_group, true)
     
     if debug.font == nil {
-        debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = cast(f32) AssetFontType.Debug }, #partial { .FontType = 1 })
+        debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = {cast(f32) AssetFontType.Debug, 1} })
         debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)
         load_font(debug.render_group.assets, debug.font_id, false)
         debug.font_info = get_font_info(assets, debug.font_id)
@@ -328,7 +329,7 @@ debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
     debug.font_scale = 0.6
     
     left_edge  := -0.5 * cast(f32) width
-    top_edge   :=  0.5 * cast(f32) height   
+    top_edge   :=  0.5 * cast(f32) height
     
     list_init_sentinel(&debug.tree_sentinel)
     debug_tree := add_tree(debug, debug.root_group, { left_edge, top_edge })

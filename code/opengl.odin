@@ -582,7 +582,42 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
         }
         
         switch header.type {
-          case .None: unreachable()
+          case .RenderEntry_Textured_Quads:
+            entry := cast(^RenderEntry_Textured_Quads) entry_data
+            header_offset += size_of(RenderEntry_Textured_Quads)
+            
+            gl.UseProgram(open_gl.basic_zbias_program)
+            defer gl.UseProgram(0)
+            
+            gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
+            
+            // @volatile see vertex shader
+            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_uv)
+            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_color)
+            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_p)
+            
+            defer {
+                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_uv)
+                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_color)
+                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_p)
+            }
+            
+            // @metaprogram
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
+            
+            gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
+            gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
+            
+            for bitmap_index in entry.bitmap_offset..<entry.bitmap_offset+entry.quad_count {
+                bitmap := commands.quad_bitmap_buffer.data[bitmap_index]
+                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
+                
+                vertex_index := cast(i32) bitmap_index*4
+                gl.DrawArrays(gl.TRIANGLE_STRIP, vertex_index, 4)
+            }
+            
           case .RenderEntryClip: 
             // @note(viktor): clip rects are handled before rendering
             header_offset += size_of(RenderEntryClip)
@@ -629,45 +664,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             glEnd()
             
-          case .RenderEntry_Textured_Quads:
-            entry := cast(^RenderEntry_Textured_Quads) entry_data
-            header_offset += size_of(RenderEntry_Textured_Quads)
-            
-            gl.UseProgram(open_gl.basic_zbias_program)
-            defer gl.UseProgram(0)
-            
-            gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
-            
-            // @volatile see vertex shader
-            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_uv)
-            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_color)
-            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_p)
-            
-            defer {
-                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_uv)
-                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_color)
-                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_p)
-            }
-            
-            // @metaprogram
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
-            
-            gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
-            gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
-            
-            entry_bitmaps := slice(commands.quad_bitmap_buffer)[entry.bitmap_offset :][: entry.quad_count]
-            
-            for bitmap, index in entry_bitmaps {
-                gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
-                
-                vertex_index := cast(i32) index*4
-                gl.DrawArrays(gl.TRIANGLE_STRIP, vertex_index, 4)
-            }
-            
-          case:
-            panic("Unhandled Entry")
+          case .None: unreachable()
+          case: panic("Unhandled Entry")
         }
     }
     

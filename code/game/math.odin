@@ -22,6 +22,10 @@ v4i :: [4] i32
 m3 :: #column_major matrix[3,3] f32
 m4 :: #column_major matrix[4,4] f32
 
+m4_inv :: struct {
+    forward, backward: m4,
+}
+
 Rectangle   :: struct ($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
@@ -316,7 +320,7 @@ rotate :: proc (v: $V/[$N]$T, angle: T) -> (result: V) {
     return result
 }
 
-dot :: proc (a, b: $V) -> (result: element_type(V)) {
+dot :: proc (a: $V, b: V) -> (result: element_type(V)) {
     when intrinsics.type_is_simd_vector(V) {
         result = simd.reduce_add_pairs(a * b)
     } else {
@@ -328,13 +332,12 @@ dot :: proc (a, b: $V) -> (result: element_type(V)) {
     return result
 }
 
-cross2 :: proc (a, b: $V/[2]$E) -> (result: E) {
+cross2 :: proc (a: $V/[2]$E, b: V) -> (result: E) {
     // just the z term, 
-    // isn't this also just the determinant? Yes!
     result = a.x * b.y - a.y * b.x
     return result
 }
-cross :: proc (a, b: $V/[3]$E) -> (result: V) {
+cross :: proc (a: $V/[3]$E, b:V) -> (result: V) {
     result = {
         a.y*b.z - a.z*b.y,
         a.z*b.x - a.x*b.z,
@@ -729,10 +732,18 @@ transpose :: proc (a: m4) -> (result: m4) {
 
 ////////////////////////////////////////////////
 
-multiply :: proc (a: m4, p: v3, w: f32 = 1) -> (result: v3) {
-    result.x = a[0, 0] * p.x + a[0, 1] * p.y + a[0, 2] * p.z + a[0, 3] * w
-    result.y = a[1, 0] * p.x + a[1, 1] * p.y + a[1, 2] * p.z + a[1, 3] * w
-    result.z = a[2, 0] * p.x + a[2, 1] * p.y + a[2, 2] * p.z + a[2, 3] * w
+multiply :: proc { multiply3, multiply4 }
+multiply4 :: proc (a: m4, p: v4) -> (result: v4) {
+    result.x = a[0, 0] * p.x + a[0, 1] * p.y + a[0, 2] * p.z + a[0, 3] * p.w
+    result.y = a[1, 0] * p.x + a[1, 1] * p.y + a[1, 2] * p.z + a[1, 3] * p.w
+    result.z = a[2, 0] * p.x + a[2, 1] * p.y + a[2, 2] * p.z + a[2, 3] * p.w
+    result.w = a[3, 0] * p.x + a[3, 1] * p.y + a[3, 2] * p.z + a[3, 3] * p.w
+    
+    return result
+}
+multiply3 :: proc (a: m4, p: v3, w: f32 = 1) -> (result: v3) {
+    product := multiply(a, V4(p, w))
+    result = product.xyz
     
     return result
 }
@@ -787,13 +798,12 @@ xz_rotation :: proc (angle: f32) -> (result: m4) {
 
 ////////////////////////////////////////////////
 
-perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32) -> (result: m4) {
-    a := aspect_width_over_height
-    b := focal_length
-    
+perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32) -> (result: m4_inv) {
     near_clip :: 0.1
     far_clip  :: 100
     
+    a := aspect_width_over_height
+    b := focal_length
     n: f32 = near_clip
     f: f32 = far_clip
     // @note(viktor): perspective, for when you divide by -z
@@ -801,43 +811,74 @@ perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32
     d := (2*f*n) / (n-f)
     
     result = {
-        b,   0,  0, 0,
-        0, a*b,  0, 0,
-        0,   0,  c, d,
-        0,   0, -1, 0,
+        forward = {
+            b,   0,  0, 0,
+            0, a*b,  0, 0,
+            0,   0,  c, d,
+            0,   0, -1, 0,
+        },
+        backward = {
+            1/b,       0,   0,   0,
+              0, 1/(a*b),   0,   0,
+              0,       0,   0,  -1,
+              0,       0, 1/d, c/d,
+        },
     }
     
     return result
 }
 
-orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4) {
-    a := aspect_width_over_height
-    
+orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4_inv) {
     near_clip :: -100
     far_clip  :: 100
     
+    a := aspect_width_over_height
     n: f32 = near_clip
     f: f32 = far_clip
     
     // @note(viktor): orthographic
-    c :=   (2  ) / (n-f)
-    d :=   (n+f) / (n-f)
+    c := (  2) / (n-f)
+    d := (n+f) / (n-f)
     
     result = {
-        1, 0, 0, 0,
-        0, a, 0, 0,
-        0, 0, c, d,
-        0, 0, 0, 1,
+        forward = {
+            1, 0, 0, 0,
+            0, a, 0, 0,
+            0, 0, c, d,
+            0, 0, 0, 1,
+        },
+        backward = {
+            1,   0,   0,    0,
+            0, 1/a,   0,    0,
+            0,   0, 1/c, -d/c,
+            0,   0,   0,    1,
+        },
     }
     
     return result
 }
 
-camera_transform :: proc (x, y, z, p: v3) -> (result: m4) {
-    result = rows_3x3(x, y, z)
+camera_transform :: proc (x, y, z, p: v3) -> (result: m4_inv) {
+    A := rows_3x3(x, y, z)
     
-    cp := -multiply(result, p)
-    result = translate(result, cp)
+    ap := -multiply(A, p)
+    A = translate(A, ap)
+    
+    ix  := x / length_squared(x)
+    iy  := y / length_squared(y)
+    iz  := z / length_squared(z)
+        
+    ip := v3{
+        dot(ap, v3{ix.x, iy.x, iz.x}), 
+        dot(ap, v3{ix.y, iy.y, iz.y}), 
+        dot(ap, v3{ix.z, iy.z, iz.z}),
+    }
+    
+    B := columns_3x3(ix, iy, iz)
+    B = translate(B, -ip)
+    
+    result.forward  = A
+    result.backward = B
     
     return result
 }

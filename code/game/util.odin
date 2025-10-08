@@ -164,7 +164,11 @@ unused :: proc (_: $T) {}
 
 
 absolute_difference :: proc (a, b: $T) -> (result: T) {
-    result = abs(a - b)
+    when T == v3 {
+        result = abs_vec(a - b)
+    } else {
+        result = abs(a - b)
+    }
     return result
 }
 

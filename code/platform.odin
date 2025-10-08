@@ -271,8 +271,8 @@ main :: proc () {
     // @todo(viktor): decide what our sizes should be
     render_commands: RenderCommands
     push_buffer := push(&frame_arena, u8, 32 * Megabyte)
-    vertex_buffer := make_array(&frame_arena, Textured_Vertex, 1 << 16)
-    quad_bitmap_buffer := make_array(&frame_arena, ^Bitmap, 1 << 16)
+    vertex_buffer := make_array(&frame_arena, Textured_Vertex, 1 << 20)
+    quad_bitmap_buffer := make_array(&frame_arena, ^Bitmap, 1 << 20)
     
     // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
     white_bitmap: Bitmap
@@ -718,6 +718,8 @@ main :: proc () {
         {
             device_context := win.GetDC(window)
             defer win.ReleaseDC(window, device_context)
+            
+            when false do print("vertex count = %\n", render_commands.vertex_buffer.count)
             
             { timed_block("SwapBuffers")
                 win.SwapBuffers(device_context)

@@ -32,7 +32,6 @@ init_render_commands :: proc (commands: ^RenderCommands, width, height: i32, pus
 
 prep_for_render :: proc (commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
     linearize_clip_rects(commands, &result, temp_arena)
-    
     return result
 }
 

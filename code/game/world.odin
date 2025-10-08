@@ -106,9 +106,9 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         ////////////////////////////////////////////////
         
-        camera := get_standard_camera_params(0.6)
+        focal_length :: 0.6
         
-            mode.camera_pitch = 0.0125 * Tau
+        mode.camera_pitch = 0.0125 * Tau
         mode.camera_orbit = 0
         mode.camera_dolly = 0
         
@@ -119,7 +119,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         x := get_column(camera_object, 0)
         y := get_column(camera_object, 1)
         z := get_column(camera_object, 2)
-        push_perspective(render_group, camera.focal_length, x, y, z, offset)
+        push_camera(render_group, {}, x, y, z, offset, focal_length)
         
         if input != nil {
             if was_pressed(input.mouse.buttons[.extra1]) {
@@ -155,7 +155,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
             x = get_column(camera_object, 0)
             y = get_column(camera_object, 1)
             z = get_column(camera_object, 2)
-            push_perspective(render_group, camera.focal_length, x, y, z, debug_offset, flags = {.debug})
+            
+            push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
         }
         
         world_camera_rect := get_camera_rectangle_at_target(render_group)

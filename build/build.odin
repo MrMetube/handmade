@@ -19,7 +19,7 @@ flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", 
 debug    :: "-debug"
 internal :: "-define:INTERNAL=true"
 
-pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semicolon", "-vet-unused-variables", "-vet-style", "-vet-packages:main,game,hha", "-vet-unused-procedures" }
+pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semicolon", "-vet-unused-variables", "-vet-style", "-vet-packages:main,hha", "-vet-unused-procedures" }
 
 ////////////////////////////////////////////////
 

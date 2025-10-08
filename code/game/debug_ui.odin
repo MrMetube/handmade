@@ -147,12 +147,10 @@ TextRenderOperation:: enum {
 
 overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     timed_function()
-
+    
     if debug.render_group.assets == nil do return
-
-    debug.default_clip_rect = debug.render_group.current_clip_rect_index
-
-    mouse_p := unproject_with_transform(&debug.render_group, default_flat_transform(), input.mouse.p).xy
+    
+    mouse_p := unproject_with_transform(&debug.render_group, default_flat_transform(), input.mouse.p, 0).xy
     
     debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p, input.delta_time)
     draw_trees(debug, mouse_p, input.delta_time)
@@ -162,11 +160,14 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
     info_text := format_string(debug.root_info, 
-        "% - % memory blocks, % used size / % total size", 
+        "% - % memory blocks, % used size / % total size, mousep % fb % delta %", 
         view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
         view_magnitude(memory_stats.block_count),
         view_memory_size(memory_stats.total_used),
         view_memory_size(memory_stats.total_size),
+        input.mouse.p,
+        mouse_p,
+        mouse_p - input.mouse.p,
     )
     debug.root_group.name = info_text
     
@@ -523,6 +524,7 @@ add_tooltip :: proc (debug: ^DebugState, text: string) {
 }
 
 draw_tooltips :: proc (debug: ^DebugState) {
+    // @todo(viktor): check that the tooltips really are no longer effected by any of the clip rects
     for &tooltip in slice(&debug.tooltips) {
         text: string = cast(string) transmute(cstring) &tooltip
         
@@ -532,11 +534,6 @@ draw_tooltips :: proc (debug: ^DebugState) {
         
         element := begin_ui_element_rectangle(layout, &size)
         end_ui_element(&element, false)
-        
-        render_group := &debug.render_group
-        old_clip_rect := render_group.current_clip_rect_index
-        render_group.current_clip_rect_index = debug.default_clip_rect
-        defer render_group.current_clip_rect_index = old_clip_rect
         
         p := v2{element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}
         text_bounds = add_offset(text_bounds, p)
@@ -1416,7 +1413,7 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         switch operation {
           case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,0}, Black)
+                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,-2}, Black)
                 push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
             }
           case .Measure:

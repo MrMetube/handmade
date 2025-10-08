@@ -79,7 +79,7 @@ AssetMemoryBlock :: struct {
     flags: AssetMemoryBlockFlags,
 }
 
-AssetVector :: [AssetTagId]f32
+AssetVector :: [AssetTagId] struct { match, weight: f32 }
 
 AssetFile :: struct {
     handle: PlatformFileHandle,
@@ -418,16 +418,16 @@ first_asset_from :: proc (assets: ^Assets, id: AssetTypeId) -> (result: u32) {
     return result
 }
 
-best_match_sound_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> SoundId {
-    return cast(SoundId) best_match_asset_from(assets, id, match_vector, weight_vector)
+best_match_sound_from :: proc (assets: ^Assets, id: AssetTypeId, vector: AssetVector) -> SoundId {
+    return cast(SoundId) best_match_asset_from(assets, id, vector)
 }
-best_match_bitmap_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> BitmapId {
-    return cast(BitmapId) best_match_asset_from(assets, id, match_vector, weight_vector)
+best_match_bitmap_from :: proc (assets: ^Assets, id: AssetTypeId, vector: AssetVector) -> BitmapId {
+    return cast(BitmapId) best_match_asset_from(assets, id, vector)
 }
-best_match_font_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> FontId {
-    return cast(FontId) best_match_asset_from(assets, id, match_vector, weight_vector)
+best_match_font_from :: proc (assets: ^Assets, id: AssetTypeId, vector: AssetVector) -> FontId {
+    return cast(FontId) best_match_asset_from(assets, id, vector)
 }
-best_match_asset_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, weight_vector: AssetVector) -> (result: u32) {
+best_match_asset_from :: proc (assets: ^Assets, id: AssetTypeId, vector: AssetVector) -> (result: u32) {
     type := assets.types[id]
 
     if type.first_asset_index != type.one_past_last_index {
@@ -437,7 +437,7 @@ best_match_asset_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, w
     
             total_weight_diff: f32
             for tag in assets.tags[asset.first_tag_index:asset.one_past_last_tag_index] {
-                a := match_vector[tag.id]
+                a := vector[tag.id].match
                 b := tag.value
                 
                 range := assets.tag_ranges[tag.id]
@@ -445,7 +445,7 @@ best_match_asset_from :: proc (assets: ^Assets, id: AssetTypeId, match_vector, w
                 d2 := abs(a - b)
                 
                 difference := min(d1, d2)
-                weighted := weight_vector[tag.id] * difference
+                weighted := vector[tag.id].weight * difference
                 
                 total_weight_diff += weighted
             }
