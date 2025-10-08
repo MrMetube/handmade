@@ -276,8 +276,8 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
 push_perspective :: proc (group: ^RenderGroup, focal_length: f32, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}, flags := Camera_Flags {}) {
     push_camera(group, focal_length, x, y, z, p, flags)
 }
-push_orthographic :: proc (group: ^RenderGroup, flags := Camera_Flags {}) {
-    push_camera(group, 1, v3{1,0,0}, v3{0,1,0}, v3{0,0,1}, v3{0,0,0}, flags + { .orthographic })
+push_orthographic :: proc (group: ^RenderGroup, x := v3{1,0,0}, y := v3{0,1,0}, z:= v3{0,0,1}, p := v3{0,0,0}, flags := Camera_Flags {}) {
+    push_camera(group, 1, x, y, z, p, flags + { .orthographic })
 }
 
 push_camera :: proc (group: ^RenderGroup, focal_length: f32, x, y, z, p: v3, flags: Camera_Flags) {
@@ -337,6 +337,20 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 
 ////////////////////////////////////////////////
 
+push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color) {
+    entry := get_current_quads(group)
+    entry.quad_count += 1
+    
+    append(&group.commands.quad_bitmap_buffer, bitmap)
+    // @note(viktor): reorder from quad ordering to triangle strip ordering
+    append(&group.commands.vertex_buffer, 
+        Textured_Vertex {p0, t0, c0}, 
+        Textured_Vertex {p3, t3, c3},
+        Textured_Vertex {p1, t1, c1}, 
+        Textured_Vertex {p2, t2, c2}, 
+    )
+}
+
 push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1}) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
@@ -353,7 +367,6 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     assert(bitmap.texture_handle != 0)
     
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis2, y_axis2)
-    
     size := used_dim.size
     
     premultiplied_color := store_color(color)
@@ -375,20 +388,21 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     
     max := min + V4(x_axis + y_axis, z_bias)
     
-    color := v4_to_rgba(premultiplied_color)
+    c := v4_to_rgba(premultiplied_color)
     
     ////////////////////////////////////////////////
     
-    entry := get_current_quads(group)
-    entry.quad_count += 1
+    p0 := min
+    p1 := v4{max.x, min.y, min.z, min.w}
+    p2 := max
+    p3 := v4{min.x, max.y, max.z, max.w}
     
-    append(&group.commands.quad_bitmap_buffer, bitmap)
-    append(&group.commands.vertex_buffer, 
-        Textured_Vertex {min, min_uv, color}, 
-        Textured_Vertex {{max.x, min.y, min.z, min.w}, {max_uv.x, min_uv.y}, color}, 
-        Textured_Vertex {max, max_uv, color}, 
-        Textured_Vertex {{min.x, max.y, max.z, max.w}, {min_uv.x, max_uv.y}, color},
-    )
+    t0 := min_uv
+    t1 := v2{max_uv.x, min_uv.y}
+    t2 := max_uv
+    t3 := v2{min_uv.x, max_uv.y}
+    
+    push_quad(group, bitmap, p0, p1, p2, p3, t0, t1, t2, t3, c, c, c, c)
 }
 
 push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
@@ -407,10 +421,9 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle != 0)
     
-    premultiplied_color := store_color(color)
-    
     p := p
     n := p
+    
     p.xy += radius
     n.xy -= radius
     n.z  -= height
@@ -424,7 +437,7 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     p5 := v4{p.x, n.y, p.z, 0}
     p7 := v4{p.x, p.y, p.z, 0}
     
-    top_color := premultiplied_color
+    top_color := store_color(color)
     bot_color := v4{0, 0, 0, 1}
     
     ct := v4_to_rgba(V4(top_color.rgb * .75, top_color.a))
@@ -438,26 +451,12 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     t2 := v2{1, 1}
     t3 := v2{0, 1}
     
-    entry := get_current_quads(group)
-    entry.quad_count += 6
-    
-    append(&group.commands.quad_bitmap_buffer, 
-        bitmap,
-        bitmap,
-        bitmap,
-        bitmap,
-        bitmap,
-        bitmap,
-    )
-    
-    append(&group.commands.vertex_buffer, [] Textured_Vertex {
-        {p0, t0, cb}, {p1, t1, ct}, {p3, t2, ct}, {p2, t3, cb}, 
-        {p0, t0, bo}, {p2, t1, bo}, {p6, t2, bo}, {p4, t3, bo}, 
-        {p0, t0, cb}, {p4, t1, cb}, {p5, t2, ct}, {p1, t3, ct}, 
-        {p7, t0, ct}, {p5, t1, ct}, {p4, t2, cb}, {p6, t3, cb}, 
-        {p7, t0, ct}, {p6, t1, cb}, {p2, t2, cb}, {p3, t3, ct}, 
-        {p7, t0, op}, {p3, t1, op}, {p1, t2, op}, {p5, t3, op}, 
-    })
+    push_quad(group, bitmap, p0, p1, p3, p2, t0, t1, t2, t3, cb, ct, ct, cb)
+    push_quad(group, bitmap, p0, p2, p6, p4, t0, t1, t2, t3, bo, bo, bo, bo)
+    push_quad(group, bitmap, p0, p4, p5, p1, t0, t1, t2, t3, cb, cb, ct, ct)
+    push_quad(group, bitmap, p7, p5, p4, p6, t0, t1, t2, t3, ct, ct, cb, cb)
+    push_quad(group, bitmap, p7, p6, p2, p3, t0, t1, t2, t3, ct, cb, cb, ct)
+    push_quad(group, bitmap, p7, p3, p1, p5, t0, t1, t2, t3, op, op, op, op)
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -465,31 +464,21 @@ push_rectangle2 :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Trans
     push_rectangle(group, Rect3(rect, 0, 0), transform, color)
 }
 push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
-    basis := project_with_transform(transform, rect.min)
+    p := project_with_transform(transform, rect.min)
     dimension := get_dimension(rect)
     
     color := color
     color = srgb_to_linear(color)
     color = store_color(color)
-    
-    c   := v4_to_rgba(color)
-    p   := basis
-    dim := dimension.xy
+    c := v4_to_rgba(color)
     
     p0 := V4(p, 0)
-    p1 := V4(p + {dim.x, 0, 0}, 0)
-    p2 := V4(p + {0, dim.y, 0}, 0)
-    p3 := V4(p + {dim.x, dim.y, 0}, 0)
+    p1 := V4(p + {dimension.x, 0, 0}, 0)
+    p2 := V4(p + {0, dimension.y, 0}, 0)
+    p3 := V4(p + {dimension.x, dimension.y, 0}, 0)
     
-    entry := get_current_quads(group)
-    entry.quad_count += 1
-    append(&group.commands.quad_bitmap_buffer, &group.commands.white_bitmap)
-    append(&group.commands.vertex_buffer, 
-        Textured_Vertex {p0, 0.5, c},
-        Textured_Vertex {p1, 0.5, c},
-        Textured_Vertex {p2, 0.5, c},
-        Textured_Vertex {p3, 0.5, c},
-    )
+    t: v2 = 0.5
+    push_quad(group, &group.commands.white_bitmap, p0, p1, p2, p3, t, t, t, t, c, c, c, c)
 }
 
 push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }

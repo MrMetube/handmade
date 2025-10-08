@@ -276,8 +276,8 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
-    push_orthographic(&debug.render_group)
-    
+    width := cast(f32) render_commands.width
+    push_orthographic(&debug.render_group, x = {2/width, 0, 0}, y = {0, 2/width, 0})
     push_sort_barrier(&debug.render_group, true)
     
     if debug.font == nil {
@@ -339,10 +339,10 @@ debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
     debug.shadow_transform  = default_flat_transform()
     debug.text_transform    = default_flat_transform()
     
-    debug.backing_transform.offset.z = 16_000
-    debug.ui_transform.offset.z      = 20_000
-    debug.shadow_transform.offset.z  = 24_000
-    debug.text_transform.offset.z    = 28_000
+    debug.backing_transform.offset.z = 0
+    debug.ui_transform.offset.z      = 0
+    debug.shadow_transform.offset.z  = 0
+    debug.text_transform.offset.z    = 0
     
     return debug
 }

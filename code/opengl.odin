@@ -1,5 +1,7 @@
 package main
 
+import "base:runtime"
+
 import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
@@ -10,9 +12,10 @@ GlAttribs := [?] i32 {
     win.WGL_CONTEXT_MAJOR_VERSION_ARB, GlMajorVersion,
     win.WGL_CONTEXT_MINOR_VERSION_ARB, GlMinorVersion,
     
-    win.WGL_CONTEXT_FLAGS_ARB, (win.WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
+    win.WGL_CONTEXT_FLAGS_ARB, win.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | (win.WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
     
-    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    // win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
+    win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
     0,
 }
 
@@ -33,6 +36,8 @@ OpenGlInfo :: struct {
 
 OpenGL :: struct {
     default_texture_format: u32,
+    
+    vertex_buffer: u32,
     
     framebuffer_handles:  FixedArray(256, u32),
     framebuffer_textures: FixedArray(256, u32),
@@ -77,6 +82,9 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
             win.wglSwapIntervalEXT(1)
         }
         
+        gl.DebugMessageCallback(gl_debug_callback, nil)
+        gl.Enable(gl.DEBUG_OUTPUT_SYNCHRONOUS)
+        
         // @note(viktor): If we believe we can do full sRGB on the texture side and the framebuffer side, then we can enable it, otherwise it is safer for us to pass it straight through.
         // @todo(viktor): Just require sRGB support and fault if it is unavailable. It should be supported nowadays
         if extensions.GL_EXT_framebuffer_sRGB && framebuffer_supports_srgb {
@@ -85,6 +93,13 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         }
         
         gl.GenTextures(1, &open_gl.blit_texture_handle)
+        
+        legacy_array_to_be_technically_correct_even_though_we_dont_use_it_or_need_it: u32
+        gl.GenVertexArrays(1, &legacy_array_to_be_technically_correct_even_though_we_dont_use_it_or_need_it)
+        gl.BindVertexArray(legacy_array_to_be_technically_correct_even_though_we_dont_use_it_or_need_it)
+        
+        gl.GenBuffers(1, &open_gl.vertex_buffer)
+        gl.BindBuffer(gl.ARRAY_BUFFER, open_gl.vertex_buffer)
         
         header_code: cstring = `
 #version 130
@@ -128,7 +143,11 @@ out vec4 result_color;
 
 void main (void) {
     vec4 texture_sample = texture(texture_sampler, frag_uv);
-    result_color = frag_color * texture_sample;
+    if (texture_sample.a > 0) {
+        result_color = frag_color * texture_sample;
+    } else {
+        discard;
+    }
 }
 `
         open_gl.basic_zbias_program = gl_create_program(header_code, vertex_code, fragment_code)
@@ -139,11 +158,24 @@ void main (void) {
         open_gl.basic_zbias_in_p = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_p")
         open_gl.basic_zbias_in_uv = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_uv")
         open_gl.basic_zbias_in_color = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_color")
-        
-        glTexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE)
     }
     
     return gl_context
+}
+
+gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, length: i32, message: cstring, user_ptr: rawptr) {
+    // @todo(viktor): how can we get the actual context, if we ever use the context in the platform layer
+    context = runtime.default_context()
+    if severity == gl.DEBUG_SEVERITY_NOTIFICATION {
+        @static seen: map[cstring] bool
+        if message not_in seen {
+            seen[message] = true
+            print("INFO: %\n", message)
+        }
+    } else {
+        print("ERROR: %\n", message)
+        assert(false)
+    }
 }
 
 load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
@@ -201,26 +233,12 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
                 }
             }
             
-            win.gl_set_proc_address(&glBegin,        "glBegin")
-            win.gl_set_proc_address(&glEnd,          "glEnd")
-            win.gl_set_proc_address(&glMatrixMode,   "glMatrixMode")
-            win.gl_set_proc_address(&glLoadIdentity, "glLoadIdentity")
-            win.gl_set_proc_address(&glTexEnvi,      "glTexEnvi")
-            win.gl_set_proc_address(&glAlphaFunc,    "glAlphaFunc")
+            win.gl_set_proc_address(&glBegin, "glBegin")
+            win.gl_set_proc_address(&glEnd,   "glEnd")
             
-            win.gl_set_proc_address(&glTexCoord2f,   "glTexCoord2f")
-            win.gl_set_proc_address(&glVertex2f,     "glVertex2f")
-            win.gl_set_proc_address(&glVertex3f,     "glVertex3f")
-            win.gl_set_proc_address(&glVertex4f,     "glVertex4f")
-            win.gl_set_proc_address(&glColor4f,      "glColor4f")
-            
-            win.gl_set_proc_address(&glLoadMatrixf,  "glLoadMatrixf")
-            win.gl_set_proc_address(&glTexCoord2fv,  "glTexCoord2fv")
-            win.gl_set_proc_address(&glVertex2fv,    "glVertex2fv")
-            win.gl_set_proc_address(&glVertex3fv,    "glVertex3fv")
-            win.gl_set_proc_address(&glVertex4fv,    "glVertex4fv")
-            win.gl_set_proc_address(&glColor4fv,     "glColor4fv")
-            win.gl_set_proc_address(&glColor4ub,     "glColor4ub")
+            win.gl_set_proc_address(&glTexCoord2f, "glTexCoord2f")
+            win.gl_set_proc_address(&glVertex3f,   "glVertex3f")
+            win.gl_set_proc_address(&glColor4f,    "glColor4f")
         }
     }
     
@@ -438,28 +456,9 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
     gl.ClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a)
     gl.Clear(gl.COLOR_BUFFER_BIT)
     
-    glMatrixMode(gl.TEXTURE)
-    glLoadIdentity()
-    
-    glMatrixMode(gl.MODELVIEW)
-    glLoadIdentity()
-    
-    glMatrixMode(gl.PROJECTION)
-    glLoadIdentity()
-    
     if true do unimplemented()
     
-    // // b := safe_ratio_1(cast(f32) size.x, cast(f32) size.y)
-    // // transform := m4 {
-    // //     1, 0, 0, 0,
-    // //     0, b, 0, 0,
-    // //     0, 0, 1, 0,
-    // //     0, 0, 1, 0,
-    // // }
-    
-    // glLoadMatrixf(&transform[0,0])
-    
-    gl_rectangle({-1, -1, 0}, {1, 1, 0}, {1,1,1,1}, 0, 1)
+    // gl_rectangle(min = {-1, -1, 0}, max = {1, 1, 0}, color = {1,1,1,1}, minuv = 0, maxuv =1)
 }
 
 ////////////////////////////////////////////////
@@ -475,22 +474,13 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     gl.ColorMask(true, true, true, true)
     gl.DepthFunc(gl.LEQUAL)
     gl.Enable(gl.DEPTH_TEST)
-    glAlphaFunc(gl.GREATER, 0)
-    gl.Enable(gl.ALPHA_TEST)
     gl.Enable(gl.SAMPLE_ALPHA_TO_COVERAGE)
     gl.Enable(gl.SAMPLE_ALPHA_TO_ONE)
     gl.Enable(gl.MULTISAMPLE)
     
-    gl.Enable(gl.TEXTURE_2D)
     gl.Enable(gl.SCISSOR_TEST)
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-    
-    glMatrixMode(gl.TEXTURE)
-    glLoadIdentity()
-    
-    glMatrixMode(gl.MODELVIEW)
-    glLoadIdentity()
     
     // @note(viktor): FrameBuffer 0 is the default frame buffer, which we got on initialization
     max_render_target_count := cast(i64) commands.max_render_target_index + 1
@@ -574,8 +564,6 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             clip := prep.clip_rects.data[clip_rect_index]
             
             projection = clip.projection
-            glMatrixMode(gl.PROJECTION)
-            glLoadMatrixf(&projection)
             
             if current_target_index != clip.render_target_index {
                 current_target_index = clip.render_target_index
@@ -613,7 +601,33 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
             
-            gl_rectangle(v3{0, 0, 0}, V3(commands_dim, 0), v4{1, 1, 1, entry.alpha})
+            // @todo(viktor): move this to the newer version of the code
+            max:= commands_dim
+            glBegin(gl.TRIANGLES)
+            
+            glColor4f(1, 1, 1, entry.alpha)
+            
+            // @note(viktor): Lower triangle
+            glTexCoord2f(0, 0)
+            glVertex3f(0, 0, 0)
+            
+            glTexCoord2f(1, 0)
+            glVertex3f(max.x, 0, 0)
+            
+            glTexCoord2f(1, 1)
+            glVertex3f(max.x, max.y, 0)
+            
+            // @note(viktor): Upper triangle
+            glTexCoord2f(0, 0)
+            glVertex3f(0, 0, 0)
+            
+            glTexCoord2f(1, 1)
+            glVertex3f(max.x, max.y, 0)
+            
+            glTexCoord2f(0, 1)
+            glVertex3f(0, max.y, 0)
+            
+            glEnd()
             
           case .RenderEntry_Textured_Quads:
             entry := cast(^RenderEntry_Textured_Quads) entry_data
@@ -621,6 +635,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             gl.UseProgram(open_gl.basic_zbias_program)
             defer gl.UseProgram(0)
+            
+            gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
             
             // @volatile see vertex shader
             gl.EnableVertexAttribArray(open_gl.basic_zbias_in_uv)
@@ -633,11 +649,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 gl.DisableVertexAttribArray(open_gl.basic_zbias_in_p)
             }
             
-            data_base := cast(umm) raw_data(commands.vertex_buffer.data)
             // @metaprogram
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), data_base + offset_of(Textured_Vertex, uv))
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), data_base + offset_of(Textured_Vertex, color))
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), data_base + offset_of(Textured_Vertex, p))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
+            gl.VertexAttribPointer(open_gl.basic_zbias_in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
             
             gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
             gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
@@ -648,7 +663,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
                 vertex_index := cast(i32) index*4
-                gl.DrawArrays(gl.QUADS, vertex_index, 4)
+                gl.DrawArrays(gl.TRIANGLE_STRIP, vertex_index, 4)
             }
             
           case:
@@ -675,55 +690,12 @@ gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i
     gl.Viewport(0, 0, window_dim.x, window_dim.y)
 }
 
-gl_rectangle :: proc (min, max: v3, color: v4, min_uv := v2{0,0}, max_uv := v2{1,1}) {
-    glBegin(gl.TRIANGLES)
-    
-    glColor4f(color.r, color.g, color.b, color.a)
-    
-    // @note(viktor): Lower triangle
-    glTexCoord2f(min_uv.x, min_uv.y)
-    glVertex3f(min.x, min.y, min.z)
-    
-    glTexCoord2f(max_uv.x, min_uv.y)
-    glVertex3f(max.x, min.y, min.z)
-    
-    glTexCoord2f(max_uv.x, max_uv.y)
-    glVertex3f(max.x, max.y, max.z)
-    
-    // @note(viktor): Upper triangle
-    glTexCoord2f(min_uv.x, min_uv.y)
-    glVertex3f(min.x, min.y, min.z)
-    
-    glTexCoord2f(max_uv.x, max_uv.y)
-    glVertex3f(max.x, max.y, max.z)
-    
-    glTexCoord2f(min_uv.x, max_uv.y)
-    glVertex3f(min.x, max.y, max.z)
-    
-    glEnd()
-}
-
 ////////////////////////////////////////////////
 // @cleanup get rid of as many as possible
 
 glBegin:        proc (_: u32)
 glEnd:          proc ()
-glMatrixMode:   proc (_: i32)
-glLoadIdentity: proc ()
-
-glTexEnvi:      proc (_: u32, _: u32, _: u32)
-glAlphaFunc:    proc (_: u32, _: f32)
 
 glTexCoord2f:   proc (_,_: f32)
-glVertex2f:     proc (_,_: f32)
 glVertex3f:     proc (_,_,_: f32)
-glVertex4f:     proc (_,_,_,_: f32)
 glColor4f:      proc (_,_,_,_: f32)
-glColor4ub:     proc (_,_,_,_: u8)
-
-glLoadMatrixf:  proc (_: ^m4)
-glTexCoord2fv:  proc (_: ^v2)
-glVertex2fv:    proc (_: ^v2)
-glVertex3fv:    proc (_: ^v3)
-glVertex4fv:    proc (_: ^v4)
-glColor4fv:     proc (_: ^v4)

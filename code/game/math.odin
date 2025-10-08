@@ -787,19 +787,6 @@ xz_rotation :: proc (angle: f32) -> (result: m4) {
 
 ////////////////////////////////////////////////
 
-orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4) {
-    a := aspect_width_over_height
-    
-    result = {
-        1, 0, 0, 0,
-        0, a, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-    }
-    
-    return result
-}
-
 perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32) -> (result: m4) {
     a := aspect_width_over_height
     b := focal_length
@@ -809,22 +796,38 @@ perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32
     
     n: f32 = near_clip
     f: f32 = far_clip
-    when true {
-        // @note(viktor): perspective, for when you divide by -z
-        c :=   (n+f) / (n-f)
-        d := (2*f*n) / (n-f)
-    } else {
-        // @note(viktor): orthographic
-        c :=   (2  ) / (n-f)
-        d :=   (n+f) / (n-f)
-    }
-    
+    // @note(viktor): perspective, for when you divide by -z
+    c :=   (n+f) / (n-f)
+    d := (2*f*n) / (n-f)
     
     result = {
         b,   0,  0, 0,
         0, a*b,  0, 0,
         0,   0,  c, d,
         0,   0, -1, 0,
+    }
+    
+    return result
+}
+
+orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4) {
+    a := aspect_width_over_height
+    
+    near_clip :: -100
+    far_clip  :: 100
+    
+    n: f32 = near_clip
+    f: f32 = far_clip
+    
+    // @note(viktor): orthographic
+    c :=   (2  ) / (n-f)
+    d :=   (n+f) / (n-f)
+    
+    result = {
+        1, 0, 0, 0,
+        0, a, 0, 0,
+        0, 0, c, d,
+        0, 0, 0, 1,
     }
     
     return result
