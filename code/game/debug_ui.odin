@@ -150,7 +150,7 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     
     if debug.render_group.assets == nil do return
     
-    mouse_p := unproject_with_transform(&debug.render_group, default_flat_transform(), input.mouse.p, 0).xy
+    mouse_p := unproject_with_transform(&debug.render_group, debug.render_group.game_cam, input.mouse.p, 1).xy
     
     debug.mouse_text_layout = begin_layout(debug, mouse_p+{15,0}, mouse_p, input.delta_time)
     draw_trees(debug, mouse_p, input.delta_time)
@@ -160,18 +160,17 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
     info_text := format_string(debug.root_info, 
-        "% - % memory blocks, % used size / % total size, mousep % fb % delta %", 
+        "% - % memory blocks, % used size / % total sizes", 
         view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
         view_magnitude(memory_stats.block_count),
         view_memory_size(memory_stats.total_used),
         view_memory_size(memory_stats.total_size),
-        input.mouse.p,
-        mouse_p,
-        mouse_p - input.mouse.p,
     )
     debug.root_group.name = info_text
     
     interact(debug, input, mouse_p)
+    
+    draw_tooltips(debug)
 }
 
 draw_trees :: proc (debug: ^DebugState, mouse_p: v2, dt: f32) {
@@ -188,10 +187,12 @@ draw_trees :: proc (debug: ^DebugState, mouse_p: v2, dt: f32) {
 }
 
 draw_tree :: proc (layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugEventLink) {
+    timed_function()
     group := tree.root
     debug := layout.debug
     
     if !has_children(link) {
+        timed_block("draw element")
         draw_element(layout, id_from_link(tree, link), link.element)
     } else {
         timed_block("draw event group")
@@ -224,6 +225,7 @@ draw_tree :: proc (layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugE
         push_text(debug, text, {element.bounds.min.x, element.bounds.max.y - debug.ascent * debug.font_scale}, color)
         
         if expanded {
+            timed_block("draw event children")
             layout.depth += 1
             defer layout.depth -= 1
             
@@ -439,9 +441,10 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         rect := ui_element.bounds
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
-        old_clip_rect := debug.render_group.current_clip_rect_index
-        debug.render_group.current_clip_rect_index = push_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform)
-        defer debug.render_group.current_clip_rect_index = old_clip_rect
+        // @todo(viktor): when pushing a cliprect the renderer just stops and shuffles between two stale images!?
+        // old_clip_rect := debug.render_group.current_clip_rect_index
+        // debug.render_group.current_clip_rect_index = push_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform)
+        // defer debug.render_group.current_clip_rect_index = old_clip_rect
         
         if contains(rect, mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
@@ -540,13 +543,12 @@ draw_tooltips :: proc (debug: ^DebugState) {
         text_bounds = add_radius(text_bounds, 4)
         
         before := debug.text_transform
+        debug.text_transform.offset.z += 80
         defer debug.text_transform = before
         
         // @todo(viktor): Just add another debug.transform for overlays and overlay shadows
-        debug.text_transform.offset.z += 1000
         push_rectangle(&debug.render_group, text_bounds, debug.text_transform, {0,0,0,0.95})
         
-        debug.text_transform.offset.z += 1000
         push_text(debug, text, p, Isabelline)
     }
     
@@ -758,7 +760,6 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
                 }
                 push_rectangle(&debug.render_group, region_rect, transform, color)
                 
-                transform.offset.z += 10
                 push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
                 
                 if contains(region_rect, mouse_p) {
@@ -908,6 +909,8 @@ set_ui_element_default_interaction :: proc (element: ^LayoutElement, interaction
 }
 
 end_ui_element :: proc (using element: ^LayoutElement, use_generic_spacing: b32) {
+    timed_function()
+    
     if !layout.line_initialized {
         layout.line_initialized = true
         layout.p.x = layout.base_p.x + layout.depth * 2 * layout.line_advance
@@ -1375,12 +1378,14 @@ debug_get_line_advance :: proc (debug: ^DebugState) -> (result: f32) {
 }
 
 push_text :: proc (debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine, pz: f32 =0) {
+    timed_function()
     if debug.font != nil && debug.font_info != nil {
         text_op(debug, .Draw, &debug.render_group, debug.font, debug.font_info, text, p, debug.font_scale, color, pz)
     }
 }
 
 measure_text :: proc (debug: ^DebugState, text: string) -> (result: Rectangle2) {
+    timed_function()
     if debug.font != nil && debug.font_info != nil {
         result = text_op(debug, .Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
     }
@@ -1413,7 +1418,7 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         switch operation {
           case .Draw: 
             if codepoint != ' ' {
-                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,-2}, Black)
+                push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,-20}, Black)
                 push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
             }
           case .Measure:

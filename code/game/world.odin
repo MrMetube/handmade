@@ -152,6 +152,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
             camera_object = xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
             debug_offset.z += mode.debug_camera_dolly
             debug_offset = multiply(camera_object, debug_offset)
+            
             x = get_column(camera_object, 0)
             y = get_column(camera_object, 1)
             z = get_column(camera_object, 2)
@@ -163,7 +164,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         screen_bounds := rectangle_center_dimension(v2{0,0}, get_dimension(world_camera_rect).xy)
         
         // @todo(viktor): by how much should we expand the sim region?
-        sim_bounds := rectangle_center_dimension(V3(get_center(screen_bounds), 0), 3 * mode.standard_room_dimension)
+        sim_bounds := rectangle_center_dimension(V3(get_center(screen_bounds), 0), mode.standard_room_dimension * {3, 3, 10})
         
         simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.p, sim_bounds, input.delta_time)
         
@@ -443,7 +444,7 @@ use_space_in_world :: proc (world: ^World, pack_size: i64, p: WorldPosition) -> 
 use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (result: ^Entity) {
     assert(chunk != nil)
     
-    if chunk.first_block == nil || !block_has_room(chunk.first_block, pack_size) {
+    if !block_has_room(chunk.first_block, pack_size) {
         new_block := list_pop_head(&world.first_free_block) or_else push(world.arena, WorldEntityBlock, no_clear())
         
         clear_world_entity_block(new_block)
@@ -468,6 +469,10 @@ clear_world_entity_block :: proc (block: ^WorldEntityBlock) {
     block.next = nil
 }
 
-block_has_room :: proc (block: ^WorldEntityBlock, size: i64) -> bool {
-    return block.entity_data.count + size < len(block.entity_data.data)
+block_has_room :: proc (block: ^WorldEntityBlock, size: i64) -> (result: bool) {
+    if block != nil {
+        result = block.entity_data.count + size < len(block.entity_data.data)
+    }
+    
+    return result
 }

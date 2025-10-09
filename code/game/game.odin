@@ -191,7 +191,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
             debug_ui_element(ArenaOccupancy{ &state.audio_arena }, "Audio Arena")
         }
         debug_ui_element(FrameSlider{})
-        debug_ui_element(FrameBarsGraph{})
+        debug_ui_element(TopClocksList{})
         debug_ui_element(FrameInfo{})
     }
     

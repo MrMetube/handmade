@@ -113,7 +113,7 @@ linear_blend_e :: proc (from: $T, to: T, t: T) -> T  {
     return result
 }
 
-bilinear_blend :: proc (a, b, c, d: $V/[$N]$E, t: [2] E) -> (result: V) {
+bilinear_blend :: proc (a: $V/[$N]$E, b, c, d: V, t: [2] E) -> (result: V) {
     la := (1-t.y) * (1-t.x)
     lb := (1-t.y) *    t.x
     lc :=    t.y  * (1-t.x)
@@ -128,7 +128,7 @@ sin_01 :: proc (t: $T) -> T {
     return result
 }
 
-safe_ratio_n :: proc (numerator, divisor, n: $T) -> (result: T) {
+safe_ratio_n :: proc (numerator: $T, divisor, n: T) -> (result: T) {
     when intrinsics.type_is_array(T) {
         #unroll for i in 0..<len(T) {
             result[i] = safe_ratio_n(numerator[i], divisor[i], n[i])
@@ -138,8 +138,8 @@ safe_ratio_n :: proc (numerator, divisor, n: $T) -> (result: T) {
     }
     return result
 }
-safe_ratio_0 :: proc (numerator, divisor: $T) -> T { return safe_ratio_n(numerator, divisor, 0) }
-safe_ratio_1 :: proc (numerator, divisor: $T) -> T { return safe_ratio_n(numerator, divisor, 1) }
+safe_ratio_0 :: proc (numerator: $T, divisor: T) -> T { return safe_ratio_n(numerator, divisor, 0) }
+safe_ratio_1 :: proc (numerator: $T, divisor: T) -> T { return safe_ratio_n(numerator, divisor, 1) }
 
 clamp :: proc (value: $T, min, max: T) -> (result: T) {
     when intrinsics.type_is_simd_vector(T) {
@@ -264,12 +264,12 @@ V4_x_yzw  :: proc (x: $T, yzw: [3] T) -> (result: [4] T) {
     result.yzw = yzw
     return result
 }
-V4_xy_zw  :: proc (xy: [2]$T, zw: [2] T) -> (result: [4] T) {
+V4_xy_zw  :: proc (xy: [2] $T, zw: [2] T) -> (result: [4] T) {
     result.xy = xy
     result.zw = zw
     return result
 }
-V4_xyz_w  :: proc (xyz: [3]$T, w: T) -> (result: [4] T) {
+V4_xyz_w  :: proc (xyz: [3] $T, w: T) -> (result: [4] T) {
     result.xyz = xyz
     result.w = w
     return result
@@ -286,18 +286,18 @@ V4_x_yz_w :: proc (x: $T, yz: [2] T, w:T) -> (result: [4] T) {
     result.w = w
     return result
 }
-V4_xy_z_w :: proc (xy: [2]$T, z, w: T) -> (result: [4] T) {
+V4_xy_z_w :: proc (xy: [2] $T, z, w: T) -> (result: [4] T) {
     result.xy = xy
     result.z = z
     result.w = w
     return result
 }
 
-v4_to_rgba :: proc (rgba: v4) -> (result: [4]u8) {
+v4_to_rgba :: proc (rgba: v4) -> (result: Color) {
     result = vec_cast(u8, rgba * 255)
     return result
 }
-rgba_to_v4 :: proc (rgba: [4]u8) -> (result: v4) {
+rgba_to_v4 :: proc (rgba: Color) -> (result: v4) {
     result = vec_cast(f32, rgba)
     result /= 255
     return result
@@ -313,7 +313,7 @@ arm :: proc (angle: $T) -> (result: [2] T) {
     return result
 }
 
-rotate :: proc (v: $V/[$N]$T, angle: T) -> (result: V) {
+rotate :: proc (v: $V/[$N] $T, angle: T) -> (result: V) {
     rotor := arm(angle)
     result.x = v.x * rotor.x + v.y * -rotor.y
     result.y = v.x * rotor.y + v.y *  rotor.x
@@ -332,12 +332,12 @@ dot :: proc (a: $V, b: V) -> (result: element_type(V)) {
     return result
 }
 
-cross2 :: proc (a: $V/[2]$E, b: V) -> (result: E) {
+cross2 :: proc (a: $V/[2] $E, b: V) -> (result: E) {
     // just the z term, 
     result = a.x * b.y - a.y * b.x
     return result
 }
-cross :: proc (a: $V/[3]$E, b:V) -> (result: V) {
+cross :: proc (a: $V/[3] $E, b:V) -> (result: V) {
     result = {
         a.y*b.z - a.z*b.y,
         a.z*b.x - a.x*b.z,
@@ -369,7 +369,7 @@ normalize :: proc (vec: $V) -> (result: V) {
     result = vec / length(vec)
     return result
 }
-normalize_or_zero :: proc (vec: $V/[$N]$T) -> (result: V) {
+normalize_or_zero :: proc (vec: $V/[$N] $T) -> (result: V) {
     len_sq := length_squared(vec)
     when intrinsics.type_is_simd_vector(T) {
         len_mask := simd.lanes_gt(len_sq, 0.0000001)
@@ -451,7 +451,7 @@ when LaneWidth != 1 {
         return result
     }
 
-    extract :: proc (a: $T/#simd[$N]$E, #any_int n: u32) -> (result: E) {
+    extract :: proc (a: $T/#simd[$N] $E, #any_int n: u32) -> (result: E) {
         when intrinsics.type_is_array(T) {
             #unroll for i in 0..<len(T) {
                 result[i] = simd.extract(a[i], n)
@@ -489,9 +489,9 @@ when LaneWidth != 1 {
             dest ^= cast(D) (((cast(^M)dest)^ &~ mask) | (transmute(M) value & mask))
         }
     }
-    greater_equal  :: proc (a, b: $T) -> u32 { return a >= b ? 0xffffffff : 0}
-    greater_than   :: proc (a, b: $T) -> u32 { return a >  b ? 0xffffffff : 0}
-    less_than      :: proc (a, b: $T) -> u32 { return a <  b ? 0xffffffff : 0}
+    greater_equal  :: proc (a: $T, b: T) -> u32 { return a >= b ? 0xffffffff : 0}
+    greater_than   :: proc (a: $T, b: T) -> u32 { return a >  b ? 0xffffffff : 0}
+    less_than      :: proc (a: $T, b: T) -> u32 { return a <  b ? 0xffffffff : 0}
     horizontal_add :: proc (a: $T) -> T { return a}
     
     shift_left    :: proc (a: $T, n: u32) -> T { return a << n }
@@ -605,7 +605,7 @@ contains_inclusive :: proc (rect: Rectangle($T), point: T) -> (result: b32) {
     return result
 }
 
-dimension_contains :: proc (dimension: $V/[$N]$T, point: V) -> (result: b32) {
+dimension_contains :: proc (dimension: $V/[$N] $T, point: V) -> (result: b32) {
     result = true
     #unroll for i in 0..<N {
         result &&= 0 <= point[i] && point[i] < dimension[i] 

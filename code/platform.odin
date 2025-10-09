@@ -312,6 +312,8 @@ main :: proc () {
     //  Game Loop
         
     for GlobalRunning {
+        check_arena(&frame_arena)  
+        
         ////////////////////////////////////////////////
         // Input
         input_processed := game.begin_timed_block("input processed")
@@ -638,6 +640,8 @@ main :: proc () {
         swap(&new_input, &old_input)
         
         render_memory := begin_temporary_memory(&frame_arena)
+        defer end_temporary_memory(render_memory)
+        
         render_prep := prep_for_render(&render_commands, render_memory.arena)
         
         { timed_block("texture downloads")
@@ -664,7 +668,7 @@ main :: proc () {
         render := game.begin_timed_block("render")
         
         render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, render_prep, window_dim)
-            
+        
         game.end_timed_block(render)
         ////////////////////////////////////////////////
         frame_end_sleep := game.begin_timed_block("sleep at frame end")
@@ -727,12 +731,8 @@ main :: proc () {
             flip_counter = get_wall_clock()
         }
         
-        end_temporary_memory(render_memory)
-        
         game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
-        
-        check_arena(&frame_arena)  
         
         end_counter := get_wall_clock()
         game.frame_marker(get_seconds_elapsed(last_counter, end_counter))

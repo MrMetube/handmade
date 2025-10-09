@@ -39,7 +39,7 @@ DebugState :: struct {
     oldest_frame_ordinal_that_is_already_freed: i32,
     most_recent_frame_ordinal: i32,
     collating_frame_ordinal:   i32,
-    frames:       [MaxFrameCount]DebugFrame,
+    frames:       [MaxFrameCount] DebugFrame,
     profile_root: ^DebugElement,
     
     viewed_frame_ordinal: i32,
@@ -288,8 +288,10 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
         debug.font_info = get_font_info(assets, debug.font_id)
         debug.ascent = get_baseline(debug.font_info)
     }
-    GlobalDebugTable.current_events_index = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
-    events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = GlobalDebugTable.current_events_index})
+    
+    array_index: u32 = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
+    GlobalDebugTable.current_events_index = array_index
+    events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = array_index})
     
     { debug_data_block("Profile")   
         { debug_data_block("Memory")   
@@ -299,6 +301,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     }
     
     collate_events(debug, GlobalDebugTable.events[events_state.array_index][:events_state.events_index])
+    
     overlay_debug_info(debug, input)
     
     debug.next_hot_interaction = {}
@@ -308,8 +311,6 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     if !debug.paused {
         debug.viewed_frame_ordinal = debug.most_recent_frame_ordinal
     }
-    
-    draw_tooltips(debug)
 }
 
 debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {

@@ -70,11 +70,10 @@ RenderGroup :: struct {
     
     screen_size: v2,
     
-    cam_p: v3,
-    cam_x: v3,
-    cam_y: v3,
-    cam_z: v3,
-    last_projection:    m4_inv,
+    game_cam: RenderTransform,
+    debug_cam: RenderTransform,
+    
+    last_projection:    m4,
     last_clip_rect:     Rectangle2i,
     last_render_target: u32,
     
@@ -85,6 +84,14 @@ RenderGroup :: struct {
     current_clip_rect_index: u16,
     
     current_quads: ^RenderEntry_Textured_Quads,
+}
+
+RenderTransform :: struct {
+    p: v3,
+    x: v3,
+    y: v3,
+    z: v3,
+    projection: m4_inv,
 }
 
 Transform :: struct {
@@ -163,7 +170,7 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         generation_id = generation_id,
     }
     
-    push_setup(group, rectangle_zero_dimension(commands.width, commands.height), 0, {identity(), identity()})
+    push_setup(group, rectangle_zero_dimension(commands.width, commands.height), 0, identity())
 }
 
 ////////////////////////////////////////////////
@@ -214,12 +221,12 @@ render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T)
 
 ////////////////////////////////////////////////
 
-push_setup :: proc (group: ^RenderGroup, rect: Rectangle2i, render_target_index: u32, projection: m4_inv) -> (result: ^RenderEntryClip) {
+push_setup :: proc (group: ^RenderGroup, rect: Rectangle2i, render_target_index: u32, projection: m4) -> (result: ^RenderEntryClip) {
     result = push_render_element(group, RenderEntryClip)
     
     result.clip_rect           = rect
     result.render_target_index = render_target_index
-    result.projection          = projection.forward
+    result.projection          = projection
     
     group.last_projection    = projection
     group.last_render_target = render_target_index
@@ -267,22 +274,24 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
     projection: m4_inv
     if .orthographic in flags {
         projection = orthographic_projection(aspect_width_over_height)
-    } else { 
+    } else {
         projection = perspective_projection(aspect_width_over_height, focal_length)
     }
     
-    if .debug not_in flags {
-        group.cam_p = p
-        group.cam_x = x
-        group.cam_y = y
-        group.cam_z = z
-    }
     camera := camera_transform(x, y, z, p)
     
     projection.forward  = projection.forward * camera.forward
     projection.backward = camera.backward * projection.backward
     
-    push_setup(group, group.last_clip_rect, group.last_render_target, projection)
+    transform := .debug in flags ? &group.debug_cam : &group.game_cam
+    
+    transform.projection = projection
+    transform.p = p
+    transform.x = x
+    transform.y = y
+    transform.z = z
+    
+    push_setup(group, group.last_clip_rect, group.last_render_target, projection.forward)
 }
 
 ////////////////////////////////////////////////
@@ -308,6 +317,8 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 ////////////////////////////////////////////////
 
 push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color) {
+    timed_function()
+    
     entry := get_current_quads(group)
     entry.quad_count += 1
     
@@ -354,11 +365,17 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     min    := V4(used_dim.basis, 0)
     x_axis := V3(x_axis2, 0) * size.x
     y_axis := V3(y_axis2, 0) * size.y
-    z_bias := height
+    z_bias := 0.5 * height
     
     if transform.is_upright {
-        x_axis = size.x * (x_axis2.x * group.cam_x + x_axis2.y * group.cam_y)
-        y_axis = size.y * (y_axis2.x * group.cam_x + y_axis2.y * group.cam_y)
+        x_axis0 := size.x * v3{x_axis2.x, 0, x_axis2.y}
+        y_axis0 := size.y * v3{y_axis2.x, 0, y_axis2.y}
+        x_axis1 := size.x * (x_axis2.x * group.game_cam.x + x_axis2.y * group.game_cam.y)
+        y_axis1 := size.y * (y_axis2.x * group.game_cam.x + y_axis2.y * group.game_cam.y)
+        
+        x_axis = x_axis1
+        y_axis = y_axis1
+        y_axis.z = linear_blend(y_axis0.z, y_axis1.z, 0.5)
     }
     
     // @note(viktor): step in one texel because the bitmaps are padded on all sides with a blank strip of pixels
@@ -514,9 +531,9 @@ project_with_transform :: proc (transform: Transform, p: v3) -> (result: v3) {
     return result
 }
 
-unproject_with_transform :: proc (group: ^RenderGroup, transform: Transform, pixel_p: v2, world_z: f32) -> (result: v3) {
-    probe := v4{0, 0, world_z, 1}
-    probe = multiply(group.last_projection.forward, probe)
+unproject_with_transform :: proc (group: ^RenderGroup, transform: RenderTransform, pixel_p: v2, world_z: f32) -> (result: v3) {
+    probe := V4(transform.p + -world_z * transform.z, 1)
+    probe = multiply(transform.projection.forward, probe)
     clip_z := probe.z / probe.w
     
     screen_center := group.screen_size * 0.5
@@ -525,8 +542,7 @@ unproject_with_transform :: proc (group: ^RenderGroup, transform: Transform, pix
     clip_p.xy *= 2 / group.screen_size
     clip_p.z = clip_z
     
-    world_p := multiply(group.last_projection.backward, clip_p)
-    result = world_p - transform.offset
+    result = multiply(transform.projection.backward, clip_p)
     
     return result
 }
@@ -538,10 +554,8 @@ get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> (result: Rectang
 }
 
 get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle3) {
-    transform := default_flat_transform()
-    
-    min := unproject_with_transform(group, transform, 0, distance_from_camera)
-    max := unproject_with_transform(group, transform, group.screen_size, distance_from_camera)
+    min := unproject_with_transform(group, group.game_cam, 0, distance_from_camera)
+    max := unproject_with_transform(group, group.game_cam, group.screen_size, distance_from_camera)
     
     result = rectangle_min_max(min, max)
     

@@ -335,7 +335,7 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
         for volume in entity.collision.volumes {
             mouse_p := debug_get_mouse_p()
             // @todo(viktor): This needs to do ray casting now, if we want to reenable it!
-            local_mouse_p := unproject_with_transform(render_group, transform, mouse_p, 1)
+            local_mouse_p := unproject_with_transform(render_group, render_group.debug_cam, mouse_p, 1)
             
             if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
                 debug_hit(debug_id, local_mouse_p.z)

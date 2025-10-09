@@ -90,7 +90,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     
     room_center: v3i
     choice: u32
-    screen_count :: 10
+    screen_count :: 3
     for screen_index in 0 ..< screen_count {
         room_radius := v2i {8, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
         room_size := room_radius * 2 + 1
@@ -104,7 +104,11 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
           case 5: room_center.y -= room_radius.y
         }
         
-        choice = random_between(&mode.world.game_entropy, u32, 0, 1)
+        when false {
+            choice = random_between(&mode.world.game_entropy, u32, 0, 1)
+        } else {
+            choice = 3
+        }
         
         switch choice {
           case 0: door_right  = true
@@ -418,15 +422,31 @@ StandartRoom :: struct {
 }
 
 add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> (result: StandartRoom) {
-    for offset_x in -radius.x ..= radius.x {
-        for offset_y in -radius.y ..= radius.y {
+    jitter: [64][64] v3
+    for offset_y in -radius.y ..= radius.y {
+        for offset_x in -radius.x ..= radius.x {
             p := chunk_position_from_tile_positon(mode, tile_p + {offset_x, offset_y, 0})
             
-            // p.offset.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
-            // p.offset.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
-            p.offset.z += random_bilateral(&mode.world.game_entropy, f32) * 0.1
+            index_x := offset_x+radius.x
+            index_y := offset_y+radius.y
             
-            result.p[offset_x+radius.x][offset_y+radius.y] = p
+            jitter_top : v3
+            if index_y != 0 do jitter_top = jitter[index_x][index_y-1]
+            jitter_left : v3
+            if index_x != 0 do jitter_left = jitter[index_x-1][index_y]
+            
+            jitter_left.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_left.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_left.z += random_bilateral(&mode.world.game_entropy, f32) * 0.4
+            jitter_top.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_top.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_top.z += random_bilateral(&mode.world.game_entropy, f32) * 0.4
+            
+            jitter_now := linear_blend(jitter_left, jitter_top, 0.5)
+            p.offset += jitter_now
+            
+            jitter[index_x][index_y] = jitter_now
+            result.p[index_x][index_y] = p
             
             if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
@@ -447,7 +467,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
                 occupying: TraversableReference
                 occupying.entity.id = entity.id
                 occupying.entity.pointer = entity
-                result.ground[offset_x+radius.x][offset_y+radius.y] = occupying
+                result.ground[index_x][index_y] = occupying
             }
         }
     }

@@ -5,6 +5,9 @@ import "base:runtime"
 import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
+
+GL_DEBUG :: false
+
 GlMajorVersion :: 4
 GlMinorVersion :: 6
 
@@ -14,7 +17,6 @@ GlAttribs := [?] i32 {
     
     win.WGL_CONTEXT_FLAGS_ARB, win.WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB | (win.WGL_CONTEXT_DEBUG_BIT_ARB when ODIN_DEBUG else 0),
     
-    // win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
     win.WGL_CONTEXT_PROFILE_MASK_ARB, win.WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
     0,
 }
@@ -27,8 +29,7 @@ OpenGlInfo :: struct {
     vendor, 
     renderer,
     version, 
-    shading_language_version, 
-    extensions: cstring,
+    shading_language_version: cstring,
     
     GL_EXT_texture_sRGB,
     GL_EXT_framebuffer_sRGB: b32,
@@ -126,7 +127,9 @@ void main (void) {
     vec4 z_min_transform = transform * in_vertex;
     vec4 z_max_transform = transform * z_vertex;
     
-    gl_Position = vec4(z_min_transform.xy, z_max_transform.z, z_min_transform.w);
+    float modified_z = (z_min_transform.w / z_max_transform.w) * z_max_transform.z;
+    
+    gl_Position = vec4(z_min_transform.xy, modified_z, z_min_transform.w);
     
     frag_uv = in_uv;
     frag_color = in_color;
@@ -248,10 +251,9 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
 opengl_get_extensions :: proc (modern_context: b32) -> (result: OpenGlInfo) {
     result.modern_context = modern_context
     
-    result.vendor     = gl.GetString(gl.VENDOR)
-    result.renderer   = gl.GetString(gl.RENDERER)
-    result.version    = gl.GetString(gl.VERSION)
-    result.extensions = gl.GetString(gl.EXTENSIONS)
+    result.vendor   = gl.GetString(gl.VENDOR)
+    result.renderer = gl.GetString(gl.RENDERER)
+    result.version  = gl.GetString(gl.VERSION)
     
     if modern_context {
         result.shading_language_version = gl.GetString(gl.SHADING_LANGUAGE_VERSION)
@@ -260,19 +262,15 @@ opengl_get_extensions :: proc (modern_context: b32) -> (result: OpenGlInfo) {
     }
     
     length: int
-    extensions := cast(string) result.extensions
-    for len(extensions) > 0 {
-        length += 1
-        if length >= len(extensions) do break
+    extensions_count : i32
+    gl.GetIntegerv(gl.NUM_EXTENSIONS, &extensions_count)
+    
+    for index in 0..<extensions_count {
+        extension := gl.GetStringi(gl.EXTENSIONS, cast(u32) index)
         
-        if extensions[length] == ' ' {
-            part      := extensions[:length]
-            extensions = extensions[length+1:]
-            length = 0
-            if      "GL_EXT_texture_sRGB"     == part do result.GL_EXT_texture_sRGB = true
-            else if "GL_EXT_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
-            else if "GL_ARB_framebuffer_sRGB" == part do result.GL_EXT_framebuffer_sRGB = true
-        }
+        if      "GL_EXT_texture_sRGB"     == extension do result.GL_EXT_texture_sRGB = true
+        else if "GL_EXT_framebuffer_sRGB" == extension do result.GL_EXT_framebuffer_sRGB = true
+        else if "GL_ARB_framebuffer_sRGB" == extension do result.GL_EXT_framebuffer_sRGB = true
     }
     
     major: i32 = 1
@@ -514,7 +512,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
             
             gl.BindTexture(slot, depth_texture)
             // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
-            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT32, width, height, false)
+            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT32F, width, height, false)
             
             gl.BindTexture(slot, 0)
             
