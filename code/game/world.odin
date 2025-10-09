@@ -179,8 +179,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         if ShowRenderAndSimulationBounds {
             world_transform := default_flat_transform()
+            push_volume_outline(render_group, simulation.region.bounds,              world_transform, Salmon,   0.2)
             push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
-            push_rectangle_outline(render_group, simulation.region.bounds,           world_transform, Blue,   0.2)
             push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
         }
         

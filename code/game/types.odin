@@ -11,7 +11,7 @@ Array :: struct ($T: typeid) {
     data:  [] T,
     count: i64,
 }
-String_Builder :: Array(u8)
+
 FixedArray :: struct ($N: i64, $T: typeid) {
     data:  [N] T,
     count: i64,
@@ -86,21 +86,6 @@ append_fixed_array_many_slice :: proc (a: ^FixedArray($N, $T), values: [] T) -> 
     return result
 }
 
-append_string :: proc (a: ^String_Builder, value: string) -> (result: string) {
-    append(a, (transmute([]u8) value))
-    return cast(string) a.data[:a.count]
-}
-
-make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
-make_string_builder_buffer :: proc (buffer: []u8) -> (result: String_Builder) {
-    result.data = buffer
-    return result
-}
-make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
-    buffer := push_slice(arena, u8, len, params)
-    result = make_string_builder_buffer(buffer)
-    return result
-}
 make_array :: proc (arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
     result.data = push_slice(arena, T, len, params)
     return result
@@ -121,10 +106,6 @@ slice_array :: proc (array: Array($T)) -> []T {
 }
 slice_array_pointer :: proc (array: ^Array($T)) -> []T {
     return array.data[:array.count]
-}
-
-to_string :: proc (sb: String_Builder) -> string {
-    return cast(string) sb.data[:sb.count]
 }
 
 rest :: proc { rest_fixed_array, rest_array, rest_dynamic_array }
@@ -158,6 +139,38 @@ unordered_remove :: proc { builtin.unordered_remove, unordered_remove_array }
 unordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
     a.data[index] = a.data[a.count-1]
     a.count -= 1
+}
+
+////////////////////////////////////////////////
+
+String_Builder :: Array(u8)
+
+append_string :: proc (a: ^String_Builder, value: string) -> (result: string) {
+    append(a, (transmute([]u8) value))
+    return cast(string) a.data[:a.count]
+}
+
+make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
+make_string_builder_buffer :: proc (buffer: []u8) -> (result: String_Builder) {
+    result.data = buffer
+    return result
+}
+make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
+    buffer := push_slice(arena, u8, len, params)
+    result = make_string_builder_buffer(buffer)
+    return result
+}
+
+to_string :: proc (sb: String_Builder) -> string {
+    return cast(string) sb.data[:sb.count]
+}
+
+////////////////////////////////////////////////
+
+Byte_Buffer :: struct {
+    bytes:        [] u8,
+    read_cursor:  int,
+    write_cursor: int,
 }
 
 ////////////////////////////////////////////////

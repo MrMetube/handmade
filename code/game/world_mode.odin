@@ -247,10 +247,11 @@ add_wall :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableRef
     
     entity.flags += {.Collides}
     entity.occupying = occupying
+    entity.collision = mode.wall_collision
     append(&entity.pieces, VisiblePiece {
         asset     = .Tree,
-        dimension = {0, 2.5}, // random_between_f32(&world.general_entropy, 0.9, 1.7),
-        color     = 1,    // {random_unilateral(&world.general_entropy, f32), 1, 1, 1},
+        dimension = {1, 2.5},
+        color     = 1,
     })
 }
 
@@ -265,8 +266,7 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         body.brain_kind = .Hero
         body.brain_slot = brain_slot_for(BrainHero, "body")
         
-        // @todo(viktor): We will probably need a creation-time system for
-        // guaranteeing no overlapping occupation.
+        // @todo(viktor): We will probably need a creation-time system for guaranteeing no overlapping occupation.
         body.occupying = occupying
         
         append(&body.pieces, VisiblePiece{
@@ -482,14 +482,15 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
     room := begin_grounded_entity(mode, room_collision)
     room.brain_kind = .Room
     diff := radius - {8, 4} // :RoomSize
+    
+    // @cleanup
+    BaseCamHeight :: 8
+    
     room.camera_height = BaseCamHeight + cast(f32) max(max(diff.x, diff.y), 0)
     end_entity(mode, room, p)
     
     return result
 }
-
-// @cleanup
-BaseCamHeight :: 8
 
 init_hitpoints :: proc (entity: ^Entity, count: u32) {
     for _ in 0..<count {

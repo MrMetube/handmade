@@ -293,7 +293,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             draw_hitpoints(render_group, &entity, 0.5, transform)
             
             for volume in entity.collision.volumes {
-                push_rectangle_outline(render_group, volume, default_upright_transform(), SeaGreen, 0.1)
+                push_volume_outline(render_group, volume, transform, SeaGreen, 0.01)
             }
             
             when false do if RenderCollisionOutlineAndTraversablePoints {
@@ -343,7 +343,7 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
             
             highlighted, color := debug_highlighted(debug_id)
             if highlighted {
-                push_rectangle_outline(render_group, volume, transform, color, 0.05)
+                push_volume_outline(render_group, volume, transform, color, 0.05)
             }
         }
         

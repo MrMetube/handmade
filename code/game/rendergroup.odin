@@ -350,6 +350,31 @@ get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Texture
     return result
 }
 
+push_line_segment :: proc (group: ^RenderGroup, bitmap: ^Bitmap, from_p, to_p: v4, c0, c1: Color, thickness: f32) {
+    perp := cross(group.debug_cam.z, to_p.xyz - from_p.xyz)
+    perp_length := length(perp)
+    
+    when false do if perp_length < thickness {
+        perp = group.debug_cam.y
+    } else {
+    }
+    perp /= perp_length
+    
+    d := V4(perp, 0) * thickness
+    
+    p0 := from_p - d 
+    p1 :=   to_p - d 
+    p2 :=   to_p + d 
+    p3 := from_p + d 
+    
+    t0, t1, t2, t3: v2 = {0,0}, {1,0}, {1,1}, {0,1}
+    c0, c1, c2, c3: Color = c0, c1, c1, c0
+    
+    push_quad(group, bitmap, p0, p1, p2, p3, t0, t1, t2, t3, c0, c1, c2, c3)
+}
+
+////////////////////////////////////////////////
+
 push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1}) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
@@ -367,8 +392,6 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     
     used_dim := get_used_bitmap_dim(group, bitmap^, transform, height, offset, use_alignment, x_axis2, y_axis2)
     size := used_dim.size
-    
-    premultiplied_color := store_color(color)
     
     min    := V4(used_dim.basis, 0)
     x_axis := V3(x_axis2, 0) * size.x
@@ -393,6 +416,7 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     
     max := min + V4(x_axis + y_axis, z_bias)
     
+    premultiplied_color := store_color(color)
     c := v4_to_rgba(premultiplied_color)
     
     ////////////////////////////////////////////////
@@ -512,6 +536,48 @@ push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform
     push_rectangle(group, rectangle_center_half_dimension(center_left,  half_dim_vertical), transform, color)
     push_rectangle(group, rectangle_center_half_dimension(center_right, half_dim_vertical), transform, color)
 }
+
+push_volume_outline :: proc (group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
+    p := project_with_transform(transform, rec.max)
+    n := project_with_transform(transform, rec.min)
+    
+    p0 := v4{n.x, n.y, n.z, 0}
+    p1 := v4{n.x, n.y, p.z, 0}
+    p2 := v4{n.x, p.y, n.z, 0}
+    p3 := v4{n.x, p.y, p.z, 0}
+    p4 := v4{p.x, n.y, n.z, 0}
+    p5 := v4{p.x, n.y, p.z, 0}
+    p6 := v4{p.x, p.y, n.z, 0}
+    p7 := v4{p.x, p.y, p.z, 0}
+    
+    color := color
+    color = store_color(color)
+    c := v4_to_rgba(color)
+    
+    t0 := v2{0, 0}
+    t1 := v2{1, 0}
+    t2 := v2{1, 1}
+    t3 := v2{0, 1}
+    
+    bitmap := &group.commands.white_bitmap
+    
+    push_line_segment(group, bitmap, p0, p1, c, c, thickness)
+    push_line_segment(group, bitmap, p0, p2, c, c, thickness)
+    push_line_segment(group, bitmap, p0, p4, c, c, thickness)
+    
+    push_line_segment(group, bitmap, p3, p1, c, c, thickness)
+    push_line_segment(group, bitmap, p3, p2, c, c, thickness)
+    push_line_segment(group, bitmap, p3, p7, c, c, thickness)
+    
+    push_line_segment(group, bitmap, p5, p1, c, c, thickness)
+    push_line_segment(group, bitmap, p5, p4, c, c, thickness)
+    push_line_segment(group, bitmap, p5, p7, c, c, thickness)
+    
+    push_line_segment(group, bitmap, p6, p2, c, c, thickness)
+    push_line_segment(group, bitmap, p6, p4, c, c, thickness)
+    push_line_segment(group, bitmap, p6, p7, c, c, thickness)
+}
+
 
 ////////////////////////////////////////////////
 
