@@ -46,44 +46,32 @@ RenderCommands :: struct {
     // @note(viktor): Packed array of disjoint elements.
     // Filled with pairs of [RenderEntryHeader + SomeRenderEntry]
     // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
-    push_buffer: [] u8, // :Array or :Allocator
+    push_buffer:         [] u8, // :Array or :ByteArray with some write-value/read-type operations a write and read cursor
     push_buffer_data_at: u32,
     
     max_render_target_index: u32,
     
-    clip_rects_count: u32,
-    rects: Deque(RenderEntryClip),
-    
-    vertex_buffer: Array(Textured_Vertex),
+    vertex_buffer:      Array(Textured_Vertex),
     quad_bitmap_buffer: Array(^Bitmap),
+    
     white_bitmap: Bitmap,
-}
-
-@(common)
-RenderPrep :: struct {
-    clip_rects: Array(RenderEntryClip),
 }
 
 RenderGroup :: struct {
     assets:              ^Assets,
-    missing_asset_count: i32,
-    
-    screen_size: v2,
-    
-    game_cam: RenderTransform,
-    debug_cam: RenderTransform,
-    
-    last_projection:    m4,
-    last_clip_rect:     Rectangle2i,
-    last_render_target: u32,
+    generation_id:       AssetGenerationId,
+    missing_asset_count: i32, // @cleanup this is only ever written to
     
     commands: ^RenderCommands,
     
-    generation_id: AssetGenerationId,
+    screen_size: v2,
     
-    current_clip_rect_index: u16,
+    last_setup: RenderSetup,
     
     current_quads: ^RenderEntry_Textured_Quads,
+    
+    game_cam:  RenderTransform,
+    debug_cam: RenderTransform,
 }
 
 RenderTransform :: struct {
@@ -110,24 +98,37 @@ Camera_Flags :: bit_set[ enum {
 
 RenderEntryType :: enum u8 {
     None,
-    RenderEntryClip,
     RenderEntryBlendRenderTargets,
     RenderEntry_Textured_Quads,
 }
 
 @(common)
 RenderEntryHeader :: struct {
-    clip_rect_index: u16,
     type: RenderEntryType,
 }
 
 @(common)
-RenderEntryClip :: struct { // @todo(viktor): rename this to some more camera-centric
-    next: ^RenderEntryClip,
+RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centric
+    next: ^RenderSetup,
     
     clip_rect:           Rectangle2i,
     render_target_index: u32,
     projection:          m4,
+    
+    // @volatile shader inputs
+    camera_p:      v3,
+    fog_direction: v3,
+    fog_begin: f32,
+    fog_end:   f32,
+    fog_color: v3,
+}
+
+@(common)
+RenderEntry_Textured_Quads :: struct {
+    setup: RenderSetup,
+    
+    quad_count:    u32,
+    bitmap_offset: u32,
 }
 
 @(common)
@@ -135,12 +136,6 @@ RenderEntryBlendRenderTargets :: struct {
     source_index: u32,
     dest_index:   u32,
     alpha:        f32,
-}
-
-@(common)
-RenderEntry_Textured_Quads :: struct {
-    quad_count: u32,
-    bitmap_offset: u32,
 }
 
 @(common)
@@ -170,7 +165,14 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         generation_id = generation_id,
     }
     
-    push_setup(group, rectangle_zero_dimension(commands.width, commands.height), 0, identity())
+    setup := group.last_setup
+    
+    setup.clip_rect = rectangle_zero_dimension(commands.width, commands.height)
+    setup.projection = identity()
+    setup.fog_begin = 0
+    setup.fog_end = 1
+    
+    push_setup(group, setup)
 }
 
 ////////////////////////////////////////////////
@@ -185,17 +187,13 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     type: RenderEntryType
     switch typeid_of(T) {
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
-      case RenderEntryClip:               type = .RenderEntryClip
       case RenderEntry_Textured_Quads:    type = .RenderEntry_Textured_Quads; reset_quads = false
       case:                               unreachable()
     }
     assert(type != .None)
     
     header := render_group_push_size(group, RenderEntryHeader)
-    header ^= {
-        clip_rect_index = group.current_clip_rect_index,
-        type = type,
-    }
+    header ^= { type = type }
     result = render_group_push_size(group, T)
     
     if reset_quads {
@@ -221,61 +219,62 @@ render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T)
 
 ////////////////////////////////////////////////
 
-push_setup :: proc (group: ^RenderGroup, rect: Rectangle2i, render_target_index: u32, projection: m4) -> (result: ^RenderEntryClip) {
-    result = push_render_element(group, RenderEntryClip)
+push_setup :: proc (group: ^RenderGroup, setup: RenderSetup) {
+    group.last_setup = setup
+    group.current_quads = nil
+}
+
+get_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> (result: Rectangle2i) {
+    dim := get_dimension(rect)
     
-    result.clip_rect           = rect
-    result.render_target_index = render_target_index
-    result.projection          = projection
+    // @todo(viktor): should we stick with the max for the transform or do something better here? we transform the max and then get back the rectangle we by subtracting the radius?
+    p := project_with_transform(transform, V3(rect.max, 0))
     
-    group.last_projection    = projection
-    group.last_render_target = render_target_index
-    group.last_clip_rect     = rect
-    
-    current_clip_rect_index := cast(u16) group.commands.clip_rects_count
-    deque_append(&group.commands.rects, result)
-    group.commands.clip_rects_count += 1
-    group.current_clip_rect_index = current_clip_rect_index
+    rectangle := rectangle_center_dimension(p.xy - 0.5 * dim, dim)
+    result = round_outer(rect)
     
     return result
 }
 
-push_clip_rect :: proc (group: ^RenderGroup, rect: Rectangle2) -> (result: u16) {
-    clip := round_outer(rect)
-    push_setup(group, clip, group.last_render_target, group.last_projection)
-    result = group.current_clip_rect_index
+@(deferred_in_out=end_transient_clip_rect)
+transient_clip_rect :: proc (group: ^RenderGroup, rect: Rectangle2i) -> (result: RenderSetup) {
+    result = group.last_setup
+    setup := result
+    setup.clip_rect =  rect
+    push_setup(group, setup)
+    
     return result
 }
-push_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> (result: u16) {
-    rect3 := Rect3(rect, 0, 0)
-    
-    // @cleanup What is this even supposed to to, thats just rect3.max isnt it?
-    center := get_center(rect3)
-    size   := get_dimension(rect3)
-    p := center + 0.5*size
-    basis := project_with_transform(transform, p)
-    
-    dim := size.xy
-    rectangle := rectangle_center_dimension(basis.xy - 0.5 * dim, dim)
-    result = push_clip_rect(group, rectangle)
-    
-    return result
+
+end_transient_clip_rect :: proc (group: ^RenderGroup, _: Rectangle2i, setup: RenderSetup) {
+    push_setup(group, setup)
 }
 
 push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
-    push_setup(group, group.last_clip_rect, render_target_index, group.last_projection)
-    
     group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
+    
+    setup := group.last_setup
+    setup.render_target_index = render_target_index
+    push_setup(group, setup)
 }
 
 push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
     
+    setup := group.last_setup
     projection: m4_inv
     if .orthographic in flags {
         projection = orthographic_projection(aspect_width_over_height)
+        
+        setup.fog_direction = 0
     } else {
         projection = perspective_projection(aspect_width_over_height, focal_length)
+        
+        if .debug not_in flags {
+            setup.fog_direction = -z
+            setup.fog_begin = 8
+            setup.fog_end = 25
+        }
     }
     
     camera := camera_transform(x, y, z, p)
@@ -291,10 +290,22 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
     transform.y = y
     transform.z = z
     
-    push_setup(group, group.last_clip_rect, group.last_render_target, projection.forward)
+    if .debug not_in flags {
+        setup.camera_p = p
+    }
+    setup.projection = projection.forward
+    push_setup(group, setup)
 }
 
 ////////////////////////////////////////////////
+
+push_clear :: proc (group: ^RenderGroup, color: v4) {
+    group.commands.clear_color = store_color(color)
+    
+    setup := group.last_setup
+    setup.fog_color = srgb_to_linear(color.rgb)
+    push_setup(group, setup)
+}
 
 push_blend_render_targets :: proc (group: ^RenderGroup, source_index: u32, alpha: f32) {
     push_sort_barrier(group)
@@ -308,10 +319,6 @@ push_blend_render_targets :: proc (group: ^RenderGroup, source_index: u32, alpha
 
 push_sort_barrier :: proc (group: ^RenderGroup, turn_of_sorting := false) {
     // @todo(viktor): Do we want the sort barrier again?
-}
-
-push_clear :: proc (group: ^RenderGroup, color: v4) {
-    group.commands.clear_color = store_color(color)
 }
 
 ////////////////////////////////////////////////
@@ -336,6 +343,7 @@ get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Texture
     if group.current_quads == nil {
         group.current_quads = push_render_element(group, RenderEntry_Textured_Quads)
         group.current_quads.bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count
+        group.current_quads.setup = group.last_setup
     }
     
     result = group.current_quads

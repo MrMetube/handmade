@@ -5,9 +5,6 @@ import "base:runtime"
 import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
-
-GL_DEBUG :: false
-
 GlMajorVersion :: 4
 GlMinorVersion :: 6
 
@@ -45,12 +42,20 @@ OpenGL :: struct {
     
     blit_texture_handle: u32,
     
-    basic_zbias_program: u32,
-    basic_zbias_transform: i32,
-    basic_zbias_texture_sampler: i32,
-    basic_zbias_in_p: u32,
-    basic_zbias_in_uv: u32,
-    basic_zbias_in_color: u32,
+    // basic zbias shader
+    program: u32,
+    // uniforms
+    transform: i32,
+    texture_sampler: i32,
+    fog_color: i32,
+    camera_p: i32,
+    fog_begin: i32,
+    fog_end: i32,
+    fog_direction: i32,
+    // attributes
+    in_p: i32,
+    in_uv: i32,
+    in_color: i32,
 }
 
 open_gl := OpenGL {
@@ -104,63 +109,106 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         
         header_code: cstring = `
 #version 130
+
+#define f32 float
+#define v2 vec2
+#define v3 vec3
+#define v4 vec4
+#define V2 vec2
+#define V3 vec3
+#define V4 vec4
+#define m4 mat4x4
+#define linear_blend(a, b, t) mix(a, b, t)
+
+#define Pipeline \
+    smooth Pipe v4 frag_color; \
+    smooth Pipe v2 frag_uv;    \
+    smooth Pipe f32 fog_amount;
+    
+    
+#define clamp01(t) clamp(t, 0, 1)
+
+f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
+    f32 range = max - min;
+    f32 absolute = (t - min) / range;
+    f32 result = clamp01(absolute);
+    return result;
+}
 `
-        vertex_code: cstring = `
-uniform mat4x4 transform;
+    vertex_code: cstring = `
+uniform m4 transform;
+uniform v3 camera_p;
+uniform f32 fog_begin;
+uniform f32 fog_end;
+uniform v3 fog_direction;
 
 // @volatile keep vertex ins in sync with renderloop code
-in vec4 in_p;
-in vec2 in_uv;
-in vec4 in_color;
+in v4 in_color;
+in v2 in_uv;
+in v4 in_p;
 
-// @volatile keep vertex outs in sync with fragment ins
-smooth out vec2 frag_uv;
-smooth out vec4 frag_color;
+#define Pipe out
+Pipeline
 
 void main (void) {
-    vec4 in_vertex = vec4(in_p.xyz, 1);
-    float z_bias = in_p.w;
+    v4 in_vertex = V4(in_p.xyz, 1);
+    f32 z_bias = in_p.w;
     
-    vec4 z_vertex = in_vertex;
+    v4 z_vertex = in_vertex;
     z_vertex.z += z_bias;
     
-    vec4 z_min_transform = transform * in_vertex;
-    vec4 z_max_transform = transform * z_vertex;
+    v4 z_min_transform = transform * in_vertex;
+    v4 z_max_transform = transform * z_vertex;
     
-    float modified_z = (z_min_transform.w / z_max_transform.w) * z_max_transform.z;
+    f32 modified_z = (z_min_transform.w / z_max_transform.w) * z_max_transform.z;
     
-    gl_Position = vec4(z_min_transform.xy, modified_z, z_min_transform.w);
+    gl_Position = V4(z_min_transform.xy, modified_z, z_min_transform.w);
     
     frag_uv = in_uv;
     frag_color = in_color;
+    v3 delta = z_vertex.xyz - camera_p;
+    f32 distance = dot(delta, fog_direction);
+    fog_amount = clamp_01_map_to_range(fog_begin, fog_end, distance);
 }
 `
         fragment_code: cstring = `
 uniform sampler2D texture_sampler;
+uniform v3 fog_color;
 
-// @volatile see vertex shader
-smooth in vec2 frag_uv;
-smooth in vec4 frag_color;
+#define Pipe in
+Pipeline
 
-out vec4 result_color;
+out v4 result_color;
 
 void main (void) {
-    vec4 texture_sample = texture(texture_sampler, frag_uv);
+    v4 texture_sample = texture(texture_sampler, frag_uv);
     if (texture_sample.a > 0) {
-        result_color = frag_color * texture_sample;
+        v4 modulated = frag_color * texture_sample;
+        result_color.rgb = linear_blend(modulated.rgb, fog_color, fog_amount);
+        result_color.a = modulated.a;
     } else {
         discard;
     }
 }
 `
-        open_gl.basic_zbias_program = gl_create_program(header_code, vertex_code, fragment_code)
+        open_gl.program = gl_create_program(header_code, vertex_code, fragment_code)
         
         // @metaprogram
-        open_gl.basic_zbias_transform = gl.GetUniformLocation(open_gl.basic_zbias_program, "transform")
-        open_gl.basic_zbias_texture_sampler = gl.GetUniformLocation(open_gl.basic_zbias_program, "texture_sampler")
-        open_gl.basic_zbias_in_p = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_p")
-        open_gl.basic_zbias_in_uv = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_uv")
-        open_gl.basic_zbias_in_color = cast(u32) gl.GetAttribLocation(open_gl.basic_zbias_program, "in_color")
+        open_gl.transform       = gl.GetUniformLocation(open_gl.program, "transform")
+        open_gl.texture_sampler = gl.GetUniformLocation(open_gl.program, "texture_sampler")
+        open_gl.fog_color       = gl.GetUniformLocation(open_gl.program, "fog_color")
+        open_gl.camera_p        = gl.GetUniformLocation(open_gl.program, "camera_p")
+        open_gl.fog_begin       = gl.GetUniformLocation(open_gl.program, "fog_begin")
+        open_gl.fog_end         = gl.GetUniformLocation(open_gl.program, "fog_end")
+        open_gl.fog_direction   = gl.GetUniformLocation(open_gl.program, "fog_direction")
+        open_gl.fog_color       = gl.GetUniformLocation(open_gl.program, "fog_color")
+        
+        open_gl.in_color = gl.GetAttribLocation(open_gl.program, "in_color")
+        open_gl.in_p     = gl.GetAttribLocation(open_gl.program, "in_p")
+        open_gl.in_uv    = gl.GetAttribLocation(open_gl.program, "in_uv")
+        assert(open_gl.in_color != -1)
+        assert(open_gl.in_p     != -1)
+        assert(open_gl.in_uv    != -1)
     }
     
     return gl_context
@@ -461,7 +509,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 
 ////////////////////////////////////////////////
 
-gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_region: Rectangle2i, window_dim: v2i) {
+gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     draw_dim := get_dimension(draw_region)
@@ -547,66 +595,72 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
     clip_scale_x := safe_ratio_0(cast(f32) dim.x, commands_dim.x)
     clip_scale_y := safe_ratio_0(cast(f32) dim.y, commands_dim.y)
     
-    clip_rect_index      := max(u16)
-    current_target_index := max(u32)
+    current_render_target_index := max(u32)
     
-    projection: m4 = 1
     for header_offset: u32; header_offset < commands.push_buffer_data_at; {
         // :PointerArithmetic
         header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
         header_offset += size_of(RenderEntryHeader)
         entry_data := &commands.push_buffer[header_offset]
         
-        if header.type != .RenderEntryClip && clip_rect_index != header.clip_rect_index {
-            clip_rect_index = header.clip_rect_index
-            clip := prep.clip_rects.data[clip_rect_index]
-            
-            projection = clip.projection
-            
-            if current_target_index != clip.render_target_index {
-                current_target_index = clip.render_target_index
-                gl_bind_frame_buffer(current_target_index, draw_region)
-            }
-            
-            rect := clip.clip_rect
-            rect.min.x = round(i32, cast(f32) rect.min.x * clip_scale_x)
-            rect.min.y = round(i32, cast(f32) rect.min.y * clip_scale_y)
-            rect.max.x = round(i32, cast(f32) rect.max.x * clip_scale_x)
-            rect.max.y = round(i32, cast(f32) rect.max.y * clip_scale_y)
-            
-            if current_target_index == 0 do rect = add_offset(rect, draw_region.min)
-            
-            gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
-        }
-        
         switch header.type {
           case .RenderEntry_Textured_Quads:
             entry := cast(^RenderEntry_Textured_Quads) entry_data
             header_offset += size_of(RenderEntry_Textured_Quads)
             
-            gl.UseProgram(open_gl.basic_zbias_program)
+            ////////////////////////////////////////////////
+            
+            setup := entry.setup
+            if current_render_target_index != setup.render_target_index {
+                current_render_target_index = setup.render_target_index
+                gl_bind_frame_buffer(current_render_target_index, draw_region)
+            }
+            
+            rect := setup.clip_rect
+            rect = round_middle(scale_radius(rec_cast(f32, setup.clip_rect), v2{clip_scale_x, clip_scale_y}))
+            rect.min.x = round(i32, cast(f32) rect.min.x * clip_scale_x)
+            rect.min.y = round(i32, cast(f32) rect.min.y * clip_scale_y)
+            rect.max.x = round(i32, cast(f32) rect.max.x * clip_scale_x)
+            rect.max.y = round(i32, cast(f32) rect.max.y * clip_scale_y)
+            
+            if current_render_target_index == 0 do rect = add_offset(rect, draw_region.min)
+            
+            gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
+            
+            ////////////////////////////////////////////////
+            
+            gl.UseProgram(open_gl.program)
             defer gl.UseProgram(0)
             
             gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
             
             // @volatile see vertex shader
-            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_uv)
-            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_color)
-            gl.EnableVertexAttribArray(open_gl.basic_zbias_in_p)
+            gl.EnableVertexAttribArray(cast(u32) open_gl.in_uv)
+            gl.EnableVertexAttribArray(cast(u32) open_gl.in_color)
+            gl.EnableVertexAttribArray(cast(u32) open_gl.in_p)
             
             defer {
-                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_uv)
-                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_color)
-                gl.DisableVertexAttribArray(open_gl.basic_zbias_in_p)
+                gl.DisableVertexAttribArray(cast(u32) open_gl.in_uv)
+                gl.DisableVertexAttribArray(cast(u32) open_gl.in_color)
+                gl.DisableVertexAttribArray(cast(u32) open_gl.in_p)
             }
             
             // @metaprogram
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
-            gl.VertexAttribPointer(open_gl.basic_zbias_in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
+            gl.VertexAttribPointer(cast(u32) open_gl.in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
+            gl.VertexAttribPointer(cast(u32) open_gl.in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
+            gl.VertexAttribPointer(cast(u32) open_gl.in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
             
-            gl.UniformMatrix4fv(open_gl.basic_zbias_transform, 1, false, &projection[0, 0])
-            gl.Uniform1i(open_gl.basic_zbias_texture_sampler, 0)
+            { using setup
+                gl.UniformMatrix4fv(open_gl.transform, 1, false, &projection[0, 0])
+                gl.Uniform1i(open_gl.texture_sampler, 0)
+                gl.Uniform3fv(open_gl.camera_p, 1, &camera_p[0])
+                gl.Uniform3fv(open_gl.fog_direction, 1, &fog_direction[0])
+                gl.Uniform1f(open_gl.fog_begin, fog_begin)
+                gl.Uniform1f(open_gl.fog_end, fog_end)
+                gl.Uniform3fv(open_gl.fog_color, 1, &fog_color[0])
+            }
+            
+            ////////////////////////////////////////////////
             
             for bitmap_index in entry.bitmap_offset..<entry.bitmap_offset+entry.quad_count {
                 bitmap := commands.quad_bitmap_buffer.data[bitmap_index]
@@ -615,10 +669,6 @@ gl_render_commands :: proc (commands: ^RenderCommands, prep: RenderPrep, draw_re
                 vertex_index := cast(i32) bitmap_index*4
                 gl.DrawArrays(gl.TRIANGLE_STRIP, vertex_index, 4)
             }
-            
-          case .RenderEntryClip: 
-            // @note(viktor): clip rects are handled before rendering
-            header_offset += size_of(RenderEntryClip)
             
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data

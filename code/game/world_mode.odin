@@ -90,7 +90,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     
     room_center: v3i
     choice: u32
-    screen_count :: 3
+    screen_count :: 10
     for screen_index in 0 ..< screen_count {
         room_radius := v2i {8, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
         room_size := room_radius * 2 + 1
@@ -119,8 +119,8 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
           case 5: door_bottom = true
         }
         
-        left_hole  := screen_index % 2 == 0
-        right_hole := !left_hole
+        left_hole  := true || screen_index % 2 == 0
+        right_hole := true || !left_hole
         if screen_index == 0 {
             left_hole  = false
             right_hole = false
@@ -450,9 +450,12 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             
             if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
-            } else if right_hole && (offset_x == 3 && offset_y >= -2 && offset_y <= 2) {
-                // @note(viktor): hole down to floor below
             } else {
+                if right_hole && (offset_x == 3 && offset_y >= -2 && offset_y <= 2) {
+                    // @note(viktor): hole down to floor below
+                    t := clamp_01_map_to_range(cast(f32) -2, cast(f32) offset_y, 2)
+                    p.offset.z += linear_blend(cast(f32) 0, -mode.typical_floor_height*2, t)
+                }
                 entity := begin_grounded_entity(mode, mode.floor_collision)
                 entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})

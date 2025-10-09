@@ -378,6 +378,8 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
             
             rect := ui_element.bounds
             
+            transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
+            
             #partial switch value in element.type {
               case ArenaOccupancy:
                 draw_arena_occupancy(debug, arena, mouse_p, rect)
@@ -441,10 +443,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         rect := ui_element.bounds
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
-        // @todo(viktor): when pushing a cliprect the renderer just stops and shuffles between two stale images!?
-        // old_clip_rect := debug.render_group.current_clip_rect_index
-        // debug.render_group.current_clip_rect_index = push_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform)
-        // defer debug.render_group.current_clip_rect_index = old_clip_rect
+        transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
         
         if contains(rect, mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
@@ -527,9 +526,8 @@ add_tooltip :: proc (debug: ^DebugState, text: string) {
 }
 
 draw_tooltips :: proc (debug: ^DebugState) {
-    // @todo(viktor): check that the tooltips really are no longer effected by any of the clip rects
     for &tooltip in slice(&debug.tooltips) {
-        text: string = cast(string) transmute(cstring) &tooltip
+        text := cast(string) transmute(cstring) &tooltip
         
         layout := &debug.mouse_text_layout
         text_bounds := measure_text(debug, text)

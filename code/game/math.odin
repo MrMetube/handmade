@@ -404,13 +404,17 @@ linear_to_srgb_exact3 :: proc (l: v3) -> (s: v3) {
 
 srgb_to_linear :: proc (color: $V) -> (result: V) {
     result.rgb = square(color.rgb)
-    result.a = color.a
+    when len(V) == 4 {
+        result.a = color.a
+    }
     return result
 }
 
 linear_to_srgb :: proc (color: $V) -> (result: V) {
     result.rgb = square_root(color.rgb)
-    result.a = color.a
+    when len(V) == 4 {
+        result.a = color.a
+    }
     return result
 }
 
@@ -702,15 +706,17 @@ has_area_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: b32) {
     return result
 }
 
-round_outer :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) {
-    result.min = floor(i32, rect.min)
-    result.max = ceil(i32, rect.max)
-    return result
-}
+Rounding :: enum { Floor, Round, Ceil }
 
-round_inner :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) {
-    result.min = ceil(i32, rect.min)
-    result.max = floor(i32, rect.max)
+round_outer  :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) { return round_rectangle(rect, .Floor, .Ceil ) }
+round_inner  :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) { return round_rectangle(rect, .Ceil,  .Floor) }
+round_upper  :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) { return round_rectangle(rect, .Ceil,  .Ceil ) }
+round_lower  :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) { return round_rectangle(rect, .Floor, .Floor) }
+round_middle :: proc (rect: $R/Rectangle([$N] f32)) -> (result: Rectangle([N] i32)) { return round_rectangle(rect, .Round, .Round) }
+
+round_rectangle :: proc (rect: $R/Rectangle([$N] f32), $floor_min, $floor_max: Rounding) -> (result: Rectangle([N] i32)) {
+    result.min = floor(i32, rect.min) when floor_min == .Floor else (ceil(i32, rect.min) when floor_min == .Ceil else round(i32, rect.min))
+    result.max = floor(i32, rect.max) when floor_max == .Floor else (ceil(i32, rect.max) when floor_max == .Ceil else round(i32, rect.max))
     return result
 }
 

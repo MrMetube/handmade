@@ -639,11 +639,6 @@ main :: proc () {
         
         swap(&new_input, &old_input)
         
-        render_memory := begin_temporary_memory(&frame_arena)
-        defer end_temporary_memory(render_memory)
-        
-        render_prep := prep_for_render(&render_commands, render_memory.arena)
-        
         { timed_block("texture downloads")
             begin_ticket_mutex(&texture_op_queue.mutex)
                 first := texture_op_queue.ops.first
@@ -667,7 +662,7 @@ main :: proc () {
         ////////////////////////////////////////////////
         render := game.begin_timed_block("render")
         
-        render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, render_prep, window_dim)
+        render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, window_dim)
         
         game.end_timed_block(render)
         ////////////////////////////////////////////////
@@ -742,14 +737,14 @@ main :: proc () {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: ^Arena, prep: RenderPrep, windows_dim: v2i) {
+render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: ^Arena, windows_dim: v2i) {
     commands.clear_color.rgb = square(commands.clear_color.rgb)
     
     if GlobalUseSoftwareRenderer {
-        software_render_commands(render_queue, commands, prep, GlobalBackBuffer, arena)
+        software_render_commands(render_queue, commands, GlobalBackBuffer, arena)
         gl_display_bitmap(GlobalBackBuffer, draw_region, commands.clear_color)
     } else {
-        gl_render_commands(commands, prep, draw_region, windows_dim)
+        gl_render_commands(commands, draw_region, windows_dim)
     }
 }
 

@@ -8,7 +8,6 @@ GlobalDebugRenderSingleThreaded: b32 = false
 
 TileRenderWork :: struct {
     commands: ^RenderCommands, 
-    prep:     RenderPrep,
     targets:  [] Bitmap,
     
     base_clip_rect: Rectangle2i, 
@@ -28,24 +27,6 @@ init_render_commands :: proc (commands: ^RenderCommands, width, height: i32, pus
     
     clear(&commands.vertex_buffer)
     clear(&commands.quad_bitmap_buffer)
-}
-
-prep_for_render :: proc (commands: ^RenderCommands, temp_arena: ^Arena) -> (result: RenderPrep) {
-    linearize_clip_rects(commands, &result, temp_arena)
-    return result
-}
-
-linearize_clip_rects :: proc (commands: ^RenderCommands, prep: ^RenderPrep, arena: ^Arena) {
-    timed_function()
-    
-    count := commands.clip_rects_count
-    prep.clip_rects =  make_array(arena, RenderEntryClip, count)
-    
-    for rect := commands.rects.last; rect != nil; rect = rect.next {
-        append(&prep.clip_rects, rect^)
-    }
-    
-    assert(count == auto_cast prep.clip_rects.count)
 }
 
 aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectangle2i) {
@@ -70,7 +51,7 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, prep: RenderPrep, base_target: Bitmap, arena: ^Arena) {
+software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, base_target: Bitmap, arena: ^Arena) {
     timed_function()
     
     targets := push_slice(arena, Bitmap, commands.max_render_target_index + 1)
@@ -99,7 +80,6 @@ software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, 
             
             work ^= {
                 commands = commands,
-                prep     = prep,
                 targets  = targets,
                 base_clip_rect = {
                     min = tile_size * {x, y},
@@ -133,7 +113,6 @@ do_tile_render_work :: proc (data: pmm) {
     assert(commands != nil)
     
     clip_rect := base_clip_rect
-    clip_rect_index := max(u16)
     
     for target, index in targets {
         clear_color: v4
@@ -150,22 +129,8 @@ do_tile_render_work :: proc (data: pmm) {
         header_offset += size_of(RenderEntryHeader)
         entry_data := &commands.push_buffer[header_offset]
         
-        if header.type != .RenderEntryClip && clip_rect_index != header.clip_rect_index {
-            clip_rect_index = header.clip_rect_index
-            
-            clip := prep.clip_rects.data[clip_rect_index]
-            clip_rect = get_intersection(base_clip_rect, clip.clip_rect)
-            
-            target_index := clip.render_target_index
-            target = targets[target_index]
-            assert(target.memory != nil)
-        }
-        
         switch header.type {
           case .None: unreachable()
-          case .RenderEntryClip: 
-            // @note(viktor): clip rects are handled before rendering
-            header_offset += size_of(RenderEntryClip)
           
           case .RenderEntryBlendRenderTargets:
             entry := cast(^RenderEntryBlendRenderTargets) entry_data
@@ -178,7 +143,11 @@ do_tile_render_work :: proc (data: pmm) {
           case .RenderEntry_Textured_Quads:
             entry := cast(^RenderEntry_Textured_Quads) entry_data
             header_offset += size_of(RenderEntry_Textured_Quads)
-            unused(entry)
+            
+            clip_rect = get_intersection(base_clip_rect, entry.setup.clip_rect)
+            
+            target = targets[entry.setup.render_target_index]
+            assert(target.memory != nil)
             
             unused(draw_rectangle_fill_color_axis_aligned)
             unused(draw_rectangle_fill_color)
