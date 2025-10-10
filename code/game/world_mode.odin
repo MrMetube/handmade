@@ -30,10 +30,16 @@ World_Mode :: struct {
 Game_Camera :: struct {
     // @todo(viktor): Should we allow split-screen?
     following_id: EntityId,
-    p:            WorldPosition,
-    last_p:       WorldPosition,
     simulation_center: WorldPosition,
-    offset_z: f32,
+    
+    p:      WorldPosition,
+    offset: v3,
+    
+    target_p:      WorldPosition,
+    target_offset: v3,
+    
+    special:   EntityId,
+    t_special: f32,
 }
 
 ////////////////////////////////////////////////
@@ -48,7 +54,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     mode.effects_entropy = seed_random_series(500)
     
     mode.tile_size_in_meters = 1.4
-    mode.typical_floor_height = 3
+    mode.typical_floor_height = 4.5
     
     // :RoomSize
     chunk_dim_meters := v3{17 * mode.tile_size_in_meters, 9 * mode.tile_size_in_meters, mode.typical_floor_height}
@@ -69,7 +75,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     choice: u32
     screen_count :: 10
     for screen_index in 0 ..< screen_count {
-        room_radius := v2i {7, 3} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
+        room_radius := v2i {7, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
         room_size := room_radius * 2 + 1
         
         switch choice {
@@ -163,7 +169,6 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     new_camera_p := chunk_position_from_tile_positon(mode, room_center)
     
     mode.camera.p = new_camera_p
-    mode.camera.last_p = mode.camera.p
     mode.camera.simulation_center = mode.camera.p
     
     end_world_changes(mode.creation_region)
@@ -392,7 +397,6 @@ StandartRoom :: struct {
 add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> (result: StandartRoom) {
     floor_tile_height :: 0.5
     
-    jitter: [64][64] v3
     for offset_y in -radius.y ..= radius.y {
         for offset_x in -radius.x ..= radius.x {
             p := chunk_position_from_tile_positon(mode, tile_p + {offset_x, offset_y, 0})
@@ -400,11 +404,8 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             index_x := offset_x+radius.x
             index_y := offset_y+radius.y
             
-            jitter_top : v3
-            if index_y != 0 do jitter_top = jitter[index_x][index_y-1]
-            jitter_left : v3
-            if index_x != 0 do jitter_left = jitter[index_x-1][index_y]
-            
+            jitter_top: v3
+            jitter_left: v3
             jitter_left.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_left.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_left.z += random_unilateral(&mode.world.game_entropy, f32) * 0.2
@@ -415,20 +416,14 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             jitter_now := linear_blend(jitter_left, jitter_top, 0.5)
             p.offset += jitter_now + {0, 0, floor_tile_height}
             
-            jitter[index_x][index_y] = jitter_now
             result.p[index_x][index_y] = p
             
             if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
+            }else if right_hole && (offset_x >= 3 && offset_x <= 4 && offset_y >= -2 && offset_y <= 2) {
+                // @note(viktor): hole down to floor below
             } else {
                 entity := begin_entity(mode)
-                
-                if right_hole && (offset_x == 3 && offset_y >= -2 && offset_y <= 2) {
-                    // @note(viktor): hole down to floor below
-                    t := clamp_01_map_to_range(cast(f32) -2, cast(f32) offset_y, 2)
-                    p.offset.z += linear_blend(cast(f32) 0, -mode.typical_floor_height*2, t)
-                }
-                
                 entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
                 append(&entity.pieces, VisiblePiece {
@@ -447,22 +442,76 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
         }
     }
     
-    {
+    tile := mode.tile_size_in_meters
+    
+    stair_p: [5] WorldPosition
+    for offset_y in cast(i32) -2 ..= 2 {
+        offset_x: i32 = 3
+        p := chunk_position_from_tile_positon(mode, tile_p + {offset_x, offset_y, 0}, {0.5 * tile, 0, 0})
+        
+        index_x := offset_x+radius.x
+        index_y := offset_y+radius.y
+        
+        t := clamp_01_map_to_range(cast(f32) -2.5, cast(f32) offset_y, 2.5)
+        p.offset.z += linear_blend(cast(f32) 0, -mode.typical_floor_height*1.8, t)
+        
         entity := begin_entity(mode)
-        entity.flags += { .controls_camera }
-        x_dim := 0.2 * mode.tile_size_in_meters
-        y_dim := 2   * mode.tile_size_in_meters
+        entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
+        append(&entity.traversables, TraversablePoint{})
+        append(&entity.pieces, VisiblePiece {
+            asset     = .Tuft,
+            dimension = {1, floor_tile_height},
+            color     = srgb_to_linear(Green),
+            flags     = {.cube},
+        })
+        end_entity(mode, entity, p)
+        stair_p[offset_y - -2] = p
+        
+        occupying: TraversableReference
+        occupying.entity.id = entity.id
+        occupying.entity.pointer = entity
+        result.ground[index_x][index_y] = occupying
+    }
+    
+    { // @note(viktor): Hole camera
+        entity := begin_entity(mode)
+        entity.camera_behaviour = { .inspect, .offset, .general_velocity_constraint }
+        entity.camera_offset    = {0, 2*tile, 4}
+        entity.camera_min_time  = 1
+        entity.camera_velocity_max = 0.01
+        
+        x_dim := 3 * tile
+        y_dim := 1 * tile
+        entity.collision_volume = grounded_collision(v3{x_dim, y_dim,1})
+        end_entity(mode, entity, result.p[-4+radius.x][-1+radius.y])
+    }
+    
+    { // @note(viktor): Stair camera
+        entity := begin_entity(mode)
+        entity.camera_behaviour = { .follow_player }
+        x_dim := 0.5 * tile
+        y_dim := 3   * tile - tile*0.5
         entity.collision_volume = Rectangle3{
-            {-x_dim, -y_dim, 0.8 * -mode.typical_floor_height},
-            { x_dim,  y_dim, 0.8 *  mode.typical_floor_height},
+            {tile*0.5 + -x_dim, -y_dim,   -0.8 * mode.typical_floor_height},
+            {tile*0.5 +  x_dim,  y_dim+tile*0.5, 1.1 * mode.typical_floor_height},
         }
-        end_entity(mode, entity, result.p[3+radius.x][0+radius.y])
+        end_entity(mode, entity, stair_p[2])
+        
+        entity = begin_entity(mode)
+        entity.camera_behaviour = { .inspect, .directional_velocity_constraint }
+        entity.camera_velocity_dir = {0, 1, 0}
+        entity.camera_velocity_min = 0.2
+        entity.camera_velocity_max = +Infinity
+        entity.collision_volume = grounded_collision({2, 1, 1} * tile)
+        entity.collision_volume.min.x += 0.5 * tile
+        entity.collision_volume.max.x += 0.5 * tile
+        end_entity(mode, entity, result.p[3+radius.x][-3+radius.y])
     }
     
     p := chunk_position_from_tile_positon(mode, tile_p)
-    scale := v3{mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height}
+    scale := v3{tile, tile, mode.typical_floor_height}
     
-    size := V3(vec_cast(f32, radius) * 2 + 1, 1) * scale
+    size := V3(vec_cast(f32, radius) * 2 + 1, 2) * scale
     
     room := begin_entity(mode)
     room.collision_volume = grounded_collision(size)

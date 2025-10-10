@@ -50,7 +50,7 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ Worl
     return result
 }
 
-chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i) -> (result: WorldPosition) {
+chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i, additional_offset: v3 = {}) -> (result: WorldPosition) {
     world := mode.world
     tile_size_in_meters  := mode.tile_size_in_meters
     
@@ -58,7 +58,7 @@ chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i) -> (re
     
     offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_p) + {0.5, 0.5, 0})
     offset.z -= 0.4 * tile_depth_in_meters
-    result = map_into_worldspace(world, result, offset)
+    result = map_into_worldspace(world, result, additional_offset + offset)
     
     assert(is_canonical(world, result.offset))
     
@@ -99,148 +99,152 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     
     ////////////////////////////////////////////////
     
-    {
-        debug_set_mouse_p(input.mouse.p)
-        
-        push_clear(render_group, DarkBlue)
-        
-        ////////////////////////////////////////////////
-        
-        focal_length :: 0.6
-        
-        mode.camera_pitch = 0.0125 * Tau
-        mode.camera_orbit = 0
-        mode.camera_dolly = 0
-        
-        camera_offset := v3{0, 0, mode.camera.offset_z}
-        
-        delta_from_sim := world_distance(mode.world, mode.camera.p, mode.camera.simulation_center)
-        camera_offset += delta_from_sim
-        
-        camera_offset.z += mode.camera_dolly
-        
-        camera_object := xy_rotation(mode.camera_orbit) * yz_rotation(mode.camera_pitch)
-        camera_offset = multiply(camera_object, camera_offset)
-        x := get_column(camera_object, 0)
-        y := get_column(camera_object, 1)
-        z := get_column(camera_object, 2)
-        push_camera(render_group, {}, x, y, z, camera_offset, focal_length)
+    debug_set_mouse_p(input.mouse.p)
+    
+    push_clear(render_group, DarkBlue)
+    
+    ////////////////////////////////////////////////
+    
+    focal_length :: 0.6
+    
+    mode.camera_pitch = 0.0125 * Tau
+    mode.camera_orbit = 0
+    mode.camera_dolly = 0
+    
+    camera_offset := mode.camera.offset
+    
+    delta_from_sim := world_distance(mode.world, mode.camera.p, mode.camera.simulation_center)
+    camera_offset += delta_from_sim
+    
+    camera_offset.z += mode.camera_dolly
+    
+    camera_object := xy_rotation(mode.camera_orbit) * yz_rotation(mode.camera_pitch)
+    camera_offset = multiply(camera_object, camera_offset)
+    x := get_column(camera_object, 0)
+    y := get_column(camera_object, 1)
+    z := get_column(camera_object, 2)
+    push_camera(render_group, {}, x, y, z, camera_offset, focal_length)
+    
+    ////////////////////////////////////////////////
+    
+    if input != nil {
+        if was_pressed(input.mouse.buttons[.extra1]) {
+            mode.use_debug_camera = !mode.use_debug_camera
+        }
+    }
+    
+    if mode.use_debug_camera {
+        debug_offset := mode.camera.offset
         
         if input != nil {
-            if was_pressed(input.mouse.buttons[.extra1]) {
-                mode.use_debug_camera = !mode.use_debug_camera
-            }
-        }
-        
-        if mode.use_debug_camera {
-            debug_offset := v3{0, 0, mode.camera.offset_z}
+            dmousep := input.mouse.p - mode.debug_last_mouse_p
+            defer mode.debug_last_mouse_p = input.mouse.p
             
-            if input != nil {
-                dmousep := input.mouse.p - mode.debug_last_mouse_p
-                defer mode.debug_last_mouse_p = input.mouse.p
-                
-                if mode.use_debug_camera {
-                    if is_down(input.mouse.buttons[.left]) {
-                        rotation_speed :: 0.001 * Tau
-                        mode.debug_camera_orbit += -dmousep.x * rotation_speed
-                        mode.debug_camera_pitch += dmousep.y * rotation_speed
-                    } else if is_down(input.mouse.buttons[.right]) {
-                        zoom_speed := 0.005 * (debug_offset.z + mode.debug_camera_dolly)
-                        mode.debug_camera_dolly += -dmousep.y * zoom_speed
-                    } else if is_down(input.mouse.buttons[.middle]) {
-                        mode.debug_camera_orbit = mode.camera_orbit
-                        mode.debug_camera_pitch = mode.camera_pitch
-                        mode.debug_camera_dolly = mode.camera_dolly
-                    }
+            if mode.use_debug_camera {
+                if is_down(input.mouse.buttons[.left]) {
+                    rotation_speed :: 0.001 * Tau
+                    mode.debug_camera_orbit += -dmousep.x * rotation_speed
+                    mode.debug_camera_pitch += dmousep.y * rotation_speed
+                } else if is_down(input.mouse.buttons[.right]) {
+                    zoom_speed := 0.005 * (debug_offset.z + mode.debug_camera_dolly)
+                    mode.debug_camera_dolly += -dmousep.y * zoom_speed
+                } else if is_down(input.mouse.buttons[.middle]) {
+                    mode.debug_camera_orbit = mode.camera_orbit
+                    mode.debug_camera_pitch = mode.camera_pitch
+                    mode.debug_camera_dolly = mode.camera_dolly
                 }
             }
-            
-            debug_camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
-            debug_offset.z += mode.debug_camera_dolly
-            debug_offset = multiply(debug_camera_object, debug_offset)
-            
-            x = get_column(debug_camera_object, 0)
-            y = get_column(debug_camera_object, 1)
-            z = get_column(debug_camera_object, 2)
-            
-            push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
         }
         
-        // @todo(viktor): by how much should we expand the sim region?
-        sim_bounds := rectangle_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
+        debug_camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
+        debug_offset.z += mode.debug_camera_dolly
+        debug_offset = multiply(debug_camera_object, debug_offset)
         
-        simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.simulation_center, sim_bounds, input.delta_time)
+        x = get_column(debug_camera_object, 0)
+        y = get_column(debug_camera_object, 1)
+        z = get_column(debug_camera_object, 2)
         
-        check_for_joining_player(state, input, simulation.region, mode)
+        push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
+    }
+    
+    ////////////////////////////////////////////////
+    
+    // @todo(viktor): by how much should we expand the sim region?
+    sim_bounds := rectangle_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
+    
+    dt := input.delta_time
+    simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.simulation_center, sim_bounds, input.delta_time)
+    
+    check_for_joining_player(state, input, simulation.region, mode)
+    
+    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
+    
+    last_camera_p := mode.camera.p
+    camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
+    if camera_entity != nil {
+        update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
+    }
+    
+    frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
+    update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
+    
+    if ShowSimulationBounds {
+        world_transform := default_flat_transform()
+        push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
+    }
+    
+    end_sim(&simulation)
+    
+    ////////////////////////////////////////////////
+    
+    if ShowRenderFrustum {
+        near: f32 = 1
+        far:  f32 =  20
+        min: v2 = 0
+        max: v2 = render_group.screen_size
         
-        simulate(&simulation, input.delta_time, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
+        bitmap := &render_group.commands.white_bitmap
+        thickness: f32 = 0.02
+        cn := srgb_to_linear(Orange)
+        cf := srgb_to_linear(Red)
         
-        frame_to_frame_camera_delta := world_distance(mode.world, mode.camera.last_p, mode.camera.p)
-        mode.camera.last_p = mode.camera.p
+        near_min := unproject_with_transform(render_group, render_group.game_cam, min, near)
+        near_max := unproject_with_transform(render_group, render_group.game_cam, max, near)
+        far_min  := unproject_with_transform(render_group, render_group.game_cam, min, far)
+        far_max  := unproject_with_transform(render_group, render_group.game_cam, max, far)
         
-        update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta)
+        p0 := V4(far_max, 0)
+        p1 := V4(far_min.x, far_max.yz, 0)
+        p2 := V4(near_max, 0)
+        p3 := V4(near_min.x, near_max.yz, 0)
+        p4 := V4(far_max.x, far_min.yz, 0)
+        p5 := V4(far_min, 0)
+        p6 := V4(near_max.x, near_min.yz, 0)
+        p7 := V4(near_min, 0)
         
-        camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
-        if camera_entity != nil {
-            update_camera(simulation.region, mode.world, &mode.camera, camera_entity)
-        }
+        c0 := v4_to_rgba(store_color(cf))
+        c1 := v4_to_rgba(store_color(cn))
         
-        if ShowSimulationBounds {
-            world_transform := default_flat_transform()
-            push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
-        }
-            
-        if ShowRenderFrustum {
-            near: f32 = 1
-            far:  f32 =  20
-            min: v2 = 0
-            max: v2 = render_group.screen_size
-            
-            bitmap := &render_group.commands.white_bitmap
-            thickness: f32 = 0.02
-            cn := srgb_to_linear(Orange)
-            cf := srgb_to_linear(Red)
-            
-            near_min := unproject_with_transform(render_group, render_group.game_cam, min, near)
-            near_max := unproject_with_transform(render_group, render_group.game_cam, max, near)
-            far_min  := unproject_with_transform(render_group, render_group.game_cam, min, far)
-            far_max  := unproject_with_transform(render_group, render_group.game_cam, max, far)
-            
-            p0 := V4(far_max, 0)
-            p1 := V4(far_min.x, far_max.yz, 0)
-            p2 := V4(near_max, 0)
-            p3 := V4(near_min.x, near_max.yz, 0)
-            p4 := V4(far_max.x, far_min.yz, 0)
-            p5 := V4(far_min, 0)
-            p6 := V4(near_max.x, near_min.yz, 0)
-            p7 := V4(near_min, 0)
-            
-            c0 := v4_to_rgba(store_color(cf))
-            c1 := v4_to_rgba(store_color(cn))
-            
-            t0 := v2{0, 0}
-            t1 := v2{1, 0}
-            t2 := v2{1, 1}
-            t3 := v2{0, 1}
-            
-            push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
-            push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
-            push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)
-            
-            push_line_segment(render_group, bitmap, p3, p1, c1, c0, thickness)
-            push_line_segment(render_group, bitmap, p3, p2, c1, c1, thickness)
-            push_line_segment(render_group, bitmap, p3, p7, c1, c1, thickness)
-            
-            push_line_segment(render_group, bitmap, p5, p1, c0, c0, thickness)
-            push_line_segment(render_group, bitmap, p5, p4, c0, c0, thickness)
-            push_line_segment(render_group, bitmap, p5, p7, c0, c1, thickness)
-            
-            push_line_segment(render_group, bitmap, p6, p2, c1, c1, thickness)
-            push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
-            push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
-        }
+        t0 := v2{0, 0}
+        t1 := v2{1, 0}
+        t2 := v2{1, 1}
+        t3 := v2{0, 1}
         
-        end_sim(&simulation)
+        push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
+        push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
+        push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)
+        
+        push_line_segment(render_group, bitmap, p3, p1, c1, c0, thickness)
+        push_line_segment(render_group, bitmap, p3, p2, c1, c1, thickness)
+        push_line_segment(render_group, bitmap, p3, p7, c1, c1, thickness)
+        
+        push_line_segment(render_group, bitmap, p5, p1, c0, c0, thickness)
+        push_line_segment(render_group, bitmap, p5, p4, c0, c0, thickness)
+        push_line_segment(render_group, bitmap, p5, p7, c0, c1, thickness)
+        
+        push_line_segment(render_group, bitmap, p6, p2, c1, c1, thickness)
+        push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
+        push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
     }
     
     ////////////////////////////////////////////////
@@ -304,7 +308,7 @@ check_for_joining_player :: proc (state: ^State, input: ^Input, region: ^SimRegi
     }
 }
 
-update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, entity: ^Entity) {
+update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, entity: ^Entity, dt: f32) {
     // @note(viktor): It is _mandatory_ that the camera "center" be the sim region center for this code to work properly, because it cannot add the offset from the sim center to the camera as a displacement or it will fail when moving between room at the changeover point.
     assert(entity.id == camera.following_id)
     
@@ -316,26 +320,73 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
             in_room = &test
         }
         
-        if .controls_camera in test.flags && entity_overlaps_entity(&test, entity)  {
-            if abs(entity.dp.y) > 0.1 {
+        if test.camera_behaviour != {} && entity_overlaps_entity(&test, entity)  {
+            ok := true
+            
+            if .general_velocity_constraint in test.camera_behaviour {
+                ok &&= contains(test.camera_velocity_min, length(entity.dp), test.camera_velocity_max)
+            }
+            
+            if .directional_velocity_constraint in test.camera_behaviour {
+                ok &&= contains(test.camera_velocity_min, dot(test.camera_velocity_dir, entity.dp), test.camera_velocity_max)
+            }
+            
+            if ok {
                 special = &test
             }
         }
     }
-    if in_room == nil do return
     
-    room_volume := add_offset(in_room.collision_volume, in_room.p)
-    
-    simulation_center := V3(get_center(room_volume).xy, room_volume.min.z)
-    
-    target_p := simulation_center
     if special != nil {
-        target_p = entity.p
+        if special.id == camera.special {
+            camera.t_special += dt
+        } else {
+            camera.t_special = 0
+            camera.special = special.id
+        }
+    } else {
+        camera.special = 0
     }
     
-    camera.p = map_into_worldspace(world, region.origin, target_p)
-    camera.simulation_center = map_into_worldspace(world, region.origin, simulation_center)
-    camera.offset_z = 8
+    if in_room != nil {
+        room_volume := add_offset(in_room.collision_volume, in_room.p)
+        
+        simulation_center := V3(get_center(room_volume).xy, room_volume.min.z)
+        
+        target_p := simulation_center
+        target_offset := v3{0, 0, 7}
+        if special != nil {
+            if .follow_player in special.camera_behaviour {
+                target_p = entity.p
+            }
+            
+            if camera.t_special > special.camera_min_time && .inspect in special.camera_behaviour {
+                target_p = special.p
+            }
+            
+            if camera.t_special > special.camera_min_time && .offset in special.camera_behaviour {
+                target_offset = special.camera_offset
+            }
+        }
+        
+        camera.simulation_center = map_into_worldspace(world, region.origin, simulation_center)
+        camera.target_p = map_into_worldspace(world, region.origin, target_p)
+        camera.target_offset = target_offset
+    }
+    
+    p        := world_distance(world, camera.p, camera.simulation_center)
+    target_p := world_distance(world, camera.target_p, camera.simulation_center)
+    offset        := camera.offset
+    target_offset := camera.target_offset
+    
+    delta_p := target_p - p
+    p += delta_p * dt
+    
+    delta_offset := target_offset - camera.offset
+    offset += delta_offset * dt
+    
+    camera.p = map_into_worldspace(world, region.origin, p)
+    camera.offset = offset
 }
 
 ////////////////////////////////////////////////

@@ -174,8 +174,6 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
 }
 
 draw_trees :: proc (debug: ^DebugState, mouse_p: v2, dt: f32) {
-    timed_function()
-    
     assert(debug.font_info != nil)
     
     for tree := debug.tree_sentinel.next; tree != &debug.tree_sentinel; tree = tree.next {
@@ -443,7 +441,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         rect := ui_element.bounds
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
-        // transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
+        transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
         
         if contains(rect, mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
@@ -577,27 +575,27 @@ draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, ro
             v2{at_x + bar_width, rect.max.y},
         )
         
+        
         color: v4
-        text: string
-        
-        switch frame_ordinal {
-          case debug.most_recent_frame_ordinal:
-            color = Emerald
-            text = "Most recent Frame"
-          case debug.oldest_frame_ordinal_that_is_already_freed:
-            color = Red
-            text = "Oldest Frame"
-          case debug.viewed_frame_ordinal: 
-            color = Green
-          case: 
-            frame_delta := debug.most_recent_frame_ordinal - frame_ordinal
-            if frame_delta < 0 {
-                frame_delta += MaxFrameCount
-            }
-            text = debug_print("% frames ago", frame_delta)
-        }
-        
         if contains(region_rect, mouse_p) {
+            text: string
+            switch frame_ordinal {
+            case debug.most_recent_frame_ordinal:
+                color = Emerald
+                text = "Most recent Frame"
+            case debug.oldest_frame_ordinal_that_is_already_freed:
+                color = Red
+                text = "Oldest Frame"
+            case debug.viewed_frame_ordinal: 
+                color = Green
+            case: 
+                frame_delta := debug.most_recent_frame_ordinal - frame_ordinal
+                if frame_delta < 0 {
+                    frame_delta += MaxFrameCount
+                }
+                text = debug_print("% frames ago", frame_delta)
+            }
+        
             if color == 0 do color = V4(Green.rgb, 0.7)
             
             id := DebugId{ value = {root_element, &frame} }

@@ -7,6 +7,12 @@ Entity :: struct {
     brain_slot: BrainSlot,
     brain_id:   BrainId,
     
+    camera_behaviour:    Camera_Behaviour,
+    camera_min_time:     f32,
+    camera_offset:       v3,
+    camera_velocity_min: f32,
+    camera_velocity_max: f32,
+    camera_velocity_dir: v3,
     // @todo(viktor): if load from world and store to world become more complex we could use a @metaprogram to generate the code and mark members with @transient if needed
     
     ////////////////////////////////////////////////
@@ -57,7 +63,6 @@ Entity_Flag :: enum {
     Collides,
     MarkedForDeletion,
     active,
-    controls_camera,
 }
 Entity_Flags :: bit_set[Entity_Flag]
 
@@ -115,19 +120,16 @@ TraversableReference :: struct {
     index:  i64,
 }
 
-// @cleanup
-get_entity_ground_point :: proc { get_entity_ground_point_, get_entity_ground_point_with_p }
-get_entity_ground_point_ :: proc (entity: ^Entity) -> (result: v3) {
-    result = get_entity_ground_point(entity, entity.p) 
+Camera_Behaviour :: bit_set[enum {
+    inspect,
+    offset,
+    follow_player,
     
-    return result
-}
+    general_velocity_constraint,
+    directional_velocity_constraint,
+}]
 
-get_entity_ground_point_with_p :: proc (entity: ^Entity, for_entity_p: v3) -> (result: v3) {
-    result = for_entity_p
-
-    return result
-}
+////////////////////////////////////////////////
 
 update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, typical_floor_height: f32, particle_cache: ^Particle_Cache) {
     timed_function()
@@ -241,10 +243,10 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             facing_match   := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
             
             transform := default_upright_transform()
-            transform.offset = get_entity_ground_point(&entity)
+            transform.offset = entity.p
             
             shadow_transform := default_flat_transform()
-            shadow_transform.offset = get_entity_ground_point(&entity)
+            shadow_transform.offset = entity.p
             shadow_transform.offset.y -= 0.5
             
             for piece in slice(&entity.pieces) {

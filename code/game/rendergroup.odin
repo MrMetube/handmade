@@ -214,14 +214,19 @@ push_setup :: proc (group: ^RenderGroup, setup: RenderSetup) {
     group.current_quads = nil
 }
 
+get_screen_point :: proc (group: ^RenderGroup, transform: Transform, world_p: v3) -> (result: v2) {
+    p := multiply(group.last_setup.projection, world_p + transform.offset)
+    
+    p.xy = group.screen_size * 0.5 * (1 + p.xy)
+    
+    return p.xy
+}
+
 get_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> (result: Rectangle2i) {
-    dim := get_dimension(rect)
+    min_corner := get_screen_point(group, transform, V3(rect.min, 0))
+    max_corner := get_screen_point(group, transform, V3(rect.max, 0))
     
-    // @todo(viktor): should we stick with the max for the transform or do something better here? we transform the max and then get back the rectangle we by subtracting the radius?
-    p := project_with_transform(transform, V3(rect.max, 0))
-    
-    rectangle := rectangle_center_dimension(p.xy - 0.5 * dim, dim)
-    result = round_outer(rect)
+    result = round_outer(Rectangle2{min_corner, max_corner})
     
     return result
 }

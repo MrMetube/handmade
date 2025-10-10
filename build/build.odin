@@ -102,11 +102,17 @@ main :: proc () {
     custom_attribute_flag := strings.to_string(sb)
     
     cmd: Cmd
+    procs: Procs
     if .debugger in tasks {
-        if ok, pid := is_running(raddbg); ok {
-            // @todo(viktor): we only need to kill it when the game crashed, otherwise the debugger is fine with us killing the game
-            fmt.printfln("INFO: Killing running debugger in order to build.")
-            kill(pid)
+        if ok, _ := is_running(raddbg); ok {
+            append(&cmd, raddbg_path)
+            append(&cmd, "--ipc")
+            append(&cmd, "kill_all")
+            run_command(&cmd)
+            tasks += { .debugger }
+        } else  {
+            append(&cmd, raddbg_path)
+            run_command(&cmd, async = &procs)
         }
     }
     
@@ -193,7 +199,6 @@ main :: proc () {
     
     fmt.println("INFO: Build done.")
     
-    procs: Procs
     if .renderdoc in tasks {
         fmt.println("INFO: Starting the Program with RenderDoc attached.")
         renderdoc_cmd := `C:\Program Files\RenderDoc\renderdoccmd.exe`
@@ -223,23 +228,27 @@ main :: proc () {
         }
     }
     
-    if .debugger in tasks {
-        fmt.println("INFO: Starting the Rad Debugger.")
-        // @study(viktor): raddbg -ipc usage
-        append(&cmd, raddbg_path)
-        if .run in tasks {
-            append(&cmd, "--auto_run")
-        }
-        run_command(&cmd, async = &procs)
-    } else {
-        if .run in tasks {
-            fmt.println("INFO: Starting the Program.")
+    if .run in tasks {
+        fmt.println("INFO: Starting the Program.")
+        if .debugger in tasks {
+            append(&cmd, raddbg_path)
+            append(&cmd, "--ipc")
+            append(&cmd, "run")
+        } else {
             os.change_directory("..")
             os.change_directory(data_dir)
+            append(&cmd, "start")
             append(&cmd, debug_exe)
+        }
+        run_command(&cmd, async = &procs)
+    } else if .debugger in tasks {
+        if ok, _ := is_running(raddbg_path); !ok {
+            append(&cmd, raddbg_path)
             run_command(&cmd, async = &procs)
         }
     }
+    
+    _ = flush
     
     if len(cmd) != 0 {
         fmt.println("INFO: cmd was not cleared: ", strings.join(cmd[:], " "))
@@ -388,7 +397,7 @@ delete_all_like :: proc (pattern: string) {
     for file in files {
         os.remove(file)
     }
-    fmt.printfln("INFO: deleted %v files with pattern '%v'", len(files), pattern)
+    // fmt.printfln("INFO: deleted %v files with pattern '%v'", len(files), pattern)
 }
 
 all_like :: proc (pattern: string, allocator := context.temp_allocator) -> (result: [] string) {
@@ -454,33 +463,47 @@ run_command :: proc (cmd: ^Cmd, or_exit := true, keep := false, stdout: ^string 
     }
     
     if err2 != nil {
-        fmt.printfln("ERROR: Failed to run command : %v", err2)
-        return false
-    }
-    
-    if async == nil {
-        if output != nil {
-            if stdout != nil do stdout ^= string(output)
-            else do fmt.println(string(output))
-        }
-        
-        if error != nil {
-            if stderr != nil do stderr ^= string(error)
-            else do fmt.println(string(error))
-            
-            if or_exit do os.exit(state.exit_code)
-        }
-        
-        if or_exit && !state.success do os.exit(state.exit_code)
-        
-        success = state.success
+        fmt.printfln("ERROR: Failed to run command: %v %v %v", cast(string) output, cast(string) error, err2)
+        success = false
     } else {
-        success = true
+        if async == nil {
+            if output != nil {
+                if stdout != nil do stdout ^= string(output)
+                else do fmt.println(string(output))
+            }
+            
+            if error != nil {
+                if stderr != nil do stderr ^= string(error)
+                else do fmt.println(string(error))
+                
+                if or_exit do os.exit(state.exit_code)
+            }
+            
+            if or_exit && !state.success do os.exit(state.exit_code)
+            
+            success = state.success
+        } else {
+            success = true
+        }
     }
-    
+        
     if !keep do clear(cmd)
     
     return success
+}
+
+flush :: proc (procs: ^Procs) {
+    for &p in procs {
+        switch &value in p {
+        case os2.Process:
+            // @todo(viktor): handle the returned values
+            _, _= os2.process_wait(value)
+        case thread.Thread:
+            thread.join(&value)
+        }
+    }
+    
+    clear(procs)
 }
 
 kill :: proc (pid: u32) {

@@ -613,12 +613,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 gl_bind_frame_buffer(current_render_target_index, draw_region)
             }
             
-            rec := rec_cast(f32, setup.clip_rect)
-            rec = scale_radius(rec, v2{clip_scale_x, clip_scale_y})
-            rect := round_middle(rec)
-            
-            if current_render_target_index == 0 do rect = add_offset(rect, draw_region.min)
-            
+            rect := setup.clip_rect
             gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
             
             ////////////////////////////////////////////////
