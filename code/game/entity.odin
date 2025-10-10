@@ -20,7 +20,7 @@ Entity :: struct {
     t_bob, dt_bob: f32,
     ddt_bob:  f32, // @transient
     
-    collision: ^EntityCollisionVolumeGroup,
+    collision_volume: Rectangle3,
     
     distance_limit: f32,
     
@@ -49,8 +49,6 @@ Entity :: struct {
     pieces: FixedArray(4, VisiblePiece),
     
     auto_boost_to: TraversableReference,
-    
-    camera_height: f32,
 }
 
 EntityId :: distinct u32
@@ -59,6 +57,7 @@ Entity_Flag :: enum {
     Collides,
     MarkedForDeletion,
     active,
+    controls_camera,
 }
 Entity_Flags :: bit_set[Entity_Flag]
 
@@ -99,15 +98,6 @@ MovementMode :: enum {
     
     AngleOffset,
     AngleAttackSwipe,
-}
-
-EntityCollisionVolumeGroup :: struct {
-    total_volume: Rectangle3,
-    // @todo(viktor): volumes is always expected to be non-empty if the entity
-    // has any volume... in the future, this could be compressed if necessary
-    // that the length can be 0 if the total_volume should be used as the only
-    // collision volume for the entity.
-    volumes: [] Rectangle3,
 }
 
 EntityReference :: struct {
@@ -292,22 +282,12 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             
             draw_hitpoints(render_group, &entity, 0.5, transform)
             
-            for volume in entity.collision.volumes {
-                push_volume_outline(render_group, volume, transform, SeaGreen, 0.01)
-            }
-            
-            when false do if RenderCollisionOutlineAndTraversablePoints {
-                flat_transform := transform
-                flat_transform.is_upright = false
-                
-                for traversable in slice(entity.traversables) {
-                    rect := rectangle_center_dimension(traversable.p, 1.4)
-                    color := traversable.occupant != nil ? Red : Green
-                    if get_traversable(entity.auto_boost_to) != nil {
-                        color = Blue
-                    }
-                    push_rectangle(render_group, rect, flat_transform, color)
+            if has_volume(entity.collision_volume) {
+                color := srgb_to_linear(SeaGreen)
+                if .Collides in entity.flags {
+                    color = srgb_to_linear(Hazel)
                 }
+                push_volume_outline(render_group, entity.collision_volume, transform, color, 0.01)
             }
             
             debug_pick_entity(&entity, transform, render_group)
@@ -332,20 +312,20 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
             }
         }
         
-        for volume in entity.collision.volumes {
-            mouse_p := debug_get_mouse_p()
-            // @todo(viktor): This needs to do ray casting now, if we want to reenable it!
-            local_mouse_p := unproject_with_transform(render_group, render_group.debug_cam, mouse_p, 1)
-            
-            if local_mouse_p.x >= volume.min.x && local_mouse_p.x < volume.max.x && local_mouse_p.y >= volume.min.y && local_mouse_p.y < volume.max.y  {
-                debug_hit(debug_id, local_mouse_p.z)
-            }
-            
-            highlighted, color := debug_highlighted(debug_id)
-            if highlighted {
-                push_volume_outline(render_group, volume, transform, color, 0.05)
-            }
+        volume := entity.collision_volume
+        mouse_p := debug_get_mouse_p()
+        
+        // @todo(viktor): This needs to do ray casting now, if we want to reenable it!
+        local_mouse_p := unproject_with_transform(render_group, render_group.debug_cam, mouse_p, 1)
+        if contains(volume, local_mouse_p) {
+            debug_hit(debug_id, local_mouse_p.z)
         }
+        
+        highlighted, color := debug_highlighted(debug_id)
+        if highlighted {
+            push_volume_outline(render_group, volume, transform, color, 0.05)
+        }
+    
         
         if debug_requested(debug_id) { 
             debug_record_value(cast(^u32) &entity.id, name = "entity_id")

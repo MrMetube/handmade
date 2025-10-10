@@ -10,16 +10,6 @@ World_Mode :: struct {
     typical_floor_height: f32,
     standard_room_dimension: v3,
     
-    null_collision, 
-    wall_collision,    
-    floor_collision,
-    stairs_collision, 
-    hero_body_collision, 
-    hero_head_collision, 
-    glove_collision,
-    monstar_collision, 
-    familiar_collision: ^EntityCollisionVolumeGroup, 
-    
     last_used_entity_id: EntityId, // @todo(viktor): Worry about wrapping - Free list of ids?
     
     effects_entropy: RandomSeries, // @note(viktor): this is randomness that does NOT effect the gameplay
@@ -42,7 +32,8 @@ Game_Camera :: struct {
     following_id: EntityId,
     p:            WorldPosition,
     last_p:       WorldPosition,
-    offset:       v3,
+    simulation_center: WorldPosition,
+    offset_z: f32,
 }
 
 ////////////////////////////////////////////////
@@ -57,26 +48,12 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     mode.effects_entropy = seed_random_series(500)
     
     mode.tile_size_in_meters = 1.4
-    
     mode.typical_floor_height = 3
     
-    chunk_dim_meters := v3{17*1.4, 9*1.4, mode.typical_floor_height}
+    // :RoomSize
+    chunk_dim_meters := v3{17 * mode.tile_size_in_meters, 9 * mode.tile_size_in_meters, mode.typical_floor_height}
     mode.world = create_world(chunk_dim_meters, &state.mode_arena)
     mode.standard_room_dimension = chunk_dim_meters
-    
-    ////////////////////////////////////////////////
-    
-    mode.null_collision     = make_null_collision(mode)
-    
-    mode.wall_collision      = mode.null_collision // make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters, mode.typical_floor_height})
-    mode.stairs_collision    = mode.null_collision//make_simple_grounded_collision(world, {tile_size_in_meters, tile_size_in_meters * 2, mode.typical_floor_height + 0.1})
-    mode.glove_collision = make_simple_grounded_collision(mode, {0.2, 0.2, 0.2})
-    mode.hero_body_collision = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.6})
-    mode.hero_head_collision = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.4, 0.5}, .7)
-    mode.monstar_collision   = mode.null_collision//make_simple_grounded_collision(world, {0.75, 0.75, 1.5})
-    mode.familiar_collision  = mode.null_collision//make_simple_grounded_collision(world, {0.5, 0.5, 1})
-    
-    mode.floor_collision    = make_simple_floor_collision(mode, v3{mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height})
     
     ////////////////////////////////////////////////
     // "World Gen"
@@ -92,7 +69,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     choice: u32
     screen_count :: 10
     for screen_index in 0 ..< screen_count {
-        room_radius := v2i {8, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
+        room_radius := v2i {7, 3} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
         room_size := room_radius * 2 + 1
         
         switch choice {
@@ -187,6 +164,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     
     mode.camera.p = new_camera_p
     mode.camera.last_p = mode.camera.p
+    mode.camera.simulation_center = mode.camera.p
     
     end_world_changes(mode.creation_region)
     mode.creation_region = nil
@@ -203,8 +181,6 @@ begin_entity :: proc (mode: ^World_Mode) -> (result: ^Entity) {
  
     // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
     result ^= { id = result.id }
-    
-    result.collision = mode.null_collision
     
     result.x_axis = {1, 0}
     result.y_axis = {0, 1}
@@ -223,14 +199,6 @@ end_entity :: proc (mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
     entity.p = world_distance(mode.world, p, mode.creation_region.origin)
 }
 
-// @cleanup
-begin_grounded_entity :: proc (mode: ^World_Mode, collision: ^EntityCollisionVolumeGroup) -> (result: ^Entity) {
-    result = begin_entity(mode)
-    result.collision = collision
-    
-    return result
-}
-
 add_brain :: proc (mode: ^World_Mode) -> (result: BrainId) {
     mode.last_used_entity_id += 1
     for mode.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
@@ -242,12 +210,12 @@ add_brain :: proc (mode: ^World_Mode) -> (result: BrainId) {
 }
 
 add_wall :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(mode, mode.wall_collision)
+    entity := begin_entity(mode)
     defer end_entity(mode, entity, p)
     
+    entity.collision_volume = grounded_collision({mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height})
     entity.flags += {.Collides}
     entity.occupying = occupying
-    entity.collision = mode.wall_collision
     append(&entity.pieces, VisiblePiece {
         asset     = .Tree,
         dimension = {1, 2.5},
@@ -261,7 +229,7 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
     
     p := map_into_worldspace(mode.world, region.origin, get_sim_space_traversable(occupying).p)
     
-    body := begin_grounded_entity(mode, mode.hero_body_collision)
+    body := begin_entity(mode)
         body.brain_id = brain_id
         body.brain_kind = .Hero
         body.brain_slot = brain_slot_for(BrainHero, "body")
@@ -290,14 +258,15 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         
     end_entity(mode, body, p)
     
-    head := begin_grounded_entity(mode, mode.hero_head_collision)
+    head := begin_entity(mode)
         head.flags += {.Collides}
         head.brain_id = brain_id
         head.brain_kind = .Hero
         head.brain_slot = brain_slot_for(BrainHero, "head")
         head.movement_mode = ._Floating
+        head.collision_volume = grounded_collision({1, 0.5, 0.5}, 0.7)
         
-        hero_height :: 3.5
+        hero_height :: 3
         // @todo(viktor): should render above the body
         append(&head.pieces, VisiblePiece{
             asset     = .Head,
@@ -313,7 +282,10 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         }
     end_entity(mode, head, p)
     
-    glove := begin_grounded_entity(mode, mode.glove_collision)
+    
+    glove_collision := grounded_collision(v3{0.2, 0.2, 0.2})
+    
+    glove := begin_entity(mode)
         glove.flags += {.Collides}
         glove.brain_id = brain_id
         glove.brain_kind = .Hero
@@ -336,10 +308,8 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
 }
 
 add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference, brain_id: BrainId, segment_index: u32) {
-    entity := begin_grounded_entity(mode, mode.monstar_collision)
+    entity := begin_entity(mode)
     defer end_entity(mode, entity, p)
-    
-    entity.flags += {.Collides}
     
     entity.brain_id = brain_id
     entity.brain_kind = .Snake
@@ -364,10 +334,8 @@ add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Travers
 }
 
 add_monster :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(mode, mode.monstar_collision)
+    entity := begin_entity(mode)
     defer end_entity(mode, entity, p)
-    
-    entity.flags += {.Collides}
     
     entity.brain_id = add_brain(mode)
     entity.brain_kind = .Monster
@@ -392,7 +360,7 @@ add_monster :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Traversable
 }
 
 add_familiar :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
-    entity := begin_grounded_entity(mode, mode.familiar_collision)
+    entity := begin_entity(mode)
     defer end_entity(mode, entity, p)
     
     entity.brain_id   = add_brain(mode)
@@ -422,6 +390,8 @@ StandartRoom :: struct {
 }
 
 add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> (result: StandartRoom) {
+    floor_tile_height :: 0.5
+    
     jitter: [64][64] v3
     for offset_y in -radius.y ..= radius.y {
         for offset_x in -radius.x ..= radius.x {
@@ -437,13 +407,13 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             
             jitter_left.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_left.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
-            jitter_left.z += random_bilateral(&mode.world.game_entropy, f32) * 0.4
+            jitter_left.z += random_unilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_top.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_top.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
-            jitter_top.z += random_bilateral(&mode.world.game_entropy, f32) * 0.4
+            jitter_top.z += random_unilateral(&mode.world.game_entropy, f32) * 0.2
             
             jitter_now := linear_blend(jitter_left, jitter_top, 0.5)
-            p.offset += jitter_now
+            p.offset += jitter_now + {0, 0, floor_tile_height}
             
             jitter[index_x][index_y] = jitter_now
             result.p[index_x][index_y] = p
@@ -451,17 +421,19 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             if left_hole && (offset_x >= -5 && offset_x <= -3 && offset_y >= 0 && offset_y <= 1) {
                 // @note(viktor): hole down to floor below
             } else {
+                entity := begin_entity(mode)
+                
                 if right_hole && (offset_x == 3 && offset_y >= -2 && offset_y <= 2) {
                     // @note(viktor): hole down to floor below
                     t := clamp_01_map_to_range(cast(f32) -2, cast(f32) offset_y, 2)
                     p.offset.z += linear_blend(cast(f32) 0, -mode.typical_floor_height*2, t)
                 }
-                entity := begin_grounded_entity(mode, mode.floor_collision)
+                
                 entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
                 append(&entity.traversables, TraversablePoint{})
                 append(&entity.pieces, VisiblePiece {
                     asset     = .Tuft,
-                    dimension = {.75, 1},
+                    dimension = {.75, floor_tile_height},
                     color     = srgb_to_linear(Green),
                     flags     = {.cube},
                 })
@@ -475,18 +447,26 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
         }
     }
     
+    {
+        entity := begin_entity(mode)
+        entity.flags += { .controls_camera }
+        x_dim := 0.2 * mode.tile_size_in_meters
+        y_dim := 2   * mode.tile_size_in_meters
+        entity.collision_volume = Rectangle3{
+            {-x_dim, -y_dim, 0.8 * -mode.typical_floor_height},
+            { x_dim,  y_dim, 0.8 *  mode.typical_floor_height},
+        }
+        end_entity(mode, entity, result.p[3+radius.x][0+radius.y])
+    }
+    
     p := chunk_position_from_tile_positon(mode, tile_p)
     scale := v3{mode.tile_size_in_meters, mode.tile_size_in_meters, mode.typical_floor_height}
-    room_collision := make_simple_grounded_collision(mode, V3(vec_cast(f32, radius) * 2 + 1, 1) * scale)
     
-    room := begin_grounded_entity(mode, room_collision)
+    size := V3(vec_cast(f32, radius) * 2 + 1, 1) * scale
+    
+    room := begin_entity(mode)
+    room.collision_volume = grounded_collision(size)
     room.brain_kind = .Room
-    diff := radius - {8, 4} // :RoomSize
-    
-    // @cleanup
-    BaseCamHeight :: 8
-    
-    room.camera_height = BaseCamHeight + cast(f32) max(max(diff.x, diff.y), 0)
     end_entity(mode, room, p)
     
     return result
@@ -498,36 +478,8 @@ init_hitpoints :: proc (entity: ^Entity, count: u32) {
     }
 }
 
-////////////////////////////////////////////////
-// @cleanup
-
-make_null_collision :: proc (mode: ^World_Mode) -> (result: ^EntityCollisionVolumeGroup) {
-    // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
-    result ^= {}
-    
-    return result
-}
-
-make_simple_grounded_collision :: proc (mode: ^World_Mode, size: v3, offset_z:f32=0) -> (result: ^EntityCollisionVolumeGroup) {
-    // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
-    result ^= {
-        total_volume = rectangle_center_dimension(v3{0, 0, 0.5 * size.z + offset_z}, size),
-        volumes = push(mode.world.arena, Rectangle3, 1),
-    }
-    result.volumes[0] = result.total_volume
-    
-    return result
-}
-
-make_simple_floor_collision :: proc (mode: ^World_Mode, size: v3) -> (result: ^EntityCollisionVolumeGroup) {
-    // @todo(viktor): not world arena! change to using the fundamental types arena
-    result = push(mode.world.arena, EntityCollisionVolumeGroup, no_clear())
-    result ^= {
-        total_volume = rectangle_center_dimension(v3{0, 0, -0.5 * size.z}, size),
-        volumes = {},
-    }
-    
+grounded_collision :: proc (size: v3, offset_z: f32 = 0) -> (result: Rectangle3) {
+    result = rectangle_center_dimension(v3{0, 0, 0.5 * size.z}, size)
+    result = add_offset(result, v3{0, 0, offset_z})
     return result
 }

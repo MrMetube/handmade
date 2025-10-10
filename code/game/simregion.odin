@@ -128,7 +128,7 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                                 // @todo(viktor): @transient marked members should not be unpacked
                                 add_entity_to_hash(region, dest)
                                 
-                                if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision.total_volume) {
+                                if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision_volume) {
                                     dest.flags += { .active }
                                 }
                                 
@@ -306,11 +306,17 @@ get_closest_traversable :: proc (region: ^SimRegion, from_p: v3, flags: bit_set[
     return result, ok
 }
 
-entity_overlaps_rectangle :: proc (bounds: Rectangle3, p: v3, volume: Rectangle3) -> (result: b32) {
-    grown := add_radius(bounds, 0.5 * get_dimension(volume))
-    result = contains(grown, p + get_center(volume))
+entity_overlaps_rectangle :: proc (bounds: Rectangle3, entity_p: v3, entity_volume: Rectangle3) -> (result: b32) {
+    result = intersects(bounds, add_offset(entity_volume, entity_p))
     return result
 }
+
+entity_overlaps_entity :: proc (a, b: ^Entity) -> (result: b32) {
+    result = intersects(add_offset(a.collision_volume, a.p), add_offset(b.collision_volume, b.p))
+    return result
+}
+
+////////////////////////////////////////////////
 
 get_brain_hash_from_id :: proc (region: ^SimRegion, id: BrainId) -> (result: ^BrainHash) {
     result = get_hash_from_id(region.brain_hash[:], region.brain_hash_occupancy[:], cast(u32) id)
@@ -520,68 +526,65 @@ move_entity :: proc (region: ^SimRegion, entity: ^Entity, dt: f32) {
             
             // @todo(viktor): spatial partition here
             for &test_entity in slice(region.entities) {
-                    
+                
                 // @todo(viktor): Robustness!
                 OverlapEpsilon :: 0.001
                 if can_collide(entity, &test_entity) {
-                    for volume in entity.collision.volumes {
-                        for test_volume in test_entity.collision.volumes {
-                            minkowski_diameter := get_dimension(volume) + get_dimension(test_volume)
-                            min_corner := -0.5 * minkowski_diameter
-                            max_corner :=  0.5 * minkowski_diameter
-                            
-                            rel := (entity.p + get_center(volume)) - (test_entity.p + get_center(test_volume))
-                            
-                            // @todo(viktor): do we want an close inclusion on the max_corner?
-                            if rel.z >= min_corner.z && rel.z < max_corner.z {
-                                Wall :: struct {
-                                    x: f32, delta_x, delta_y, rel_x, rel_y, min_y, max_y: f32, 
-                                    normal: v2,
-                                }
+                    volume := entity.collision_volume
+                    test_volume := test_entity.collision_volume
+                    
+                    minkowski_diameter := get_dimension(volume) + get_dimension(test_volume)
+                    min_corner := -0.5 * minkowski_diameter
+                    max_corner :=  0.5 * minkowski_diameter
+                    
+                    rel := (entity.p + get_center(volume)) - (test_entity.p + get_center(test_volume))
+                    
+                    // @todo(viktor): do we want an close inclusion on the max_corner?
+                    if rel.z >= min_corner.z && rel.z < max_corner.z {
+                        Wall :: struct {
+                            x: f32, delta_x, delta_y, rel_x, rel_y, min_y, max_y: f32, 
+                            normal: v2,
+                        }
+                        
+                        walls := [?]Wall{
+                            {min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, {-1,  0}},
+                            {max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, { 1,  0}},
+                            {min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, { 0, -1}},
+                            {max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, { 0,  1}},
+                        }
+                        
+                        TEpsilon :: 0.0000001
+                        #assert(TEpsilon < OverlapEpsilon)
+                        test_hit: b32
+                        test_wall_normal: v2
+                        test_t := t_min
+                        
+                        for wall in walls {
+                            collided: b32
+                            if wall.delta_x != 0 {
+                                t_result := (wall.x - wall.rel_x) / wall.delta_x
+                                y        := wall.rel_y + t_result * wall.delta_y
                                 
-                                walls := [?]Wall{
-                                    {min_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, {-1,  0}},
-                                    {max_corner.x, entity_delta.x, entity_delta.y, rel.x, rel.y, min_corner.y, max_corner.y, { 1,  0}},
-                                    {min_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, { 0, -1}},
-                                    {max_corner.y, entity_delta.y, entity_delta.x, rel.y, rel.x, min_corner.x, max_corner.x, { 0,  1}},
-                                }
-                                
-                                TEpsilon :: 0.0001
-                                #assert(TEpsilon < OverlapEpsilon)
-                                test_hit: b32
-                                test_wall_normal: v2
-                                test_t := t_min
-                                
-                                for wall in walls {
-                                    collided: b32
-                                    if wall.delta_x != 0 {
-                                        t_result := (wall.x - wall.rel_x) / wall.delta_x
-                                        y        := wall.rel_y + t_result * wall.delta_y
-                                        
-                                        if t_result >= 0 && test_t > t_result {
-                                            if wall.min_y < y && y <= wall.max_y {
-                                                test_t = max(0, t_result-TEpsilon)
-                                                collided = true
-                                            }
-                                        }
+                                if t_result >= 0 && test_t > t_result {
+                                    if wall.min_y < y && y <= wall.max_y {
+                                        test_t = max(0, t_result-TEpsilon)
+                                        collided = true
                                     }
-                                    
-                                    if collided {
-                                        test_wall_normal = wall.normal
-                                        test_hit = true
-                                    }
-                                }
-                                
-                                if test_hit {
-                                    t_min = test_t
-                                    wall_normal_min = test_wall_normal
-                                    hit_min = &test_entity
                                 }
                             }
                             
+                            if collided {
+                                test_wall_normal = wall.normal
+                                test_hit = true
+                            }
+                        }
+                        
+                        if test_hit {
+                            t_min = test_t
+                            wall_normal_min = test_wall_normal
+                            hit_min = &test_entity
                         }
                     }
-                    
                 }
             }
             
@@ -628,7 +631,9 @@ can_collide :: proc (a, b: ^Entity) -> (result: b32) {
         if a.id > b.id do a, b = b, a
         
         if .Collides in a.flags && .Collides in b.flags {
-            result = true
+            if has_volume(a.collision_volume) && has_volume(b.collision_volume) {
+                result = true
+            }
         }
     }
     return result

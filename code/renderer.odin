@@ -18,7 +18,7 @@ init_render_commands :: proc (commands: ^RenderCommands, width, height: i32, pus
         width  = width, 
         height = height,
         
-        push_buffer = push_buffer,
+        push_buffer = make_byte_buffer(push_buffer),
         vertex_buffer = vertex_buffer,
         quad_bitmap_buffer = quad_bitmap_buffer,
         
@@ -123,26 +123,22 @@ do_tile_render_work :: proc (data: pmm) {
     }
     
     target: Bitmap
-    for header_offset: u32; header_offset < commands.push_buffer_data_at; {
-        // :PointerArithmetic
-        header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
-        header_offset += size_of(RenderEntryHeader)
-        entry_data := &commands.push_buffer[header_offset]
+    
+    for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
+        header := read(&commands.push_buffer, RenderEntryHeader)
         
         switch header.type {
           case .None: unreachable()
           
           case .RenderEntryBlendRenderTargets:
-            entry := cast(^RenderEntryBlendRenderTargets) entry_data
-            header_offset += size_of(RenderEntryBlendRenderTargets)
+            entry := read(&commands.push_buffer, RenderEntryBlendRenderTargets)
             
             source := targets[entry.source_index]
             dest   := targets[entry.dest_index]
             blend_render_target(dest, clip_rect, source, entry.alpha)
             
           case .RenderEntry_Textured_Quads:
-            entry := cast(^RenderEntry_Textured_Quads) entry_data
-            header_offset += size_of(RenderEntry_Textured_Quads)
+            entry := read(&commands.push_buffer, RenderEntry_Textured_Quads)
             
             clip_rect = get_intersection(base_clip_rect, entry.setup.clip_rect)
             

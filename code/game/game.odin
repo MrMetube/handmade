@@ -6,12 +6,12 @@ SlowCode :: INTERNAL
 ////////////////////////////////////////////////
 // @todo(viktor): Find a better place for these configurations
 
-LoadAssetsSingleThreaded:      b32 = false
-SoundPanningWithMouse:         b32 = false
-SoundPitchingWithMouse:        b32 = false
-ShowRenderAndSimulationBounds: b32 = true
-TimestepPercentage:            f32 = 100
-RenderCollisionOutlineAndTraversablePoints: b32 = true
+LoadAssetsSingleThreaded: b32 = false
+SoundPanningWithMouse:    b32 = false
+SoundPitchingWithMouse:   b32 = false
+ShowSimulationBounds:     b32 = false
+ShowRenderFrustum:        b32 = false
+TimestepPercentage:       f32 = 100
 
 ////////////////////////////////////////////////
 
@@ -198,10 +198,10 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     { debug_data_block("Game")
  
         { debug_data_block("Camera")
-            debug_record_value(&ShowRenderAndSimulationBounds)
+            debug_record_value(&ShowRenderFrustum)
+            debug_record_value(&ShowSimulationBounds)
         }
         
-        debug_record_value(&RenderCollisionOutlineAndTraversablePoints)
         debug_record_value(&LoadAssetsSingleThreaded)
         
         TimestepPercentage = clamp(TimestepPercentage, 0, 1000)

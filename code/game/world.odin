@@ -112,14 +112,19 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         mode.camera_orbit = 0
         mode.camera_dolly = 0
         
+        camera_offset := v3{0, 0, mode.camera.offset_z}
+        
+        delta_from_sim := world_distance(mode.world, mode.camera.p, mode.camera.simulation_center)
+        camera_offset += delta_from_sim
+        
+        camera_offset.z += mode.camera_dolly
+        
         camera_object := xy_rotation(mode.camera_orbit) * yz_rotation(mode.camera_pitch)
-        offset := mode.camera.offset
-        offset.z += mode.camera_dolly
-        offset = multiply(camera_object, offset)
+        camera_offset = multiply(camera_object, camera_offset)
         x := get_column(camera_object, 0)
         y := get_column(camera_object, 1)
         z := get_column(camera_object, 2)
-        push_camera(render_group, {}, x, y, z, offset, focal_length)
+        push_camera(render_group, {}, x, y, z, camera_offset, focal_length)
         
         if input != nil {
             if was_pressed(input.mouse.buttons[.extra1]) {
@@ -128,7 +133,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         }
         
         if mode.use_debug_camera {
-            debug_offset := mode.camera.offset
+            debug_offset := v3{0, 0, mode.camera.offset_z}
+            
             if input != nil {
                 dmousep := input.mouse.p - mode.debug_last_mouse_p
                 defer mode.debug_last_mouse_p = input.mouse.p
@@ -139,34 +145,31 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
                         mode.debug_camera_orbit += -dmousep.x * rotation_speed
                         mode.debug_camera_pitch += dmousep.y * rotation_speed
                     } else if is_down(input.mouse.buttons[.right]) {
-                        zoom_speed := 0.005 * (mode.camera.offset.z + mode.debug_camera_dolly)
+                        zoom_speed := 0.005 * (debug_offset.z + mode.debug_camera_dolly)
                         mode.debug_camera_dolly += -dmousep.y * zoom_speed
                     } else if is_down(input.mouse.buttons[.middle]) {
-                        mode.debug_camera_orbit = 0
-                        mode.debug_camera_pitch = 0
-                        mode.debug_camera_dolly = 0
+                        mode.debug_camera_orbit = mode.camera_orbit
+                        mode.debug_camera_pitch = mode.camera_pitch
+                        mode.debug_camera_dolly = mode.camera_dolly
                     }
                 }
             }
             
-            camera_object = xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
+            debug_camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
             debug_offset.z += mode.debug_camera_dolly
-            debug_offset = multiply(camera_object, debug_offset)
+            debug_offset = multiply(debug_camera_object, debug_offset)
             
-            x = get_column(camera_object, 0)
-            y = get_column(camera_object, 1)
-            z = get_column(camera_object, 2)
+            x = get_column(debug_camera_object, 0)
+            y = get_column(debug_camera_object, 1)
+            z = get_column(debug_camera_object, 2)
             
             push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
         }
         
-        world_camera_rect := get_camera_rectangle_at_target(render_group)
-        screen_bounds := rectangle_center_dimension(v2{0,0}, get_dimension(world_camera_rect).xy)
-        
         // @todo(viktor): by how much should we expand the sim region?
-        sim_bounds := rectangle_center_dimension(V3(get_center(screen_bounds), 0), mode.standard_room_dimension * {3, 3, 10})
+        sim_bounds := rectangle_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
         
-        simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.p, sim_bounds, input.delta_time)
+        simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.simulation_center, sim_bounds, input.delta_time)
         
         check_for_joining_player(state, input, simulation.region, mode)
         
@@ -177,16 +180,64 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         update_and_render_particle_systems(mode.particle_cache, render_group, input.delta_time, frame_to_frame_camera_delta)
         
-        if ShowRenderAndSimulationBounds {
-            world_transform := default_flat_transform()
-            push_volume_outline(render_group, simulation.region.bounds,              world_transform, Salmon,   0.2)
-            push_rectangle_outline(render_group, screen_bounds,                      world_transform, Orange, 0.1)
-            push_rectangle_outline(render_group, simulation.region.updatable_bounds, world_transform, Green,  0.2)
-        }
-        
         camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
         if camera_entity != nil {
             update_camera(simulation.region, mode.world, &mode.camera, camera_entity)
+        }
+        
+        if ShowSimulationBounds {
+            world_transform := default_flat_transform()
+            push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
+        }
+            
+        if ShowRenderFrustum {
+            near: f32 = 1
+            far:  f32 =  20
+            min: v2 = 0
+            max: v2 = render_group.screen_size
+            
+            bitmap := &render_group.commands.white_bitmap
+            thickness: f32 = 0.02
+            cn := srgb_to_linear(Orange)
+            cf := srgb_to_linear(Red)
+            
+            near_min := unproject_with_transform(render_group, render_group.game_cam, min, near)
+            near_max := unproject_with_transform(render_group, render_group.game_cam, max, near)
+            far_min  := unproject_with_transform(render_group, render_group.game_cam, min, far)
+            far_max  := unproject_with_transform(render_group, render_group.game_cam, max, far)
+            
+            p0 := V4(far_max, 0)
+            p1 := V4(far_min.x, far_max.yz, 0)
+            p2 := V4(near_max, 0)
+            p3 := V4(near_min.x, near_max.yz, 0)
+            p4 := V4(far_max.x, far_min.yz, 0)
+            p5 := V4(far_min, 0)
+            p6 := V4(near_max.x, near_min.yz, 0)
+            p7 := V4(near_min, 0)
+            
+            c0 := v4_to_rgba(store_color(cf))
+            c1 := v4_to_rgba(store_color(cn))
+            
+            t0 := v2{0, 0}
+            t1 := v2{1, 0}
+            t2 := v2{1, 1}
+            t3 := v2{0, 1}
+            
+            push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
+            push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)
+            
+            push_line_segment(render_group, bitmap, p3, p1, c1, c0, thickness)
+            push_line_segment(render_group, bitmap, p3, p2, c1, c1, thickness)
+            push_line_segment(render_group, bitmap, p3, p7, c1, c1, thickness)
+            
+            push_line_segment(render_group, bitmap, p5, p1, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p5, p4, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p5, p7, c0, c1, thickness)
+            
+            push_line_segment(render_group, bitmap, p6, p2, c1, c1, thickness)
+            push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
+            push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
         }
         
         end_sim(&simulation)
@@ -210,6 +261,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     
     return false
 }
+
+////////////////////////////////////////////////
 
 World_Sim_Work :: struct {
     mode: ^World_Mode,
@@ -256,65 +309,33 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
     assert(entity.id == camera.following_id)
     
     in_room: ^Entity
-    room_p: v3
-    
+    special: ^Entity
     // @todo(viktor): Probably don't want to loop over all entities - maintain a separate list of room entities during unpack!
     for &test in slice(region.entities) {
-        if test.brain_kind != .Room do continue
-        
-        volume := add_offset(test.collision.total_volume, test.p)
-        if contains(volume, entity.p) {
+        if test.brain_kind == .Room && entity_overlaps_entity(&test, entity) {
             in_room = &test
-            room_p = entity.p - test.p
-            break
+        }
+        
+        if .controls_camera in test.flags && entity_overlaps_entity(&test, entity)  {
+            if abs(entity.dp.y) > 0.1 {
+                special = &test
+            }
         }
     }
     if in_room == nil do return
     
-    room_delta := get_dimension(in_room.collision.total_volume)
+    room_volume := add_offset(in_room.collision_volume, in_room.p)
     
-    half_room_delta := room_delta * 0.5
-    half_room_apron := half_room_delta - 0.7
-    height: f32 = 0.5
-    camera.offset = 0
-    camera.p = map_into_worldspace(world, region.origin, in_room.p)
+    simulation_center := V3(get_center(room_volume).xy, room_volume.min.z)
     
-    delta := room_p
-    if delta.y >  half_room_apron.y {
-        t := clamp_01_map_to_range(half_room_apron.y, delta.y, half_room_delta.y)
-        camera.offset.y = t * half_room_delta.y
-        camera.offset.z = (-(t*t) + 2*t) * height
+    target_p := simulation_center
+    if special != nil {
+        target_p = entity.p
     }
     
-    if delta.y < -half_room_apron.y {
-        t := clamp_01_map_to_range(-half_room_apron.y, delta.y, -half_room_delta.y)
-        camera.offset.y = t * -half_room_delta.y
-        camera.offset.z = (-(t*t) + 2*t) * height
-    }
-    
-    if delta.x >  half_room_apron.x {
-        t := clamp_01_map_to_range(half_room_apron.x, delta.x, half_room_delta.x)
-        camera.offset.x = t * half_room_delta.x
-        camera.offset.z = (-(t*t) + 2*t) * height
-    }
-    
-    if delta.x < -half_room_apron.x {
-        t := clamp_01_map_to_range(-half_room_apron.x, delta.x, -half_room_delta.x)
-        camera.offset.x = t * -half_room_delta.x
-        camera.offset.z = (-(t*t) + 2*t) * height
-    }
-    
-    if delta.z >  half_room_apron.z {
-        t := clamp_01_map_to_range(half_room_apron.z, delta.z, half_room_delta.z)
-        camera.offset.z = t * half_room_delta.z
-    }
-    
-    if delta.z < -half_room_apron.z {
-        t := clamp_01_map_to_range(-half_room_apron.z, delta.z, -half_room_delta.z)
-        camera.offset.z = t * -half_room_delta.z
-    }
-    
-    camera.offset.z += in_room.camera_height
+    camera.p = map_into_worldspace(world, region.origin, target_p)
+    camera.simulation_center = map_into_worldspace(world, region.origin, simulation_center)
+    camera.offset_z = 8
 }
 
 ////////////////////////////////////////////////

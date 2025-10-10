@@ -46,8 +46,7 @@ RenderCommands :: struct {
     // @note(viktor): Packed array of disjoint elements.
     // Filled with pairs of [RenderEntryHeader + SomeRenderEntry]
     // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
-    push_buffer:         [] u8, // :Array or :ByteArray with some write-value/read-type operations a write and read cursor
-    push_buffer_data_at: u32,
+    push_buffer: Byte_Buffer,
     
     max_render_target_index: u32,
     
@@ -167,7 +166,7 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
     
     setup := group.last_setup
     
-    setup.clip_rect = rectangle_zero_dimension(commands.width, commands.height)
+    setup.clip_rect = rectangle_zero_min_dimension(commands.width, commands.height)
     setup.projection = identity()
     setup.fog_begin = 0
     setup.fog_end = 1
@@ -204,16 +203,7 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
 }
 
 render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
-    // @note(viktor): The result is _always_ cleared to zero.
-    size     := cast(u32) size_of(T)
-    capacity := cast(u32) len(group.commands.push_buffer)
-    assert(group.commands.push_buffer_data_at + size < capacity)
-    
-    // :PointerArithmetic
-    result = cast(^T) &group.commands.push_buffer[group.commands.push_buffer_data_at]
-    group.commands.push_buffer_data_at += size
-    
-    result ^= {}
+    result = write_reserve(&group.commands.push_buffer, T)
     return result
 }
 
@@ -292,6 +282,8 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
     
     if .debug not_in flags {
         setup.camera_p = p
+    } else {
+        group.debug_cam = group.game_cam
     }
     setup.projection = projection.forward
     push_setup(group, setup)
@@ -324,8 +316,6 @@ push_sort_barrier :: proc (group: ^RenderGroup, turn_of_sorting := false) {
 ////////////////////////////////////////////////
 
 push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color) {
-    timed_function()
-    
     entry := get_current_quads(group)
     entry.quad_count += 1
     
@@ -342,15 +332,25 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
 get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Textured_Quads) {
     if group.current_quads == nil {
         group.current_quads = push_render_element(group, RenderEntry_Textured_Quads)
-        group.current_quads.bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count
-        group.current_quads.setup = group.last_setup
+        group.current_quads ^= {
+            bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count,
+            setup         = group.last_setup,
+        }        
     }
     
     result = group.current_quads
     return result
 }
 
-push_line_segment :: proc (group: ^RenderGroup, bitmap: ^Bitmap, from_p, to_p: v4, c0, c1: Color, thickness: f32) {
+push_line_segment :: proc { push_line_segment_default, push_line_segment_direct }
+push_line_segment_default :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, from_p, to_p: v3, c0, c1: v4, thickness: f32) {
+    from_p := V4(project_with_transform(transform, from_p) , 0)
+    to_p   := V4(project_with_transform(transform, to_p), 0)
+    c0 := v4_to_rgba(store_color(c0))
+    c1 := v4_to_rgba(store_color(c1))
+    push_line_segment(group, bitmap, from_p, to_p, c0, c1, thickness)
+}
+push_line_segment_direct :: proc (group: ^RenderGroup, bitmap: ^Bitmap, from_p, to_p: v4, c0, c1: Color, thickness: f32) {
     perp := cross(group.debug_cam.z, to_p.xyz - from_p.xyz)
     perp_length := length(perp)
     
@@ -396,7 +396,7 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     min    := V4(used_dim.basis, 0)
     x_axis := V3(x_axis2, 0) * size.x
     y_axis := V3(y_axis2, 0) * size.y
-    z_bias := 0.5 * height
+    z_bias := 0.25 * height
     
     if transform.is_upright {
         x_axis0 := size.x * v3{x_axis2.x, 0, x_axis2.y}
@@ -606,7 +606,7 @@ project_with_transform :: proc (transform: Transform, p: v3) -> (result: v3) {
 }
 
 unproject_with_transform :: proc (group: ^RenderGroup, transform: RenderTransform, pixel_p: v2, world_z: f32) -> (result: v3) {
-    probe := V4(transform.p + -world_z * transform.z, 1)
+    probe := V4(transform.p - world_z * transform.z, 1)
     probe = multiply(transform.projection.forward, probe)
     clip_z := probe.z / probe.w
     

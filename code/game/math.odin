@@ -527,12 +527,13 @@ when LaneWidth != 1 {
 // Rectangle operations
 
 rectangle_min_dimension         :: proc { rectangle_min_dimension_2, rectangle_min_dimension_v }
-rectangle_zero_dimension        :: proc { rectangle_zero_dimension_2, rectangle_zero_dimension_v }
+rectangle_zero_min_dimension    :: proc { rectangle_zero_min_dimension_2, rectangle_zero_min_dimension_v }
 
 rectangle_min_dimension_2       :: proc (x: $E, y, w, h: E)             -> Rectangle([2] E) { return { {x, y},                   {w, h}                   } }
 rectangle_min_dimension_v       :: proc (min: $T, dimension: T)         -> Rectangle(T)     { return { min,                      min + dimension          } }
-rectangle_zero_dimension_2      :: proc (w: $E, h: E)                   -> Rectangle([2] E) { return { 0,                        {w, h}                   } }
-rectangle_zero_dimension_v      :: proc (dimension: $T)                 -> Rectangle(T)     { return { 0,                        dimension                } }
+rectangle_zero_min_dimension_2  :: proc (w: $E, h: E)                   -> Rectangle([2] E) { return { 0,                        {w, h}                   } }
+rectangle_zero_min_dimension_v  :: proc (dimension: $T)                 -> Rectangle(T)     { return { 0,                        dimension                } }
+rectangle_zero_center_dimension :: proc (dimension: $T)                 -> Rectangle(T)     { return { -dimension / 2,      dimension / 2       } }
 rectangle_min_max               :: proc (min, max: $T)                  -> Rectangle(T)     { return { min,                      max                      } }
 rectangle_center_dimension      :: proc (center: $T, dimension: T)      -> Rectangle(T)     { return { center - (dimension / 2), center + (dimension / 2) } }
 rectangle_center_half_dimension :: proc (center: $T, half_dimension: T) -> Rectangle(T)     { return { center - half_dimension,  center + half_dimension  } }
@@ -683,6 +684,7 @@ get_area_or_zero :: proc (rect: $R/Rectangle($T)) -> (result: T) {
     return result
 }
 
+has_volume :: has_area
 has_area :: proc (rect: $R/Rectangle($T)) -> (result: bool) {
     area := get_area_or_zero(rect)
     result = area != 0
@@ -700,6 +702,7 @@ get_area_or_zero_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: T) {
     return result
 }
 
+has_volume_inclusive :: has_area_inclusive
 has_area_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: b32) {
     area := get_area_or_zero_inclusive(rect)
     result = area != 0
@@ -750,6 +753,7 @@ multiply4 :: proc (a: m4, p: v4) -> (result: v4) {
 multiply3 :: proc (a: m4, p: v3, w: f32 = 1) -> (result: v3) {
     product := multiply(a, V4(p, w))
     result = product.xyz
+    result /= product.w 
     
     return result
 }

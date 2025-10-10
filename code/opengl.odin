@@ -597,16 +597,13 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     current_render_target_index := max(u32)
     
-    for header_offset: u32; header_offset < commands.push_buffer_data_at; {
-        // :PointerArithmetic
-        header := cast(^RenderEntryHeader) &commands.push_buffer[header_offset]
-        header_offset += size_of(RenderEntryHeader)
-        entry_data := &commands.push_buffer[header_offset]
+    
+    for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
+        header := read(&commands.push_buffer, RenderEntryHeader)
         
         switch header.type {
           case .RenderEntry_Textured_Quads:
-            entry := cast(^RenderEntry_Textured_Quads) entry_data
-            header_offset += size_of(RenderEntry_Textured_Quads)
+            entry := read(&commands.push_buffer, RenderEntry_Textured_Quads)
             
             ////////////////////////////////////////////////
             
@@ -616,12 +613,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 gl_bind_frame_buffer(current_render_target_index, draw_region)
             }
             
-            rect := setup.clip_rect
-            rect = round_middle(scale_radius(rec_cast(f32, setup.clip_rect), v2{clip_scale_x, clip_scale_y}))
-            rect.min.x = round(i32, cast(f32) rect.min.x * clip_scale_x)
-            rect.min.y = round(i32, cast(f32) rect.min.y * clip_scale_y)
-            rect.max.x = round(i32, cast(f32) rect.max.x * clip_scale_x)
-            rect.max.y = round(i32, cast(f32) rect.max.y * clip_scale_y)
+            rec := rec_cast(f32, setup.clip_rect)
+            rec = scale_radius(rec, v2{clip_scale_x, clip_scale_y})
+            rect := round_middle(rec)
             
             if current_render_target_index == 0 do rect = add_offset(rect, draw_region.min)
             
@@ -671,8 +665,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             }
             
           case .RenderEntryBlendRenderTargets:
-            entry := cast(^RenderEntryBlendRenderTargets) entry_data
-            header_offset += size_of(RenderEntryBlendRenderTargets)
+            entry := read(&commands.push_buffer, RenderEntryBlendRenderTargets)
             
             // @todo(viktor): if blending works without binding the dest then we can also remove that member from the Entry
             // gl_bind_frame_buffer(entry.dest_index, draw_region)

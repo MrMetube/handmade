@@ -443,7 +443,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         rect := ui_element.bounds
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
-        transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
+        // transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
         
         if contains(rect, mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
