@@ -123,7 +123,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     x := get_column(camera_object, 0)
     y := get_column(camera_object, 1)
     z := get_column(camera_object, 2)
-    push_camera(render_group, {}, x, y, z, camera_offset, focal_length)
+    push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true)
     
     ////////////////////////////////////////////////
     

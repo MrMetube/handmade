@@ -86,20 +86,23 @@ DegreesPerRadian :: 360.0 / Tau
 ////////////////////////////////////////////////
 // Scalar operations
 
-square :: proc (x: $T) -> T where intrinsics.type_is_numeric(T) || intrinsics.type_is_array(T) || intrinsics.type_is_simd_vector(T) { return x * x }
+square :: proc (x: $T) -> (result: T) {
+    result = x * x
+    return result
+}
 
-square_root :: proc (x: $T) -> (result: T) where intrinsics.type_is_numeric(T) || intrinsics.type_is_array(T) || intrinsics.type_is_simd_vector(T) { 
+square_root :: proc (x: $T) -> (result: T) { 
     when intrinsics.type_is_array(T) {
         #unroll for i in 0..<len(T) {
-            result[i] = simd.sqrt(x[i])
+            result[i] = intrinsics.sqrt(x[i])
         }
     } else {
-        result = simd.sqrt(x)
+        result = intrinsics.sqrt(x)
     }
     return result
- }
+}
  
- power :: math.pow
+power :: math.pow
 
 linear_blend  :: proc { linear_blend_v_e, linear_blend_e }
 linear_blend_v_e :: proc (from: $V/[$N]$E, to: V, t: E) -> V {
@@ -176,22 +179,23 @@ modulus_i :: proc (value: $I, divisor: I) -> I where intrinsics.type_is_integer(
 modulus_f :: proc (value: f32, divisor: f32) -> f32 {
     return math.mod(value, divisor)
 }
-modulus_vf :: proc (value: [$N]f32, divisor: f32) -> (result: [N]f32) where N > 1 {
+modulus_vf :: proc (value: [$N] f32, divisor: f32) -> (result: [N]f32) where N > 1 {
     #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor) 
     return result
 }
-modulus_v :: proc (value: [$N]f32, divisor: [N]f32) -> (result: [N]f32) {
+modulus_v :: proc (value: [$N] f32, divisor: [N] f32) -> (result: [N]f32) {
     #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor[i]) 
     return result
 }
 
 round :: proc { round_f, round_v }
-round_f :: proc ($T: typeid, f: $F) -> T 
+round_f :: proc ($T: typeid, f: $F) -> (result: T) 
 where !intrinsics.type_is_array(F)
 {
-    return  cast(T) (f < 0 ? -math.round(-f) : math.round(f))
+    result = cast(T) (f < 0 ? -math.round(-f) : math.round(f))
+    return result
 }
-round_v :: proc ($T: typeid, v: [$N]$F) -> (result: [N] T) {
+round_v :: proc ($T: typeid, v: [$N] $F) -> (result: [N] T) {
     #unroll for i in 0..<N do result[i] = cast(T) math.round(v[i]) 
     return result
 }
@@ -200,7 +204,7 @@ floor :: proc { floor_f, floor_v }
 floor_f :: proc ($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.floor(f)
 }
-floor_v :: proc ($T: typeid, fs: [$N]f32) -> [N] T {
+floor_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T {
     return vec_cast(T, simd.to_array(simd.floor(simd.from_array(fs))))
 }
 
@@ -208,7 +212,7 @@ ceil :: proc { ceil_f, ceil_v }
 ceil_f :: proc ($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.ceil(f)
 }
-ceil_v :: proc ($T: typeid, fs: [$N]f32) -> [N] T {
+ceil_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T {
     return vec_cast(T, simd.to_array(simd.ceil(simd.from_array(fs))))
 }
 
@@ -216,7 +220,7 @@ truncate :: proc { truncate_f, truncate_v }
 truncate_f :: proc ($T: typeid, f: f32) -> T {
     return cast(T) f
 }
-truncate_v :: proc ($T: typeid, fs: [$N]f32) -> [N]T where N > 1 {
+truncate_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T where N > 1 {
     return vec_cast(T, fs)
 }
 
@@ -815,14 +819,11 @@ xz_rotation :: proc (angle: f32) -> (result: m4) {
 
 ////////////////////////////////////////////////
 
-perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32) -> (result: m4_inv) {
-    near_clip :: 0.1
-    far_clip  :: 100
-    
+perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32, near_clip_plane, far_clip_plane: f32) -> (result: m4_inv) {
     a := aspect_width_over_height
     b := focal_length
-    n: f32 = near_clip
-    f: f32 = far_clip
+    n := near_clip_plane
+    f := far_clip_plane
     // @note(viktor): perspective, for when you divide by -z
     c :=   (n+f) / (n-f)
     d := (2*f*n) / (n-f)
@@ -845,13 +846,10 @@ perspective_projection :: proc (aspect_width_over_height: f32, focal_length: f32
     return result
 }
 
-orthographic_projection :: proc (aspect_width_over_height: f32) -> (result: m4_inv) {
-    near_clip :: -100
-    far_clip  :: 100
-    
+orthographic_projection :: proc (aspect_width_over_height: f32, near_clip_plane, far_clip_plane: f32) -> (result: m4_inv) {
     a := aspect_width_over_height
-    n: f32 = near_clip
-    f: f32 = far_clip
+    n := near_clip_plane
+    f := far_clip_plane
     
     // @note(viktor): orthographic
     c := (  2) / (n-f)

@@ -83,8 +83,9 @@ RenderTransform :: struct {
 
 Transform :: struct {
     is_upright: b32,
-    
     offset: v3,  
+    
+    // @cleanup scale is never read from or writen to
     scale:  f32,
 }
     
@@ -232,17 +233,18 @@ get_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, tra
 }
 
 @(deferred_in_out=end_transient_clip_rect)
-transient_clip_rect :: proc (group: ^RenderGroup, rect: Rectangle2i) -> (result: RenderSetup) {
-    result = group.last_setup
-    setup := result
+transient_clip_rect :: proc (group: ^RenderGroup, rect: Rectangle2i) -> (previous_setup: RenderSetup) {
+    previous_setup = group.last_setup
+    
+    setup := previous_setup
     setup.clip_rect =  rect
     push_setup(group, setup)
     
-    return result
+    return previous_setup
 }
 
-end_transient_clip_rect :: proc (group: ^RenderGroup, _: Rectangle2i, setup: RenderSetup) {
-    push_setup(group, setup)
+end_transient_clip_rect :: proc (group: ^RenderGroup, _: Rectangle2i, previous_setup: RenderSetup) {
+    push_setup(group, previous_setup)
 }
 
 push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
@@ -253,23 +255,26 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
     push_setup(group, setup)
 }
 
-push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1) {
+push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
     
     setup := group.last_setup
     projection: m4_inv
     if .orthographic in flags {
-        projection = orthographic_projection(aspect_width_over_height)
+        projection = orthographic_projection(aspect_width_over_height, near_clip_plane, far_clip_plane)
         
         setup.fog_direction = 0
     } else {
-        projection = perspective_projection(aspect_width_over_height, focal_length)
-        
-        if .debug not_in flags {
-            setup.fog_direction = -z
-            setup.fog_begin = 8
-            setup.fog_end = 25
-        }
+        projection = perspective_projection(aspect_width_over_height, focal_length, near_clip_plane, far_clip_plane)
+    }
+    
+    fog := fog
+    if .debug in flags do fog = false
+    
+    if fog {
+        setup.fog_direction = -z
+        setup.fog_begin = 8
+        setup.fog_end = 25
     }
     
     camera := camera_transform(x, y, z, p)
@@ -401,9 +406,11 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     min    := V4(used_dim.basis, 0)
     x_axis := V3(x_axis2, 0) * size.x
     y_axis := V3(y_axis2, 0) * size.y
-    z_bias := 0.25 * height
     
+    z_bias: f32
     if transform.is_upright {
+        z_bias = 0.25 * height
+        
         x_axis0 := size.x * v3{x_axis2.x, 0, x_axis2.y}
         y_axis0 := size.y * v3{y_axis2.x, 0, y_axis2.y}
         x_axis1 := size.x * (x_axis2.x * group.game_cam.x + x_axis2.y * group.game_cam.y)

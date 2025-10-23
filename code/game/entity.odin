@@ -136,6 +136,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
     
     for &entity in slice(sim_region.entities) {
         if .active in entity.flags {
+            boost := begin_timed_block("entity boost")
             // @todo(viktor): Should non-active entities not do simmy stuff?
             boost_to := get_traversable(entity.auto_boost_to)
             if boost_to != nil {
@@ -150,10 +151,12 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     }
                 }
             }
+            end_timed_block(boost)
             
             ////////////////////////////////////////////////
             // Physics
             
+            physics := begin_timed_block("entity physics")
             if entity.movement_mode == .Planted {
                 if entity.occupying.entity.pointer != nil {
                     entity.p = get_sim_space_traversable(entity.occupying).p
@@ -231,6 +234,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     entity.t_movement = 1
                 }
             }
+            end_timed_block(physics)
                             
             if entity.ddp != 0 || entity.dp != 0 {
                 move_entity(sim_region, &entity, dt)
@@ -240,7 +244,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             ////////////////////////////////////////////////
             // Rendering
             
-            facing_match   := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
+            rendering := begin_timed_block("entity rendering")
+            facing_match := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
             
             transform := default_upright_transform()
             transform.offset = entity.p
@@ -249,6 +254,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             shadow_transform.offset = entity.p
             shadow_transform.offset.y -= 0.5
             
+            rendering_pieces := begin_timed_block("entity rendering pieces")
             for piece in slice(&entity.pieces) {
                 offset := piece.offset
                 color  := piece.color
@@ -281,9 +287,11 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     push_bitmap(render_group, bitmap_id, transform, piece.dimension.y, offset, color, x_axis = x_axis, y_axis = y_axis)
                 }
             }
-            
             draw_hitpoints(render_group, &entity, 0.5, transform)
             
+            end_timed_block(rendering_pieces)
+            
+            rendering_volumes := begin_timed_block("entity rendering volumes")
             if has_volume(entity.collision_volume) {
                 color := srgb_to_linear(SeaGreen)
                 if .Collides in entity.flags {
@@ -291,6 +299,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 }
                 push_volume_outline(render_group, entity.collision_volume, transform, color, 0.01)
             }
+            end_timed_block(rendering_volumes)
+            end_timed_block(rendering)
             
             debug_pick_entity(&entity, transform, render_group)
         }
@@ -299,6 +309,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
 
 debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: ^RenderGroup) {
     when !DebugEnabled do return
+    
+    timed_function()
     
     // @todo(viktor): we dont really have a way to unique-ify these :(
     debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)

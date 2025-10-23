@@ -512,6 +512,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
+    gl_setup_render := game.begin_timed_block("gl setup render")
     draw_dim := get_dimension(draw_region)
     gl_bind_frame_buffer(0, draw_region)
     defer gl_bind_frame_buffer(0, draw_region)
@@ -596,7 +597,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     clip_scale_y := safe_ratio_0(cast(f32) dim.y, commands_dim.y)
     
     current_render_target_index := max(u32)
-    
+    game.end_timed_block(gl_setup_render)
     
     for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
         header := read(&commands.push_buffer, RenderEntryHeader)
@@ -621,7 +622,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             gl.UseProgram(open_gl.program)
             defer gl.UseProgram(0)
             
+            s2 := game.begin_timed_block("gl copy buffer data")
             gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
+            game.end_timed_block(s2)
             
             // @volatile see vertex shader
             gl.EnableVertexAttribArray(cast(u32) open_gl.in_uv)
@@ -651,6 +654,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             
             ////////////////////////////////////////////////
             
+            timed_block("gl quad loop")
             for bitmap_index in entry.bitmap_offset..<entry.bitmap_offset+entry.quad_count {
                 bitmap := commands.quad_bitmap_buffer.data[bitmap_index]
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)

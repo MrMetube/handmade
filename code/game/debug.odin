@@ -23,7 +23,7 @@ GlobalDebugMemory: ^GameMemory
 GlobalDebugTable:  ^DebugTable
 
 DebugMaxEventCount :: 500_000 when DebugEnabled else 0
-MaxFrameCount :: 512
+MaxFrameCount :: 256
 
 DebugPrintBuffer: [1024] u8
 
@@ -233,6 +233,7 @@ DebugStoredEvent :: struct {
 
 DebugProfileNode :: struct {
     element: ^DebugElement,
+    parent_node: ^DebugProfileNode,
     
     first_child:      ^DebugStoredEvent,
     next_same_parent: ^DebugStoredEvent,
@@ -276,7 +277,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     width := cast(f32) render_commands.width
     x := v3{2 / width, 0, 0}
     y := v3{0, 2 / width, 0}
-    push_camera(&debug.render_group, flags = { .orthographic }, x = x, y = y)
+    push_camera(&debug.render_group, flags = { .orthographic }, x = x, y = y, near_clip_plane = -100_000, far_clip_plane = 100_000)
     push_sort_barrier(&debug.render_group, true)
     
     if debug.font == nil {
@@ -339,10 +340,10 @@ debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
     debug.shadow_transform  = default_flat_transform()
     debug.text_transform    = default_flat_transform()
     
-    debug.backing_transform.offset.z = 0
-    debug.ui_transform.offset.z      = 0
-    debug.shadow_transform.offset.z  = 0
-    debug.text_transform.offset.z    = 0
+    debug.backing_transform.offset.z = -4000
+    debug.ui_transform.offset.z      = -3000
+    debug.shadow_transform.offset.z  = -2000
+    debug.text_transform.offset.z    = -1000
     
     return debug
 }
@@ -445,6 +446,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
                 parent_event = store_event(debug, {}, debug.profile_root)
                 collation_frame.profile_root = parent_event
             }
+            assert(parent_event != nil)
             
             if clock_basis == 0 {
                 clock_basis = debug.initialization_clock
@@ -455,6 +457,8 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
             node := &stored_event.node
             node ^= {
                 element = element,
+                parent_node = &parent_event.node,
+                
                 parent_relative_clock = event.clock - clock_basis,
                 
                 thread_index = thread.thread_index,

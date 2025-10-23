@@ -36,7 +36,7 @@ DebugView :: struct {
 }
 
 DebugId :: struct {
-    value: [2]pmm,
+    value: [2] pmm,
 }
 
 DebugViewCollapsible :: struct {
@@ -346,7 +346,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
             
             _, is_occupancy    := element.type.(ArenaOccupancy)
             begin_ui_row(layout)
-                boolean_button(layout, "Occupancy", is_occupancy, set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}))
+                boolean_button(layout, "Occupancy", set_value_interaction(id, &element.type, cast(DebugValue) ArenaOccupancy{}), is_occupancy)
                 arena := graph.arena
                 
                 
@@ -395,11 +395,11 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         }
         
         begin_ui_row(layout)
-            boolean_button(layout, debug.paused ? "Unpause" : "Pause",       debug.paused, set_value_interaction(id, &debug.paused, !debug.paused))
+            boolean_button(layout, debug.paused ? "Unpause" : "Pause", set_value_interaction(id, &debug.paused, !debug.paused), debug.paused)
             if debug.paused {
-                boolean_button(layout, "< Back",      false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount))
-                boolean_button(layout, "Most Recent", debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal, set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal))
-                boolean_button(layout, "Forward >",   false,        set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount))
+                boolean_button(layout, "< Back",      set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+MaxFrameCount-1)%MaxFrameCount), false)
+                boolean_button(layout, "Most Recent", set_value_interaction(id, &debug.viewed_frame_ordinal, debug.most_recent_frame_ordinal),                            debug.viewed_frame_ordinal == debug.most_recent_frame_ordinal)
+                boolean_button(layout, "Forward >",   set_value_interaction(id, &debug.viewed_frame_ordinal, (debug.viewed_frame_ordinal+1)%MaxFrameCount),               false)
             }
         end_ui_row(layout)
         
@@ -426,10 +426,23 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         }
         
         begin_ui_row(layout)
-            boolean_button(layout, "Threads", is_profile,   set_value_interaction(id, &element.type, cast(DebugValue) ThreadProfileGraph{}))
-            boolean_button(layout, "Frames", is_frame_bars, set_value_interaction(id, &element.type, cast(DebugValue) FrameBarsGraph{}))
-            boolean_button(layout, "Clocks", is_top_clocks, set_value_interaction(id, &element.type, cast(DebugValue) TopClocksList{}))
-            action_button(layout,  "Root", set_value_interaction(id, &graph.root, DebugGUID{} ))
+            parent_guid: DebugGUID
+            // @note(viktor): We can not know which parent we used to get here, so we just pick the first one we find to go back up.
+            // @todo(viktor): just allow them to select from all parents, maybe in a dropdown or something if its too much for the ui_row.
+            frame := viewed_element.frames[debug.viewed_frame_ordinal]
+            if frame.events.last != nil {
+                node := frame.events.last.node
+                if node.parent_node != nil && node.parent_node.element != nil {
+                    parent_guid = node.parent_node.element.guid
+                }
+            }
+            boolean_button(layout, "Threads",     set_value_interaction(id, &element.type, ThreadProfileGraph{}), is_profile)
+            boolean_button(layout, "Frames",      set_value_interaction(id, &element.type, FrameBarsGraph{}),     is_frame_bars)
+            boolean_button(layout, "Clocks",      set_value_interaction(id, &element.type, TopClocksList{}),      is_top_clocks)
+
+            action_button(layout, "View Root",   set_value_interaction(id, &graph.root, DebugGUID{}))
+            parent_text := debug_print("View Parent: %", parent_guid.name)
+            action_button(layout, parent_text, set_value_interaction(id, &graph.root, parent_guid))
             text := debug_print("Viewing: %", viewed_element.guid.name)
             action_button(layout, text, {}, backdrop_color = {})
         end_ui_row(layout)
@@ -577,36 +590,54 @@ draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, ro
         
         
         color: v4
+        outline_color: v4 = Black
+        switch frame_ordinal {
+          case debug.most_recent_frame_ordinal:
+            color = Emerald
+          case debug.oldest_frame_ordinal_that_is_already_freed:
+            color = Red
+          case debug.viewed_frame_ordinal: 
+            color = Green
+        }
+        
+        text: string
         if contains(region_rect, mouse_p) {
-            text: string
+            outline_color = Isabelline
+            
             switch frame_ordinal {
-            case debug.most_recent_frame_ordinal:
-                color = Emerald
+              case debug.most_recent_frame_ordinal:
                 text = "Most recent Frame"
-            case debug.oldest_frame_ordinal_that_is_already_freed:
-                color = Red
+                
+              case debug.oldest_frame_ordinal_that_is_already_freed:
                 text = "Oldest Frame"
-            case debug.viewed_frame_ordinal: 
-                color = Green
-            case: 
+                
+              case debug.viewed_frame_ordinal: 
+                
+              case: 
                 frame_delta := debug.most_recent_frame_ordinal - frame_ordinal
                 if frame_delta < 0 {
                     frame_delta += MaxFrameCount
                 }
                 text = debug_print("% frames ago", frame_delta)
             }
+        }
         
-            if color == 0 do color = V4(Green.rgb, 0.7)
-            
+        if outline_color == 0 do outline_color = color * {.2, .2, .2, 1}
+        
+        if text != "" {
             id := DebugId{ value = {root_element, &frame} }
             debug.next_hot_interaction = set_value_continously_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
             add_tooltip(debug, text)
         }
         
-        if color.a != 0 {
-            push_rectangle(&debug.render_group, region_rect, debug.backing_transform, color)
-            push_rectangle_outline(&debug.render_group, region_rect, debug.ui_transform, color * {.2, .2, .2, 1}, {1, 0})
-        }
+        outline_width: f32 = 1
+        pre_outline_rect := rectangle_min_dimension(region_rect.min, v2{outline_width, get_dimension(region_rect).y})
+        region_rect.min.x += outline_width
+        region_rect.max.x -= outline_width
+        post_outline_rect := rectangle_min_dimension(v2{region_rect.max.x, region_rect.min.y}, v2{outline_width, get_dimension(region_rect).y})
+        push_rectangle(&debug.render_group, pre_outline_rect, debug.ui_transform, outline_color)
+        push_rectangle(&debug.render_group, region_rect, debug.ui_transform, color)
+        push_rectangle(&debug.render_group, post_outline_rect, debug.ui_transform, outline_color)
         at_x += bar_width
     }
 }
@@ -614,22 +645,60 @@ draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, ro
 draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
     timed_function()
     
+    // @hack if root element is the profile root, it should also just work fine without special handling
     link_count: u32
     group := debug.profile_group
     for link := group.first_child; link != sentinel(group); link = link.next {
-        link_count += 1
+        is_child_of_root := false
+        
+        if root_element == debug.profile_root {
+            is_child_of_root = true
+        }
+        
+        if !is_child_of_root {
+            frame := link.element.frames[debug.viewed_frame_ordinal]
+            for event := frame.events.last; event != nil; event = event.next {
+                if event.node.parent_node != nil && event.node.parent_node.element == root_element {
+                    is_child_of_root = true
+                    break
+                }
+            }
+        }
+        
+        if is_child_of_root {
+            link_count += 1
+        }
     }
+    if link_count == 0 do return
     
     temp := begin_temporary_memory(&debug.arena)
     defer end_temporary_memory(temp)
     
-    sort_entries := push_slice(temp.arena, SortEntry, link_count, no_clear())
-    temp_space   := push_slice(temp.arena, SortEntry, link_count, no_clear())
+    sort_entries := push_slice(temp.arena, SortEntry,  link_count, no_clear())
+    temp_space   := push_slice(temp.arena, SortEntry,  link_count, no_clear())
     entries      := push_slice(temp.arena, ClockEntry, link_count, no_clear())
     
     total_time: f32
     entry_index: u32
     for link := group.first_child; link != sentinel(group); link = link.next {
+        is_child_of_root := false
+        
+        if root_element == debug.profile_root {
+            is_child_of_root = true
+        }
+        
+        if !is_child_of_root {
+            frame := link.element.frames[debug.viewed_frame_ordinal]
+            for event := frame.events.last; event != nil; event = event.next {
+                if event.node.parent_node != nil && event.node.parent_node.element == root_element {
+                    is_child_of_root = true
+                    break
+                }
+            }
+        }
+        
+        if !is_child_of_root do continue
+        
         element := link.element
         assert(element != nil)
         assert(!has_children(link))
@@ -639,14 +708,14 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         
         entry.element = element
         begin_debug_statistic(&entry.stats)
-        
-        frame := &element.frames[debug.viewed_frame_ordinal]
+            
+        frame := link.element.frames[debug.viewed_frame_ordinal]
         for event := frame.events.last; event != nil; event = event.next {
             // duration_with_children := cast(f32) event.node.duration
             duration_without_children := cast(f32) (event.node.duration - event.node.duration_of_children)
             accumulate_debug_statistic(&entry.stats, duration_without_children)
         }
-     
+        
         end_debug_statistic(&entry.stats)
         
         sort_entries[entry_index] = {
@@ -667,8 +736,12 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         entry := entries[sort_entry.index]
         running_sum += entry.stats.sum
         
-        text := debug_print("%cy - % %% / % %% - %",
+        // @todo(viktor): This wants to be a tabular view of the data
+        text := debug_print("% cycles / % % - % %% / % %% - %",
             view_magnitude(cast(u32) entry.stats.sum),
+            view_magnitude(entry.stats.count),
+            entry.stats.count == 1 ? "hit" : "hits",
+            
             view_float(entry.stats.sum * total_time_percentage, width = 2, precision = 2),
             view_float(running_sum * total_time_percentage, width = 2, precision = 2),
             entry.element.guid.name,
@@ -681,12 +754,12 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         region_rect = add_offset(region_rect, p)
         region_rect = get_intersection(rect, region_rect)
         if contains(region_rect, mouse_p) {
-            tooltip := debug_print("average %cy - % %",
-                view_magnitude_decimal(entry.stats.avg),
-                view_magnitude(cast(u64) entry.stats.count), 
-                entry.stats.count == 1 ? "hit" : "hits",
-            )
+            tooltip := debug_print("average %cy", view_magnitude_decimal(entry.stats.avg))
             add_tooltip(debug, tooltip)
+            // @copypasta with draw_profile
+            // @todo(viktor): if has children
+            id := DebugId { value = { graph_root, entry.element } }
+            debug.next_hot_interaction = set_value_interaction(id, graph_root, entry.element.guid)
         }
         
         if p.y < rect.min.y {
@@ -739,6 +812,9 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             y_min := rect.min.y + scale * cast(f32) node.parent_relative_clock
             y_max := y_min      + scale * cast(f32) node.duration
             
+            height := y_max - y_min
+            if bar_width <= 1 || height <= 1  do continue
+            
             region_rect := rectangle_min_max(
                 v2{at_x, y_min},
                 v2{at_x + bar_width, y_max},
@@ -746,27 +822,24 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             
             color := debug_get_element_color(element)
             
-            height := y_max - y_min
-            if bar_width > 1 && height > 1 {
-                border_color := color * {.2,.2,.2, 1}
-                // @todo(viktor): find a better way to highlight the current frame
-                if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
-                    border_color = 1
-                    transform.offset.z += 10
-                }
-                push_rectangle(&debug.render_group, region_rect, transform, color)
+            border_color := color * {.2,.2,.2, 1}
+            // @todo(viktor): find a better way to highlight the current frame
+            if auto_cast frame_ordinal == debug.viewed_frame_ordinal {
+                border_color = 1
+                transform.offset.z += 10
+            }
+            push_rectangle(&debug.render_group, region_rect, transform, color)
+            
+            push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
+            
+            if contains(region_rect, mouse_p) {
+                text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
+                add_tooltip(debug, text)
                 
-                push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
-                
-                if contains(region_rect, mouse_p) {
-                    text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
-                    add_tooltip(debug, text)
-                    
-                    // @copypasta with draw_profile
-                    if node.first_child != nil {
-                        id := DebugId { value = { graph_root, &element } }
-                        debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
-                    }
+                // @copypasta with draw_profile
+                if node.first_child != nil {
+                    id := DebugId { value = { graph_root, &element } }
+                    debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
                 }
             }
         }
@@ -975,7 +1048,7 @@ action_button :: proc (layout: ^Layout, label: string, interaction: DebugInterac
     basic_text_element(layout, label, interaction, padding = 5, backdrop_color = backdrop_color)
 }
 
-boolean_button :: proc (layout: ^Layout, label: string, highlighted: $bool,  interaction: DebugInteraction) {
+boolean_button :: proc (layout: ^Layout, label: string, interaction: DebugInteraction, highlighted: $bool) {
     basic_text_element(layout, label, interaction, highlighted ? Green : Jasmine, padding = 5, backdrop_color = DarkGreen)
 }
 
@@ -1027,7 +1100,7 @@ set_value_continously_interaction :: proc (id: DebugId, target: ^$T, value: T) -
 
 interaction_is_hot :: proc (debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
     if interaction.kind != .None {
-        result = debug.hot_interaction.id == interaction.id
+        result = debug.hot_interaction == interaction
     }
     return result
 }
@@ -1414,6 +1487,7 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
         switch operation {
           case .Draw: 
             if codepoint != ' ' {
+                // @todo(viktor): Eventually, it's probably the right hting to go ahead and make z flow through the debug system sensibly, but for now we just don't care.
                 push_bitmap(group, bitmap_id, debug.shadow_transform, height, V3(p, pz) + {2,-2,-20}, Black)
                 push_bitmap(group, bitmap_id, debug.text_transform,   height, V3(p, pz), color)
             }

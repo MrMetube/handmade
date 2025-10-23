@@ -143,13 +143,13 @@ intro_layers :: [?] [] Scene_Layer {
     },
 
     11 = {
-        {{ 0,     0,     -100},   150,   {.at_infinity}, 0},
-        {{ 0,    10,      -40},    40,   {            }, 0},
-        {{ 0,     3.2,    -20},    23,   {            }, 0},
-        {{ 0.25,  0.9,    -10},    13.5, {            }, 0},
-        {{-0.5,   0.625,   -5},     7,   {            }, 0},
+        {{ 0,     0,     -100  }, 150,   {.at_infinity}, 0},
+        {{ 0,    10,      -40  },  40,   {            }, 0},
+        {{ 0,     3.2,    -20  },  23,   {            }, 0},
+        {{ 0.25,  0.9,    -10  },  13.5, {            }, 0},
+        {{-0.5,   0.625,   -5  },   7,   {            }, 0},
         {{ 0,     0.1,     -2.5},   3.9, {            }, 0},
-        {{-0.3,  -0.15,    -1},     1.2, {            }, 0},
+        {{-0.3,  -0.15,    -1  },   1.2, {            }, 0},
     },
 
 }
@@ -238,7 +238,7 @@ render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mo
 }
 
 render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene: Layered_Scene, t_normal: f32) {
-    focal_length :: 0.25
+    focal_length :: 0.8
     
     scene_fade_value: f32 = 1
     if t_normal < scene.t_fade_in {
@@ -253,7 +253,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     // @todo(viktor): We could potentially simplify this by making better use of the camera.p
     camera_offset := linear_blend(scene.camera_start, scene.camera_end, t_normal)
     if render_group != nil {
-        push_camera(render_group, {}, focal_length = focal_length)
+        push_camera(render_group, {}, focal_length = focal_length, near_clip_plane = 0.1, far_clip_plane = 1000)
         
         if len(scene.layers) == 0 {
             push_clear(render_group, 0)
