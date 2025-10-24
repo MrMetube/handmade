@@ -218,7 +218,6 @@ main :: proc () {
         
         game_update_hz = cast(f32) MonitorRefreshHz
     }
-    target_seconds_per_frame := 1 / game_update_hz
     
     ////////////////////////////////////////////////
     //  Sound Setup
@@ -229,7 +228,10 @@ main :: proc () {
     sound_output.bytes_per_sample   = size_of(Sample)
     sound_output.buffer_size        = sound_output.samples_per_second * sound_output.bytes_per_sample
     // @todo(viktor): actually compute this variance and set a reasonable value
-    sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32)sound_output.samples_per_second * cast(f32)sound_output.bytes_per_sample)
+    {
+        target_seconds_per_frame := 1 / game_update_hz
+        sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32) sound_output.samples_per_second * cast(f32) sound_output.bytes_per_sample)
+    }
     
     init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
     
@@ -247,7 +249,7 @@ main :: proc () {
     // @todo(viktor): Monitor xbox controllers for being plugged in after the fact
     xbox_controller_present: [XUSER_MAX_COUNT] b32 = true
     
-    input: [2]Input
+    input: [2] Input
     old_input, new_input := &input[0], &input[1]
     
     ////////////////////////////////////////////////
@@ -310,297 +312,293 @@ main :: proc () {
     
     ////////////////////////////////////////////////
     //  Game Loop
-        
+    
+    expected_frames_per_update: f32 = 1
+    target_seconds_per_frame: f32
     for GlobalRunning {
+        check_arena(&platform_arena)  
         check_arena(&frame_arena)  
-        
-        ////////////////////////////////////////////////
-        // Input
-        input_processed := game.begin_timed_block("input processed")
         
         init_render_commands(&render_commands, GlobalBackBuffer.width, GlobalBackBuffer.height, push_buffer, vertex_buffer, quad_bitmap_buffer, white_bitmap)
         
         window_dim := get_window_dimension(window)
         draw_region := aspect_ratio_fit({render_commands.width, render_commands.height}, window_dim)
         
-        {
-            new_input.delta_time = target_seconds_per_frame
+        ////////////////////////////////////////////////
+        { timed_block("input processed")
             
-            is_down :: proc (vk: win.INT) -> b32 {
-                is_down_mask :: transmute(i16) (cast(u16) 1 << 15)
-                return (win.GetKeyState(vk) & is_down_mask) != 0
-            }
-            
-            { // Modifiers
-                new_input.shift_down   = is_down(win.VK_LSHIFT)
-                new_input.control_down = is_down(win.VK_CONTROL)
-                new_input.alt_down     = is_down(win.VK_MENU)
-            }
-            
-            { // Mouse Input 
-                timed_block("mouse_input")
+            target_seconds_per_frame = expected_frames_per_update / game_update_hz
+            {
+                new_input.delta_time = target_seconds_per_frame
                 
-                mouse_in_window_y_down: win.POINT
-                win.GetCursorPos(&mouse_in_window_y_down)
-                win.ScreenToClient(window, &mouse_in_window_y_down)
-                
-                mouse_in_window_y_up := vec_cast(f32, mouse_in_window_y_down.x, window_dim.y - 1 - mouse_in_window_y_down.y)
-                draw_region := rec_cast(f32, draw_region)
-                mouse_in_draw_region := vec_cast(f32, render_commands.width, render_commands.height) * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
-                
-                new_input.mouse.p = mouse_in_draw_region
-                for &button, index in new_input.mouse.buttons {
-                    button.ended_down = old_input.mouse.buttons[index].ended_down
-                    button.half_transition_count = 0
+                is_down :: proc (vk: win.INT) -> b32 {
+                    is_down_mask :: transmute(i16) (cast(u16) 1 << 15)
+                    return (win.GetKeyState(vk) & is_down_mask) != 0
                 }
                 
-                // @todo(viktor): support mouse wheel
-                new_input.mouse.wheel = 0
-                // @todo(viktor): Do we need to update the input button on every event?
-                process_win_keyboard_message(&new_input.mouse.buttons[.left],   is_down(win.VK_LBUTTON))
-                process_win_keyboard_message(&new_input.mouse.buttons[.right],  is_down(win.VK_RBUTTON))
-                process_win_keyboard_message(&new_input.mouse.buttons[.middle], is_down(win.VK_MBUTTON))
-                process_win_keyboard_message(&new_input.mouse.buttons[.extra1], is_down(win.VK_XBUTTON1))
-                process_win_keyboard_message(&new_input.mouse.buttons[.extra2], is_down(win.VK_XBUTTON2))
-            }
-            
-            { // Keyboard Input
-                timed_block("keyboard_input")
-                
-                old_keyboard_controller := &old_input.controllers[0]
-                new_keyboard_controller := &new_input.controllers[0]
-                new_keyboard_controller ^= {}
-                new_keyboard_controller.is_connected = true
-                
-                for &button, index in new_keyboard_controller.buttons {
-                    button.ended_down = old_keyboard_controller.buttons[index].ended_down
+                { // Modifiers
+                    new_input.shift_down   = is_down(win.VK_LSHIFT)
+                    new_input.control_down = is_down(win.VK_CONTROL)
+                    new_input.alt_down     = is_down(win.VK_MENU)
                 }
                 
-                process_pending_messages(&GlobalPlatformState, new_keyboard_controller)
-            }
-            
-            max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
-            // @todo(viktor): Need to not poll disconnected controllers to avoid xinput frame rate hit
-            // on older libraries.
-            // Is this still relevant?
-            // @todo(viktor): should we poll this more frequently
-            // @todo(viktor): only check connected controllers, catch messages on connect / disconnect
-            controller_input := game.begin_timed_block("controller_input")
-            defer game.end_timed_block(controller_input)
-            
-            for controller_index in 0..<max_controller_count {
-                controller_state: XINPUT_STATE
-                
-                our_controller_index := controller_index+1
-                
-                old_controller := old_input.controllers[our_controller_index]
-                new_controller := &new_input.controllers[our_controller_index]
-                
-                if xbox_controller_present[controller_index] && XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
-                    new_controller.is_connected = true
-                    new_controller.is_analog = old_controller.is_analog
-                    // @todo(viktor): see if dwPacketNumber increments too rapidly
-                    pad := controller_state.Gamepad
+                { timed_block("mouse input")
                     
-                    process_Xinput_button :: proc (new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
-                        new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
-                        new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
+                    mouse_in_window_y_down: win.POINT
+                    win.GetCursorPos(&mouse_in_window_y_down)
+                    win.ScreenToClient(window, &mouse_in_window_y_down)
+                    
+                    mouse_in_window_y_up := vec_cast(f32, mouse_in_window_y_down.x, window_dim.y - 1 - mouse_in_window_y_down.y)
+                    draw_region := rec_cast(f32, draw_region)
+                    mouse_in_draw_region := vec_cast(f32, render_commands.width, render_commands.height) * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
+                    
+                    new_input.mouse.p = mouse_in_draw_region
+                    for &button, index in new_input.mouse.buttons {
+                        button.ended_down = old_input.mouse.buttons[index].ended_down
+                        button.half_transition_count = 0
                     }
                     
-                    xx := #partial [Controller_Button] win.WORD {
-                        .button_up      = XINPUT_GAMEPAD_Y,
-                        .button_down    = XINPUT_GAMEPAD_A,
-                        .button_left    = XINPUT_GAMEPAD_X,
-                        .button_right   = XINPUT_GAMEPAD_B,
-                        
-                        .start          = XINPUT_GAMEPAD_START,
-                        .back           = XINPUT_GAMEPAD_BACK,
-                        
-                        .shoulder_left  = XINPUT_GAMEPAD_LEFT_SHOULDER,
-                        .shoulder_right = XINPUT_GAMEPAD_RIGHT_SHOULDER,
-                        
-                        .dpad_up        = XINPUT_GAMEPAD_DPAD_UP,
-                        .dpad_down      = XINPUT_GAMEPAD_DPAD_DOWN,
-                        .dpad_left      = XINPUT_GAMEPAD_DPAD_LEFT,
-                        .dpad_right     = XINPUT_GAMEPAD_DPAD_RIGHT,
-                        
-                        .thumb_left     = XINPUT_GAMEPAD_LEFT_THUMB,
-                        .thumb_right    = XINPUT_GAMEPAD_RIGHT_THUMB,
-                        
-                        // @note(viktor): stick_xx "buttons" are handled separately below
+                    // @todo(viktor): support mouse wheel
+                    new_input.mouse.wheel = 0
+                    // @todo(viktor): Do we need to update the input button on every event?
+                    process_win_keyboard_message(&new_input.mouse.buttons[.left],   is_down(win.VK_LBUTTON))
+                    process_win_keyboard_message(&new_input.mouse.buttons[.right],  is_down(win.VK_RBUTTON))
+                    process_win_keyboard_message(&new_input.mouse.buttons[.middle], is_down(win.VK_MBUTTON))
+                    process_win_keyboard_message(&new_input.mouse.buttons[.extra1], is_down(win.VK_XBUTTON1))
+                    process_win_keyboard_message(&new_input.mouse.buttons[.extra2], is_down(win.VK_XBUTTON2))
+                }
+                
+                { timed_block("keyboard input")
+                    
+                    old_keyboard_controller := &old_input.controllers[0]
+                    new_keyboard_controller := &new_input.controllers[0]
+                    new_keyboard_controller ^= {}
+                    new_keyboard_controller.is_connected = true
+                    
+                    for &button, index in new_keyboard_controller.buttons {
+                        button.ended_down = old_keyboard_controller.buttons[index].ended_down
                     }
                     
-                    for xinput_bit, button in xx {
-                        process_Xinput_button(&new_controller.buttons[button], old_controller.buttons[button], pad.wButtons, xinput_bit)
-                    }
+                    process_pending_messages(&GlobalPlatformState, new_keyboard_controller)
+                }
+                
+                max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
+                // @todo(viktor): Need to not poll disconnected controllers to avoid xinput frame rate hit
+                // on older libraries.
+                // Is this still relevant?
+                // @todo(viktor): should we poll this more frequently
+                // @todo(viktor): only check connected controllers, catch messages on connect / disconnect
+                { timed_block("controller input")
                     
-                    process_Xinput_stick :: proc (thumbstick: win.SHORT, deadzone: i16) -> f32 {
-                        if thumbstick < -deadzone {
-                            return cast(f32) (thumbstick + deadzone) / (32768 - cast(f32) deadzone)
-                        } else if thumbstick > deadzone {
-                            return cast(f32) (thumbstick - deadzone) / (32767 - cast(f32) deadzone)
+                    for controller_index in 0..<max_controller_count {
+                        controller_state: XINPUT_STATE
+                        
+                        our_controller_index := controller_index+1
+                        
+                        old_controller := old_input.controllers[our_controller_index]
+                        new_controller := &new_input.controllers[our_controller_index]
+                        
+                        if xbox_controller_present[controller_index] && XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
+                            new_controller.is_connected = true
+                            new_controller.is_analog = old_controller.is_analog
+                            // @todo(viktor): see if dwPacketNumber increments too rapidly
+                            pad := controller_state.Gamepad
+                            
+                            process_Xinput_button :: proc (new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
+                                new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
+                                new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
+                            }
+                            
+                            xx := #partial [Controller_Button] win.WORD {
+                                .button_up      = XINPUT_GAMEPAD_Y,
+                                .button_down    = XINPUT_GAMEPAD_A,
+                                .button_left    = XINPUT_GAMEPAD_X,
+                                .button_right   = XINPUT_GAMEPAD_B,
+                                
+                                .start          = XINPUT_GAMEPAD_START,
+                                .back           = XINPUT_GAMEPAD_BACK,
+                                
+                                .shoulder_left  = XINPUT_GAMEPAD_LEFT_SHOULDER,
+                                .shoulder_right = XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                                
+                                .dpad_up        = XINPUT_GAMEPAD_DPAD_UP,
+                                .dpad_down      = XINPUT_GAMEPAD_DPAD_DOWN,
+                                .dpad_left      = XINPUT_GAMEPAD_DPAD_LEFT,
+                                .dpad_right     = XINPUT_GAMEPAD_DPAD_RIGHT,
+                                
+                                .thumb_left     = XINPUT_GAMEPAD_LEFT_THUMB,
+                                .thumb_right    = XINPUT_GAMEPAD_RIGHT_THUMB,
+                                
+                                // @note(viktor): stick_xx "buttons" are handled separately below
+                            }
+                            
+                            for xinput_bit, button in xx {
+                                process_Xinput_button(&new_controller.buttons[button], old_controller.buttons[button], pad.wButtons, xinput_bit)
+                            }
+                            
+                            process_Xinput_stick :: proc (thumbstick: win.SHORT, deadzone: i16) -> f32 {
+                                if thumbstick < -deadzone {
+                                    return cast(f32) (thumbstick + deadzone) / (32768 - cast(f32) deadzone)
+                                } else if thumbstick > deadzone {
+                                    return cast(f32) (thumbstick - deadzone) / (32767 - cast(f32) deadzone)
+                                }
+                                return 0
+                            }
+                            
+                            // @todo(viktor): right stick, triggers
+                            // @todo(viktor): This is a square deadzone, check XInput to
+                            // verify that the deadzone is "round" and show how to do
+                            // round deadzone processing.
+                            new_controller.stick_average = {
+                                process_Xinput_stick(pad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
+                                process_Xinput_stick(pad.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
+                            }
+                            if new_controller.stick_average != {0,0} do new_controller.is_analog = true
+                            
+                            // @todo(viktor): what if we don't want to override the stick
+                            if (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 { new_controller.stick_average.x =  1; new_controller.is_analog = false }
+                            if (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
+                            if (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP) != 0    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
+                            if (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
+                            
+                            Threshold :: 0.5
+                            // @cleanup process_Xinput_button is leaking its abstraction here
+                            process_Xinput_button(&new_controller.buttons[.stick_left],  old_controller.buttons[.stick_left],  1, new_controller.stick_average.x < -Threshold ? 1 : 0)
+                            process_Xinput_button(&new_controller.buttons[.stick_right], old_controller.buttons[.stick_right], 1, new_controller.stick_average.x >  Threshold ? 1 : 0)
+                            process_Xinput_button(&new_controller.buttons[.stick_down],  old_controller.buttons[.stick_down],  1, new_controller.stick_average.y < -Threshold ? 1 : 0)
+                            process_Xinput_button(&new_controller.buttons[.stick_up],    old_controller.buttons[.stick_up],    1, new_controller.stick_average.y >  Threshold ? 1 : 0)
+                            
+                            // @cleanup This is probably vestigial and can safely be removed
+                            if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 do GlobalRunning = false
+                        } else {
+                            new_controller.is_connected = false
+                            xbox_controller_present[controller_index] = false
                         }
-                        return 0
                     }
-                    
-                    // @todo(viktor): right stick, triggers
-                    // @todo(viktor): This is a square deadzone, check XInput to
-                    // verify that the deadzone is "round" and show how to do
-                    // round deadzone processing.
-                    new_controller.stick_average = {
-                        process_Xinput_stick(pad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
-                        process_Xinput_stick(pad.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
-                    }
-                    if new_controller.stick_average != {0,0} do new_controller.is_analog = true
-                    
-                    // @todo(viktor): what if we don't want to override the stick
-                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 { new_controller.stick_average.x =  1; new_controller.is_analog = false }
-                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
-                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP) != 0    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
-                    if (pad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0  { new_controller.stick_average.y = -1; new_controller.is_analog = false }
-                    
-                    Threshold :: 0.5
-                    // @cleanup process_Xinput_button is leaking its abstraction here
-                    process_Xinput_button(&new_controller.buttons[.stick_left],  old_controller.buttons[.stick_left],  1, new_controller.stick_average.x < -Threshold ? 1 : 0)
-                    process_Xinput_button(&new_controller.buttons[.stick_right], old_controller.buttons[.stick_right], 1, new_controller.stick_average.x >  Threshold ? 1 : 0)
-                    process_Xinput_button(&new_controller.buttons[.stick_down],  old_controller.buttons[.stick_down],  1, new_controller.stick_average.y < -Threshold ? 1 : 0)
-                    process_Xinput_button(&new_controller.buttons[.stick_up],    old_controller.buttons[.stick_up],    1, new_controller.stick_average.y >  Threshold ? 1 : 0)
-                    
-                    // @cleanup This is probably vestigial and can safely be removed
-                    if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 do GlobalRunning = false
-                } else {
-                    new_controller.is_connected = false
-                    xbox_controller_present[controller_index] = false
+                }
+            }
+            
+            { debug_data_block("Platform")
+                {debug_data_block("Renderer")
+                    game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
+                    game.debug_record_b32(&GlobalUseSoftwareRenderer)
+                }
+                
+                game.debug_record_b32(&GlobalPause)
+                game.debug_record_b32(&GlobalDebugShowCursor)
+                game.debug_record_f32(&expected_frames_per_update)
+            }
+            
+            { debug_data_block("Profile")
+                { debug_data_block("Memory")
+                    game.debug_ui_element(ArenaOccupancy{ &platform_arena }, "Platform Arena")
+                    game.debug_ui_element(ArenaOccupancy{ &frame_arena }, "Platform Frame Arena")
                 }
             }
         }
-        
-        { debug_data_block("Platform")
-            {debug_data_block("Renderer")
-                game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-                game.debug_record_b32(&GlobalUseSoftwareRenderer)
-            }
-            
-            game.debug_record_b32(&GlobalPause)
-            game.debug_record_b32(&GlobalDebugShowCursor)
-        }
-        
-        { debug_data_block("Profile")
-            { debug_data_block("Memory")
-                game.debug_ui_element(ArenaOccupancy{ &platform_arena }, "Platform Arena")
-                game.debug_ui_element(ArenaOccupancy{ &frame_arena }, "Platform Frame Arena")
-            }
-        }
-            
-                
-        game.end_timed_block(input_processed)
         ////////////////////////////////////////////////
-        //  Update and Render
-        game_updated := game.begin_timed_block("game updated")
+        { timed_block("game updated")
         
-        if !GlobalPause {
-            state := &GlobalPlatformState
-            if state.recording_index != 0 {
-                record_input(state, new_input)
-            }
-            
-            if state.replaying_index != 0 {
-                replay_input(state, new_input)
-            }
-            
-            if game_lib_is_valid {
-                game.update_and_render(&game_memory, new_input, &render_commands)
-                if new_input.quit_requested {
-                    GlobalRunning = false
-                }
-            }
-        }
-        
-        game.end_timed_block(game_updated)
-        ////////////////////////////////////////////////
-        // Sound Output
-        audio_update := game.begin_timed_block("audio update")
-        
-        if !GlobalPause {
-            sound_is_valid = true
-            play_cursor, write_cursor: u32
-            audio_counter := get_wall_clock()
-            from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
-            
-            if result := GlobalSoundBuffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
-                /*
-                Here is how sound output computation works.
-                
-                We define a safety value that is the number of samples we think our game update loop
-                may vary by (let's say up to 2ms)
-                
-                When we wake up to write audio, we will look and see what the play cursor position is and we
-                will forecast ahead where we think the play cursor will be on the next frame boundary.
-                
-                We will then look to see if the write cursor is before that by at least our safety value. If
-                it is, the target fill position is that frame boundary plus one frame. This gives us perfect
-                audio sync in the case of a card that has low enough latency.
-                
-                If the write cursor is _after_ that safety margin, then we assume we can never sync the
-                audio perfectly, so we will write one frame's worth of audio plus the safety margin's worth
-                of guard samples.
-                */
-                
-                if !sound_is_valid {
-                    sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample
-                    sound_is_valid = true
+            if !GlobalPause {
+                state := &GlobalPlatformState
+                if state.recording_index != 0 {
+                    record_input(state, new_input)
                 }
                 
-                byte_to_lock := (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.buffer_size
-                
-                expected_sound_bytes_per_frame := cast(u32) (cast(f32)sound_output.bytes_per_sample * cast(f32) sound_output.samples_per_second * target_seconds_per_frame)
-                
-                seconds_left_until_flip := target_seconds_per_frame-from_begin_to_audio
-                expected_sound_bytes_until_flip := cast(u32) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
-                
-                expected_frame_boundary_byte := play_cursor + expected_sound_bytes_until_flip
-                
-                safe_write_cursor := write_cursor
-                if safe_write_cursor < play_cursor {
-                    safe_write_cursor += sound_output.buffer_size
+                if state.replaying_index != 0 {
+                    replay_input(state, new_input)
                 }
-                assert(safe_write_cursor >= play_cursor)
-                safe_write_cursor += sound_output.safety_bytes
-                
-                audio_card_is_low_latency := safe_write_cursor < expected_frame_boundary_byte
-                
-                target_cursor: u32
-                if audio_card_is_low_latency {
-                    target_cursor = expected_frame_boundary_byte + expected_sound_bytes_per_frame
-                } else {
-                    target_cursor = write_cursor + sound_output.safety_bytes + expected_sound_bytes_per_frame
-                }
-                target_cursor %= sound_output.buffer_size
-                
-                bytes_to_write: u32
-                if byte_to_lock > target_cursor {
-                    bytes_to_write = target_cursor - byte_to_lock + sound_output.buffer_size
-                } else{
-                    bytes_to_write = target_cursor - byte_to_lock
-                }
-                
-                sound_buffer := GameSoundBuffer{
-                    samples_per_second = sound_output.samples_per_second,
-                    samples = samples[:align(8, bytes_to_write / sound_output.bytes_per_sample)],
-                }
-                bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
                 
                 if game_lib_is_valid {
-                    game.output_sound_samples(&game_memory, sound_buffer)
+                    game.update_and_render(&game_memory, new_input, &render_commands)
+                    if new_input.quit_requested {
+                        GlobalRunning = false
+                    }
                 }
-                
-                fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
-            } else {
-                sound_is_valid = false
             }
         }
-        
-        game.end_timed_block(audio_update)
+        ////////////////////////////////////////////////
+        { timed_block("audio update")
+            
+            if !GlobalPause {
+                sound_is_valid = true
+                play_cursor, write_cursor: u32
+                audio_counter := get_wall_clock()
+                from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
+                
+                if result := GlobalSoundBuffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
+                    /*
+                    Here is how sound output computation works.
+                    
+                    We define a safety value that is the number of samples we think our game update loop
+                    may vary by (let's say up to 2ms)
+                    
+                    When we wake up to write audio, we will look and see what the play cursor position is and we
+                    will forecast ahead where we think the play cursor will be on the next frame boundary.
+                    
+                    We will then look to see if the write cursor is before that by at least our safety value. If
+                    it is, the target fill position is that frame boundary plus one frame. This gives us perfect
+                    audio sync in the case of a card that has low enough latency.
+                    
+                    If the write cursor is _after_ that safety margin, then we assume we can never sync the
+                    audio perfectly, so we will write one frame's worth of audio plus the safety margin's worth
+                    of guard samples.
+                    */
+                    
+                    if !sound_is_valid {
+                        sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample
+                        sound_is_valid = true
+                    }
+                    
+                    byte_to_lock := (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.buffer_size
+                    
+                    expected_sound_bytes_per_frame := cast(u32) (cast(f32)sound_output.bytes_per_sample * cast(f32) sound_output.samples_per_second * target_seconds_per_frame)
+                    
+                    seconds_left_until_flip := target_seconds_per_frame-from_begin_to_audio
+                    expected_sound_bytes_until_flip := cast(u32) (seconds_left_until_flip/target_seconds_per_frame * cast(f32)expected_sound_bytes_per_frame)
+                    
+                    expected_frame_boundary_byte := play_cursor + expected_sound_bytes_until_flip
+                    
+                    safe_write_cursor := write_cursor
+                    if safe_write_cursor < play_cursor {
+                        safe_write_cursor += sound_output.buffer_size
+                    }
+                    assert(safe_write_cursor >= play_cursor)
+                    safe_write_cursor += sound_output.safety_bytes
+                    
+                    audio_card_is_low_latency := safe_write_cursor < expected_frame_boundary_byte
+                    
+                    target_cursor: u32
+                    if audio_card_is_low_latency {
+                        target_cursor = expected_frame_boundary_byte + expected_sound_bytes_per_frame
+                    } else {
+                        target_cursor = write_cursor + sound_output.safety_bytes + expected_sound_bytes_per_frame
+                    }
+                    target_cursor %= sound_output.buffer_size
+                    
+                    bytes_to_write: u32
+                    if byte_to_lock > target_cursor {
+                        bytes_to_write = target_cursor - byte_to_lock + sound_output.buffer_size
+                    } else{
+                        bytes_to_write = target_cursor - byte_to_lock
+                    }
+                    
+                    sound_buffer := GameSoundBuffer{
+                        samples_per_second = sound_output.samples_per_second,
+                        samples = samples[:align(8, bytes_to_write / sound_output.bytes_per_sample)],
+                    }
+                    bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
+                    
+                    if game_lib_is_valid {
+                        game.output_sound_samples(&game_memory, sound_buffer)
+                    }
+                    
+                    fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
+                } else {
+                    sound_is_valid = false
+                }
+            }
+        }
         ////////////////////////////////////////////////
         when INTERNAL {
             debug_collation := game.begin_timed_block("debug collation")
@@ -635,40 +633,36 @@ main :: proc () {
             game.end_timed_block(debug_collation)
         }
         ////////////////////////////////////////////////
-        prep_render := game.begin_timed_block("prepare render")
-        
-        swap(&new_input, &old_input)
-        
-        { timed_block("texture downloads")
-            begin_ticket_mutex(&texture_op_queue.mutex)
-                first := texture_op_queue.ops.first
-                last  := texture_op_queue.ops.last
-                texture_op_queue.ops = {}
-            end_ticket_mutex(&texture_op_queue.mutex)
+        { timed_block("prepare render")
             
-            if last != nil {
-                assert(first != nil)
-                gl_manage_textures(last)
-                
+            swap(&new_input, &old_input)
+            
+            { timed_block("texture downloads")
                 begin_ticket_mutex(&texture_op_queue.mutex)
-                    
-                    first.next = texture_op_queue.first_free
-                    texture_op_queue.first_free = last
+                    first := texture_op_queue.ops.first
+                    last  := texture_op_queue.ops.last
+                    texture_op_queue.ops = {}
                 end_ticket_mutex(&texture_op_queue.mutex)
+                
+                if last != nil {
+                    assert(first != nil)
+                    gl_manage_textures(last)
+                    
+                    begin_ticket_mutex(&texture_op_queue.mutex)
+                        first.next = texture_op_queue.first_free
+                        texture_op_queue.first_free = last
+                    end_ticket_mutex(&texture_op_queue.mutex)
+                }
             }
         }
-        
-        game.end_timed_block(prep_render)
         ////////////////////////////////////////////////
-        render := game.begin_timed_block("render")
-        
-        render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, window_dim)
-        
-        game.end_timed_block(render)
+        { timed_block("render")
+            
+            render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, window_dim)
+        }
         ////////////////////////////////////////////////
-        frame_end_sleep := game.begin_timed_block("sleep at frame end")
-        
-        {
+        { timed_block("sleep at frame end")
+            
             seconds_elapsed_for_frame := get_seconds_elapsed_until_now(last_counter)
             for seconds_elapsed_for_frame < target_seconds_per_frame {
                 seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
@@ -709,12 +703,9 @@ main :: proc () {
                 }
             }
         }
-        
-        game.end_timed_block(frame_end_sleep)
         ////////////////////////////////////////////////
-        frame_display := game.begin_timed_block("frame display")
-        
-        {
+        { timed_block("frame display")
+            
             device_context := win.GetDC(window)
             defer win.ReleaseDC(window, device_context)
             
@@ -725,12 +716,16 @@ main :: proc () {
             }
             flip_counter = get_wall_clock()
         }
-        
-        game.end_timed_block(frame_display)
         ////////////////////////////////////////////////
         
         end_counter := get_wall_clock()
-        game.frame_marker(get_seconds_elapsed(last_counter, end_counter))
+        measured_seconds_per_frame := get_seconds_elapsed(last_counter, end_counter)
+        exact_target_frames_per_update     := measured_seconds_per_frame * MonitorRefreshHz
+        new_exact_target_frames_per_update := round(i32, exact_target_frames_per_update)
+        
+        target_seconds_per_frame = measured_seconds_per_frame
+        
+        game.frame_marker(measured_seconds_per_frame)
         last_counter = end_counter
     }
 }

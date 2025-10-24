@@ -137,6 +137,10 @@ do_tile_render_work :: proc (data: pmm) {
             dest   := targets[entry.dest_index]
             blend_render_target(dest, clip_rect, source, entry.alpha)
             
+          case .RenderEntry_DepthClear:
+            entry := read(&commands.push_buffer, RenderEntry_DepthClear)
+            unimplemented()
+            
           case .RenderEntry_Textured_Quads:
             entry := read(&commands.push_buffer, RenderEntry_Textured_Quads)
             

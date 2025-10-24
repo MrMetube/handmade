@@ -354,7 +354,7 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
         simulation_center := V3(get_center(room_volume).xy, room_volume.min.z)
         
         target_p := simulation_center
-        target_offset := v3{0, 0, 7}
+        target_offset := v3{0, 0, 8}
         if special != nil {
             if .follow_player in special.camera_behaviour {
                 target_p = entity.p

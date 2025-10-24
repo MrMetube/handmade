@@ -280,6 +280,8 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     push_camera(&debug.render_group, flags = { .orthographic }, x = x, y = y, near_clip_plane = -100_000, far_clip_plane = 100_000)
     push_sort_barrier(&debug.render_group, true)
     
+    push_depth_clear(&debug.render_group)
+    
     if debug.font == nil {
         debug.font_id = best_match_font_from(assets, .Font, #partial { .FontType = {cast(f32) AssetFontType.Debug, 1} })
         debug.font    = get_font(assets, debug.font_id, debug.render_group.generation_id)

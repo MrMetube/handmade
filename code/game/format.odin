@@ -4,7 +4,6 @@ package game
 
 @(common="file")
 
-import "base:intrinsics"
 import "base:runtime"
 import "core:os"
 import "core:unicode/utf8"
@@ -16,23 +15,13 @@ import "core:mem"
 
 ////////////////////////////////////////////////
 
-/* 
-    Can we abstract all these writes to allocators and dynamic arrays of them?
-    Can we make a "file_allocator" that maps its memory to a file?
- */
-
-@(printlike)
-print_asdjlasd :: proc (_: string, args: ..any, flags: Format_Context_Flags = {}, console := os.stdout) {
-}
-@(printlike)
-print_asdjlasasdadd :: proc (aaaaa,bbbb,bbbccc: string, args: ..any, flags: Format_Context_Flags = {}, console := os.stdout) {
-}
 @(printlike)
 print_to_console :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, console := os.stdout) {
     result := format_string(buffer = console_buffer[:], format = format, args = args, flags = flags)
     os.write(console, transmute([]u8) result)
 }
 
+// @todo(viktor): string and cstring is a bunch of @copypasta code, that sucks especially because all the format code changes is if it appends a zero at the end
 @(printlike)
 print_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: string) {
     s := format_string(buffer = console_buffer[:], format = format, args = args, flags = flags)
@@ -41,13 +30,23 @@ print_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: 
     result = transmute(string) buffer
     return result
 }
+@(printlike)
+cprint_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: cstring) {
+    s, length := format_cstring(buffer = console_buffer[:], format = format, args = args, flags = flags)
+    buffer := make([]u8, length, allocator)
+    copy(buffer, slice_from_parts(u8, cast(^u8) s, length))
+    result = cast(cstring) raw_data(buffer)
+    return result
+}
 
 ////////////////////////////////////////////////
 
 print  :: print_to_console
 aprint :: print_to_allocator
-@(printlike) tprint :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> (result: string) { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
-@(printlike) sprint :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> (result: string) { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) tprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> (result: string)  { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) sprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> (result: string)  { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) ctprint :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> (result: cstring) { return cprint_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) cprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> (result: cstring) { return cprint_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
 
 ////////////////////////////////////////////////
 
@@ -349,10 +348,11 @@ end_temp_views :: proc () -> (result: Temp_Views) {
 ////////////////////////////////////////////////
 
 @(printlike)
-format_cstring :: proc (buffer: []u8, format: string, args: ..any, flags := Format_Context_Flags {}) -> (result: cstring) {
+format_cstring :: proc (buffer: []u8, format: string, args: ..any, flags := Format_Context_Flags {}) -> (result: cstring, length: int) {
     s := format_string(buffer, format, ..args, flags = flags + { .AppendZero })
     result = cast(cstring) raw_data(s)
-    return result
+    length = len(s)
+    return result, length
 }
 
 @(printlike)

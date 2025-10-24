@@ -100,6 +100,7 @@ RenderEntryType :: enum u8 {
     None,
     RenderEntryBlendRenderTargets,
     RenderEntry_Textured_Quads,
+    RenderEntry_DepthClear,
 }
 
 @(common)
@@ -137,6 +138,9 @@ RenderEntryBlendRenderTargets :: struct {
     dest_index:   u32,
     alpha:        f32,
 }
+
+@(common)
+RenderEntry_DepthClear :: struct {}
 
 @(common)
 Textured_Vertex :: struct {
@@ -188,6 +192,7 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     switch typeid_of(T) {
       case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
       case RenderEntry_Textured_Quads:    type = .RenderEntry_Textured_Quads; reset_quads = false
+      case RenderEntry_DepthClear:        type = .RenderEntry_DepthClear
       case:                               unreachable()
     }
     assert(type != .None)
@@ -253,6 +258,10 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
     setup := group.last_setup
     setup.render_target_index = render_target_index
     push_setup(group, setup)
+}
+
+push_depth_clear :: proc (group: ^RenderGroup) {
+    push_render_element(group, RenderEntry_DepthClear)
 }
 
 push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false) {

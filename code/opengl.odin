@@ -42,21 +42,30 @@ OpenGL :: struct {
     
     blit_texture_handle: u32,
     
-    // basic zbias shader
-    program: u32,
+    zbias_no_depth_peel: OpenGLProgram, // @note(viktor): pass 0
+    zbias_depth_peel:    OpenGLProgram, // @note(viktor): pass 1
+}
+
+OpenGLProgram :: struct {
+    program_handle: u32,
+    
     // uniforms
     transform: i32,
     texture_sampler: i32,
+    depth_sampler: i32,
     fog_color: i32,
     camera_p: i32,
     fog_begin: i32,
     fog_end: i32,
     fog_direction: i32,
+    
     // attributes
     in_p: i32,
     in_uv: i32,
     in_color: i32,
 }
+    
+
 
 open_gl := OpenGL {
     default_texture_format = gl.RGBA8,
@@ -84,8 +93,12 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         
         extensions := opengl_get_extensions(context_is_modern)
         
+        win.wglSwapIntervalEXT = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
         if win.wglSwapIntervalEXT != nil {
-            win.wglSwapIntervalEXT(1)
+            DisableVSync  ::  0
+            EnableVSync   ::  1
+            AdaptiveVSync :: -1
+            win.wglSwapIntervalEXT(EnableVSync)
         }
         
         gl.DebugMessageCallback(gl_debug_callback, nil)
@@ -107,8 +120,20 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         gl.GenBuffers(1, &open_gl.vertex_buffer)
         gl.BindBuffer(gl.ARRAY_BUFFER, open_gl.vertex_buffer)
         
-        header_code: cstring = `
+        compile_zbias_program(&open_gl.zbias_no_depth_peel, false)
+        compile_zbias_program(&open_gl.zbias_depth_peel, true)
+    }
+    
+    return gl_context
+}
+
+////////////////////////////////////////////////
+
+compile_zbias_program :: proc (program: ^OpenGLProgram, depth_peeling: bool) {
+    header_code := ctprint(`
 #version 130
+
+#define DepthPeeling %
 
 #define f32 float
 #define v2 vec2
@@ -125,7 +150,6 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
     smooth Pipe v2 frag_uv;    \
     smooth Pipe f32 fog_amount;
     
-    
 #define clamp01(t) clamp(t, 0, 1)
 
 f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
@@ -134,7 +158,8 @@ f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
     f32 result = clamp01(absolute);
     return result;
 }
-`
+`, depth_peeling ? 1 : 0)
+
     vertex_code: cstring = `
 uniform m4 transform;
 uniform v3 camera_p;
@@ -149,6 +174,7 @@ in v4 in_p;
 
 #define Pipe out
 Pipeline
+#undef Pipe
 
 void main (void) {
     v4 in_vertex = V4(in_p.xyz, 1);
@@ -169,18 +195,33 @@ void main (void) {
     v3 delta = z_vertex.xyz - camera_p;
     f32 distance = dot(delta, fog_direction);
     fog_amount = clamp_01_map_to_range(fog_begin, fog_end, distance);
+    // f32 alpha_amount = clamp_01_map_to_range(5.0f, 5.25f, distance);
+    // frag_color.a *= alpha_amount;
 }
 `
         fragment_code: cstring = `
 uniform sampler2D texture_sampler;
 uniform v3 fog_color;
 
+#if DepthPeeling
+uniform sampler2D depth_sampler;
+#endif // DepthPeeling
+
 #define Pipe in
 Pipeline
+#undef Pipe
 
 out v4 result_color;
 
 void main (void) {
+  #if DepthPeeling
+    f32 clip_depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), 0).r;
+    f32 frag_z = gl_FragCoord.z;
+    if (frag_z <= clip_depth) {
+        discard;
+    }
+  #endif // DepthPeeling
+
     v4 texture_sample = texture(texture_sampler, frag_uv);
     if (texture_sample.a > 0) {
         v4 modulated = frag_color * texture_sample;
@@ -191,28 +232,63 @@ void main (void) {
     }
 }
 `
-        open_gl.program = gl_create_program(header_code, vertex_code, fragment_code)
-        
-        // @metaprogram
-        open_gl.transform       = gl.GetUniformLocation(open_gl.program, "transform")
-        open_gl.texture_sampler = gl.GetUniformLocation(open_gl.program, "texture_sampler")
-        open_gl.fog_color       = gl.GetUniformLocation(open_gl.program, "fog_color")
-        open_gl.camera_p        = gl.GetUniformLocation(open_gl.program, "camera_p")
-        open_gl.fog_begin       = gl.GetUniformLocation(open_gl.program, "fog_begin")
-        open_gl.fog_end         = gl.GetUniformLocation(open_gl.program, "fog_end")
-        open_gl.fog_direction   = gl.GetUniformLocation(open_gl.program, "fog_direction")
-        open_gl.fog_color       = gl.GetUniformLocation(open_gl.program, "fog_color")
-        
-        open_gl.in_color = gl.GetAttribLocation(open_gl.program, "in_color")
-        open_gl.in_p     = gl.GetAttribLocation(open_gl.program, "in_p")
-        open_gl.in_uv    = gl.GetAttribLocation(open_gl.program, "in_uv")
-        assert(open_gl.in_color != -1)
-        assert(open_gl.in_p     != -1)
-        assert(open_gl.in_uv    != -1)
-    }
+    program.program_handle = gl_create_program(header_code, vertex_code, fragment_code)
+    p := program.program_handle
     
-    return gl_context
+    // @metaprogram
+    program.transform       = gl.GetUniformLocation(p, "transform")
+    program.texture_sampler = gl.GetUniformLocation(p, "texture_sampler")
+    program.depth_sampler   = gl.GetUniformLocation(p, "depth_sampler")
+    program.fog_color       = gl.GetUniformLocation(p, "fog_color")
+    program.camera_p        = gl.GetUniformLocation(p, "camera_p")
+    program.fog_begin       = gl.GetUniformLocation(p, "fog_begin")
+    program.fog_end         = gl.GetUniformLocation(p, "fog_end")
+    program.fog_direction   = gl.GetUniformLocation(p, "fog_direction")
+    program.fog_color       = gl.GetUniformLocation(p, "fog_color")
+    
+    program.in_color = gl.GetAttribLocation(p, "in_color")
+    program.in_p     = gl.GetAttribLocation(p, "in_p")
+    program.in_uv    = gl.GetAttribLocation(p, "in_uv")
+    assert(program.in_color != -1)
+    assert(program.in_p     != -1)
+    assert(program.in_uv    != -1)
 }
+
+begin_program :: proc (program: OpenGLProgram, setup: RenderSetup) {
+    gl.UseProgram(program.program_handle)
+    // @volatile see vertex shader
+    gl.EnableVertexAttribArray(cast(u32) program.in_uv)
+    gl.EnableVertexAttribArray(cast(u32) program.in_color)
+    gl.EnableVertexAttribArray(cast(u32) program.in_p)
+    
+    // @metaprogram
+    gl.VertexAttribPointer(cast(u32) program.in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
+    gl.VertexAttribPointer(cast(u32) program.in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
+    gl.VertexAttribPointer(cast(u32) program.in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
+    
+    {
+        setup := setup
+        
+        gl.Uniform1i(program.texture_sampler,  0)
+        gl.Uniform1i(program.depth_sampler,    0)
+        gl.UniformMatrix4fv(program.transform, 1, false, &setup.projection[0, 0])
+        gl.Uniform3fv(program.camera_p,        1, &setup.camera_p[0])
+        gl.Uniform3fv(program.fog_direction,   1, &setup.fog_direction[0])
+        gl.Uniform3fv(program.fog_color,       1, &setup.fog_color[0])
+        gl.Uniform1f(program.fog_begin,        setup.fog_begin)
+        gl.Uniform1f(program.fog_end,          setup.fog_end)
+    }
+}
+
+end_program :: proc (program: OpenGLProgram) {
+    gl.DisableVertexAttribArray(cast(u32) program.in_uv)
+    gl.DisableVertexAttribArray(cast(u32) program.in_color)
+    gl.DisableVertexAttribArray(cast(u32) program.in_p)
+    
+    gl.UseProgram(0)
+}
+
+////////////////////////////////////////////////
 
 gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, length: i32, message: cstring, user_ptr: rawptr) {
     // @todo(viktor): how can we get the actual context, if we ever use the context in the platform layer
@@ -266,7 +342,6 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
             
             win.wglChoosePixelFormatARB    = auto_cast win.wglGetProcAddress("wglChoosePixelFormatARB")
             win.wglCreateContextAttribsARB = auto_cast win.wglGetProcAddress("wglCreateContextAttribsARB")
-            win.wglSwapIntervalEXT         = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
             win.wglGetExtensionsStringARB  = auto_cast win.wglGetProcAddress("wglGetExtensionsStringARB")
             
             if win.wglGetExtensionsStringARB != nil {
@@ -547,7 +622,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
             max_sample_count = min(16, max_sample_count)
             
-            slot: u32 = gl.TEXTURE_2D_MULTISAMPLE when true else gl.TEXTURE_2D
+            slot: u32 = gl.TEXTURE_2D_MULTISAMPLE when !true else gl.TEXTURE_2D
             
             using textures: struct { texture, depth_texture: u32 }
             gl.GenTextures(2, auto_cast &textures)
@@ -561,8 +636,11 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             
             gl.BindTexture(slot, depth_texture)
             // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
-            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT32F, width, height, false)
-            
+            if slot == gl.TEXTURE_2D_MULTISAMPLE {
+                gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT24, width, height, false)
+            } else {
+                gl.TexImage2D(slot, 0, gl.DEPTH_COMPONENT24, width, height, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_BYTE, nil)
+            }
             gl.BindTexture(slot, 0)
             
             append(&open_gl.framebuffer_textures, texture)
@@ -614,54 +692,31 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 gl_bind_frame_buffer(current_render_target_index, draw_region)
             }
             
-            rect := setup.clip_rect
-            gl.Scissor(rect.min.x, rect.min.y, rect.max.x - rect.min.x, rect.max.y - rect.min.y)
+            gl.Scissor(setup.clip_rect.min.x, setup.clip_rect.min.y, setup.clip_rect.max.x - setup.clip_rect.min.x, setup.clip_rect.max.y - setup.clip_rect.min.y)
             
-            ////////////////////////////////////////////////
-            
-            gl.UseProgram(open_gl.program)
-            defer gl.UseProgram(0)
-            
-            s2 := game.begin_timed_block("gl copy buffer data")
+            copy := game.begin_timed_block("gl copy buffer data")
             gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
-            game.end_timed_block(s2)
-            
-            // @volatile see vertex shader
-            gl.EnableVertexAttribArray(cast(u32) open_gl.in_uv)
-            gl.EnableVertexAttribArray(cast(u32) open_gl.in_color)
-            gl.EnableVertexAttribArray(cast(u32) open_gl.in_p)
-            
-            defer {
-                gl.DisableVertexAttribArray(cast(u32) open_gl.in_uv)
-                gl.DisableVertexAttribArray(cast(u32) open_gl.in_color)
-                gl.DisableVertexAttribArray(cast(u32) open_gl.in_p)
-            }
-            
-            // @metaprogram
-            gl.VertexAttribPointer(cast(u32) open_gl.in_uv,    len(v2),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, uv))
-            gl.VertexAttribPointer(cast(u32) open_gl.in_color, len(Color), gl.UNSIGNED_BYTE,  true, size_of(Textured_Vertex), offset_of(Textured_Vertex, color))
-            gl.VertexAttribPointer(cast(u32) open_gl.in_p,     len(v4),    gl.FLOAT,         false, size_of(Textured_Vertex), offset_of(Textured_Vertex, p))
-            
-            { using setup
-                gl.UniformMatrix4fv(open_gl.transform, 1, false, &projection[0, 0])
-                gl.Uniform1i(open_gl.texture_sampler, 0)
-                gl.Uniform3fv(open_gl.camera_p, 1, &camera_p[0])
-                gl.Uniform3fv(open_gl.fog_direction, 1, &fog_direction[0])
-                gl.Uniform1f(open_gl.fog_begin, fog_begin)
-                gl.Uniform1f(open_gl.fog_end, fog_end)
-                gl.Uniform3fv(open_gl.fog_color, 1, &fog_color[0])
-            }
+            game.end_timed_block(copy)
             
             ////////////////////////////////////////////////
             
-            timed_block("gl quad loop")
+            begin_program(open_gl.zbias_no_depth_peel, setup)
+            defer end_program(open_gl.zbias_no_depth_peel)
+            
+            loop := game.begin_timed_block("gl quad loop")
             for bitmap_index in entry.bitmap_offset..<entry.bitmap_offset+entry.quad_count {
                 bitmap := commands.quad_bitmap_buffer.data[bitmap_index]
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
-                vertex_index := cast(i32) bitmap_index*4
+                vertex_index := cast(i32) bitmap_index * 4
                 gl.DrawArrays(gl.TRIANGLE_STRIP, vertex_index, 4)
             }
+            end_timed_block(loop)
+            
+          case .RenderEntry_DepthClear:
+            entry := read(&commands.push_buffer, RenderEntry_DepthClear)
+            gl.Clear(gl.DEPTH_BUFFER_BIT)
+            
             
           case .RenderEntryBlendRenderTargets:
             entry := read(&commands.push_buffer, RenderEntryBlendRenderTargets)
@@ -677,7 +732,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
             
             // @todo(viktor): move this to the newer version of the code
-            max:= commands_dim
+            max := commands_dim
             glBegin(gl.TRIANGLES)
             
             glColor4f(1, 1, 1, entry.alpha)

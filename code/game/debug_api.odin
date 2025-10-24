@@ -16,6 +16,7 @@ DebugGUID :: struct {
 @(export) debug_record_f32 :: proc (value: ^f32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
 @(export) debug_record_b32 :: proc (value: ^b32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
 @(export) debug_record_i64 :: proc (value: ^i64, name: string = #caller_expression(value)) { debug_record_value(value, name) }
+@(export) debug_record_i32 :: proc (value: ^i32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
 debug_record_value :: proc (value: ^$Value, name: string = #caller_expression(value)) { 
     if GlobalDebugTable == nil do return
     guid := DebugGUID{ name = name }
