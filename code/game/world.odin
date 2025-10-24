@@ -101,6 +101,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     
     debug_set_mouse_p(input.mouse.p)
     
+    push_begin_depth_peel(render_group)
+    
     push_clear(render_group, DarkBlue)
     
     ////////////////////////////////////////////////
@@ -193,10 +195,6 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
     }
     
-    end_sim(&simulation)
-    
-    ////////////////////////////////////////////////
-    
     if ShowRenderFrustum {
         near: f32 = 1
         far:  f32 =  20
@@ -246,6 +244,10 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
         push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
     }
+    
+    end_sim(&simulation)
+    
+    push_end_depth_peel(render_group)
     
     ////////////////////////////////////////////////
     

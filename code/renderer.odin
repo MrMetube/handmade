@@ -130,19 +130,25 @@ do_tile_render_work :: proc (data: pmm) {
         switch header.type {
           case .None: unreachable()
           
-          case .RenderEntryBlendRenderTargets:
-            entry := read(&commands.push_buffer, RenderEntryBlendRenderTargets)
+          case .BlendRenderTargets:
+            entry := read(&commands.push_buffer, BlendRenderTargets)
             
             source := targets[entry.source_index]
             dest   := targets[entry.dest_index]
             blend_render_target(dest, clip_rect, source, entry.alpha)
             
-          case .RenderEntry_DepthClear:
-            entry := read(&commands.push_buffer, RenderEntry_DepthClear)
+          case .DepthClear:
+            entry := read(&commands.push_buffer, DepthClear)
+            unimplemented()
+          case .BeginPeels:
+            entry := read(&commands.push_buffer, BeginPeels)
+            unimplemented()
+          case .EndPeels:
+            entry := read(&commands.push_buffer, EndPeels)
             unimplemented()
             
-          case .RenderEntry_Textured_Quads:
-            entry := read(&commands.push_buffer, RenderEntry_Textured_Quads)
+          case .Textured_Quads:
+            entry := read(&commands.push_buffer, Textured_Quads)
             
             clip_rect = get_intersection(base_clip_rect, entry.setup.clip_rect)
             

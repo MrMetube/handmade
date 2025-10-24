@@ -67,7 +67,7 @@ RenderGroup :: struct {
     
     last_setup: RenderSetup,
     
-    current_quads: ^RenderEntry_Textured_Quads,
+    current_quads: ^Textured_Quads,
     
     game_cam:  RenderTransform,
     debug_cam: RenderTransform,
@@ -98,9 +98,11 @@ Camera_Flags :: bit_set[ enum {
 
 RenderEntryType :: enum u8 {
     None,
-    RenderEntryBlendRenderTargets,
-    RenderEntry_Textured_Quads,
-    RenderEntry_DepthClear,
+    BlendRenderTargets,
+    Textured_Quads,
+    DepthClear,
+    BeginPeels,
+    EndPeels,
 }
 
 @(common)
@@ -125,7 +127,7 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
 }
 
 @(common)
-RenderEntry_Textured_Quads :: struct {
+Textured_Quads :: struct {
     setup: RenderSetup,
     
     quad_count:    u32,
@@ -133,14 +135,15 @@ RenderEntry_Textured_Quads :: struct {
 }
 
 @(common)
-RenderEntryBlendRenderTargets :: struct {
+BlendRenderTargets :: struct {
     source_index: u32,
     dest_index:   u32,
     alpha:        f32,
 }
 
-@(common)
-RenderEntry_DepthClear :: struct {}
+@(common) DepthClear :: struct {}
+@(common) BeginPeels :: struct {}
+@(common) EndPeels   :: struct {}
 
 @(common)
 Textured_Vertex :: struct {
@@ -190,10 +193,12 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     reset_quads := true
     type: RenderEntryType
     switch typeid_of(T) {
-      case RenderEntryBlendRenderTargets: type = .RenderEntryBlendRenderTargets
-      case RenderEntry_Textured_Quads:    type = .RenderEntry_Textured_Quads; reset_quads = false
-      case RenderEntry_DepthClear:        type = .RenderEntry_DepthClear
-      case:                               unreachable()
+      case BlendRenderTargets: type = .BlendRenderTargets
+      case Textured_Quads:     type = .Textured_Quads; reset_quads = false
+      case DepthClear:         type = .DepthClear
+      case BeginPeels:         type = .BeginPeels
+      case EndPeels:           type = .EndPeels
+      case:                    unreachable()
     }
     assert(type != .None)
     
@@ -260,9 +265,9 @@ push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
     push_setup(group, setup)
 }
 
-push_depth_clear :: proc (group: ^RenderGroup) {
-    push_render_element(group, RenderEntry_DepthClear)
-}
+push_depth_clear :: proc (group: ^RenderGroup) { push_render_element(group, DepthClear) }
+push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_element(group, BeginPeels) }
+push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_element(group, EndPeels)   }
 
 push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
@@ -320,7 +325,7 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 
 push_blend_render_targets :: proc (group: ^RenderGroup, source_index: u32, alpha: f32) {
     push_sort_barrier(group)
-    entry := push_render_element(group, RenderEntryBlendRenderTargets)
+    entry := push_render_element(group, BlendRenderTargets)
     entry ^= {
         source_index = source_index,
         alpha = alpha,
@@ -341,16 +346,16 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     append(&group.commands.quad_bitmap_buffer, bitmap)
     // @note(viktor): reorder from quad ordering to triangle strip ordering
     append(&group.commands.vertex_buffer, 
-        Textured_Vertex {p0, t0, c0}, 
         Textured_Vertex {p3, t3, c3},
-        Textured_Vertex {p1, t1, c1}, 
-        Textured_Vertex {p2, t2, c2}, 
+        Textured_Vertex {p0, t0, c0},
+        Textured_Vertex {p2, t2, c2},
+        Textured_Vertex {p1, t1, c1},
     )
 }
 
-get_current_quads :: proc (group: ^RenderGroup) -> (result: ^RenderEntry_Textured_Quads) {
+get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {
     if group.current_quads == nil {
-        group.current_quads = push_render_element(group, RenderEntry_Textured_Quads)
+        group.current_quads = push_render_element(group, Textured_Quads)
         group.current_quads ^= {
             bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count,
             setup         = group.last_setup,
