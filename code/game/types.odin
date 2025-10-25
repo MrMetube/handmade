@@ -145,6 +145,14 @@ unordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
 
 String_Builder :: Array(u8)
 
+@(printlike)
+appendf :: proc (a: ^String_Builder, format: string, args: ..any) -> (result: string) {
+    buf := rest(a^)
+    result = format_string(buf, format, ..args)
+    a.count += auto_cast len(result)
+    return result
+}
+
 append_string :: proc (a: ^String_Builder, value: string) -> (result: string) {
     append(a, (transmute([]u8) value))
     return cast(string) a.data[:a.count]
@@ -163,6 +171,10 @@ make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := D
 
 to_string :: proc (sb: String_Builder) -> string {
     return cast(string) sb.data[:sb.count]
+}
+to_cstring :: proc (sb: ^String_Builder) -> cstring {
+    append(sb, 0)
+    return cast(cstring) &sb.data[0]
 }
 
 ////////////////////////////////////////////////

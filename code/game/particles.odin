@@ -153,7 +153,11 @@ spawn_fire :: proc (cache: ^Particle_Cache, at: v3) {
     
     particle := &system.particles[index]
     particle.p      = at + {random_bilateral(entropy, lane_f32)*0.1, 0, 0}
-    particle.dp     = {random_bilateral(entropy, lane_f32)*0, (random_unilateral(entropy, lane_f32)*0.4)+7, 0}
+    particle.dp     = {
+        random_bilateral(entropy, lane_f32)*0.3, 
+        random_bilateral(entropy, lane_f32)*0.3, 
+        (random_unilateral(entropy, lane_f32)*0.4)+7
+    }
     particle.ddp    = {0, 0, -9.8}
     particle.color  = V4(random_unilateral(entropy, lane_v3), 1)
     particle.dcolor = {0,0,0,-0.2}

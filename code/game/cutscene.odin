@@ -238,7 +238,7 @@ render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mo
 }
 
 render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene: Layered_Scene, t_normal: f32) {
-    focal_length :: 0.8
+    focal_length :: 0.78
     
     scene_fade_value: f32 = 1
     if t_normal < scene.t_fade_in {

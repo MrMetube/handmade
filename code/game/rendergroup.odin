@@ -116,14 +116,16 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     
     clip_rect:           Rectangle2i,
     render_target_index: u32,
-    projection:          m4,
     
     // @volatile shader inputs
-    camera_p:      v3,
-    fog_direction: v3,
-    fog_begin: f32,
-    fog_end:   f32,
-    fog_color: v3,
+    projection:       m4,
+    camera_p:         v3,
+    fog_direction:    v3,
+    fog_begin:        f32,
+    fog_end:          f32,
+    fog_color:        v3,
+    clip_alpha_begin: f32,
+    clip_alpha_end:   f32,
 }
 
 @(common)
@@ -178,6 +180,8 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
     setup.projection = identity()
     setup.fog_begin = 0
     setup.fog_end = 1
+    setup.clip_alpha_begin = 0
+    setup.clip_alpha_end = 1
     
     push_setup(group, setup)
 }
@@ -288,7 +292,9 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
     if fog {
         setup.fog_direction = -z
         setup.fog_begin = 8
-        setup.fog_end = 25
+        setup.fog_end   = 25
+        setup.clip_alpha_begin = near_clip_plane + 2.0
+        setup.clip_alpha_end   = near_clip_plane + 2.25
     }
     
     camera := camera_transform(x, y, z, p)
@@ -368,8 +374,9 @@ get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {
 
 push_line_segment :: proc { push_line_segment_default, push_line_segment_direct }
 push_line_segment_default :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, from_p, to_p: v3, c0, c1: v4, thickness: f32) {
-    from_p := V4(project_with_transform(transform, from_p) , 0)
-    to_p   := V4(project_with_transform(transform, to_p), 0)
+    zbias :: 0.01
+    from_p := V4(project_with_transform(transform, from_p), zbias)
+    to_p   := V4(project_with_transform(transform, to_p),   zbias)
     c0 := v4_to_rgba(store_color(c0))
     c1 := v4_to_rgba(store_color(c1))
     push_line_segment(group, bitmap, from_p, to_p, c0, c1, thickness)

@@ -54,7 +54,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     mode.effects_entropy = seed_random_series(500)
     
     mode.tile_size_in_meters = 1.4
-    mode.typical_floor_height = 4.5
+    mode.typical_floor_height = 5
     
     // :RoomSize
     chunk_dim_meters := v3{17 * mode.tile_size_in_meters, 9 * mode.tile_size_in_meters, mode.typical_floor_height}
@@ -67,9 +67,9 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     creation_memory := begin_temporary_memory(&tran_state.arena)
     mode.creation_region = begin_world_changes(creation_memory.arena, mode.world, {}, {}, 0)
     
-    door_left, door_right: b32
-    door_top, door_bottom: b32
-    stair_up, stair_down:  b32
+    door_left, door_right: bool
+    door_top, door_bottom: bool
+    stair_up, stair_down:  bool
     
     room_center: v3i
     choice: u32
