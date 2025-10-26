@@ -124,8 +124,11 @@ set_len :: proc (array: ^[dynamic] $T, len: int) {
     raw.len = len
 }
 
-clear :: proc { array_clear, builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array }
-array_clear :: proc (a: ^$A) {
+clear :: proc { builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array, clear_byte_buffer, array_clear, fixed_array_clear }
+array_clear :: proc (a: ^Array($T)) {
+    a.count = 0
+}
+fixed_array_clear :: proc (a: ^FixedArray($N, $T)) {
     a.count = 0
 }
 
@@ -262,6 +265,11 @@ read_slice :: proc (b: ^Byte_Buffer, $T: typeid/ [] $E, count: int) -> (result: 
 
 begin_reading :: proc (b: ^Byte_Buffer) { b.read_cursor = 0 }
 can_read :: proc (b: ^Byte_Buffer) -> (result: bool) { return b.read_cursor < b.write_cursor }
+
+clear_byte_buffer :: proc (b: ^Byte_Buffer) {
+    b.read_cursor = 0
+    b.write_cursor = 0
+}
 
 ////////////////////////////////////////////////
 // [First] <- [..] ... <- [..] <- [Last] 

@@ -77,9 +77,6 @@ update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderG
         }
     }
     
-    push_sort_barrier(render_group, true)
-    defer push_sort_barrier(render_group, false)
-    
     for &particle in system.particles {
         when false {
             p := ( particle.p - grid_origin ) / grid_scale

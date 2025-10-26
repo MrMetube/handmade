@@ -36,11 +36,18 @@ Bitmap :: struct {
     
     texture_handle: u32,
 }
+    
+@(common)
+RenderSettings :: struct {
+    dimension:             v2i,
+    depth_peel_count_hint: u32,
+    multisampling_hint:    b32,
+    pixelation_hint:       b32,
+}
 
 @(common)
 RenderCommands :: struct {
-    // @todo(viktor): make this a dim v2i
-    width, height: i32,
+    using settings: RenderSettings,
     
     clear_color: v4,
     
@@ -48,8 +55,6 @@ RenderCommands :: struct {
     // Filled with pairs of [RenderEntryHeader + SomeRenderEntry]
     // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
     push_buffer: Byte_Buffer,
-    
-    max_render_target_index: u32,
     
     vertex_buffer:      Array(Textured_Vertex),
     quad_bitmap_buffer: Array(^Bitmap),
@@ -99,7 +104,6 @@ Camera_Flags :: bit_set[ enum {
 
 RenderEntryType :: enum u8 {
     None,
-    BlendRenderTargets,
     Textured_Quads,
     DepthClear,
     BeginPeels,
@@ -116,7 +120,6 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     next: ^RenderSetup,
     
     clip_rect:           Rectangle2i,
-    render_target_index: u32,
     
     // @volatile shader inputs
     projection:       m4,
@@ -135,13 +138,6 @@ Textured_Quads :: struct {
     
     quad_count:    u32,
     bitmap_offset: u32,
-}
-
-@(common)
-BlendRenderTargets :: struct {
-    source_index: u32,
-    dest_index:   u32,
-    alpha:        f32,
 }
 
 @(common) DepthClear :: struct {}
@@ -171,13 +167,13 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         assets   = assets,
         commands = commands,
         
-        screen_size   = vec_cast(f32, commands.width, commands.height),
+        screen_size   = vec_cast(f32, commands.dimension),
         generation_id = generation_id,
     }
     
     setup := group.last_setup
     
-    setup.clip_rect = rectangle_zero_min_dimension(commands.width, commands.height)
+    setup.clip_rect = rectangle_zero_min_dimension(commands.dimension)
     setup.projection = identity()
     setup.fog_begin = 0
     setup.fog_end = 1
@@ -198,7 +194,6 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     reset_quads := true
     type: RenderEntryType
     switch typeid_of(T) {
-      case BlendRenderTargets: type = .BlendRenderTargets
       case Textured_Quads:     type = .Textured_Quads; reset_quads = false
       case DepthClear:         type = .DepthClear
       case BeginPeels:         type = .BeginPeels
@@ -262,20 +257,12 @@ end_transient_clip_rect :: proc (group: ^RenderGroup, _: Rectangle2i, previous_s
     push_setup(group, previous_setup)
 }
 
-push_render_target :: proc (group: ^RenderGroup, render_target_index: u32) {
-    group.commands.max_render_target_index = max(group.commands.max_render_target_index, render_target_index)
-    
-    setup := group.last_setup
-    setup.render_target_index = render_target_index
-    push_setup(group, setup)
-}
-
 push_depth_clear :: proc (group: ^RenderGroup) { push_render_element(group, DepthClear) }
 push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_element(group, BeginPeels) }
 push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_element(group, EndPeels)   }
 
-push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false) {
-    aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.width, cast(f32) group.commands.height)
+push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true) {
+    aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.dimension.x, cast(f32) group.commands.dimension.y)
     
     setup := group.last_setup
     projection: m4_inv
@@ -294,8 +281,14 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
         setup.fog_direction = -z
         setup.fog_begin = 8
         setup.fog_end   = 25
+    }
+    
+    if clip_alpha {
         setup.clip_alpha_begin = near_clip_plane + 2.0
         setup.clip_alpha_end   = near_clip_plane + 2.25
+    } else {
+        setup.clip_alpha_begin = near_clip_plane - 1000
+        setup.clip_alpha_end   = near_clip_plane -  999
     }
     
     camera := camera_transform(x, y, z, p)
@@ -328,20 +321,6 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
     setup := group.last_setup
     setup.fog_color = srgb_to_linear(color.rgb)
     push_setup(group, setup)
-}
-
-push_blend_render_targets :: proc (group: ^RenderGroup, source_index: u32, alpha: f32) {
-    push_sort_barrier(group)
-    entry := push_render_element(group, BlendRenderTargets)
-    entry ^= {
-        source_index = source_index,
-        alpha = alpha,
-    }
-    push_sort_barrier(group)
-}
-
-push_sort_barrier :: proc (group: ^RenderGroup, turn_of_sorting := false) {
-    // @todo(viktor): Do we want the sort barrier again?
 }
 
 ////////////////////////////////////////////////

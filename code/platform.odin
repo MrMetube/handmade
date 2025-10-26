@@ -270,20 +270,28 @@ main :: proc () {
     
     frame_arena := Arena { allocation_flags = { .not_restored } }
     
-    // @todo(viktor): decide what our sizes should be
     render_commands: RenderCommands
-    push_buffer := push(&frame_arena, u8, 32 * Megabyte)
-    vertex_buffer := make_array(&frame_arena, Textured_Vertex, 1 << 20)
-    quad_bitmap_buffer := make_array(&frame_arena, ^Bitmap, 1 << 20)
-    
-    // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
-    white_bitmap: Bitmap
-    white_bitmap.memory = push(&frame_arena, Color, 1)
-    white_bitmap.memory[0] = 255
-    white_bitmap.width = 1
-    white_bitmap.height = 1
-    white_bitmap.width_over_height = 1
-    white_bitmap.texture_handle = gl_allocate_texture(1, 1, raw_data(white_bitmap.memory))
+    {
+        render_commands.dimension = { GlobalBackBuffer.width, GlobalBackBuffer.height }
+        
+        // @todo(viktor): decide what our sizes should be
+        push_buffer := push(&frame_arena, u8, 32 * Megabyte)
+        render_commands.push_buffer        = make_byte_buffer(push_buffer)
+        render_commands.vertex_buffer      = make_array(&frame_arena, Textured_Vertex, 1 << 20)
+        render_commands.quad_bitmap_buffer = make_array(&frame_arena, ^Bitmap, 1 << 20)
+        
+        // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
+        render_commands.white_bitmap.memory            = push(&frame_arena, Color, 1)
+        render_commands.white_bitmap.memory[0]         = 255
+        render_commands.white_bitmap.width             = 1
+        render_commands.white_bitmap.height            = 1
+        render_commands.white_bitmap.width_over_height = 1
+        render_commands.white_bitmap.texture_handle    = gl_allocate_texture(1, 1, raw_data(render_commands.white_bitmap.memory))
+        
+        render_commands.multisampling_hint    = false
+        render_commands.pixelation_hint       = false
+        render_commands.depth_peel_count_hint = 4
+    }
     
     game_memory := GameMemory {
         high_priority_queue = auto_cast &high_queue,
@@ -319,10 +327,10 @@ main :: proc () {
         check_arena(&platform_arena)  
         check_arena(&frame_arena)  
         
-        init_render_commands(&render_commands, GlobalBackBuffer.width, GlobalBackBuffer.height, push_buffer, vertex_buffer, quad_bitmap_buffer, white_bitmap)
+        clear_render_commands(&render_commands)
         
         window_dim := get_window_dimension(window)
-        draw_region := aspect_ratio_fit({render_commands.width, render_commands.height}, window_dim)
+        draw_region := aspect_ratio_fit(render_commands.dimension, window_dim)
         
         ////////////////////////////////////////////////
         { timed_block("input processed")
@@ -350,7 +358,7 @@ main :: proc () {
                     
                     mouse_in_window_y_up := vec_cast(f32, mouse_in_window_y_down.x, window_dim.y - 1 - mouse_in_window_y_down.y)
                     draw_region := rec_cast(f32, draw_region)
-                    mouse_in_draw_region := vec_cast(f32, render_commands.width, render_commands.height) * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
+                    mouse_in_draw_region := vec_cast(f32, render_commands.dimension) * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
                     
                     new_input.mouse.p = mouse_in_draw_region
                     for &button, index in new_input.mouse.buttons {

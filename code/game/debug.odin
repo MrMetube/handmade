@@ -268,17 +268,16 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     if assets == nil do return
     
     if memory.debug_state == nil {
-        memory.debug_state = debug_init(render_commands.width, render_commands.height)
+        memory.debug_state = debug_init(render_commands.dimension)
     }
     debug := memory.debug_state
     
     init_render_group(&debug.render_group, assets, render_commands, generation_id)
     
-    width := cast(f32) render_commands.width
+    width := cast(f32) render_commands.dimension.x
     x := v3{2 / width, 0, 0}
     y := v3{0, 2 / width, 0}
-    push_camera(&debug.render_group, flags = { .orthographic }, x = x, y = y, near_clip_plane = -100_000, far_clip_plane = 100_000)
-    push_sort_barrier(&debug.render_group, true)
+    push_camera(&debug.render_group, flags = { .orthographic }, x = x, y = y, near_clip_plane = -100_000, far_clip_plane = 100_000, clip_alpha = false)
     
     push_depth_clear(&debug.render_group)
     
@@ -314,7 +313,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     }
 }
 
-debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
+debug_init :: proc (dimension: v2i) -> (debug: ^DebugState) {
     debug = bootstrap_arena(DebugState, "arena")
     
     debug.initialization_clock = read_cycle_counter()
@@ -330,8 +329,8 @@ debug_init :: proc (width, height: i32) -> (debug: ^DebugState) {
     
     debug.font_scale = 0.6
     
-    left_edge  := -0.5 * cast(f32) width
-    top_edge   :=  0.5 * cast(f32) height
+    left_edge  := -0.5 * cast(f32) dimension.x
+    top_edge   :=  0.5 * cast(f32) dimension.y
     
     list_init_sentinel(&debug.tree_sentinel)
     debug_tree := add_tree(debug, debug.root_group, { left_edge, top_edge })

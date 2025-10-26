@@ -1,3 +1,4 @@
+#!+build
 package main
 
 // @todo(viktor): Pull this out into a third layer or into the game so that we can hotreload it
@@ -13,18 +14,8 @@ TileRenderWork :: struct {
     base_clip_rect: Rectangle2i, 
 }
 
-init_render_commands :: proc (commands: ^RenderCommands, width, height: i32, push_buffer: [] u8, vertex_buffer: Array(Textured_Vertex), quad_bitmap_buffer: Array(^Bitmap), white_bitmap: Bitmap) {
-    commands ^= {
-        width  = width, 
-        height = height,
-        
-        push_buffer = make_byte_buffer(push_buffer),
-        vertex_buffer = vertex_buffer,
-        quad_bitmap_buffer = quad_bitmap_buffer,
-        
-        white_bitmap = white_bitmap,
-    }
-    
+clear_render_commands :: proc (commands: ^RenderCommands) {
+    clear(&commands.push_buffer)
     clear(&commands.vertex_buffer)
     clear(&commands.quad_bitmap_buffer)
 }
@@ -54,7 +45,10 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
 software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, base_target: Bitmap, arena: ^Arena) {
     timed_function()
     
-    targets := push_slice(arena, Bitmap, commands.max_render_target_index + 1)
+    // @todo(viktor): removed from commands on day 384
+    max_render_target_index := 1
+    
+    targets := push_slice(arena, Bitmap, max_render_target_index + 1)
     targets[0] = base_target
     for &target in targets[1:] {
         target = base_target
@@ -129,27 +123,19 @@ do_tile_render_work :: proc (data: pmm) {
         
         switch header.type {
           case .None: unreachable()
-          
-          case .BlendRenderTargets:
-            entry := read(&commands.push_buffer, BlendRenderTargets)
             
-            source := targets[entry.source_index]
-            dest   := targets[entry.dest_index]
-            blend_render_target(dest, clip_rect, source, entry.alpha)
-            
-          case .DepthClear:
-            unimplemented()
-          case .BeginPeels:
-            unimplemented()
-          case .EndPeels:
-            unimplemented()
+          case .DepthClear: unimplemented()
+          case .BeginPeels: unimplemented()
+          case .EndPeels:   unimplemented()
             
           case .Textured_Quads:
             entry := read(&commands.push_buffer, Textured_Quads)
             
             clip_rect = get_intersection(base_clip_rect, entry.setup.clip_rect)
             
-            target = targets[entry.setup.render_target_index]
+            // @todo(viktor): removed from entry.setup on day 384, it was never set
+            render_target_index: int
+            target = targets[render_target_index]
             assert(target.memory != nil)
             
             unused(draw_rectangle_fill_color_axis_aligned)
@@ -191,36 +177,6 @@ clear_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
         for x := pmin.x; x < pmax.x; x += pstep.x {
             shader_update_load_and_store_mask(&ctx, x)
             shader_store_pixels_at(&ctx, packed, x, y)
-        }
-    }
-}
-
-blend_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, source: Bitmap, alpha: f32) {
-    timed_function()
-    
-    ctx: Shader_Context
-    ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, dest, clip_rect, clip_rect)
-    assert(ok)
-    
-    for y := pmin.y; y < pmax.y; y += pstep.y {
-        for x := pmin.x; x < pmax.x; x += pstep.x {
-            pixels := shader_load_pixels(&ctx, x, y)
-            
-            // @todo(viktor): this is should be easier to do
-            src    := &source.memory[x + y * source.width]
-            texel_ := simd.masked_load(src, cast(lane_u32) 0, ctx.mask)
-            texel  := unpack_pixel(texel_)
-            
-            texel = srgb_to_linear(texel)
-            
-            t := alpha * (texel.a * Inv255)
-            blended := linear_blend(pixels, texel, t)
-            
-            blended = linear_to_srgb(blended)
-            
-            packed := pack_pixel(blended)
-            
-            shader_store_pixels(&ctx, packed)
         }
     }
 }
@@ -364,7 +320,6 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
 
 // @todo(viktor): How can we split this in a relevant and convinient way
 // 1) Clear             - only clip_rect, only masked_stores into output
-// 2) Blend             - only clip_rect, masked_loads from input and output and blends then stores
 // 3) Fill Rect Aligned - rect-clip_rect intersection, blends output with color then stores
 // 4) Fill Rect Rotated - axis-clip_rect intersection, blends output with color then stores
 // 5) Texture Rotated   - axis-clip_rect intersection, bilinear sample texture in uv coords, blends output with texel then stores

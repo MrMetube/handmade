@@ -195,6 +195,20 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         debug_ui_element(FrameInfo{})
     }
     
+    { debug_data_block("Renderer")
+        // @todo(viktor): tell the debug ui to move back into the screen area
+        dim := vec_cast(f32, render_commands.dimension)
+        debug_record_value(&dim.x, "Render Width")
+        debug_record_value(&dim.y, "Render Height")
+        render_commands.dimension = vec_cast(i32, dim)
+        
+        debug_record_value(&render_commands.multisampling_hint, "Multisampling")
+        debug_record_value(&render_commands.pixelation_hint, "Pixelation")
+        count := cast(f32) render_commands.depth_peel_count_hint
+        debug_record_value(&count, "Depth Peel Count")
+        render_commands.depth_peel_count_hint = cast(u32) count
+    }
+    
     { debug_data_block("Game")
  
         { debug_data_block("Camera")
@@ -215,7 +229,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     
     if SoundPanningWithMouse {
         // @note(viktor): test sound panning with the mouse 
-        music_volume := input.mouse.p - vec_cast(f32, render_commands.width, render_commands.height) * 0.5
+        music_volume := input.mouse.p - vec_cast(f32, render_commands.dimension) * 0.5
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
                 play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))
