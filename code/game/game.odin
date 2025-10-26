@@ -218,8 +218,8 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         
         debug_record_value(&LoadAssetsSingleThreaded)
         
-        TimestepPercentage = clamp(TimestepPercentage, 0, 1000)
         debug_record_value(&TimestepPercentage)
+        TimestepPercentage = clamp(TimestepPercentage, 0, 1000)
         
         { debug_data_block("Audio")
             debug_record_value(&SoundPanningWithMouse)

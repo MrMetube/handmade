@@ -45,12 +45,14 @@ OpenGL :: struct {
     // @note(viktor): Dynamic resources take get recreated when settings change:
     
     resolve_buffer: FrameBuffer,
-    depth_peel_buffers: FixedArray(16, FrameBuffer),
+    depth_peel_buffers:         FixedArray(16, FrameBuffer),
+    depth_peel_resolve_buffers: FixedArray(16, FrameBuffer),
     
     zbias_no_depth_peel: ZBiasProgram, // @note(viktor): pass 0
     zbias_depth_peel:    ZBiasProgram, // @note(viktor): passes 1 through n
     peel_composite:      PeelCompositeProgram, // @note(viktor): composite all passes
     final_stretch:       FinalStretchProgram,
+    multisample_resolve: MultisampleResolve,
 }
 
 CreateFramebufferFlags :: bit_set[enum{ multisampled, filtered, has_color, has_depth }]
@@ -327,12 +329,17 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for &buffer in slice(&open_gl.depth_peel_buffers) {
         delete_framebuffer(&buffer)
     }
+    for &buffer in slice(&open_gl.depth_peel_resolve_buffers) {
+        delete_framebuffer(&buffer)
+    }
     clear(&open_gl.depth_peel_buffers)
+    clear(&open_gl.depth_peel_resolve_buffers)
     
-    delete_program(&open_gl.zbias_no_depth_peel.base)
-    delete_program(&open_gl.zbias_depth_peel.base)
-    delete_program(&open_gl.peel_composite.base)
-    delete_program(&open_gl.final_stretch.base)
+    delete_program(&open_gl.zbias_no_depth_peel)
+    delete_program(&open_gl.zbias_depth_peel)
+    delete_program(&open_gl.peel_composite)
+    delete_program(&open_gl.final_stretch)
+    delete_program(&open_gl.multisample_resolve)
     
     open_gl.settings = settings
     
@@ -356,10 +363,16 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     compile_zbias_program(&open_gl.zbias_depth_peel, true)
     compile_peel_composite(&open_gl.peel_composite)
     compile_final_stretch(&open_gl.final_stretch)
+    compile_multisample_resolve(&open_gl.multisample_resolve)
     
     for depth_peel_index in 0..<open_gl.depth_peel_count {
         buffer := create_framebuffer(settings.dimension, depth_peel_flags)
         append(&open_gl.depth_peel_buffers, buffer)
+        
+        if open_gl.multisampling {
+            resolve_buffer := create_framebuffer(settings.dimension, depth_peel_flags - { .multisampled })
+            append(&open_gl.depth_peel_resolve_buffers, resolve_buffer)
+        }
     }
 }
 
@@ -427,17 +440,28 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             peel_header_restore = commands.push_buffer.read_cursor
             
           case .EndPeels:
+            if open_gl.multisampling {
+                gl.BindFramebuffer(gl.READ_FRAMEBUFFER, open_gl.depth_peel_buffers.data[peel_index].handle)
+                gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, open_gl.depth_peel_resolve_buffers.data[peel_index].handle)
+                gl.Viewport(0, 0, render_dim.x, render_dim.y)
+                gl.BlitFramebuffer(0, 0, render_dim.x, render_dim.y, 0, 0, render_dim.x, render_dim.y, gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT, gl.NEAREST)
+            }
+            
             if peel_index < open_gl.depth_peel_count-1 {
                 commands.push_buffer.read_cursor = peel_header_restore
                 
-                peel_index += 1
-                gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[peel_index], render_dim)
                 peeling = peel_index > 0
+                peel_index += 1
+                
+                gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[peel_index], render_dim)
             } else {
                 assert(peel_index == open_gl.depth_peel_count-1)
-                gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[0], render_dim)
+                
                 peeling = false
                 peel_index = 0
+                
+                buffer := get_depth_peel_read_buffer(0)
+                gl_bind_frame_buffer(buffer, render_dim)
             }
             
           case .Textured_Quads:
@@ -459,8 +483,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             alpha_threshold: f32
             if peeling {
                 program = open_gl.zbias_depth_peel
+                
+                buffer := get_depth_peel_read_buffer(peel_index-1)
                 gl.ActiveTexture(gl.TEXTURE1)
-                gl.BindTexture(gl.TEXTURE_2D, open_gl.depth_peel_buffers.data[peel_index-1].depth_texture)
+                gl.BindTexture(gl.TEXTURE_2D, buffer.depth_texture)
                 gl.ActiveTexture(gl.TEXTURE0)
                 if peel_index == open_gl.depth_peel_count-1 {
                     alpha_threshold = 0.9
@@ -509,10 +535,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     begin_program(open_gl.peel_composite)
     for index in 0 ..< open_gl.depth_peel_count {
         gl.ActiveTexture(gl.TEXTURE0 + index)
-        gl.BindTexture(gl.TEXTURE_2D, open_gl.depth_peel_buffers.data[index].color_texture)
+        buffer := get_depth_peel_read_buffer(index)
+        gl.BindTexture(gl.TEXTURE_2D, buffer.color_texture)
     }
-    gl.ActiveTexture(gl.TEXTURE0)
-    gl.BindTexture(gl.TEXTURE_2D, open_gl.depth_peel_buffers.data[0].color_texture)
     
     gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
     
@@ -524,9 +549,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     end_program(open_gl.peel_composite)
     
-    ////////////////////////////////////////////////
-    
     gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+    
+    ////////////////////////////////////////////////
     
     gl.Viewport(0, 0, window_dim.x, window_dim.y)
     gl.Scissor(0, 0, window_dim.x, window_dim.y)
@@ -546,6 +571,46 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.BindTexture(gl.TEXTURE_2D, 0)
     
     end_program(open_gl.final_stretch)
+}
+
+resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
+    gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, to.handle)
+    defer gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+    
+    gl.Viewport(0, 0, dim.x, dim.y)
+    gl.Scissor(0, 0, dim.x, dim.y)
+    
+    vertex_buffer := [4] Textured_Vertex {
+        {{-1,  1, 0, 1}, {0, 1}, 0xff},
+        {{-1, -1, 0, 1}, {0, 0}, 0xff},
+        {{ 1,  1, 0, 1}, {1, 1}, 0xff},
+        {{ 1, -1, 0, 1}, {1, 0}, 0xff},
+    }
+    gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
+    
+    begin_program(open_gl.multisample_resolve)
+    
+    gl.ActiveTexture(gl.TEXTURE0)
+    gl.BindTexture(gl.TEXTURE_2D, from.color_texture)
+    gl.ActiveTexture(gl.TEXTURE1)
+    gl.BindTexture(gl.TEXTURE_2D, from.depth_texture)
+    
+    gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
+    
+    gl.ActiveTexture(gl.TEXTURE0)
+    gl.BindTexture(gl.TEXTURE_2D, 0)
+    gl.ActiveTexture(gl.TEXTURE1)
+    gl.BindTexture(gl.TEXTURE_2D, 0)
+    
+    end_program(open_gl.multisample_resolve)
+}
+
+get_depth_peel_read_buffer :: proc (index: u32) -> (result: FrameBuffer) {
+    result = open_gl.depth_peel_buffers.data[index]
+    if open_gl.multisampling {
+        result = open_gl.depth_peel_resolve_buffers.data[index]
+    }
+    return result
 }
 
 gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
@@ -581,59 +646,54 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 
 create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
     gl.GenFramebuffers(1, &result.handle)
-    if .has_color in flags {
-        gl.GenTextures(1, auto_cast &result.color_texture)
-    }
-    if .has_depth in flags {
-        gl.GenTextures(1, auto_cast &result.depth_texture)
-    }
-    
     gl.BindFramebuffer(gl.FRAMEBUFFER, result.handle)
     
-    max_sample_count: i32
-    gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
-    max_sample_count = min(16, max_sample_count)
-    
     slot: u32 = .multisampled in flags ? gl.TEXTURE_2D_MULTISAMPLE : gl.TEXTURE_2D
-    filtering: i32 = .filtered in flags ? gl.LINEAR : gl.NEAREST
+    filter_type: i32 = .filtered in flags ? gl.LINEAR : gl.NEAREST
     
     if .has_color in flags {
-        gl.BindTexture(slot, result.color_texture)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-        
-        if slot == gl.TEXTURE_2D_MULTISAMPLE {
-            gl.TexImage2DMultisample(slot, max_sample_count, open_gl.default_texture_format, dim.x, dim.y, false)
-        } else {
-            gl.TexImage2D(slot, 0, cast(i32) open_gl.default_texture_format, dim.x, dim.y, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
-        }
+        result.color_texture = create_framebuffer_texture(slot, filter_type, open_gl.default_texture_format, dim)
         
         gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, result.color_texture, 0)
     }
     
     if .has_depth in flags {
-        gl.BindTexture(slot, result.depth_texture)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-        
         // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
-        if slot == gl.TEXTURE_2D_MULTISAMPLE {
-            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT24, dim.x, dim.y, false)
-        } else {
-            gl.TexImage2D(slot, 0, gl.DEPTH_COMPONENT24, dim.x, dim.y, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, nil)
-        }
+        result.depth_texture = create_framebuffer_texture(slot, filter_type, gl.DEPTH_COMPONENT24, dim)
         
-        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,  slot, result.depth_texture, 0)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, slot, result.depth_texture, 0)
     }
-    gl.BindTexture(slot, 0)
-    
     
     status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
     assert(status == gl.FRAMEBUFFER_COMPLETE)
+    
+    gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+    gl.BindTexture(slot, 0)
+    
+    return result
+}
+
+create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, dim: v2i) -> (result: u32) {
+    gl.GenTextures(1, auto_cast &result)
+    
+    gl.BindTexture(slot, result)
+    
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter_type)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter_type)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    
+    if slot == gl.TEXTURE_2D_MULTISAMPLE {
+        max_sample_count: i32
+        gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
+        max_sample_count = min(16, max_sample_count)
+        
+        gl.TexImage2DMultisample(slot, max_sample_count, format, dim.x, dim.y, false)
+    } else {
+        data_format: u32 = format == gl.DEPTH_COMPONENT24 ? gl.DEPTH_COMPONENT : gl.RGBA
+        
+        gl.TexImage2D(slot, 0, auto_cast format, dim.x, dim.y, 0, data_format, gl.UNSIGNED_BYTE, nil)
+    }
     
     return result
 }

@@ -9,12 +9,15 @@ sl :: struct ($T: typeid) {
     value:    T,
 }
 
-gl_m4        :: distinct i32
-gl_f32       :: distinct i32
-gl_v2        :: distinct i32
-gl_v3        :: distinct i32
-gl_v4        :: distinct i32
-gl_sampler2D :: distinct i32
+gl_m4          :: distinct i32
+gl_i32         :: distinct i32
+gl_u32         :: distinct i32
+gl_f32         :: distinct i32
+gl_v2          :: distinct i32
+gl_v3          :: distinct i32
+gl_v4          :: distinct i32
+gl_sampler2D   :: distinct i32
+gl_sampler2DMS :: distinct i32
 
 OpenGLProgram :: struct {
     handle: u32,
@@ -29,7 +32,10 @@ OpenGLProgram :: struct {
 ////////////////////////////////////////////////
 
 GlobalShaderHeaderCode :: `
+#define u32 int unsigned
+#define i32 int
 #define f32 float
+#define v2i ivec2
 #define v2 vec2
 #define v3 vec3
 #define v4 vec4
@@ -131,7 +137,7 @@ out v4 result_color;
 void main (void) {
     f32 clip_depth = 0;
   #if DepthPeeling
-    clip_depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), 0).r;
+    clip_depth = texelFetch(depth_sampler, v2i(gl_FragCoord.xy), 0).r;
     f32 frag_z = gl_FragCoord.z;
     if (frag_z <= clip_depth) {
         discard;
@@ -175,12 +181,10 @@ void main (void) {
 PeelCompositeProgram :: struct {
     using base: OpenGLProgram,
     
-    using vertex_uniforms : struct {
-    },
+    using vertex_uniforms : struct {},
     
     using pipeline_attributes: struct {
-        frag_color: gl_v4,
-        frag_uv:    gl_v2,
+        frag_uv: gl_v2,
     },
     
     using fragment_uniforms: struct {
@@ -190,7 +194,6 @@ PeelCompositeProgram :: struct {
         peel2_sampler: gl_sampler2D,
         peel3_sampler: gl_sampler2D,
     },
-    
 }
 
 compile_peel_composite :: proc (program: ^PeelCompositeProgram) {
@@ -207,7 +210,6 @@ compile_peel_composite :: proc (program: ^PeelCompositeProgram) {
 void main (void) {
     gl_Position = in_p;
     frag_uv = in_uv;
-    frag_color = in_color;
 }
 `)
     vertex_code := to_cstring(&sb)
@@ -255,6 +257,72 @@ void main (void) {
 
 ////////////////////////////////////////////////
 
+MultisampleResolve :: struct {
+    using base: OpenGLProgram,
+    
+    using vertex_uniforms: struct {},
+    using pipeline_attributes: struct {},
+    
+    using fragment_uniforms: struct {
+        sample_count:  gl_i32,
+        color_sampler: gl_sampler2DMS,
+        depth_sampler: gl_sampler2DMS,
+    },
+}
+
+compile_multisample_resolve :: proc (program: ^MultisampleResolve) {
+    defines: cstring = "#version 130"
+    
+    buf: [2048] u8
+    sb := make_string_builder(buf[:])
+    
+    gl_generate(&sb, type_of(program.vertex_uniforms), "uniform")
+    gl_generate(&sb, type_of(program.vertex_inputs), "in")
+    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth out")
+    
+    append(&sb, `
+void main (void) {
+    gl_Position = in_p;
+}
+`)
+    vertex_code := to_cstring(&sb)
+    
+    buf2: [2048] u8
+    sb = make_string_builder(buf2[:])
+    
+    gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
+    gl_generate(&sb, type_of(program.pipeline_attributes), "in")
+    
+    append(&sb, `
+out v4 result_color;
+
+void main (void) {
+    f32 closest_depth = 1.0f;
+    for (i32 sample_index = 0; sample_index < sample_count; ++sample_index) {
+        v4 color = texel_fetch(color_sampler, v2i(gl_FragCoord.xy), sample_index);
+        f32 depth = texel_fetch(depth_sampler, v2i(gl_FragCoord.xy), sample_index).r;
+        
+        if (closest_depth > depth) {
+            closest_depth = depth;
+            
+        }
+        
+        result_color.rgb = peel3.rgb;
+        result_color.rgb = peel2.rgb + (1 - peel2.a) * result_color.rgb;
+    }
+}
+`)
+    fragment_code := to_cstring(&sb)
+
+    program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
+    gl_get_locations(program.handle, &program.vertex_inputs, false)
+    
+    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
+    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+}
+
+////////////////////////////////////////////////
+
 FinalStretchProgram :: struct {
     using base: OpenGLProgram,
     
@@ -268,7 +336,6 @@ FinalStretchProgram :: struct {
     using fragment_uniforms: struct {
         image: gl_sampler2D,
     },
-    
 }
 
 compile_final_stretch :: proc (program: ^FinalStretchProgram) {
@@ -315,13 +382,21 @@ void main (void) {
 
 ////////////////////////////////////////////////
 
-begin_program :: proc { begin_program_peel_composite, begin_program_zbias, begin_program_final_stretch }
+begin_program :: proc { begin_program_peel_composite, begin_program_zbias, begin_program_final_stretch, begin_program_multisample_resolve }
 
 begin_program_final_stretch :: proc (program: FinalStretchProgram) {
     begin_program_common(program)
     
     // @todo(viktor): @metaprogram here?
     gl.Uniform1i(auto_cast program.image, 0)
+}
+begin_program_multisample_resolve :: proc (program: MultisampleResolve) {
+    begin_program_common(program)
+    
+    // @todo(viktor): @metaprogram here?
+    gl.Uniform1i(auto_cast program.sample_count, 0)
+    gl.Uniform1i(auto_cast program.color_sampler, 0)
+    gl.Uniform1i(auto_cast program.depth_sampler, 0)
 }
 begin_program_peel_composite :: proc (program: PeelCompositeProgram) {
     begin_program_common(program)
@@ -439,9 +514,9 @@ create_program :: proc (defines, header_code, vertex_code, fragment_code: cstrin
     return result
 }
 
-delete_program :: proc (program: ^OpenGLProgram) {
+delete_program :: proc (program: ^$Program) {
     gl.DeleteProgram(program.handle)
-    program.handle = 0
+    program ^= {}
 }
 
 ////////////////////////////////////////////////
@@ -449,12 +524,15 @@ delete_program :: proc (program: ^OpenGLProgram) {
 gl_type_to_string :: proc (type: typeid) -> (result: string) {
     switch type {
         case: unreachable()
-        case gl_m4:        result = "m4"
-        case gl_f32:       result = "f32"
-        case gl_v2:        result = "v2"
-        case gl_v3:        result = "v3"
-        case gl_v4:        result = "v4"
-        case gl_sampler2D: result = "sampler2D"
+        case gl_i32:         result = "i32"
+        case gl_u32:         result = "u32"
+        case gl_m4:          result = "m4"
+        case gl_f32:         result = "f32"
+        case gl_v2:          result = "v2"
+        case gl_v3:          result = "v3"
+        case gl_v4:          result = "v4"
+        case gl_sampler2D:   result = "sampler2D"
+        case gl_sampler2DMS: result = "gl_sampler2DMS"
     }
     
     return result
