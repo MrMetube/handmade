@@ -576,6 +576,12 @@ rectangle_inverted_infinity :: proc ($R: typeid) -> (result: R) {
 get_dimension :: proc (rect: Rectangle($T)) -> (result: T) { return rect.max - rect.min }
 get_center    :: proc (rect: Rectangle($T)) -> (result: T) { return rect.min + (rect.max - rect.min) / 2 }
 
+get_min_dimension :: proc (rect: Rectangle($T)) -> (min, dimension: T) { return rect.min, get_dimension(rect) }
+get_center_dimension :: proc (rect: Rectangle($T)) -> (min, dimension: T) { return get_center(rect), get_dimension(rect) }
+
+get_xywh :: proc (rect: Rectangle($V/[2]$T)) -> (x, y, w, h: T) { return rect.min.x, rect.min.y, get_dimension(rect).x, get_dimension(rect).y }
+get_xyzwhd :: proc (rect: Rectangle($V/[3]$T)) -> (x, y, z, w, h, d: T) { return rect.min.x, rect.min.y, rect.min.z, get_dimension(rect).x, get_dimension(rect).y, get_dimension(rect).z }
+
 add_radius :: proc (rect: $R/Rectangle($T), radius: T) -> (result: R) {
     result = rect
     result.min -= radius

@@ -39,6 +39,7 @@ Bitmap :: struct {
 
 @(common)
 RenderCommands :: struct {
+    // @todo(viktor): make this a dim v2i
     width, height: i32,
     
     clear_color: v4,

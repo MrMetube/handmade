@@ -138,13 +138,10 @@ do_tile_render_work :: proc (data: pmm) {
             blend_render_target(dest, clip_rect, source, entry.alpha)
             
           case .DepthClear:
-            entry := read(&commands.push_buffer, DepthClear)
             unimplemented()
           case .BeginPeels:
-            entry := read(&commands.push_buffer, BeginPeels)
             unimplemented()
           case .EndPeels:
-            entry := read(&commands.push_buffer, EndPeels)
             unimplemented()
             
           case .Textured_Quads:

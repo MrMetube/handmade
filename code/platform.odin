@@ -28,7 +28,7 @@ GlobalBackBuffer :=  Bitmap {
     // width = 2560, height = 1440,
 }
 
-MonitorRefreshHz :: 120
+MonitorRefreshHz :: 90
 
 HighPriorityThreads :: 9
 LowPriorityThreads  :: 2
@@ -132,7 +132,7 @@ main :: proc () {
             lpszClassName = "HandmadeWindowClass",
             style = win.CS_HREDRAW | win.CS_VREDRAW | win.CS_OWNDC,
             lpfnWndProc = main_window_callback,
-            hCursor = win.LoadCursorW(nil, cast(cstring16) win.MAKEINTRESOURCEW(32512)),
+            hCursor = win.LoadCursorW(nil, cast(cstring16) win.MAKEINTRESOURCEW(cast(umm) cast(pmm) win.IDC_ARROW)),
             // hIcon =,
         }
         
@@ -722,6 +722,7 @@ main :: proc () {
         measured_seconds_per_frame := get_seconds_elapsed(last_counter, end_counter)
         exact_target_frames_per_update     := measured_seconds_per_frame * MonitorRefreshHz
         new_exact_target_frames_per_update := round(i32, exact_target_frames_per_update)
+        unused(new_exact_target_frames_per_update)
         
         target_seconds_per_frame = measured_seconds_per_frame
         
@@ -1146,7 +1147,9 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         win.EndPaint(window, &paint)
         
       case win.WM_SETCURSOR: 
-        if !GlobalDebugShowCursor {
+        if GlobalDebugShowCursor {
+            win.SetCursor(win.LoadCursorW(nil, cast(cstring16) win.MAKEINTRESOURCEW(cast(umm) cast(pmm) win.IDC_ARROW)))
+        } else {
             win.SetCursor(nil)
         }
         

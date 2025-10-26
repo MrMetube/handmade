@@ -37,15 +37,30 @@ OpenGL :: struct {
     
     vertex_buffer: u32,
     
-    framebuffer_handles:  FixedArray(256, u32),
-    framebuffer_textures: FixedArray(256, u32),
-    framebuffer_depths:   FixedArray(256, u32),
+    resolve: FrameBuffer,
+    framebuffers: FixedArray(256, FrameBuffer),
     
     blit_texture_handle: u32,
     
     zbias_no_depth_peel: ZBiasProgram, // @note(viktor): pass 0
-    zbias_depth_peel:    ZBiasProgram, // @note(viktor): pass 1
-    peel_composite:      PeelCompositeProgram,
+    zbias_depth_peel:    ZBiasProgram, // @note(viktor): passes 1 through n
+    peel_composite:      PeelCompositeProgram, // @note(viktor): composite all passes
+    final_stretch:       FinalStretchProgram,
+}
+
+CreateFramebufferFlags :: bit_set[enum{ multisampled, filtered, has_color, has_depth }]
+
+FrameBuffer :: struct {
+    handle: u32,
+    
+    color_texture: u32,
+    depth_texture: u32,
+}
+
+// @todo(viktor): maybe try this instead of gl_xxx
+sl :: struct ($T: typeid) {
+    location: i32,
+    value:    T,
 }
 
 gl_m4        :: distinct i32
@@ -63,52 +78,6 @@ OpenGLProgram :: struct {
         in_uv:    gl_v2,
         in_color: gl_v4,
     },
-}
-
-ZBiasProgram :: struct {
-    using base: OpenGLProgram,
-    
-    using pipeline_attributes: struct {
-        frag_color: gl_v4,
-        frag_uv:    gl_v2,
-        fog_amount: gl_f32,
-    },
-    using vertex_uniforms : struct {
-        projection:      gl_m4,
-        camera_p:        gl_v3,
-        fog_begin:       gl_f32,
-        fog_end:         gl_f32,
-        fog_direction:   gl_v3,
-        
-        clip_alpha_begin: gl_f32,
-        clip_alpha_end:   gl_f32,
-    },
-    
-    using fragment_uniforms: struct {
-        fog_color:       gl_v3,
-        texture_sampler: gl_sampler2D,
-        depth_sampler:   gl_sampler2D,
-    },
-}
-
-PeelCompositeProgram :: struct {
-    using base: OpenGLProgram,
-    
-    using pipeline_attributes: struct {
-        frag_color: gl_v4,
-        frag_uv:    gl_v2,
-    },
-    using vertex_uniforms : struct {
-    },
-    
-    using fragment_uniforms: struct {
-        // @todo(viktor): support arrays of samplers
-        peel0_sampler: gl_sampler2D,
-        peel1_sampler: gl_sampler2D,
-        peel2_sampler: gl_sampler2D,
-        peel3_sampler: gl_sampler2D,
-    },
-    
 }
 
 open_gl := OpenGL {
@@ -167,6 +136,9 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         compile_zbias_program(&open_gl.zbias_no_depth_peel, false)
         compile_zbias_program(&open_gl.zbias_depth_peel, true)
         compile_peel_composite(&open_gl.peel_composite)
+        compile_final_stretch(&open_gl.final_stretch)
+        
+        // @todo(viktor): check that all programs where compiled
     }
     
     return gl_context
@@ -176,10 +148,12 @@ gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, l
     // @todo(viktor): how can we get the actual context, if we ever use the context in the platform layer
     context = runtime.default_context()
     if severity == gl.DEBUG_SEVERITY_NOTIFICATION {
+        @static ignored: map[u32] bool
+        ignored[131185] = true
         @static seen: map[cstring] bool
-        if message not_in seen {
+        if id not_in ignored && message not_in seen {
             seen[message] = true
-            print("INFO: %\n", message)
+            print("INFO(%:%): %\n", type, id, message)
         }
     } else {
         print("ERROR: %\n", message)
@@ -266,8 +240,7 @@ opengl_get_extensions :: proc (modern_context: b32) -> (result: OpenGlInfo) {
         result.shading_language_version = "(none)"
     }
     
-    length: int
-    extensions_count : i32
+    extensions_count: i32
     gl.GetIntegerv(gl.NUM_EXTENSIONS, &extensions_count)
     
     for index in 0..<extensions_count {
@@ -399,6 +372,35 @@ f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
 }
 `
 
+ZBiasProgram :: struct {
+    using base: OpenGLProgram,
+    
+    using vertex_uniforms : struct {
+        projection: gl_m4,
+        camera_p:   gl_v3,
+        fog_direction: gl_v3,
+    },
+    
+    using pipeline_attributes: struct {
+        frag_color: gl_v4,
+        frag_uv:    gl_v2,
+        fog_distance: gl_f32,
+    },
+    
+    using fragment_uniforms: struct {
+        fog_color:       gl_v3,
+        texture_sampler: gl_sampler2D,
+        depth_sampler:   gl_sampler2D,
+        alpha_threshold: gl_f32,
+        
+        fog_begin:     gl_f32,
+        fog_end:       gl_f32,
+        
+        clip_alpha_begin: gl_f32,
+        clip_alpha_end:   gl_f32,
+    },
+}
+
 compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
     defines := ctprint(`
 #version 130
@@ -431,14 +433,7 @@ void main (void) {
     frag_uv = in_uv;
     frag_color = in_color;
     
-    v3 delta = z_vertex.xyz - camera_p;
-    f32 distance = dot(delta, fog_direction);
-    
-    fog_amount = clamp_01_map_to_range(fog_begin, fog_end, distance);
-    
-    f32 alpha_amount = clamp_01_map_to_range(clip_alpha_begin, clip_alpha_end, distance);
-    if(alpha_amount < 0.1) alpha_amount = 0;
-    frag_color *= alpha_amount * alpha_amount;
+    fog_distance = dot(z_vertex.xyz - camera_p, fog_direction);
 }
 `)
     vertex_code := to_cstring(&sb)
@@ -447,7 +442,7 @@ void main (void) {
     sb = make_string_builder(buf2[:])
     
     gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "in")
+    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth in")
     
     append(&sb, `
 out v4 result_color;
@@ -468,10 +463,15 @@ void main (void) {
         discard;
     }
   #endif // DepthPeeling
-
+    
+    f32 fog_amount   = clamp_01_map_to_range(fog_begin,        fog_end,        fog_distance);
+    f32 alpha_amount = clamp_01_map_to_range(clip_alpha_begin, clip_alpha_end, fog_distance);
+    
     v4 texture_sample = texture(texture_sampler, frag_uv);
-    if (texture_sample.a > 0) {
-        v4 modulated = frag_color;// * texture_sample;
+    v4 modulated = frag_color * texture_sample;
+    modulated *= alpha_amount;
+    
+    if (modulated.a > alpha_threshold) {
         result_color.rgb = linear_blend(modulated.rgb, fog_color, fog_amount);
         result_color.a = modulated.a;
     } else {
@@ -487,6 +487,27 @@ void main (void) {
     
     gl_get_locations(program.handle, &program.vertex_uniforms, true)
     gl_get_locations(program.handle, &program.fragment_uniforms, true)
+}
+
+PeelCompositeProgram :: struct {
+    using base: OpenGLProgram,
+    
+    using vertex_uniforms : struct {
+    },
+    
+    using pipeline_attributes: struct {
+        frag_color: gl_v4,
+        frag_uv:    gl_v2,
+    },
+    
+    using fragment_uniforms: struct {
+        // @todo(viktor): support arrays of samplers
+        peel0_sampler: gl_sampler2D,
+        peel1_sampler: gl_sampler2D,
+        peel2_sampler: gl_sampler2D,
+        peel3_sampler: gl_sampler2D,
+    },
+    
 }
 
 compile_peel_composite :: proc (program: ^PeelCompositeProgram) {
@@ -523,11 +544,16 @@ void main (void) {
     v4 peel2 = texture(peel2_sampler, frag_uv);
     v4 peel3 = texture(peel3_sampler, frag_uv);
     
-    f32 inv_a = 0.0f;
-    if (peel3.a > 0) {
-        inv_a = 1.0f / peel3.a;
-    }
-    peel3.rgb *= inv_a;
+    #if 0
+    peel3.rgb *= 1.0f / peel3.a;
+    #endif
+    
+    #if 0
+    peel0.rgb = V3(0, 0, 1) * peel0.a;
+    peel1.rgb = V3(0, 1, 0) * peel1.a;
+    peel2.rgb = V3(1, 0, 0) * peel2.a;
+    peel3.rgb = V3(1, 1, 1) * peel3.a;
+    #endif
     
     result_color.rgb = peel3.rgb;
     result_color.rgb = peel2.rgb + (1 - peel2.a) * result_color.rgb;
@@ -540,12 +566,78 @@ void main (void) {
     program.handle = gl_create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
     gl_get_locations(program.handle, &program.vertex_inputs, false)
     
-    gl_get_locations(program.handle, &program.vertex_uniforms, true)
+    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
     gl_get_locations(program.handle, &program.fragment_uniforms, true)
 }
 
-begin_program :: proc { begin_program_peel_composite, begin_program_zbias }
+FinalStretchProgram :: struct {
+    using base: OpenGLProgram,
+    
+    using vertex_uniforms: struct {},
+    
+    using pipeline_attributes: struct {
+        frag_color: gl_v4,
+        frag_uv:    gl_v2,
+    },
+    
+    using fragment_uniforms: struct {
+        image: gl_sampler2D,
+    },
+    
+}
 
+compile_final_stretch :: proc (program: ^FinalStretchProgram) {
+    defines: cstring = "#version 130"
+    
+    buf: [2048] u8
+    sb := make_string_builder(buf[:])
+    
+    gl_generate(&sb, type_of(program.vertex_uniforms), "uniform")
+    gl_generate(&sb, type_of(program.vertex_inputs), "in")
+    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth out")
+    
+    append(&sb, `
+void main (void) {
+    gl_Position = in_p;
+    frag_uv = in_uv;
+    frag_color = in_color;
+}
+`)
+    vertex_code := to_cstring(&sb)
+    
+    buf2: [2048] u8
+    sb = make_string_builder(buf2[:])
+    
+    gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
+    gl_generate(&sb, type_of(program.pipeline_attributes), "in")
+    
+    append(&sb, `
+out v4 result_color;
+
+void main (void) {
+    v4 sample = texture(image, frag_uv);
+    result_color = sample;
+}
+`)
+    fragment_code := to_cstring(&sb)
+
+    program.handle = gl_create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
+    gl_get_locations(program.handle, &program.vertex_inputs, false)
+    
+    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
+    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+}
+
+////////////////////////////////////////////////
+
+begin_program :: proc { begin_program_peel_composite, begin_program_zbias, begin_program_final_stretch }
+
+begin_program_final_stretch :: proc (program: FinalStretchProgram) {
+    begin_program_common(program)
+    
+    // @todo(viktor): @metaprogram here?
+    gl.Uniform1i(auto_cast program.image, 0)
+}
 begin_program_peel_composite :: proc (program: PeelCompositeProgram) {
     begin_program_common(program)
     
@@ -556,18 +648,19 @@ begin_program_peel_composite :: proc (program: PeelCompositeProgram) {
     gl.Uniform1i(auto_cast program.peel3_sampler, 3)
 }
 
-begin_program_zbias :: proc (program: ZBiasProgram, setup: RenderSetup) {
+begin_program_zbias :: proc (program: ZBiasProgram, setup: RenderSetup, alpha_threshold: f32) {
     begin_program_common(program)
-    
-    gl.Uniform1i(auto_cast program.texture_sampler, 0)
-    gl.Uniform1i(auto_cast program.depth_sampler,   1)
     
     // @todo(viktor): @metaprogram here?
     setup := setup
     gl.UniformMatrix4fv(auto_cast program.projection, 1, false, &setup.projection[0, 0])
     gl.Uniform3fv(auto_cast program.camera_p,         1, &setup.camera_p[0])
     gl.Uniform3fv(auto_cast program.fog_direction,    1, &setup.fog_direction[0])
+    
     gl.Uniform3fv(auto_cast program.fog_color,        1, &setup.fog_color[0])
+    gl.Uniform1i(auto_cast program.texture_sampler, 0)
+    gl.Uniform1i(auto_cast program.depth_sampler,   1)
+    gl.Uniform1f(auto_cast program.alpha_threshold,   alpha_threshold)
     gl.Uniform1f(auto_cast program.fog_begin,         setup.fog_begin)
     gl.Uniform1f(auto_cast program.fog_end,           setup.fog_end)
     gl.Uniform1f(auto_cast program.clip_alpha_begin,  setup.clip_alpha_begin)
@@ -577,17 +670,28 @@ begin_program_zbias :: proc (program: ZBiasProgram, setup: RenderSetup) {
 begin_program_common :: proc (program: OpenGLProgram) {
     gl.UseProgram(program.handle)
     
-    if program.in_uv    != -1 do gl.EnableVertexAttribArray(cast(u32) program.in_uv)
-    if program.in_color != -1 do gl.EnableVertexAttribArray(cast(u32) program.in_color)
-    if program.in_p     != -1 do gl.EnableVertexAttribArray(cast(u32) program.in_p)
+    dummy: Textured_Vertex
+    stride := cast(i32) size_of(dummy)
     
-    stride := cast(i32) size_of(Textured_Vertex)
-    if program.in_uv    != -1 do gl.VertexAttribPointer(cast(u32) program.in_uv,    len(v2),    gl.FLOAT,         false, stride, offset_of(Textured_Vertex, uv))
-    if program.in_color != -1 do gl.VertexAttribPointer(cast(u32) program.in_color, len(Color), gl.UNSIGNED_BYTE,  true, stride, offset_of(Textured_Vertex, color))
-    if program.in_p     != -1 do gl.VertexAttribPointer(cast(u32) program.in_p,     len(v4),    gl.FLOAT,         false, stride, offset_of(Textured_Vertex, p))
+    if program.in_uv != -1 {
+        id := cast(u32) program.in_uv
+        gl.EnableVertexAttribArray(id)
+        gl.VertexAttribPointer(id, len(dummy.uv), gl.FLOAT, false, stride, offset_of(dummy.uv))
+    }
+    if program.in_color != -1 {
+        id := cast(u32) program.in_color
+        gl.EnableVertexAttribArray(id)
+        gl.VertexAttribPointer(id, len(dummy.color), gl.UNSIGNED_BYTE, true, stride, offset_of(dummy.color))
+    }
+    if program.in_p != -1 {
+        id := cast(u32) program.in_p
+        gl.EnableVertexAttribArray(id)
+        gl.VertexAttribPointer(id, len(dummy.p), gl.FLOAT, false, stride, offset_of(dummy.p))
+    }
 }
 
-end_program :: proc (program: OpenGLProgram) {
+end_program :: proc { end_program_common }
+end_program_common :: proc (program: OpenGLProgram) {
     if program.in_uv    != -1 do gl.DisableVertexAttribArray(cast(u32) program.in_uv)
     if program.in_color != -1 do gl.DisableVertexAttribArray(cast(u32) program.in_color)
     if program.in_p     != -1 do gl.DisableVertexAttribArray(cast(u32) program.in_p)
@@ -693,11 +797,70 @@ gl_create_program :: proc (defines, header_code, vertex_code, fragment_code: cst
 
 ////////////////////////////////////////////////
 
+create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
+    gl.GenFramebuffers(1, &result.handle)
+    if .has_color in flags {
+        gl.GenTextures(1, auto_cast &result.color_texture)
+    }
+    if .has_depth in flags {
+        gl.GenTextures(1, auto_cast &result.depth_texture)
+    }
+    
+    gl.BindFramebuffer(gl.FRAMEBUFFER, result.handle)
+    
+    max_sample_count: i32
+    gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
+    max_sample_count = min(16, max_sample_count)
+    
+    slot: u32 = .multisampled in flags ? gl.TEXTURE_2D_MULTISAMPLE : gl.TEXTURE_2D
+    filtering: i32 = .filtered in flags ? gl.LINEAR : gl.NEAREST
+    
+    if .has_color in flags {
+        gl.BindTexture(slot, result.color_texture)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        
+        if slot == gl.TEXTURE_2D_MULTISAMPLE {
+            gl.TexImage2DMultisample(slot, max_sample_count, open_gl.default_texture_format, dim.x, dim.y, false)
+        } else {
+            gl.TexImage2D(slot, 0, cast(i32) open_gl.default_texture_format, dim.x, dim.y, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+        }
+        
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, result.color_texture, 0)
+    }
+    
+    if .has_depth in flags {
+        gl.BindTexture(slot, result.depth_texture)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        
+        // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
+        if slot == gl.TEXTURE_2D_MULTISAMPLE {
+            gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT24, dim.x, dim.y, false)
+        } else {
+            gl.TexImage2D(slot, 0, gl.DEPTH_COMPONENT24, dim.x, dim.y, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, nil)
+        }
+        
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,  slot, result.depth_texture, 0)
+    }
+    gl.BindTexture(slot, 0)
+    
+    
+    status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
+    assert(status == gl.FRAMEBUFFER_COMPLETE)
+    
+    return result
+}
+
 gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     gl_setup_render := game.begin_timed_block("gl setup render")
-    draw_dim := get_dimension(draw_region)
+    render_dim := v2i{commands.width, commands.height}
     
     gl.DepthMask(true)
     gl.ColorMask(true, true, true, true)
@@ -715,73 +878,30 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
     max_render_target_index := cast(u32) 3 // commands.max_render_target_index
-    count := cast(u32) open_gl.framebuffer_handles.count
+    count := cast(u32) open_gl.framebuffers.count
     if max_render_target_index >= count {
+        if open_gl.resolve.handle == 0 {
+            open_gl.resolve = create_framebuffer(render_dim, { .filtered, .has_color })
+        }
+        
         new_frame_buffer_count := max_render_target_index + 1
-        assert(new_frame_buffer_count < len(open_gl.framebuffer_handles.data))
+        assert(new_frame_buffer_count < len(open_gl.framebuffers.data))
         
         new_count := new_frame_buffer_count - count
-        gl.GenFramebuffers(cast(i32) new_count, &open_gl.framebuffer_handles.data[count])
-        open_gl.framebuffer_handles.count += auto_cast new_count
-        
-        for render_target in slice(&open_gl.framebuffer_handles)[count:] {
-            width  := draw_dim.x 
-            height := draw_dim.y
-            
-            max_sample_count: i32
-            gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
-            max_sample_count = min(16, max_sample_count)
-            
-            slot: u32 = gl.TEXTURE_2D_MULTISAMPLE when false else gl.TEXTURE_2D
-            
-            using textures: struct { texture, depth_texture: u32 }
-            gl.GenTextures(2, auto_cast &textures)
-            
-            gl.BindTexture(slot, texture)
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-            if slot == gl.TEXTURE_2D_MULTISAMPLE {
-                gl.TexImage2DMultisample(slot, max_sample_count, open_gl.default_texture_format, width, height, false)
-            } else {
-                gl.TexImage2D(slot, 0, cast(i32) open_gl.default_texture_format, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
-            }
-            
-            gl.BindTexture(slot, depth_texture)
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            
-            // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
-            if slot == gl.TEXTURE_2D_MULTISAMPLE {
-                gl.TexImage2DMultisample(slot, max_sample_count, gl.DEPTH_COMPONENT24, width, height, false)
-            } else {
-                gl.TexImage2D(slot, 0, gl.DEPTH_COMPONENT24, width, height, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, nil)
-            }
-            gl.BindTexture(slot, 0)
-            
-            append(&open_gl.framebuffer_textures, texture)
-            append(&open_gl.framebuffer_depths,   depth_texture)
-            
-            gl.BindFramebuffer(gl.FRAMEBUFFER, render_target)
-            gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, texture, 0)
-            gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,  slot, depth_texture, 0)
-            
-            status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
-            assert(status == gl.FRAMEBUFFER_COMPLETE)
+        for _ in 0..<new_count {
+            buffer := create_framebuffer(render_dim, { .has_color, .has_depth })
+            append(&open_gl.framebuffers, buffer)
         }
     }
     
     for index in 0 ..= max_render_target_index {
-        gl_bind_frame_buffer(index, draw_region)
+        gl_bind_frame_buffer(index, render_dim)
+        gl.Scissor(0, 0, render_dim.x, render_dim.y)
+        
         c: v4
         if index == max_render_target_index {
             c = commands.clear_color
-            gl.Scissor(0, 0, draw_dim.x, draw_dim.y)
-        } else {
-            gl.Scissor(0, 0, window_dim.x, window_dim.y)
+            c.a = 1
         }
         
         gl.ClearColor(c.r, c.g, c.b, c.a)
@@ -789,14 +909,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
         gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     }
     
-    commands_dim := vec_cast(f32, commands.width, commands.height)
-    dim := get_dimension(draw_region)
-    clip_scale_x := safe_ratio_0(cast(f32) dim.x, commands_dim.x)
-    clip_scale_y := safe_ratio_0(cast(f32) dim.y, commands_dim.y)
-    
     game.end_timed_block(gl_setup_render)
     
-    gl_bind_frame_buffer(0, draw_region)
+    gl_bind_frame_buffer(0, render_dim)
     
     current_render_target_index := max(u32)
     
@@ -810,26 +925,23 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
           case .None: unreachable()
           case: panic("Unhandled Entry")
             
+          case .DepthClear:
+            gl.Clear(gl.DEPTH_BUFFER_BIT)
+            
           case .BeginPeels:
-            entry := read(&commands.push_buffer, BeginPeels)
             peel_header_restore = commands.push_buffer.read_cursor
             
           case .EndPeels:
-            entry := read(&commands.push_buffer, EndPeels)
             if peel_index < max_render_target_index {
                 commands.push_buffer.read_cursor = peel_header_restore
                 peel_index += 1
-                gl_bind_frame_buffer(peel_index, draw_region)
+                gl_bind_frame_buffer(peel_index, render_dim)
                 peeling = true
             } else {
                 assert(peel_index == max_render_target_index)
-                gl_bind_frame_buffer(0, draw_region)
+                gl_bind_frame_buffer(0, render_dim)
                 peeling = false
             }
-            
-          case .DepthClear:
-            entry := read(&commands.push_buffer, DepthClear)
-            gl.Clear(gl.DEPTH_BUFFER_BIT)
             
           case .BlendRenderTargets:
             entry := read(&commands.push_buffer, BlendRenderTargets)
@@ -839,12 +951,13 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             // defer gl_bind_frame_buffer(current_target_index, draw_region)
             
             // @todo(viktor): If the window has black bars the rectangle will be offset incorrectly. thanks global variables!
-            gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffer_textures.data[entry.source_index])
+            gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffers.data[entry.source_index].color_texture)
             
             gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             defer gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
             
             // @todo(viktor): move this to the newer version of the code
+            commands_dim := vec_cast(f32, commands.width, commands.height)
             max := commands_dim
             glBegin(gl.TRIANGLES)
             
@@ -878,6 +991,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             ////////////////////////////////////////////////
             
             setup := entry.setup
+            unused(current_render_target_index)
             when false {
                 if current_render_target_index != setup.render_target_index {
                     current_render_target_index = setup.render_target_index
@@ -885,7 +999,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 }
             }
             
-            gl.Scissor(setup.clip_rect.min.x, setup.clip_rect.min.y, setup.clip_rect.max.x - setup.clip_rect.min.x, setup.clip_rect.max.y - setup.clip_rect.min.y)
+            gl.Scissor(get_xywh(setup.clip_rect))
             
             copy := game.begin_timed_block("gl copy buffer data")
             gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
@@ -894,13 +1008,17 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             ////////////////////////////////////////////////
             
             program := open_gl.zbias_no_depth_peel
+            alpha_threshold: f32
             if peeling {
                 program = open_gl.zbias_depth_peel
                 gl.ActiveTexture(gl.TEXTURE1)
-                gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffer_depths.data[peel_index-1])
+                gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffers.data[peel_index-1].depth_texture)
                 gl.ActiveTexture(gl.TEXTURE0)
+                if peel_index == max_render_target_index {
+                    alpha_threshold = 0.9
+                }
             }
-            begin_program(program, setup)
+            begin_program(program, setup, alpha_threshold)
             
             loop := game.begin_timed_block("gl quad loop")
             for bitmap_index in entry.bitmap_offset ..< entry.bitmap_offset + entry.quad_count {
@@ -923,49 +1041,73 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
         }
     }
     
-    when false {
-        gl.BindFramebuffer(gl.READ_FRAMEBUFFER, open_gl.framebuffer_handles.data[3])
-        gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
-        gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
-        
-        s := draw_dim
-        d := draw_region
-        gl.BlitFramebuffer(0, 0, s.x, s.y, d.min.x, d.min.y, d.max.x, d.max.y, gl.COLOR_BUFFER_BIT, gl.LINEAR)
-    } else {
-        gl.Disable(gl.DEPTH_TEST)
-        gl.Disable(gl.SCISSOR_TEST)
-        
-        gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
-        
-        vertex_buffer := [4] Textured_Vertex {
-            {{-1,  1, 0, 1}, {0, 1}, 0xff},
-            {{-1, -1, 0, 1}, {0, 0}, 0xff},
-            {{ 1,  1, 0, 1}, {1, 1}, 0xff},
-            {{ 1, -1, 0, 1}, {1, 0}, 0xff},
-        }
-        gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
-        
-        program := open_gl.peel_composite
-        begin_program(program)
-        for index in 1 ..= max_render_target_index {
-            gl.ActiveTexture(gl.TEXTURE0 + index)
-            gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffer_textures.data[index])
-        }
-        gl.ActiveTexture(gl.TEXTURE0)
-        gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffer_textures.data[0])
-        
-        gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
-        
-        gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
-        
-        for index in 1 ..= max_render_target_index {
-            gl.ActiveTexture(gl.TEXTURE0 + index)
-            gl.BindTexture(gl.TEXTURE_2D, 0)
-        }
-        gl.ActiveTexture(gl.TEXTURE0)
-        
-        end_program(program)
+    ////////////////////////////////////////////////
+    
+    gl.Disable(gl.DEPTH_TEST)
+    gl.Disable(gl.SCISSOR_TEST)
+    
+    gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, open_gl.resolve.handle)
+    gl.Viewport(0, 0, render_dim.x, render_dim.y)
+    gl.Scissor(0, 0, render_dim.x, render_dim.y)
+    
+    vertex_buffer := [4] Textured_Vertex {
+        {{-1,  1, 0, 1}, {0, 1}, 0xff},
+        {{-1, -1, 0, 1}, {0, 0}, 0xff},
+        {{ 1,  1, 0, 1}, {1, 1}, 0xff},
+        {{ 1, -1, 0, 1}, {1, 0}, 0xff},
     }
+    gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
+    
+    begin_program(open_gl.peel_composite)
+    for index in 1 ..= max_render_target_index {
+        gl.ActiveTexture(gl.TEXTURE0 + index)
+        gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffers.data[index].color_texture)
+    }
+    gl.ActiveTexture(gl.TEXTURE0)
+    gl.BindTexture(gl.TEXTURE_2D, open_gl.framebuffers.data[0].color_texture)
+    
+    gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
+    
+    for index in 1 ..= max_render_target_index {
+        gl.ActiveTexture(gl.TEXTURE0 + index)
+        gl.BindTexture(gl.TEXTURE_2D, 0)
+    }
+    gl.ActiveTexture(gl.TEXTURE0)
+    
+    end_program(open_gl.peel_composite)
+    
+    ////////////////////////////////////////////////
+    
+    gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+    
+    gl.Viewport(0, 0, window_dim.x, window_dim.y)
+    gl.Scissor(0, 0, window_dim.x, window_dim.y)
+    gl.ClearColor(0, 0, 0, 0)
+    gl.Clear(gl.COLOR_BUFFER_BIT)
+    
+    gl.Viewport(get_xywh(draw_region))
+    gl.Scissor(get_xywh(draw_region))
+    
+    begin_program(open_gl.final_stretch)
+    gl.ActiveTexture(gl.TEXTURE0)
+    gl.BindTexture(gl.TEXTURE_2D, open_gl.resolve.color_texture)
+    
+    gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
+    
+    gl.ActiveTexture(gl.TEXTURE0)
+    gl.BindTexture(gl.TEXTURE_2D, 0)
+    
+    end_program(open_gl.final_stretch)
+    
+    ////////////////////////////////////////////////
+    
+    // s := render_dim
+    // d := draw_region
+    // gl.BindFramebuffer(gl.READ_FRAMEBUFFER, open_gl.framebuffer_handles.data[0])
+    // gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+    // gl.Viewport(draw_region.min.x, draw_region.min.y, window_dim.x, window_dim.y)
+    
+    // gl.BlitFramebuffer(0, 0, s.x, s.y, d.min.x, d.min.y, d.max.x, d.max.y, gl.COLOR_BUFFER_BIT, gl.LINEAR)
 }
 
 gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
@@ -973,7 +1115,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
     
     timed_function()
     
-    gl_bind_frame_buffer(0, draw_region)
+    gl_bind_frame_buffer(0, get_dimension(draw_region))
     
     gl.Disable(gl.SCISSOR_TEST)
     gl.Disable(gl.BLEND)
@@ -999,12 +1141,11 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 
 ////////////////////////////////////////////////
 
-gl_bind_frame_buffer :: proc (render_target_index: u32, draw_region: Rectangle2i) {
-    render_texture := open_gl.framebuffer_handles.data[render_target_index]
+gl_bind_frame_buffer :: proc (render_target_index: u32, render_dim: v2i) {
+    render_texture := open_gl.framebuffers.data[render_target_index].handle
     gl.BindFramebuffer(gl.FRAMEBUFFER, render_texture)
     
-    window_dim := get_dimension(draw_region)
-    gl.Viewport(0, 0, window_dim.x, window_dim.y)
+    gl.Viewport(0, 0, render_dim.x, render_dim.y)
 }
 
 ////////////////////////////////////////////////
