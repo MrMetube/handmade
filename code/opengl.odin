@@ -294,7 +294,7 @@ gl_manage_textures :: proc (last: ^TextureOp) {
         
           case TextureOpAllocate:
             allocs += 1
-            op.result ^= gl_allocate_texture(op.width, op.height, op.data)
+            op.result ^= gl_allocate_texture(op.bitmap)
             
           case TextureOpDeallocate:
             deallocs += 1
@@ -306,12 +306,15 @@ gl_manage_textures :: proc (last: ^TextureOp) {
     print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
 }
 
-gl_allocate_texture :: proc (width, height: i32, data: pmm) -> (result: u32) {
+gl_allocate_texture :: proc (bitmap: Bitmap) -> (result: u32) {
     handle: u32
     gl.GenTextures(1, &handle)
     
     gl.BindTexture(gl.TEXTURE_2D, handle)
     
+    width := bitmap.dimension.x
+    height := bitmap.dimension.y
+    data := raw_data(bitmap.memory)
     gl.TexImage2D(gl.TEXTURE_2D, 0, cast(i32) open_gl.default_texture_format, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, data)
     
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
@@ -362,7 +365,6 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
         depth_peel_flags += { .multisampled }
     }
     
-    // @todo(viktor): Jettison all existing framebuffers and programs
     open_gl.resolve_buffer = create_framebuffer(settings.dimension, resolve_flags)
     
     compile_zbias_program(&open_gl.zbias_no_depth_peel, false)
@@ -652,7 +654,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
     gl.BindTexture(gl.TEXTURE_2D, open_gl.blit_buffer.handle)
     defer gl.BindTexture(gl.TEXTURE_2D, 0)
     
-    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, bitmap.width, bitmap.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory))
+    gl.TexImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, bitmap.dimension.x, bitmap.dimension.y, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(bitmap.memory))
     
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)

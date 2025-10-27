@@ -110,9 +110,7 @@ TextureOpQueue :: struct {
 
 @(common)
 TextureOpAllocate :: struct {
-    width, height: i32, 
-    data: pmm,
-    
+    bitmap: Bitmap,
     result: ^u32,
 }
 
@@ -727,10 +725,7 @@ load_asset_work_immediatly :: proc (work: ^LoadAssetWork) {
             }
             
             op := TextureOpAllocate {
-                width = bitmap.width, 
-                height = bitmap.height, 
-                data = raw_data(bitmap.memory),
-                
+                bitmap = bitmap^,
                 result = &bitmap.texture_handle,
             }
             
@@ -856,9 +851,8 @@ allocate_asset_memory:: proc (assets: ^Assets, kind: AssetKind, #any_int id: u32
         info := asset.info.bitmap
           
         asset.header.value = Bitmap{
-            width  = cast(i32) info.dimension.x,
-            height = cast(i32) info.dimension.y,
-        
+            dimension = vec_cast(i32, info.dimension),
+            
             align_percentage = info.align_percentage,
             width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,
         }
@@ -866,7 +860,7 @@ allocate_asset_memory:: proc (assets: ^Assets, kind: AssetKind, #any_int id: u32
         
         divider_designate(&divider, &bitmap.memory)
         divider_hand_over(&divider)
-        assert(auto_cast len(bitmap.memory) == bitmap.width * bitmap.height)
+        assert(auto_cast len(bitmap.memory) == bitmap.dimension.x * bitmap.dimension.y)
       case .Sound: 
         info := asset.info.sound
         

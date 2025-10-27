@@ -52,7 +52,7 @@ software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, 
     targets[0] = base_target
     for &target in targets[1:] {
         target = base_target
-        target.memory = push_slice(arena, Color, target.width * target.height, align_no_clear(LaneWidth * size_of(Color)))
+        target.memory = push_slice(arena, Color, target.dimension.x * target.dimension.y, align_no_clear(LaneWidth * size_of(Color)))
     }
     
     /* @todo(viktor):
@@ -63,7 +63,7 @@ software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, 
     tile_count :: v2i{4, 4}
     works: [tile_count.x * tile_count.y] TileRenderWork
     
-    tile_size := v2i{base_target.width, base_target.height} / tile_count
+    tile_size := base_target.dimension / tile_count
     tile_size.x = align(LaneWidth, tile_size.x)
     
     work_index: i32
@@ -83,10 +83,10 @@ software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, 
             work.base_clip_rect.max = work.base_clip_rect.min + tile_size
             
             if x == tile_count.x-1 {
-                work.base_clip_rect.max.x = base_target.width 
+                work.base_clip_rect.max.x = base_target.dimension.x 
             }
             if y == tile_count.y-1 {
-                work.base_clip_rect.max.y = base_target.height
+                work.base_clip_rect.max.y = base_target.dimension.y
             }
             
             if GlobalDebugRenderSingleThreaded {
@@ -253,9 +253,9 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
     
     color := vec_cast(lane_f32, color)
     
-    texture_size := vec_cast(lane_f32, texture.width, texture.height) - 2
+    texture_size := vec_cast(lane_f32, texture.dimension) - 2
     
-    texture_width  := cast(lane_u32) texture.width
+    texture_width  := cast(lane_u32) texture.dimension.x
     texture_memory := cast(lane_umm) raw_data(texture.memory)
 
     zero := cast(lane_u32) 0
@@ -474,7 +474,7 @@ _shader_uv_and_mask :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v
 }
 
 _shader_load_pixels :: proc (using ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
-    at      = &buffer.memory[x + y * buffer.width]
+    at      = &buffer.memory[x + y * buffer.dimension.x]
     pixel_ := simd.masked_load(at, cast(lane_u32) 0, mask)
     result  = unpack_pixel(pixel_)
     
@@ -485,7 +485,7 @@ _shader_load_pixels :: proc (using ctx: ^Shader_Context, x, y: i32) -> (result: 
 ////////////////////////////////////////////////
 
 shader_store_pixels_at :: proc (ctx: ^Shader_Context, packed: lane_u32, x, y: i32) {
-    ctx.at = &ctx.buffer.memory[x + y * ctx.buffer.width]
+    ctx.at = &ctx.buffer.memory[x + y * ctx.buffer.dimension.x]
     simd.masked_store(ctx.at, packed, ctx.mask)
 }
 

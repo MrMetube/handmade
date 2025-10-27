@@ -27,12 +27,11 @@ package game
 Bitmap :: struct {
     // @todo(viktor): the length of the slice and either width or height are redundant
     memory: [] Color,
+    dimension: v2i,
     
     // @cleanup with the next asset pack
     align_percentage:  v2,
     width_over_height: f32,
-    
-    width, height: i32,
     
     texture_handle: u32,
 }
@@ -423,7 +422,7 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     }
     
     // @note(viktor): step in one texel because the bitmaps are padded on all sides with a blank strip of pixels
-    d_texel := 1 / vec_cast(f32, bitmap.width, bitmap.height)
+    d_texel := 1 / vec_cast(f32, bitmap.dimension)
     min_uv := 0 + d_texel
     max_uv := 1 - d_texel
     

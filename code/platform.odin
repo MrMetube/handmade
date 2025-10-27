@@ -23,9 +23,9 @@ import win "core:sys/windows"
 // Config
 
 GlobalBackBuffer :=  Bitmap {
-    // width = 1280, height = 720,
-    width = 1920, height = 1080,
-    // width = 2560, height = 1440,
+    // dimension = {1280, 720},
+    dimension = {1920, 1080},
+    // dimension = {2560, 1440},
 }
 
 MonitorRefreshHz :: 90
@@ -138,8 +138,8 @@ main :: proc () {
         
         {
             buffer := &GlobalBackBuffer
-            assert(align(16, buffer.width) == buffer.width)
-            buffer.memory = push(&platform_arena, Color, buffer.width * buffer.height)
+            assert(align(16, buffer.dimension.x) == buffer.dimension.x)
+            buffer.memory = push(&platform_arena, Color, buffer.dimension.x * buffer.dimension.y)
         }
         
         if win.RegisterClassW(&window_class) == 0 {
@@ -153,8 +153,8 @@ main :: proc () {
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
-            GlobalBackBuffer.width  + 16, // added for the window frame
-            GlobalBackBuffer.height + 39,
+            GlobalBackBuffer.dimension.x  + 16, // added for the window frame
+            GlobalBackBuffer.dimension.y + 39,
             nil,
             nil,
             window_class.hInstance,
@@ -272,7 +272,7 @@ main :: proc () {
     
     render_commands: RenderCommands
     {
-        render_commands.dimension = { GlobalBackBuffer.width, GlobalBackBuffer.height }
+        render_commands.dimension = GlobalBackBuffer.dimension * 2
         
         // @todo(viktor): decide what our sizes should be
         push_buffer := push(&frame_arena, u8, 32 * Megabyte)
@@ -281,12 +281,11 @@ main :: proc () {
         render_commands.quad_bitmap_buffer = make_array(&frame_arena, ^Bitmap, 1 << 20)
         
         // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
-        render_commands.white_bitmap.memory            = push(&frame_arena, Color, 1)
-        render_commands.white_bitmap.memory[0]         = 255
-        render_commands.white_bitmap.width             = 1
-        render_commands.white_bitmap.height            = 1
+        render_commands.white_bitmap.memory = push(&frame_arena, Color, 1)
+        render_commands.white_bitmap.memory[0] = 255
+        render_commands.white_bitmap.dimension = 1
         render_commands.white_bitmap.width_over_height = 1
-        render_commands.white_bitmap.texture_handle    = gl_allocate_texture(1, 1, raw_data(render_commands.white_bitmap.memory))
+        render_commands.white_bitmap.texture_handle = gl_allocate_texture(render_commands.white_bitmap)
         
         render_commands.multisampling_hint    = !true
         render_commands.pixelation_hint       = false
@@ -485,16 +484,17 @@ main :: proc () {
                     }
                 }
             }
-            
+                        
             { debug_data_block("Platform")
-                {debug_data_block("Renderer")
-                    game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-                    game.debug_record_b32(&GlobalUseSoftwareRenderer)
-                }
                 
                 game.debug_record_b32(&GlobalPause)
                 game.debug_record_b32(&GlobalDebugShowCursor)
                 game.debug_record_f32(&expected_frames_per_update)
+            }
+
+            { debug_data_block("Renderer")
+                game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
+                game.debug_record_b32(&GlobalUseSoftwareRenderer)
             }
             
             { debug_data_block("Profile")
@@ -1119,7 +1119,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             
             added := window_dim - client_dim
             
-            render_dim := v2i {GlobalBackBuffer.width, GlobalBackBuffer.height}
+            render_dim := GlobalBackBuffer.dimension
             
             new_cx := (new_pos.cy * (render_dim.x - added.x)) / render_dim.y
             new_cy := (new_pos.cx * (render_dim.y - added.y)) / render_dim.x

@@ -42,7 +42,7 @@ OpenGLProgram :: struct {
 ////////////////////////////////////////////////
 
 GlobalShaderHeaderCode :: `
-#define u32 int unsigned
+#define u32 unsigned int
 #define i32 int
 #define f32 float
 #define v2 vec2
@@ -98,6 +98,7 @@ compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
 smooth INOUT v4 frag_color;
 smooth INOUT v2 frag_uv;
 smooth INOUT f32 fog_distance;
+centroid INOUT f32 input_z;
 
 #ifdef VERTEX
 void main (void) {
@@ -118,6 +119,8 @@ void main (void) {
     frag_color = in_color;
     
     fog_distance = dot(z_vertex.xyz - camera_p, fog_direction);
+    
+    input_z = 0.5 + 0.5 * (modified_z / z_min_transform.w);
 }
 #endif // VERTEX
 
@@ -125,10 +128,14 @@ void main (void) {
 out v4 result_color;
 
 void main (void) {
+    f32 frag_z = gl_FragCoord.z;
+    // @note(viktor): Force all samples from this primitive to have the same Z value.
+    gl_FragDepth = input_z;
+    frag_z = input_z;
+    
     f32 clip_depth = 0;
   #if DepthPeeling
     clip_depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), 0).r;
-    f32 frag_z = gl_FragCoord.z;
     if (frag_z <= clip_depth) {
         discard;
     }
@@ -236,23 +243,58 @@ void main (void) {
 #ifdef FRAGMENT
 out v4 result_color;
 
+#define DepthThreshold 0.01f
+
 void main (void) {
-    f32 closest_depth = 1.0f;
+#if 1
+    f32 depth_min = 1;
+    
+    for (i32 sample_index = 0; sample_index < sample_count; ++sample_index) {
+        depth_min = min(depth_min, texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), sample_index).r);
+    }
+        
+    gl_FragDepth = depth_min;
+    
     v4 combined_color = V4(0, 0, 0, 0);
     for (i32 sample_index = 0; sample_index < sample_count; ++sample_index) {
-        v4 color = texelFetch(color_sampler, ivec2(gl_FragCoord.xy), sample_index);
         f32 depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), sample_index).r;
-        
-        if (closest_depth > depth) {
-            closest_depth = depth;
+        if (depth == depth_min) {
+            v4 color = texelFetch(color_sampler, ivec2(gl_FragCoord.xy), sample_index);
+            combined_color += color;
         }
-        
-        combined_color += color;
     }
     
-    gl_FragDepth = closest_depth;
+    
     f32 inv_sample_count = 1.0f / sample_count;
     result_color = inv_sample_count * combined_color;
+#else
+    i32 unique_count = 1;
+    for (i32 index_a = 1; index_a < sample_count; ++index_a) {
+        f32 depth_a = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), index_a).r;
+        bool unique = true;
+        for (i32 index_b = 0; index_b < index_a; ++index_b) {
+            f32 depth_b = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), index_b).r;
+            if (depth_a == depth_b) {
+                unique = false;
+                break;
+            }
+        }
+        if (unique) {
+            unique_count += 1;
+        }
+    }
+    
+    result_color.a = 1;
+    if (unique_count == 1) result_color.rgb = V3(0,0,0);
+    if (unique_count == 2) result_color.rgb = V3(1,0,0);
+    if (unique_count == 3) result_color.rgb = V3(0,1,0);
+    if (unique_count == 4) result_color.rgb = V3(1,1,0);
+    if (unique_count == 5) result_color.rgb = V3(0,0,1);
+    if (unique_count == 6) result_color.rgb = V3(1,0,1);
+    if (unique_count == 7) result_color.rgb = V3(0,1,1);
+    if (unique_count == 8) result_color.rgb = V3(1,1,1);
+
+#endif
 }
 #endif // FRAGMENT
 `
@@ -380,7 +422,7 @@ end_program_common :: proc (program: OpenGLProgram) {
 compile_program_common :: proc (program: ^$Program, common: string) {
     defines: cstring = "#version 330\n"
     
-    vertex_buffer, fragment_buffer: [2048] u8
+    vertex_buffer, fragment_buffer: [4096] u8
     vb := make_string_builder(vertex_buffer[:])
     fb := make_string_builder(fragment_buffer[:])
     
