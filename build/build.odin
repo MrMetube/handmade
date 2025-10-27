@@ -19,7 +19,7 @@ flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", 
 debug    :: "-debug"
 internal :: "-define:INTERNAL=true"
 
-pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semicolon", "-vet-unused-variables", "-vet-style", "-vet-packages:main,hha", "-vet-unused-procedures" }
+pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semicolon", "-vet-unused-variables", "-vet-style",  "-vet-unused-procedures" }
 
 ////////////////////////////////////////////////
 
@@ -101,6 +101,13 @@ main :: proc () {
     fmt.sbprint(&sb, "common", "api", "printlike", sep=",")
     custom_attribute_flag := strings.to_string(sb)
     
+    sb = strings.builder_make()
+    fmt.sbprint(&sb, "-vet-packages:")
+    if PedanticPlatform do fmt.sbprint(&sb, "main,")
+    if PedanticGame do fmt.sbprint(&sb, "game,")
+    fmt.sbprint(&sb, "hha")
+    pedantic_vet_packages := strings.to_string(sb)
+    
     cmd: Cmd
     procs: Procs
     if .debugger in tasks {
@@ -130,6 +137,7 @@ main :: proc () {
         append(&cmd, debug)
         append(&cmd, ..flags)
         append(&cmd, custom_attribute_flag)
+        append(&cmd, pedantic_vet_packages)
         append(&cmd, ..pedantic)
         run_command(&cmd)
     }
@@ -164,7 +172,10 @@ main :: proc () {
         append(&cmd, custom_attribute_flag)
         append(&cmd, internal)
         append(&cmd, optimizations)
-        if PedanticGame do append(&cmd, ..pedantic)
+        if PedanticGame {
+            append(&cmd, pedantic_vet_packages)
+            append(&cmd, ..pedantic)
+        }
         
         silence: string
         run_command(&cmd, stdout = &silence)
@@ -191,7 +202,10 @@ main :: proc () {
             append(&cmd, custom_attribute_flag)
             append(&cmd, internal)
             append(&cmd, optimizations)
-            if PedanticPlatform do append(&cmd, ..pedantic)
+            if PedanticPlatform {
+                append(&cmd, pedantic_vet_packages)
+                append(&cmd, ..pedantic)
+            }
             
             run_command(&cmd)
         }

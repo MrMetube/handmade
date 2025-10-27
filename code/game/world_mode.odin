@@ -288,9 +288,8 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
     end_entity(mode, head, p)
     
     
-    glove_collision := grounded_collision(v3{0.2, 0.2, 0.2})
-    
     glove := begin_entity(mode)
+        glove.collision_volume = grounded_collision(v3{0.2, 0.2, 0.2})
         glove.flags += {.Collides}
         glove.brain_id = brain_id
         glove.brain_kind = .Hero

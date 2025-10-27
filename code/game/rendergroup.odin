@@ -411,7 +411,7 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     if transform.is_upright {
         z_bias = 0.25 * height
         
-        x_axis0 := size.x * v3{x_axis2.x, 0, x_axis2.y}
+        // x_axis0 := size.x * v3{x_axis2.x, 0, x_axis2.y}
         y_axis0 := size.y * v3{y_axis2.x, 0, y_axis2.y}
         x_axis1 := size.x * (x_axis2.x * group.game_cam.x + x_axis2.y * group.game_cam.y)
         y_axis1 := size.y * (y_axis2.x * group.game_cam.x + y_axis2.y * group.game_cam.y)
@@ -566,11 +566,6 @@ push_volume_outline :: proc (group: ^RenderGroup, rec: Rectangle3, transform: Tr
     color = store_color(color)
     c := v4_to_rgba(color)
     
-    t0 := v2{0, 0}
-    t1 := v2{1, 0}
-    t2 := v2{1, 1}
-    t3 := v2{0, 1}
-    
     bitmap := &group.commands.white_bitmap
     
     push_line_segment(group, bitmap, p0, p1, c, c, thickness)
@@ -633,12 +628,6 @@ unproject_with_transform :: proc (group: ^RenderGroup, transform: RenderTransfor
     return result
 }
 
-get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> (result: Rectangle3) {
-    z: f32 = 8
-    result = get_camera_rectangle_at_distance(group, z)
-    return result
-}
-
 get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle3) {
     min := unproject_with_transform(group, group.game_cam, 0, distance_from_camera)
     max := unproject_with_transform(group, group.game_cam, group.screen_size, distance_from_camera)
@@ -647,6 +636,14 @@ get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_cam
     
     return result
 }
+
+// @cleanup
+get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> (result: Rectangle3) {
+    z: f32 = 8
+    result = get_camera_rectangle_at_distance(group, z)
+    return result
+}
+
 
 fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meters: f32, half_dim_in_meters: $V) -> (result: V) {
     result = focal_length * (half_dim_in_meters / monitor_half_dim_in_meters)

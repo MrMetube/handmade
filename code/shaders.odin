@@ -98,7 +98,6 @@ compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
 smooth INOUT v4 frag_color;
 smooth INOUT v2 frag_uv;
 smooth INOUT f32 fog_distance;
-centroid INOUT f32 input_z;
 
 #ifdef VERTEX
 void main (void) {
@@ -119,8 +118,6 @@ void main (void) {
     frag_color = in_color;
     
     fog_distance = dot(z_vertex.xyz - camera_p, fog_direction);
-    
-    input_z = 0.5 + 0.5 * (modified_z / z_min_transform.w);
 }
 #endif // VERTEX
 
@@ -129,9 +126,6 @@ out v4 result_color;
 
 void main (void) {
     f32 frag_z = gl_FragCoord.z;
-    // @note(viktor): Force all samples from this primitive to have the same Z value.
-    gl_FragDepth = input_z;
-    frag_z = input_z;
     
     f32 clip_depth = 0;
   #if DepthPeeling
@@ -234,6 +228,9 @@ MultisampleResolve :: struct {
 
 compile_multisample_resolve :: proc (program: ^MultisampleResolve) {
     common := `
+// @todo(viktor): depth is non-linear - can we do something here that is based on ratio?
+#define DepthThreshold 0.001f
+
 #ifdef VERTEX
 void main (void) {
     gl_Position = in_p;
@@ -243,22 +240,24 @@ void main (void) {
 #ifdef FRAGMENT
 out v4 result_color;
 
-#define DepthThreshold 0.01f
-
 void main (void) {
 #if 1
-    f32 depth_min = 1;
+    f32 depth_max = 0;
+    f32 depth_min = 0;
     
     for (i32 sample_index = 0; sample_index < sample_count; ++sample_index) {
-        depth_min = min(depth_min, texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), sample_index).r);
+        f32 depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), sample_index).r;
+        depth_min = min(depth_min, depth);
+        depth_max = max(depth_max, depth);
     }
         
-    gl_FragDepth = depth_min;
+    gl_FragDepth = 0.5f * (depth_min + depth_max);
     
     v4 combined_color = V4(0, 0, 0, 0);
     for (i32 sample_index = 0; sample_index < sample_count; ++sample_index) {
         f32 depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), sample_index).r;
-        if (depth == depth_min) {
+        // if (depth == depth_min) 
+        {
             v4 color = texelFetch(color_sampler, ivec2(gl_FragCoord.xy), sample_index);
             combined_color += color;
         }

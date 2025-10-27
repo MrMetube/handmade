@@ -224,11 +224,6 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         c0 := v4_to_rgba(store_color(cf))
         c1 := v4_to_rgba(store_color(cn))
         
-        t0 := v2{0, 0}
-        t1 := v2{1, 0}
-        t2 := v2{1, 1}
-        t3 := v2{0, 1}
-        
         push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
         push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
         push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)

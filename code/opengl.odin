@@ -373,7 +373,7 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     compile_final_stretch(&open_gl.final_stretch)
     compile_multisample_resolve(&open_gl.multisample_resolve)
     
-    for depth_peel_index in 0..<open_gl.depth_peel_count {
+    for _ in 0..<open_gl.depth_peel_count {
         buffer := create_framebuffer(settings.dimension, depth_peel_flags)
         append(&open_gl.depth_peel_buffers, buffer)
         
@@ -396,8 +396,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     gl.DepthMask(true)
     gl.ColorMask(true, true, true, true)
-    gl.DepthFunc(gl.LEQUAL)
     gl.Enable(gl.DEPTH_TEST)
+    gl.DepthFunc(gl.LEQUAL)
     gl.Enable(gl.CULL_FACE)
     gl.CullFace(gl.BACK)
     gl.FrontFace(gl.CCW)
@@ -495,7 +495,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             ////////////////////////////////////////////////
             
             program := open_gl.zbias_no_depth_peel
-            alpha_threshold: f32
+            alpha_threshold: f32 = 0.02
             if peeling {
                 program = open_gl.zbias_depth_peel
                 buffer := get_depth_peel_read_buffer(peel_index-1)
@@ -595,8 +595,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
 }
 
 resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
-    gl.Disable(gl.DEPTH_TEST)
-    defer gl.Enable(gl.DEPTH_TEST)
+    gl.DepthFunc(gl.ALWAYS)
+    defer gl.DepthFunc(gl.LEQUAL)
     
     gl.BindFramebuffer(gl.FRAMEBUFFER, to.handle)
     defer gl.BindFramebuffer(gl.FRAMEBUFFER, 0)

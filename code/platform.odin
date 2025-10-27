@@ -272,8 +272,6 @@ main :: proc () {
     
     render_commands: RenderCommands
     {
-        render_commands.dimension = GlobalBackBuffer.dimension * 2
-        
         // @todo(viktor): decide what our sizes should be
         push_buffer := push(&frame_arena, u8, 32 * Megabyte)
         render_commands.push_buffer        = make_byte_buffer(push_buffer)
@@ -287,8 +285,10 @@ main :: proc () {
         render_commands.white_bitmap.width_over_height = 1
         render_commands.white_bitmap.texture_handle = gl_allocate_texture(render_commands.white_bitmap)
         
-        render_commands.multisampling_hint    = !true
-        render_commands.pixelation_hint       = false
+        render_commands.dimension = GlobalBackBuffer.dimension
+        
+        render_commands.multisampling_hint    = true
+        render_commands.pixelation_hint       = !false
         render_commands.depth_peel_count_hint = 4
     }
     
