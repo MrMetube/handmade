@@ -161,12 +161,11 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     
     most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
     info_text := format_string(debug.root_info, 
-        "% - % memory blocks, % used size / % total sizes, mouse %",
+        "% - % memory blocks, % used size / % total sizes",
         view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
         view_magnitude(memory_stats.block_count),
         view_memory_size(memory_stats.total_used),
         view_memory_size(memory_stats.total_size),
-        mouse_p,
     )
     debug.root_group.name = info_text
     

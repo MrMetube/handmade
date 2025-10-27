@@ -36,7 +36,8 @@ OpenGL :: struct {
     settings: RenderSettings,
     
     multisampling:    b32,
-    depth_peel_count: u32,
+    multisample_count: i32,
+    depth_peel_count:  u32,
     
     default_texture_format: u32,
     vertex_buffer_handle: u32,
@@ -116,6 +117,11 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         
         gl.GenBuffers(1, &open_gl.vertex_buffer_handle)
         gl.BindBuffer(gl.ARRAY_BUFFER, open_gl.vertex_buffer_handle)
+        
+        max_sample_count: i32
+        gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
+        max_sample_count = min(16, max_sample_count)
+        open_gl.multisample_count = max_sample_count
     }
     
     return gl_context
@@ -395,9 +401,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.FrontFace(gl.CCW)
     // gl.Enable(gl.SAMPLE_ALPHA_TO_COVERAGE)
     // gl.Enable(gl.SAMPLE_ALPHA_TO_ONE)
-    // gl.Enable(gl.MULTISAMPLE)
+    gl.Enable(gl.MULTISAMPLE)
     
     gl.Enable(gl.SCISSOR_TEST)
+    
     gl.Disable(gl.BLEND)
     gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     
@@ -441,10 +448,16 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             
           case .EndPeels:
             if open_gl.multisampling {
-                gl.BindFramebuffer(gl.READ_FRAMEBUFFER, open_gl.depth_peel_buffers.data[peel_index].handle)
-                gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, open_gl.depth_peel_resolve_buffers.data[peel_index].handle)
-                gl.Viewport(0, 0, render_dim.x, render_dim.y)
-                gl.BlitFramebuffer(0, 0, render_dim.x, render_dim.y, 0, 0, render_dim.x, render_dim.y, gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT, gl.NEAREST)
+                from := open_gl.depth_peel_buffers.data[peel_index]
+                to   := open_gl.depth_peel_resolve_buffers.data[peel_index]
+                when true {
+                    resolve_multisample(from, to, render_dim)
+                } else {
+                    gl.BindFramebuffer(gl.READ_FRAMEBUFFER, from.handle)
+                    gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, to.handle)
+                    gl.Viewport(0, 0, render_dim.x, render_dim.y)
+                    gl.BlitFramebuffer(0, 0, render_dim.x, render_dim.y, 0, 0, render_dim.x, render_dim.y, gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT, gl.NEAREST)
+                }
             }
             
             if peel_index < open_gl.depth_peel_count-1 {
@@ -483,8 +496,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             alpha_threshold: f32
             if peeling {
                 program = open_gl.zbias_depth_peel
-                
                 buffer := get_depth_peel_read_buffer(peel_index-1)
+                
+                // @metaprogram
                 gl.ActiveTexture(gl.TEXTURE1)
                 gl.BindTexture(gl.TEXTURE_2D, buffer.depth_texture)
                 gl.ActiveTexture(gl.TEXTURE0)
@@ -504,9 +518,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             }
             end_timed_block(loop)
             
-            gl.BindTexture(gl.TEXTURE_2D, 0)
-            
             end_program(program)
+            
+            // @metaprogram
+            gl.BindTexture(gl.TEXTURE_2D, 0)
             if peeling {
                 gl.ActiveTexture(gl.TEXTURE1)
                 gl.BindTexture(gl.TEXTURE_2D, 0)
@@ -533,6 +548,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
     begin_program(open_gl.peel_composite)
+    // @metaprogram
     for index in 0 ..< open_gl.depth_peel_count {
         gl.ActiveTexture(gl.TEXTURE0 + index)
         buffer := get_depth_peel_read_buffer(index)
@@ -541,6 +557,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
     
+    // @metaprogram
     for index in 0 ..< open_gl.depth_peel_count {
         gl.ActiveTexture(gl.TEXTURE0 + index)
         gl.BindTexture(gl.TEXTURE_2D, 0)
@@ -562,11 +579,13 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.Scissor(get_xywh(draw_region))
     
     begin_program(open_gl.final_stretch)
+    // @metaprogram
     gl.ActiveTexture(gl.TEXTURE0)
     gl.BindTexture(gl.TEXTURE_2D, open_gl.resolve_buffer.color_texture)
     
     gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
     
+    // @metaprogram
     gl.ActiveTexture(gl.TEXTURE0)
     gl.BindTexture(gl.TEXTURE_2D, 0)
     
@@ -574,8 +593,11 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
 }
 
 resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
-    gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, to.handle)
-    defer gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, 0)
+    gl.Disable(gl.DEPTH_TEST)
+    defer gl.Enable(gl.DEPTH_TEST)
+    
+    gl.BindFramebuffer(gl.FRAMEBUFFER, to.handle)
+    defer gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
     
     gl.Viewport(0, 0, dim.x, dim.y)
     gl.Scissor(0, 0, dim.x, dim.y)
@@ -588,19 +610,22 @@ resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
+    open_gl.multisample_resolve.sample_count.value = open_gl.multisample_count
     begin_program(open_gl.multisample_resolve)
     
+    // @metaprogram
     gl.ActiveTexture(gl.TEXTURE0)
-    gl.BindTexture(gl.TEXTURE_2D, from.color_texture)
+    gl.BindTexture(gl.TEXTURE_2D_MULTISAMPLE, from.color_texture)
     gl.ActiveTexture(gl.TEXTURE1)
-    gl.BindTexture(gl.TEXTURE_2D, from.depth_texture)
+    gl.BindTexture(gl.TEXTURE_2D_MULTISAMPLE, from.depth_texture)
     
     gl.DrawArrays(gl.TRIANGLE_STRIP, 0, auto_cast len(vertex_buffer))
     
-    gl.ActiveTexture(gl.TEXTURE0)
-    gl.BindTexture(gl.TEXTURE_2D, 0)
+    // @metaprogram
     gl.ActiveTexture(gl.TEXTURE1)
-    gl.BindTexture(gl.TEXTURE_2D, 0)
+    gl.BindTexture(gl.TEXTURE_2D_MULTISAMPLE, 0)
+    gl.ActiveTexture(gl.TEXTURE0)
+    gl.BindTexture(gl.TEXTURE_2D_MULTISAMPLE, 0)
     
     end_program(open_gl.multisample_resolve)
 }
@@ -684,11 +709,7 @@ create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, di
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     
     if slot == gl.TEXTURE_2D_MULTISAMPLE {
-        max_sample_count: i32
-        gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
-        max_sample_count = min(16, max_sample_count)
-        
-        gl.TexImage2DMultisample(slot, max_sample_count, format, dim.x, dim.y, false)
+        gl.TexImage2DMultisample(slot, open_gl.multisample_count, format, dim.x, dim.y, false)
     } else {
         data_format: u32 = format == gl.DEPTH_COMPONENT24 ? gl.DEPTH_COMPONENT : gl.RGBA
         

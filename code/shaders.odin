@@ -9,6 +9,16 @@ sl :: struct ($T: typeid) {
     value:    T,
 }
 
+sl_m4  :: sl(^m4)
+sl_u32 :: sl(u32)
+sl_i32 :: sl(i32)
+sl_f32 :: sl(f32)
+sl_v2  :: sl(v2)
+sl_v3  :: sl(v3)
+sl_v4  :: sl(v4)
+sl_sampler2D :: sl(i32)
+sl_sampler2DMS :: sl(i32)
+
 gl_m4          :: distinct i32
 gl_i32         :: distinct i32
 gl_u32         :: distinct i32
@@ -35,7 +45,6 @@ GlobalShaderHeaderCode :: `
 #define u32 int unsigned
 #define i32 int
 #define f32 float
-#define v2i ivec2
 #define v2 vec2
 #define v3 vec3
 #define v4 vec4
@@ -66,12 +75,6 @@ ZBiasProgram :: struct {
         fog_direction: gl_v3,
     },
     
-    using pipeline_attributes: struct {
-        frag_color: gl_v4,
-        frag_uv:    gl_v2,
-        fog_distance: gl_f32,
-    },
-    
     using fragment_uniforms: struct {
         fog_color:       gl_v3,
         texture_sampler: gl_sampler2D,
@@ -89,20 +92,14 @@ ZBiasProgram :: struct {
 ////////////////////////////////////////////////
 
 compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
-    defines := ctprint(`
-#version 130
-
+    common := tprint(`
 #define DepthPeeling %
-`, depth_peeling ? 1 : 0)
     
-    buf: [2048] u8
-    sb := make_string_builder(buf[:])
-    
-    gl_generate(&sb, type_of(program.vertex_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.vertex_inputs), "in")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth out")
-    
-    append(&sb, `
+smooth INOUT v4 frag_color;
+smooth INOUT v2 frag_uv;
+smooth INOUT f32 fog_distance;
+
+#ifdef VERTEX
 void main (void) {
     v4 in_vertex = V4(in_p.xyz, 1);
     f32 z_bias = in_p.w;
@@ -122,31 +119,17 @@ void main (void) {
     
     fog_distance = dot(z_vertex.xyz - camera_p, fog_direction);
 }
-`)
-    vertex_code := to_cstring(&sb)
-    
-    buf2: [2048] u8
-    sb = make_string_builder(buf2[:])
-    
-    gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth in")
-    
-    append(&sb, `
+#endif // VERTEX
+
+#ifdef FRAGMENT
 out v4 result_color;
 
 void main (void) {
     f32 clip_depth = 0;
   #if DepthPeeling
-    clip_depth = texelFetch(depth_sampler, v2i(gl_FragCoord.xy), 0).r;
+    clip_depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), 0).r;
     f32 frag_z = gl_FragCoord.z;
     if (frag_z <= clip_depth) {
-        discard;
-    }
-        
-    f32 ClipDepth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), 0).r;
-    f32 FragZ = gl_FragCoord.z;
-    if(FragZ <= ClipDepth)
-    {
         discard;
     }
   #endif // DepthPeeling
@@ -165,15 +148,10 @@ void main (void) {
         discard;
     }
 }
-`)
+#endif // FRAGMENT
+`, depth_peeling ? 1 : 0)
     
-    fragment_code := to_cstring(&sb)
-    
-    program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
-    gl_get_locations(program.handle, &program.vertex_inputs, false)
-    
-    gl_get_locations(program.handle, &program.vertex_uniforms, true)
-    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+    compile_program_common(program, common)
 }
 
 ////////////////////////////////////////////////
@@ -182,10 +160,6 @@ PeelCompositeProgram :: struct {
     using base: OpenGLProgram,
     
     using vertex_uniforms : struct {},
-    
-    using pipeline_attributes: struct {
-        frag_uv: gl_v2,
-    },
     
     using fragment_uniforms: struct {
         // @todo(viktor): support arrays of samplers
@@ -197,30 +171,17 @@ PeelCompositeProgram :: struct {
 }
 
 compile_peel_composite :: proc (program: ^PeelCompositeProgram) {
-    defines: cstring = "#version 130"
-    
-    buf: [2048] u8
-    sb := make_string_builder(buf[:])
-    
-    gl_generate(&sb, type_of(program.vertex_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.vertex_inputs), "in")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth out")
-    
-    append(&sb, `
+    common := `
+smooth INOUT v2 frag_uv;
+
+#ifdef VERTEX
 void main (void) {
     gl_Position = in_p;
     frag_uv = in_uv;
 }
-`)
-    vertex_code := to_cstring(&sb)
-    
-    buf2: [2048] u8
-    sb = make_string_builder(buf2[:])
-    
-    gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "in")
-    
-    append(&sb, `
+#endif // VERTEX
+
+#ifdef FRAGMENT
 out v4 result_color;
 
 void main (void) {
@@ -245,14 +206,10 @@ void main (void) {
     result_color.rgb = peel1.rgb + (1 - peel1.a) * result_color.rgb;
     result_color.rgb = peel0.rgb + (1 - peel0.a) * result_color.rgb;
 }
-`)
-    fragment_code := to_cstring(&sb)
-
-    program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
-    gl_get_locations(program.handle, &program.vertex_inputs, false)
+#endif // FRAGMENT
+`
     
-    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
-    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+    compile_program_common(program, common)
 }
 
 ////////////////////////////////////////////////
@@ -261,64 +218,46 @@ MultisampleResolve :: struct {
     using base: OpenGLProgram,
     
     using vertex_uniforms: struct {},
-    using pipeline_attributes: struct {},
-    
     using fragment_uniforms: struct {
-        sample_count:  gl_i32,
+        sample_count:  sl_i32,
         color_sampler: gl_sampler2DMS,
         depth_sampler: gl_sampler2DMS,
     },
 }
 
 compile_multisample_resolve :: proc (program: ^MultisampleResolve) {
-    defines: cstring = "#version 130"
-    
-    buf: [2048] u8
-    sb := make_string_builder(buf[:])
-    
-    gl_generate(&sb, type_of(program.vertex_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.vertex_inputs), "in")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth out")
-    
-    append(&sb, `
+    common := `
+#ifdef VERTEX
 void main (void) {
     gl_Position = in_p;
 }
-`)
-    vertex_code := to_cstring(&sb)
-    
-    buf2: [2048] u8
-    sb = make_string_builder(buf2[:])
-    
-    gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "in")
-    
-    append(&sb, `
+#endif // VERTEX
+
+#ifdef FRAGMENT
 out v4 result_color;
 
 void main (void) {
     f32 closest_depth = 1.0f;
+    v4 combined_color = V4(0, 0, 0, 0);
     for (i32 sample_index = 0; sample_index < sample_count; ++sample_index) {
-        v4 color = texel_fetch(color_sampler, v2i(gl_FragCoord.xy), sample_index);
-        f32 depth = texel_fetch(depth_sampler, v2i(gl_FragCoord.xy), sample_index).r;
+        v4 color = texelFetch(color_sampler, ivec2(gl_FragCoord.xy), sample_index);
+        f32 depth = texelFetch(depth_sampler, ivec2(gl_FragCoord.xy), sample_index).r;
         
         if (closest_depth > depth) {
             closest_depth = depth;
-            
         }
         
-        result_color.rgb = peel3.rgb;
-        result_color.rgb = peel2.rgb + (1 - peel2.a) * result_color.rgb;
+        combined_color += color;
     }
-}
-`)
-    fragment_code := to_cstring(&sb)
-
-    program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
-    gl_get_locations(program.handle, &program.vertex_inputs, false)
     
-    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
-    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+    gl_FragDepth = closest_depth;
+    f32 inv_sample_count = 1.0f / sample_count;
+    result_color = inv_sample_count * combined_color;
+}
+#endif // FRAGMENT
+`
+    
+    compile_program_common(program, common)
 }
 
 ////////////////////////////////////////////////
@@ -328,56 +267,33 @@ FinalStretchProgram :: struct {
     
     using vertex_uniforms: struct {},
     
-    using pipeline_attributes: struct {
-        frag_color: gl_v4,
-        frag_uv:    gl_v2,
-    },
-    
     using fragment_uniforms: struct {
         image: gl_sampler2D,
     },
 }
 
 compile_final_stretch :: proc (program: ^FinalStretchProgram) {
-    defines: cstring = "#version 130"
-    
-    buf: [2048] u8
-    sb := make_string_builder(buf[:])
-    
-    gl_generate(&sb, type_of(program.vertex_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.vertex_inputs), "in")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "smooth out")
-    
-    append(&sb, `
+    common := `
+smooth INOUT v2 frag_uv;
+
+#ifdef VERTEX
 void main (void) {
     gl_Position = in_p;
     frag_uv = in_uv;
-    frag_color = in_color;
 }
-`)
-    vertex_code := to_cstring(&sb)
-    
-    buf2: [2048] u8
-    sb = make_string_builder(buf2[:])
-    
-    gl_generate(&sb, type_of(program.fragment_uniforms), "uniform")
-    gl_generate(&sb, type_of(program.pipeline_attributes), "in")
-    
-    append(&sb, `
+#endif // VERTEX
+
+#ifdef FRAGMENT
 out v4 result_color;
 
 void main (void) {
     v4 sample = texture(image, frag_uv);
     result_color = sample;
 }
-`)
-    fragment_code := to_cstring(&sb)
+#endif // FRAGMENT
+`
 
-    program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
-    gl_get_locations(program.handle, &program.vertex_inputs, false)
-    
-    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
-    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+    compile_program_common(program, common)
 }
 
 ////////////////////////////////////////////////
@@ -394,9 +310,9 @@ begin_program_multisample_resolve :: proc (program: MultisampleResolve) {
     begin_program_common(program)
     
     // @todo(viktor): @metaprogram here?
-    gl.Uniform1i(auto_cast program.sample_count, 0)
+    gl.Uniform1i(auto_cast program.sample_count.location,  program.sample_count.value)
     gl.Uniform1i(auto_cast program.color_sampler, 0)
-    gl.Uniform1i(auto_cast program.depth_sampler, 0)
+    gl.Uniform1i(auto_cast program.depth_sampler, 1)
 }
 begin_program_peel_composite :: proc (program: PeelCompositeProgram) {
     begin_program_common(program)
@@ -460,6 +376,41 @@ end_program_common :: proc (program: OpenGLProgram) {
 }
 
 ////////////////////////////////////////////////
+
+compile_program_common :: proc (program: ^$Program, common: string) {
+    defines: cstring = "#version 330\n"
+    
+    vertex_buffer, fragment_buffer: [2048] u8
+    vb := make_string_builder(vertex_buffer[:])
+    fb := make_string_builder(fragment_buffer[:])
+    
+    append(&vb, `
+#define INOUT out
+#define VERTEX
+`)
+    
+    append(&fb, `
+#define INOUT in
+#define FRAGMENT
+`)
+    
+    gl_generate(&vb, type_of(program.vertex_uniforms), "uniform")
+    gl_generate(&vb, type_of(program.vertex_inputs), "in")
+    
+    gl_generate(&fb, type_of(program.fragment_uniforms), "uniform")
+    
+    append(&vb, common)
+    append(&fb, common)
+    
+    vertex_code := to_cstring(&vb)
+    fragment_code := to_cstring(&fb)
+    
+    program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
+    gl_get_locations(program.handle, &program.vertex_inputs, false)
+    
+    gl_get_locations(program.handle, &program.vertex_uniforms,   true)
+    gl_get_locations(program.handle, &program.fragment_uniforms, true)
+}
 
 create_program :: proc (defines, header_code, vertex_code, fragment_code: cstring) -> (result: u32) {
     shared_code := ctprint("% %", defines, header_code)
@@ -532,7 +483,17 @@ gl_type_to_string :: proc (type: typeid) -> (result: string) {
         case gl_v3:          result = "v3"
         case gl_v4:          result = "v4"
         case gl_sampler2D:   result = "sampler2D"
-        case gl_sampler2DMS: result = "gl_sampler2DMS"
+        case gl_sampler2DMS: result = "sampler2DMS"
+        
+        case sl_i32:         result = "i32"
+        case sl_u32:         result = "u32"
+        case sl_m4:          result = "m4"
+        case sl_f32:         result = "f32"
+        case sl_v2:          result = "v2"
+        case sl_v3:          result = "v3"
+        case sl_v4:          result = "v4"
+        case sl_sampler2D:   result = "sampler2D"
+        case sl_sampler2DMS: result = "sampler2DMS"
     }
     
     return result

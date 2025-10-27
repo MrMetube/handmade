@@ -288,7 +288,7 @@ main :: proc () {
         render_commands.white_bitmap.width_over_height = 1
         render_commands.white_bitmap.texture_handle    = gl_allocate_texture(1, 1, raw_data(render_commands.white_bitmap.memory))
         
-        render_commands.multisampling_hint    = false
+        render_commands.multisampling_hint    = !true
         render_commands.pixelation_hint       = false
         render_commands.depth_peel_count_hint = 4
     }
