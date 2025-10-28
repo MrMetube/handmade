@@ -146,6 +146,7 @@ Textured_Quads :: struct {
 @(common)
 Textured_Vertex :: struct {
     p:     v4,
+    n:     v3,
     uv:    v2,
     color: Color,
 }
@@ -328,13 +329,25 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     entry := get_current_quads(group)
     entry.quad_count += 1
     
+    // @todo(viktor): Just pass the normal down directly
+    e10 := p1 - p0
+    e20 := p2 - p0
+    
+    e10.z += e10.w
+    e20.z += e20.w
+    
+    normal := cross(e10.xyz, e20.xyz)
+    normal = normalize_or_zero(normal)
+    
+    n0, n1, n2, n3: v3 = normal, normal, normal, normal
+    
     append(&group.commands.quad_bitmap_buffer, bitmap)
     // @note(viktor): reorder from quad ordering to triangle strip ordering
     append(&group.commands.vertex_buffer, 
-        Textured_Vertex {p3, t3, c3},
-        Textured_Vertex {p0, t0, c0},
-        Textured_Vertex {p2, t2, c2},
-        Textured_Vertex {p1, t1, c1},
+        Textured_Vertex {p3, n3, t3, c3},
+        Textured_Vertex {p0, n0, t0, c0},
+        Textured_Vertex {p2, n2, t2, c2},
+        Textured_Vertex {p1, n1, t1, c1},
     )
 }
 

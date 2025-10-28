@@ -465,8 +465,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             if peel_index < open_gl.depth_peel_count-1 {
                 commands.push_buffer.read_cursor = peel_header_restore
                 
-                peeling = peel_index > 0
                 peel_index += 1
+                peeling = peel_index > 0
                 
                 gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[peel_index], render_dim)
             } else {
@@ -532,6 +532,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
         }
     }
     
+    from := open_gl.depth_peel_buffers.data[peel_index]
+    to   := open_gl.depth_peel_resolve_buffers.data[peel_index]
+    resolve_multisample(from, to, render_dim)
+    
     ////////////////////////////////////////////////
     
     gl.Disable(gl.DEPTH_TEST)
@@ -542,10 +546,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.Scissor(0, 0, render_dim.x, render_dim.y)
     
     vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, {0, 1}, 0xff},
-        {{-1, -1, 0, 1}, {0, 0}, 0xff},
-        {{ 1,  1, 0, 1}, {1, 1}, 0xff},
-        {{ 1, -1, 0, 1}, {1, 0}, 0xff},
+        {{-1,  1, 0, 1}, {0, 0, 0}, {0, 1}, 0xff},
+        {{-1, -1, 0, 1}, {0, 0, 0}, {0, 0}, 0xff},
+        {{ 1,  1, 0, 1}, {0, 0, 0}, {1, 1}, 0xff},
+        {{ 1, -1, 0, 1}, {0, 0, 0}, {1, 0}, 0xff},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
@@ -605,10 +609,10 @@ resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
     gl.Scissor(0, 0, dim.x, dim.y)
     
     vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, {0, 1}, 0xff},
-        {{-1, -1, 0, 1}, {0, 0}, 0xff},
-        {{ 1,  1, 0, 1}, {1, 1}, 0xff},
-        {{ 1, -1, 0, 1}, {1, 0}, 0xff},
+        {{-1,  1, 0, 1}, {0, 0, 0}, {0, 1}, 0xff},
+        {{-1, -1, 0, 1}, {0, 0, 0}, {0, 0}, 0xff},
+        {{ 1,  1, 0, 1}, {0, 0, 0}, {1, 1}, 0xff},
+        {{ 1, -1, 0, 1}, {0, 0, 0}, {1, 0}, 0xff},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     

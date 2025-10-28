@@ -34,6 +34,7 @@ OpenGLProgram :: struct {
     
     using vertex_inputs: struct {
         in_p:     gl_v4,
+        in_n:     gl_v3,
         in_uv:    gl_v2,
         in_color: gl_v4,
     },
@@ -54,7 +55,9 @@ GlobalShaderHeaderCode :: `
 #define m4 mat4x4
 #define linear_blend(a, b, t) mix(a, b, t)
 
-#define clamp01(t) clamp(t, 0, 1)
+#define clamp01(t) clamp((t), 0, 1)
+
+#define square(t) ((t) * (t))
 
 f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
     f32 range = max - min;
@@ -98,6 +101,7 @@ compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
 smooth INOUT v4 frag_color;
 smooth INOUT v2 frag_uv;
 smooth INOUT f32 fog_distance;
+smooth INOUT v3 world_position;
 
 #ifdef VERTEX
 void main (void) {
@@ -118,6 +122,8 @@ void main (void) {
     frag_color = in_color;
     
     fog_distance = dot(z_vertex.xyz - camera_p, fog_direction);
+    
+    world_position = z_vertex.xyz;
 }
 #endif // VERTEX
 
@@ -125,6 +131,11 @@ void main (void) {
 out v4 result_color;
 
 void main (void) {
+    v3 light_pos0 = V3(0, 0, 0);
+    f32 light_strength0 = 1.0f;
+    v3 light_pos1 = V3(8, 0, 1);
+    f32 light_strength1 = 2.0f;
+
     f32 frag_z = gl_FragCoord.z;
     
     f32 clip_depth = 0;
@@ -143,7 +154,17 @@ void main (void) {
     modulated *= alpha_amount;
     
     if (modulated.a > alpha_threshold) {
+        f32 light_distance0 = distance(world_position, light_pos0);
+        f32 light_here0 = light_strength0 / square(light_distance0);
+        
+        f32 light_distance2 = distance(world_position, light_pos1);
+        f32 light_here1 = light_strength1 / square(light_distance2);
+        
+        f32 light_total = light_here0 + light_here1;
+        
         result_color.rgb = linear_blend(modulated.rgb, fog_color, fog_amount);
+        result_color.rgb *= light_total;
+        
         result_color.a = modulated.a;
     } else {
         discard;
@@ -395,6 +416,11 @@ begin_program_common :: proc (program: OpenGLProgram) {
         gl.EnableVertexAttribArray(id)
         gl.VertexAttribPointer(id, len(dummy.uv), gl.FLOAT, false, stride, offset_of(dummy.uv))
     }
+    if program.in_n != -1 {
+        id := cast(u32) program.in_n
+        gl.EnableVertexAttribArray(id)
+        gl.VertexAttribPointer(id, len(dummy.n), gl.FLOAT, false, stride, offset_of(dummy.n))
+    }
     if program.in_color != -1 {
         id := cast(u32) program.in_color
         gl.EnableVertexAttribArray(id)
@@ -409,9 +435,21 @@ begin_program_common :: proc (program: OpenGLProgram) {
 
 end_program :: proc { end_program_common }
 end_program_common :: proc (program: OpenGLProgram) {
-    if program.in_uv    != -1 do gl.DisableVertexAttribArray(cast(u32) program.in_uv)
-    if program.in_color != -1 do gl.DisableVertexAttribArray(cast(u32) program.in_color)
-    if program.in_p     != -1 do gl.DisableVertexAttribArray(cast(u32) program.in_p)
+    program := program
+    base := cast(umm) cast(pmm) &program.vertex_inputs
+    
+    struct_type :: type_of(program.vertex_inputs)
+    info := type_info_of(struct_type).variant.(runtime.Type_Info_Struct)
+    for index in 0 ..< info.field_count {
+        offset := info.offsets[index]
+        type   := info.types[index]
+        
+        // @todo(viktor): make a proc for this reflection read from member of struct
+        assert(size_of(i32) == type.size)
+        value := (cast(^i32) (base + offset))^
+        
+        if value != -1 do gl.DisableVertexAttribArray(cast(u32) value)
+    }
     
     gl.UseProgram(0)
 }
