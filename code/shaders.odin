@@ -140,7 +140,7 @@ out v4 result_color;
 
 void main (void) {
     v3  light_p = light_p;
-    f32 light_strength = 6.0f;
+    v3 light_strength = V3(6, 1, 4);
 
     f32 frag_z = gl_FragCoord.z;
     
@@ -163,33 +163,41 @@ void main (void) {
         v3 to_camera = camera_p - world_p;
         f32 camera_distance = length(to_camera);
         to_camera *= (1.0f / camera_distance);
-        f32 cos_camera_angle = dot(to_camera, world_n);
         
         v3 to_light = light_p - world_p;
         f32 light_distance = length(to_light);
         to_light *= (1.0f / light_distance);
-        f32 cos_light_angle = dot(to_light, world_n);
+        v3 cos_light_angle = V3(
+            dot(to_light, world_n),
+            dot(to_light, world_n),
+            dot(to_light, world_n)
+        );
         cos_light_angle = clamp(cos_light_angle, 0, 1);
         
         
         v3 reflected_d = -to_camera + 2 * dot(world_n, to_camera) * world_n;
-        f32 cos_reflected = dot(to_light, reflected_d);
+        v3 cos_reflected = V3(
+            dot(to_light, reflected_d),
+            dot(to_light, reflected_d),
+            dot(to_light, reflected_d)
+        );
         cos_reflected = clamp(cos_reflected, 0, 1);
+        
         cos_reflected *= cos_reflected;
         cos_reflected *= cos_reflected;
         cos_reflected *= cos_reflected;
         cos_reflected *= cos_reflected;
         cos_reflected *= cos_reflected;
         
-        f32 light_amount = light_strength / square(light_distance);
+        v3 light_amount = light_strength / square(light_distance);
         
         f32 diffuse_c = 0.5f;
-        f32 diffuse_light = diffuse_c * cos_light_angle * light_amount;
+        v3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
         
         f32 spec_c = 2.0f;
-        f32 spec_light = spec_c * cos_reflected * light_amount;
+        v3 spec_light = spec_c * cos_reflected * light_amount;
         
-        f32 light_total = diffuse_light + spec_light;
+        v3 light_total = diffuse_light + spec_light;
         
         result_color.rgb = linear_blend(modulated.rgb, fog_color, fog_amount);
         result_color.rgb *= light_total;

@@ -56,9 +56,20 @@ OpenGL :: struct {
     peel_composite:      PeelCompositeProgram, // @note(viktor): composite all passes
     final_stretch:       FinalStretchProgram,
     multisample_resolve: MultisampleResolve,
+    
+    light_texture_mip_count:     u32,
+    light_texture_channel_count: u32,
+    light_texture_count: u32,
+    light_textures: [8] FrameBuffer,
 }
 
-CreateFramebufferFlags :: bit_set[enum{ multisampled, filtered, has_color, has_depth }]
+CreateFramebufferFlags :: bit_set[enum{ 
+    multisampled, 
+    filtered, 
+    color, 
+    depth,
+    float,
+}]
 
 FrameBuffer :: struct {
     handle: u32,
@@ -343,6 +354,9 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for &buffer in slice(&open_gl.depth_peel_resolve_buffers) {
         delete_framebuffer(&buffer)
     }
+    for &buffer in open_gl.light_textures {
+        delete_framebuffer(&buffer)
+    }
     clear(&open_gl.depth_peel_buffers)
     clear(&open_gl.depth_peel_resolve_buffers)
     
@@ -357,12 +371,12 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     open_gl.multisampling    = settings.multisampling_hint
     open_gl.depth_peel_count = min(settings.depth_peel_count_hint, len(open_gl.depth_peel_buffers.data))
     
-    resolve_flags := CreateFramebufferFlags{ .has_color }
+    resolve_flags := CreateFramebufferFlags{ .color }
     if !settings.pixelation_hint {
         resolve_flags += { .filtered }
     }
     
-    depth_peel_flags := CreateFramebufferFlags{ .has_color, .has_depth }
+    depth_peel_flags := CreateFramebufferFlags{ .color, .depth }
     if open_gl.multisampling {
         depth_peel_flags += { .multisampled }
     }
@@ -383,6 +397,17 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
             resolve_buffer := create_framebuffer(settings.dimension, depth_peel_flags - { .multisampled })
             append(&open_gl.depth_peel_resolve_buffers, resolve_buffer)
         }
+    }
+    
+    light_texture_width  := cast(i32) 1 << settings.light_texture_dimension_power_of_2.x
+    light_texture_height := cast(i32) 1 << settings.light_texture_dimension_power_of_2.y
+    light_texture_depth  := cast(i32) 1 << settings.light_texture_dimension_power_of_2.z
+    open_gl.light_texture_mip_count = cast(u32) max(light_texture_width, light_texture_height, light_texture_depth)
+    
+    open_gl.light_texture_count = 3
+    open_gl.light_texture_channel_count = 4    
+    for &buffer in open_gl.light_textures {
+        buffer = create_framebuffer({light_texture_width, light_texture_height}, resolve_flags)
     }
 }
 
@@ -677,6 +702,9 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 
 ////////////////////////////////////////////////
 
+// @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
+GlobalDepthComponent :: gl.DEPTH_COMPONENT24
+
 create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
     gl.GenFramebuffers(1, &result.handle)
     gl.BindFramebuffer(gl.FRAMEBUFFER, result.handle)
@@ -684,15 +712,14 @@ create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result:
     slot: u32 = .multisampled in flags ? gl.TEXTURE_2D_MULTISAMPLE : gl.TEXTURE_2D
     filter_type: i32 = .filtered in flags ? gl.LINEAR : gl.NEAREST
     
-    if .has_color in flags {
+    if .color in flags {
         result.color_texture = create_framebuffer_texture(slot, filter_type, open_gl.default_texture_format, dim)
         
         gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, result.color_texture, 0)
     }
     
-    if .has_depth in flags {
-        // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
-        result.depth_texture = create_framebuffer_texture(slot, filter_type, gl.DEPTH_COMPONENT24, dim)
+    if .depth in flags {
+        result.depth_texture = create_framebuffer_texture(slot, filter_type, GlobalDepthComponent, dim)
         
         gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, slot, result.depth_texture, 0)
     }
@@ -719,7 +746,7 @@ create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, di
     if slot == gl.TEXTURE_2D_MULTISAMPLE {
         gl.TexImage2DMultisample(slot, open_gl.multisample_count, format, dim.x, dim.y, false)
     } else {
-        data_format: u32 = format == gl.DEPTH_COMPONENT24 ? gl.DEPTH_COMPONENT : gl.RGBA
+        data_format: u32 = format == GlobalDepthComponent ? gl.DEPTH_COMPONENT : gl.RGBA
         
         gl.TexImage2D(slot, 0, auto_cast format, dim.x, dim.y, 0, data_format, gl.UNSIGNED_BYTE, nil)
     }

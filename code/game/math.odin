@@ -18,6 +18,9 @@ v4  :: [4] f32
 v2i :: [2] i32
 v3i :: [3] i32
 v4i :: [4] i32
+v2u :: [2] u32
+v3u :: [3] u32
+v4u :: [4] u32
 
 m3 :: #column_major matrix[3,3] f32
 m4 :: #column_major matrix[4,4] f32

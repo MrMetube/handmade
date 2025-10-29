@@ -290,6 +290,7 @@ main :: proc () {
         render_commands.multisampling_hint    = true
         render_commands.pixelation_hint       = !false
         render_commands.depth_peel_count_hint = 4
+        render_commands.light_texture_dimension_power_of_2 = {9, 8, 1}
     }
     
     game_memory := GameMemory {
