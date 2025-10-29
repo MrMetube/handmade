@@ -21,6 +21,7 @@ World_Mode :: struct {
     debug_camera_pitch: f32,
     debug_camera_orbit: f32,
     debug_camera_dolly: f32,
+    debug_light_p: v3,
     
     camera_pitch: f32,
     camera_orbit: f32,

@@ -126,7 +126,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     y := get_column(camera_object, 1)
     z := get_column(camera_object, 2)
     near_clip_plane :: 3
-    push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true, near_clip_plane = near_clip_plane)
+    push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true, near_clip_plane = near_clip_plane, debug_light_p = mode.debug_light_p)
     
     ////////////////////////////////////////////////
     
@@ -167,7 +167,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         y = get_column(debug_camera_object, 1)
         z = get_column(debug_camera_object, 2)
         
-        push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
+        push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length, debug_light_p = mode.debug_light_p)
     }
     
     ////////////////////////////////////////////////
@@ -185,6 +185,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     last_camera_p := mode.camera.p
     camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
     if camera_entity != nil {
+        mode.debug_light_p = camera_entity.p + {0,0,1}
         update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
     }
     

@@ -72,9 +72,12 @@ f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
 ZBiasProgram :: struct {
     using base: OpenGLProgram,
     
+    using shared_uniforms : struct {
+        camera_p: gl_v3,
+    },
+    
     using vertex_uniforms : struct {
         projection: gl_m4,
-        camera_p:   gl_v3,
         fog_direction: gl_v3,
     },
     
@@ -89,6 +92,8 @@ ZBiasProgram :: struct {
         
         clip_alpha_begin: gl_f32,
         clip_alpha_end:   gl_f32,
+        
+        light_p: gl_v3,
     },
 }
 
@@ -101,7 +106,8 @@ compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
 smooth INOUT v4 frag_color;
 smooth INOUT v2 frag_uv;
 smooth INOUT f32 fog_distance;
-smooth INOUT v3 world_position;
+smooth INOUT v3 world_p;
+smooth INOUT v3 world_n;
 
 #ifdef VERTEX
 void main (void) {
@@ -123,18 +129,18 @@ void main (void) {
     
     fog_distance = dot(z_vertex.xyz - camera_p, fog_direction);
     
-    world_position = z_vertex.xyz;
+    world_p = z_vertex.xyz;
+    world_n = in_n;
 }
 #endif // VERTEX
+
 
 #ifdef FRAGMENT
 out v4 result_color;
 
 void main (void) {
-    v3 light_pos0 = V3(0, 0, 0);
-    f32 light_strength0 = 1.0f;
-    v3 light_pos1 = V3(8, 0, 1);
-    f32 light_strength1 = 2.0f;
+    v3  light_p = light_p;
+    f32 light_strength = 6.0f;
 
     f32 frag_z = gl_FragCoord.z;
     
@@ -154,13 +160,36 @@ void main (void) {
     modulated *= alpha_amount;
     
     if (modulated.a > alpha_threshold) {
-        f32 light_distance0 = distance(world_position, light_pos0);
-        f32 light_here0 = light_strength0 / square(light_distance0);
+        v3 to_camera = camera_p - world_p;
+        f32 camera_distance = length(to_camera);
+        to_camera *= (1.0f / camera_distance);
+        f32 cos_camera_angle = dot(to_camera, world_n);
         
-        f32 light_distance2 = distance(world_position, light_pos1);
-        f32 light_here1 = light_strength1 / square(light_distance2);
+        v3 to_light = light_p - world_p;
+        f32 light_distance = length(to_light);
+        to_light *= (1.0f / light_distance);
+        f32 cos_light_angle = dot(to_light, world_n);
+        cos_light_angle = clamp(cos_light_angle, 0, 1);
         
-        f32 light_total = light_here0 + light_here1;
+        
+        v3 reflected_d = -to_camera + 2 * dot(world_n, to_camera) * world_n;
+        f32 cos_reflected = dot(to_light, reflected_d);
+        cos_reflected = clamp(cos_reflected, 0, 1);
+        cos_reflected *= cos_reflected;
+        cos_reflected *= cos_reflected;
+        cos_reflected *= cos_reflected;
+        cos_reflected *= cos_reflected;
+        cos_reflected *= cos_reflected;
+        
+        f32 light_amount = light_strength / square(light_distance);
+        
+        f32 diffuse_c = 0.5f;
+        f32 diffuse_light = diffuse_c * cos_light_angle * light_amount;
+        
+        f32 spec_c = 2.0f;
+        f32 spec_light = spec_c * cos_reflected * light_amount;
+        
+        f32 light_total = diffuse_light + spec_light;
         
         result_color.rgb = linear_blend(modulated.rgb, fog_color, fog_amount);
         result_color.rgb *= light_total;
@@ -181,6 +210,7 @@ void main (void) {
 PeelCompositeProgram :: struct {
     using base: OpenGLProgram,
     
+    using shared_uniforms : struct {},
     using vertex_uniforms : struct {},
     
     using fragment_uniforms: struct {
@@ -239,6 +269,7 @@ void main (void) {
 MultisampleResolve :: struct {
     using base: OpenGLProgram,
     
+    using shared_uniforms : struct {},
     using vertex_uniforms: struct {},
     using fragment_uniforms: struct {
         sample_count:  sl_i32,
@@ -327,6 +358,7 @@ void main (void) {
 FinalStretchProgram :: struct {
     using base: OpenGLProgram,
     
+    using shared_uniforms : struct {},
     using vertex_uniforms: struct {},
     
     using fragment_uniforms: struct {
@@ -403,6 +435,8 @@ begin_program_zbias :: proc (program: ZBiasProgram, setup: RenderSetup, alpha_th
     gl.Uniform1f(auto_cast program.fog_end,           setup.fog_end)
     gl.Uniform1f(auto_cast program.clip_alpha_begin,  setup.clip_alpha_begin)
     gl.Uniform1f(auto_cast program.clip_alpha_end,    setup.clip_alpha_end)
+    
+    gl.Uniform3fv(auto_cast program.light_p,   1, &setup.debug_light_p[0])
 }
 
 begin_program_common :: proc (program: OpenGLProgram) {
@@ -473,9 +507,11 @@ compile_program_common :: proc (program: ^$Program, common: string) {
 #define FRAGMENT
 `)
     
+    gl_generate(&vb, type_of(program.shared_uniforms), "uniform")
     gl_generate(&vb, type_of(program.vertex_uniforms), "uniform")
     gl_generate(&vb, type_of(program.vertex_inputs), "in")
     
+    gl_generate(&fb, type_of(program.shared_uniforms), "uniform")
     gl_generate(&fb, type_of(program.fragment_uniforms), "uniform")
     
     append(&vb, common)
@@ -487,17 +523,14 @@ compile_program_common :: proc (program: ^$Program, common: string) {
     program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
     gl_get_locations(program.handle, &program.vertex_inputs, false)
     
+    gl_get_locations(program.handle, &program.shared_uniforms,   true)
     gl_get_locations(program.handle, &program.vertex_uniforms,   true)
     gl_get_locations(program.handle, &program.fragment_uniforms, true)
 }
 
 create_program :: proc (defines, header_code, vertex_code, fragment_code: cstring) -> (result: u32) {
-    shared_code := ctprint("% %", defines, header_code)
-    
-    lengths := [?] i32 { 0..<20 = -1 }
-    
-    vertex_shader_code   := [?] cstring { shared_code, vertex_code }
-    fragment_shader_code := [?] cstring { shared_code, fragment_code }
+    vertex_shader_code   := [?] cstring { defines, header_code, vertex_code }
+    fragment_shader_code := [?] cstring { defines, header_code, fragment_code }
     
     vertex_shader_id   := gl.CreateShader(gl.VERTEX_SHADER)
     fragment_shader_id := gl.CreateShader(gl.FRAGMENT_SHADER)
@@ -506,8 +539,8 @@ create_program :: proc (defines, header_code, vertex_code, fragment_code: cstrin
         gl.DeleteShader(fragment_shader_id)
     }
     
-    gl.ShaderSource(vertex_shader_id,   len(vertex_shader_code),   raw_data(vertex_shader_code[:]),   raw_data(lengths[:]))
-    gl.ShaderSource(fragment_shader_id, len(fragment_shader_code), raw_data(fragment_shader_code[:]), raw_data(lengths[:]))
+    gl.ShaderSource(vertex_shader_id,   len(vertex_shader_code),   raw_data(vertex_shader_code[:]),   nil)
+    gl.ShaderSource(fragment_shader_id, len(fragment_shader_code), raw_data(fragment_shader_code[:]), nil)
     
     gl.CompileShader(vertex_shader_id)
     gl.CompileShader(fragment_shader_id)

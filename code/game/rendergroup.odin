@@ -129,6 +129,8 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     fog_color:        v3,
     clip_alpha_begin: f32,
     clip_alpha_end:   f32,
+    
+    debug_light_p: v3,
 }
 
 @(common)
@@ -261,7 +263,7 @@ push_depth_clear :: proc (group: ^RenderGroup) { push_render_element(group, Dept
 push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_element(group, BeginPeels) }
 push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_element(group, EndPeels)   }
 
-push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true) {
+push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true, debug_light_p: v3 = 0) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.dimension.x, cast(f32) group.commands.dimension.y)
     
     setup := group.last_setup
@@ -282,6 +284,8 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
         setup.fog_begin = 8
         setup.fog_end   = 25
     }
+    
+    setup.debug_light_p = debug_light_p
     
     if clip_alpha {
         setup.clip_alpha_begin = near_clip_plane + 2.0
@@ -308,6 +312,7 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
         setup.camera_p = p
     } else {
         group.debug_cam = group.game_cam
+        setup.camera_p = p
     }
     setup.projection = projection.forward
     push_setup(group, setup)
@@ -499,6 +504,11 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     
     bo := v4_to_rgba(bot_color)
     op := v4_to_rgba(top_color)
+    
+    ct = v4_to_rgba(store_color(color))
+    cb = ct
+    bo = ct
+    op = ct
     
     t0 := v2{0, 0}
     t1 := v2{1, 0}

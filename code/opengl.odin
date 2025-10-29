@@ -5,6 +5,8 @@ import "base:runtime"
 import win "core:sys/windows"
 import gl "vendor:OpenGl"
 
+MaxMultisampleCount :: 8
+
 GlMajorVersion :: 4
 GlMinorVersion :: 6
 
@@ -120,7 +122,7 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         
         max_sample_count: i32
         gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
-        max_sample_count = min(16, max_sample_count)
+        max_sample_count = min(MaxMultisampleCount, max_sample_count)
         open_gl.multisample_count = max_sample_count
     }
     
