@@ -42,8 +42,6 @@ RenderSettings :: struct {
     depth_peel_count_hint: u32,
     multisampling_hint:    b32,
     pixelation_hint:       b32,
-    
-    light_texture_dimension_power_of_2: v3u,
 }
 
 @(common)

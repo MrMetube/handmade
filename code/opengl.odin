@@ -37,6 +37,9 @@ OpenGlInfo :: struct {
 OpenGL :: struct {
     settings: RenderSettings,
     
+    max_color_attachments:   i32,
+    max_samplers_per_shader: i32,
+    
     multisampling:    b32,
     multisample_count: i32,
     depth_peel_count:  u32,
@@ -56,11 +59,19 @@ OpenGL :: struct {
     peel_composite:      PeelCompositeProgram, // @note(viktor): composite all passes
     final_stretch:       FinalStretchProgram,
     multisample_resolve: MultisampleResolve,
+ 
+    light_buffers: FixedArray(12, LightBuffer),
+}
+
+LightBuffer :: struct {
+    write_all_buffer:      u32,
+    write_emission_buffer: u32,
     
-    light_texture_mip_count:     u32,
-    light_texture_channel_count: u32,
-    light_texture_count: u32,
-    light_textures: [8] FrameBuffer,
+    // @note(viktor): these are all 3-element textures
+    front_emission: u32,
+    back_emission: u32,
+    surface_color: u32,
+    normal_xz_and_depth: u32,
 }
 
 CreateFramebufferFlags :: bit_set[enum{ 
@@ -131,10 +142,11 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         gl.GenBuffers(1, &open_gl.vertex_buffer_handle)
         gl.BindBuffer(gl.ARRAY_BUFFER, open_gl.vertex_buffer_handle)
         
-        max_sample_count: i32
-        gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &max_sample_count)
-        max_sample_count = min(MaxMultisampleCount, max_sample_count)
-        open_gl.multisample_count = max_sample_count
+        gl.GetIntegerv(gl.MAX_COLOR_TEXTURE_SAMPLES, &open_gl.multisample_count)
+        open_gl.multisample_count = min(MaxMultisampleCount, open_gl.multisample_count)
+        
+        gl.GetIntegerv(gl.MAX_COLOR_ATTACHMENTS, &open_gl.max_color_attachments)
+        gl.GetIntegerv(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS, &open_gl.max_samplers_per_shader)
     }
     
     return gl_context
@@ -354,8 +366,8 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for &buffer in slice(&open_gl.depth_peel_resolve_buffers) {
         delete_framebuffer(&buffer)
     }
-    for &buffer in open_gl.light_textures {
-        delete_framebuffer(&buffer)
+    for &buffer in slice(&open_gl.light_buffers) {
+        delete_lightbuffer(&buffer)
     }
     clear(&open_gl.depth_peel_buffers)
     clear(&open_gl.depth_peel_resolve_buffers)
@@ -392,22 +404,40 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for _ in 0..<open_gl.depth_peel_count {
         buffer := create_framebuffer(settings.dimension, depth_peel_flags)
         append(&open_gl.depth_peel_buffers, buffer)
-        
+        p
         if open_gl.multisampling {
             resolve_buffer := create_framebuffer(settings.dimension, depth_peel_flags - { .multisampled })
             append(&open_gl.depth_peel_resolve_buffers, resolve_buffer)
         }
     }
     
-    light_texture_width  := cast(i32) 1 << settings.light_texture_dimension_power_of_2.x
-    light_texture_height := cast(i32) 1 << settings.light_texture_dimension_power_of_2.y
-    light_texture_depth  := cast(i32) 1 << settings.light_texture_dimension_power_of_2.z
-    open_gl.light_texture_mip_count = cast(u32) max(light_texture_width, light_texture_height, light_texture_depth)
-    
-    open_gl.light_texture_count = 3
-    open_gl.light_texture_channel_count = 4    
-    for &buffer in open_gl.light_textures {
-        buffer = create_framebuffer({light_texture_width, light_texture_height}, resolve_flags)
+    texture_dim := settings.dimension
+    open_gl.light_buffers.count = 10
+    for &buffer in slice(&open_gl.light_buffers) {
+        filter_type: i32 = gl.LINEAR
+        // @note(viktor): Drop these down to 16F once we know what's what and probably use RGB8 for surface_color? And normal_xz_and_depth could probably be encoded in RGB8?
+        buffer.front_emission      = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.back_emission       = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.surface_color       = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.normal_xz_and_depth = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        
+        // @note(viktor): up framebuffer
+        gl.GenFramebuffers(1, &buffer.write_all_buffer)
+        gl.BindFramebuffer(gl.FRAMEBUFFER, buffer.write_all_buffer)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, buffer.front_emission, 0)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, buffer.back_emission, 0)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, buffer.surface_color, 0)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT3, gl.TEXTURE_2D, buffer.normal_xz_and_depth, 0)
+        
+        // @note(viktor): down framebuffer
+        gl.GenFramebuffers(1, &buffer.write_emission_buffer)
+        gl.BindFramebuffer(gl.FRAMEBUFFER, buffer.write_emission_buffer)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, buffer.front_emission, 0)
+        gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, buffer.back_emission, 0)
+        
+        texture_dim /= 2
+        if texture_dim.x < 1 do texture_dim.x = 1
+        if texture_dim.y < 1 do texture_dim.y = 1
     }
 }
 
@@ -744,11 +774,9 @@ create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, di
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     
     if slot == gl.TEXTURE_2D_MULTISAMPLE {
-        gl.TexImage2DMultisample(slot, open_gl.multisample_count, format, dim.x, dim.y, false)
+        gl.TexStorage2DMultisample(slot, open_gl.multisample_count, format, dim.x, dim.y, false)
     } else {
-        data_format: u32 = format == GlobalDepthComponent ? gl.DEPTH_COMPONENT : gl.RGBA
-        
-        gl.TexImage2D(slot, 0, auto_cast format, dim.x, dim.y, 0, data_format, gl.UNSIGNED_BYTE, nil)
+        gl.TexStorage2D(slot, 1, format, dim.x, dim.y)
     }
     
     return result
@@ -758,6 +786,17 @@ delete_framebuffer :: proc (buffer: ^FrameBuffer) {
     if buffer.color_texture != 0 do gl.DeleteTextures(1, &buffer.color_texture)
     if buffer.depth_texture != 0 do gl.DeleteTextures(1, &buffer.depth_texture)
     if buffer.handle        != 0 do gl.DeleteFramebuffers(1, &buffer.handle)
+    
+    buffer ^= {}
+}
+delete_lightbuffer :: proc (buffer: ^LightBuffer) {
+    if buffer.front_emission        != 0 do gl.DeleteTextures(1, &buffer.front_emission)
+    if buffer.back_emission         != 0 do gl.DeleteTextures(1, &buffer.back_emission)
+    if buffer.surface_color         != 0 do gl.DeleteTextures(1, &buffer.surface_color)
+    if buffer.normal_xz_and_depth   != 0 do gl.DeleteTextures(1, &buffer.normal_xz_and_depth)
+    
+    if buffer.write_all_buffer      != 0 do gl.DeleteFramebuffers(1, &buffer.write_all_buffer)
+    if buffer.write_emission_buffer != 0 do gl.DeleteFramebuffers(1, &buffer.write_emission_buffer)
     
     buffer ^= {}
 }
