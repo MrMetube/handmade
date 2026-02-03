@@ -104,8 +104,8 @@ Font :: struct {
 TextureOpQueue :: struct {
     mutex: TicketMutex,
     
-    ops: Deque(TextureOp),
-    first_free: ^TextureOp,
+    ops:      Deque(TextureOp),
+    freelist: FreeList(TextureOp),
 }
 
 @(common)
@@ -699,9 +699,9 @@ add_texture_op :: proc (queue: ^TextureOpQueue, source: TextureOp) {
     defer end_ticket_mutex(&queue.mutex)
     
     // @todo(viktor): Can we devise a soft failure case for running out of ops?
-    assert(queue.first_free != nil)
+    assert(!freelist_empty(queue.freelist))
     
-    dest := list_pop_head(&queue.first_free)
+    dest := freelist_push(&queue.freelist, no_clear())
     dest ^= source
     assert(dest.next == nil)
     

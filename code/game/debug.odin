@@ -44,9 +44,9 @@ DebugState :: struct {
     
     viewed_frame_ordinal: i32,
     
-    thread:            ^DebugThread,
-    first_free_thread: ^DebugThread,
-    max_thread_count:  u32,
+    thread:           ^DebugThread,
+    thread_free_list: FreeList(DebugThread),
+    max_thread_count: u32,
     
     element_hash: [1024] ^DebugElement,
     
@@ -89,7 +89,7 @@ DebugState :: struct {
     
     // Per-frame storage management
     per_frame_arena:         Arena,
-    first_free_stored_event: ^DebugStoredEvent,
+    stored_event_freelist: FreeList(DebugStoredEvent),
     
     tooltips: FixedArray(16, [256] u8),
 }
@@ -346,6 +346,9 @@ debug_init :: proc (dimension: v2i) -> (debug: ^DebugState) {
     debug.shadow_transform.offset.z  = -2000
     debug.text_transform.offset.z    = -1000
     
+    freelist_init(&debug.thread_free_list,      &debug.arena)
+    freelist_init(&debug.stored_event_freelist, &debug.per_frame_arena)
+    
     return debug
 }
 
@@ -371,7 +374,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
         debug.max_thread_count = max(debug.max_thread_count, thread_count)
         
         if thread == nil {
-            thread = list_pop_head(&debug.first_free_thread) or_else push(&debug.arena, DebugThread, no_clear())
+            thread = freelist_push(&debug.thread_free_list, no_clear())
             thread ^= { thread_index = event.thread_index }
             
             list_push(&debug.thread, thread)
@@ -498,7 +501,7 @@ store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugEleme
     collation_frame.stored_event_count += 1
     
     for result == nil {
-        result = list_pop_head(&debug.first_free_stored_event) or_else push(&debug.per_frame_arena, DebugStoredEvent, no_clear())
+        result = freelist_push(&debug.stored_event_freelist, no_clear())
     }
     
     result ^= {
@@ -540,7 +543,7 @@ free_frame :: proc (debug: ^DebugState, frame_ordinal: i32) {
             for frame.events.last != nil {
                 free_event := deque_remove_from_end(&frame.events)
                 freed_count += 1
-                list_push(&debug.first_free_stored_event, free_event)
+                freelist_free(&debug.stored_event_freelist, free_event)
             }
             
             frame ^= {}

@@ -14,9 +14,9 @@ GameSoundBuffer :: struct {
 }
 
 Mixer :: struct {
-    permanent_arena:          ^Arena,
-    first_playing_sound:      ^PlayingSound,
-    first_free_playing_sound: ^PlayingSound,
+    permanent_arena:        ^Arena,
+    first_playing_sound:    ^PlayingSound,
+    playing_sound_freelist: FreeList(PlayingSound),
     
     master_volume: v2,
 }
@@ -44,10 +44,12 @@ PlayingSound :: struct {
 init_mixer :: proc (mixer: ^Mixer, arena: ^Arena) {
     mixer.master_volume = 0.2
     mixer.permanent_arena = arena
+    
+    freelist_init(&mixer.playing_sound_freelist, mixer.permanent_arena)
 }
 
 play_sound :: proc (mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
-    playing_sound := list_pop_head(&mixer.first_free_playing_sound) or_else push(mixer.permanent_arena, PlayingSound, no_clear())
+    playing_sound := freelist_push(&mixer.playing_sound_freelist, no_clear())
     
     // @todo(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound ^= {
@@ -252,7 +254,7 @@ output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^
         
         if sound_finished {
             // :ListEntryRemovalInLoop
-            list_push(&mixer.first_free_playing_sound, playing_sound)
+            freelist_free(&mixer.playing_sound_freelist, playing_sound)
             playing_sound_pointer ^= playing_sound.next
         } else {
             playing_sound_pointer = &playing_sound.next

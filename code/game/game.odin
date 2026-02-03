@@ -6,7 +6,7 @@ SlowCode :: INTERNAL
 ////////////////////////////////////////////////
 // @todo(viktor): Find a better place for these configurations
 
-LoadAssetsSingleThreaded: b32 = false
+LoadAssetsSingleThreaded: b32 = !false
 SoundPanningWithMouse:    b32 = false
 SoundPitchingWithMouse:   b32 = false
 ShowSimulationBounds:     b32 = false

@@ -404,7 +404,7 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for _ in 0..<open_gl.depth_peel_count {
         buffer := create_framebuffer(settings.dimension, depth_peel_flags)
         append(&open_gl.depth_peel_buffers, buffer)
-        p
+        
         if open_gl.multisampling {
             resolve_buffer := create_framebuffer(settings.dimension, depth_peel_flags - { .multisampled })
             append(&open_gl.depth_peel_resolve_buffers, resolve_buffer)

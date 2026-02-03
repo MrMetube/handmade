@@ -290,7 +290,7 @@ main :: proc () {
         render_commands.multisampling_hint    = true
         render_commands.pixelation_hint       = !false
         render_commands.depth_peel_count_hint = 4
-        render_commands.light_texture_dimension_power_of_2 = {9, 8, 1}
+        // render_commands.light_texture_dimension_power_of_2 = {9, 8, 1}
     }
     
     game_memory := GameMemory {
@@ -308,7 +308,8 @@ main :: proc () {
         for &op, index in texture_ops[:texture_op_count-1] {
             op.next = &texture_ops[index + 1]
         }
-        game_memory.platform_texture_op_queue.first_free = &texture_ops[0]
+        
+        freelist_init(&game_memory.platform_texture_op_queue.freelist, nil, &texture_ops[0])
     }
     texture_op_queue := &game_memory.platform_texture_op_queue
     
@@ -658,8 +659,7 @@ main :: proc () {
                     gl_manage_textures(last)
                     
                     begin_ticket_mutex(&texture_op_queue.mutex)
-                        first.next = texture_op_queue.first_free
-                        texture_op_queue.first_free = last
+                        freelist_free_list(&texture_op_queue.freelist, last, first)
                     end_ticket_mutex(&texture_op_queue.mutex)
                 }
             }

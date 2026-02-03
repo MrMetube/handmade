@@ -17,7 +17,7 @@ PedanticGame     :: false
 PedanticPlatform :: false
 
 // @todo(viktor): get radlink working?
-flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native", "-linker:lld" }
+flags    := [] string { "-vet-cast", "-vet-shadowing", /* "-target:windows_amd64", "-microarch:native", "-linker:lld" */ }
 // "-build-diagnostics"
 
 debug    :: "-debug"

@@ -10,8 +10,8 @@ World :: struct {
     chunk_hash: [4096] ^Chunk,
     first_free: ^WorldEntityBlock,
     
-    first_free_chunk: ^Chunk,
-    first_free_block: ^WorldEntityBlock,
+    chunk_freelist: FreeList(Chunk),
+    block_freelist: FreeList(WorldEntityBlock),
 
     game_entropy: RandomSeries,
     
@@ -46,6 +46,9 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ Worl
     result.chunk_dim_meters = chunk_dim_in_meters
     result.arena = arena
     result.game_entropy = seed_random_series(123)
+    
+    freelist_init(&result.chunk_freelist, result.arena)
+    freelist_init(&result.block_freelist, result.arena)
     
     return result
 }
@@ -434,7 +437,8 @@ get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> (resul
     result = next_pointer_of_the_chunks_previous_chunk^
     
     if arena != nil && result == nil {
-        result = list_pop_head(&world.first_free_chunk) or_else push(arena, Chunk, no_clear())
+        assert(arena == world.chunk_freelist.arena, "When I started using the freelist, all callers used world.arena, so its hardcoded as that in the freelist")
+        result = freelist_push(&world.chunk_freelist, no_clear())
         result ^= {
             chunk = chunk_p,
         }
@@ -489,11 +493,10 @@ extract_chunk :: proc (world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
 add_to_free_list :: proc (world: ^World, chunk: ^Chunk, first_block, last_block: ^WorldEntityBlock) {
     begin_ticket_mutex(&world.change_ticket)
     
-    list_push(&world.first_free_chunk, chunk)
+    freelist_free(&world.chunk_freelist, chunk)
     if first_block != nil {
         // @note(viktor): push on the whole list from first to last
-        last_block.next = world.first_free_block
-        world.first_free_block = first_block
+        freelist_free_list(&world.block_freelist, first_block, last_block)
     }
     
     end_ticket_mutex(&world.change_ticket)
@@ -516,7 +519,7 @@ use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (re
     assert(chunk != nil)
     
     if !block_has_room(chunk.first_block, pack_size) {
-        new_block := list_pop_head(&world.first_free_block) or_else push(world.arena, WorldEntityBlock, no_clear())
+        new_block := freelist_push(&world.block_freelist, no_clear())
         
         clear_world_entity_block(new_block)
         
