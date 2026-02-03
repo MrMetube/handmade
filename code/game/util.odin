@@ -12,14 +12,6 @@ import "core:simd"
 
 _ :: simd
 
-was_pressed :: proc (button: InputButton) -> b32 {
-    return button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
-}
-
-is_down :: proc (button: InputButton) -> b32 {
-    return button.ended_down
-}
-
 // ------- Low Contrast
 // #C1B28B gray
 
