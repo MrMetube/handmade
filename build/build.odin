@@ -119,8 +119,10 @@ main :: proc () {
     
     // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
-    if !metaprogram_collect_data(&metaprogram, code_dir) do os.exit(1)
-    if !metaprogram_collect_data(&metaprogram, game_dir) do os.exit(1)
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir) do os.exit(1)
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir) do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, code_dir) do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, game_dir) do os.exit(1)
     
     // @todo(viktor): let the metaprogramms define these attributes at initialization
     sb := strings.builder_make()

@@ -253,6 +253,7 @@ view_magnitude :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) wh
     result = view_magnitude_raw(value, integer_table[:], precision = precision)
     return result
 }
+
 view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_float(T) {
     @(static, rodata)
     decimal_table := [?] Magnitude (T) {

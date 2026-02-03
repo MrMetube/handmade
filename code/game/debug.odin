@@ -9,7 +9,7 @@ package game
     - To track data we collect events of interest into elements
     - an element keeps a history of values
     
-    ////////////////////////////////////////////////
+////////////////////////////////////////////////
 */
 
 // @todo(viktor): "Mark Loop Point" for input recording(currently on 'L' key) as debug action

@@ -9,6 +9,7 @@ import "core:os"
 import "core:unicode/utf8"
 import "core:fmt"
 import "core:mem"
+import "shared"
 
 // @volatile This breaks if in the midst of a print we start another print on the same thread. we could use a cursor to know from where onwards we can use the buffer.
 @(thread_local) console_buffer: [128 * Megabyte] u8
@@ -365,33 +366,50 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
         max_depth = 8,
     }
     
-    // :PrintlikeChecking @volatile 
-    // the loop structure is copied in the metaprogram to check the arg count, any changes here need to be propagated to there
     arg_index: u32
-    start_of_text: int
-    for index: int; index < len(format); index += 1 {
-        if format[index] == '%' {
-            part := format[start_of_text:index]
-            if part != "" {
-                format_any(&ctx, part)
-            }
-            start_of_text = index+1
+    
+    iter := shared.make_format_iterator(format)
+    for part in shared.iterate_format(&iter) {
+        switch part.kind {
+        case .Percent:
+            arg := args[arg_index]
+            arg_index += 1
+            format_any(&ctx, arg)
             
-            if index+1 < len(format) && format[index+1] == '%' {
-                index += 1
-                // @note(viktor): start_of_text now points at the percent sign and will append it next time saving processing one view
-            } else {
-                arg := args[arg_index]
-                arg_index += 1
-                
-                // @incomplete Would be ever want to display a raw View? if so put in a flag to make it use the normal path
-                format_any(&ctx, arg)
-            }
+        case .Escaped:
+            // @todo(viktor): maybe we could spare this invocation by joining the second % to the next Text
+            format_any(&ctx, "%")
+        case .Text:
+            format_any(&ctx, part.text)
         }
     }
     
-    end := format[start_of_text:]
-    format_any(&ctx, end)
+    // // :PrintlikeChecking @volatile printable parts
+    // // the loop structure is copied in the metaprogram to check the arg count, any changes here need to be propagated to there
+    // start_of_text: int
+    // for index: int; index < len(format); index += 1 {
+    //     if format[index] == '%' {
+    //         part := format[start_of_text:index]
+    //         if part != "" {
+    //             format_any(&ctx, part)
+    //         }
+    //         start_of_text = index+1
+            
+    //         if index+1 < len(format) && format[index+1] == '%' {
+    //             index += 1
+    //             // @note(viktor): start_of_text now points at the percent sign and will append it next time saving processing one view
+    //         } else {
+    //             arg := args[arg_index]
+    //             arg_index += 1
+                
+    //             // @incomplete Would be ever want to display a raw View? if so put in a flag to make it use the normal path
+    //             format_any(&ctx, arg)
+    //         }
+    //     }
+    // }
+    
+    // end := format[start_of_text:]
+    // format_any(&ctx, end)
     
     assert(arg_index == auto_cast len(args))
     

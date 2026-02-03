@@ -6,7 +6,7 @@ import "vendor:directx/dxgi"
 init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) {
     assert(GlobalSoundBuffer == nil, "DSound has already been initialized")
     
-    dSound_lib := win.LoadLibraryW(win.utf8_to_wstring("dsound.dll"))
+    dSound_lib := win.LoadLibraryW("dsound.dll")
     if dSound_lib == nil {
         // @logging 
     }

@@ -7,18 +7,18 @@ XInputSetState : ProcXInputSetState = XInputSetStateStub
 
 init_xInput :: proc () {
     assert(XInputGetState == XInputGetStateStub, "xInput has already been initialized")
-
-    xInput_lib := win.LoadLibraryW(win.utf8_to_wstring("Xinput1_4.dll"))
+    
+    xInput_lib := win.LoadLibraryW("Xinput1_4.dll")
     if xInput_lib == nil {
         // @logging 
-        xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("XInput9_1_0.dll"))
+        xInput_lib = win.LoadLibraryW("XInput9_1_0.dll")
     }
     if xInput_lib == nil {
         // @logging 
-        xInput_lib = win.LoadLibraryW(win.utf8_to_wstring("xinput1_3.dll"))
+        xInput_lib = win.LoadLibraryW("xinput1_3.dll")
     }
     
-    if (xInput_lib != nil) {
+    if xInput_lib != nil {
         XInputGetState = cast(ProcXInputGetState) win.GetProcAddress(xInput_lib, "XInputGetState")
         XInputSetState = cast(ProcXInputSetState) win.GetProcAddress(xInput_lib, "XInputSetState")
     } else {
@@ -27,23 +27,23 @@ init_xInput :: proc () {
 }
 
 XINPUT_STATE  :: struct {
-  dwPacketNumber : win.DWORD,
-  Gamepad : XINPUT_GAMEPAD,
+    dwPacketNumber: win.DWORD,
+    Gamepad:        XINPUT_GAMEPAD,
 }
 
 XINPUT_GAMEPAD :: struct {
-  wButtons: win.WORD,
-  bLeftTrigger: win.BYTE,
-  bRightTrigger: win.BYTE,
-  sThumbLX: win.SHORT,
-  sThumbLY: win.SHORT,
-  sThumbRX: win.SHORT,
-  sThumbRY: win.SHORT,
+    wButtons:      win.WORD,
+    bLeftTrigger:  win.BYTE,
+    bRightTrigger: win.BYTE,
+    sThumbLX:      win.SHORT,
+    sThumbLY:      win.SHORT,
+    sThumbRX:      win.SHORT,
+    sThumbRY:      win.SHORT,
 }
 
 XINPUT_VIBRATION :: struct {
-  wLeftMotorSpeed : win.WORD,
-  wRightMotorSpeed : win.WORD,
+    wLeftMotorSpeed:  win.WORD,
+    wRightMotorSpeed: win.WORD,
 }
 
 
@@ -75,8 +75,8 @@ XINPUT_GAMEPAD_TRIGGER_THRESHOLD    :: 30
 
 // ---------------------- Internal stuff
 
-@(private="file") ProcXInputGetState :: #type proc (dwUserIndex: win.DWORD, pState: ^XINPUT_STATE ) -> win.DWORD
+@(private="file") ProcXInputGetState :: #type proc (dwUserIndex: win.DWORD, pState:     ^XINPUT_STATE)     -> win.DWORD
 @(private="file") ProcXInputSetState :: #type proc (dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD
 
-@(private="file") XInputGetStateStub : ProcXInputGetState = proc (dwUserIndex: win.DWORD, pState: ^XINPUT_STATE )        -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }
+@(private="file") XInputGetStateStub : ProcXInputGetState = proc (dwUserIndex: win.DWORD, pState:     ^XINPUT_STATE)     -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }
 @(private="file") XInputSetStateStub : ProcXInputSetState = proc (dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD { return ERROR_DEVICE_NOT_CONNECTED }

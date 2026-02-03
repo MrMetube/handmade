@@ -8,8 +8,8 @@ import "core:odin/tokenizer"
 import "core:os"
 import "core:os/os2"
 import "core:slice"
-import "core:strings"
 import "core:terminal/ansi"
+import "../code/game/shared" // Get the shared format string iterator. Ughh...
 
 Info :: struct { 
     name: string, 
@@ -25,160 +25,253 @@ Printlike :: struct {
 
 Procedure :: struct {
     name:         string,
-    return_count: u32,
+    return_count: int,
+}
+
+File :: struct {
+    file_name: string,
+    infos: [dynamic] Info,
 }
 
 Metaprogram :: struct {
     files: map[string] string,
     
-    commons: map[string] [dynamic] Info,
+    collections: map[string] Collector,
+    
+    commons: [dynamic] File,
     exports: [dynamic] Info,
     
-    apis: map[string] [dynamic] Info,
+    apis: [dynamic] File,
     
+    // @note(viktor): we assume that noone will make a local rename onto a name specified in another scope, scopes are ignored
     printlikes: map[string] Printlike,
     procedures: map[string] Procedure,
     printlikes_failed: bool,
 }
 
-metaprogram_collect_data :: proc (using mp: ^Metaprogram, dir: string) -> (success: b32) {
-    context.user_ptr = mp
-    
-    collect_all_files(&files, dir)
-    
-    pack, ok := parser.parse_package_from_path(dir)
-    if !ok {
-        fmt.printfln("ERROR: The metaprogram failed to parse the package %v", dir)
+Collector :: struct {
+    entries: [dynamic] Collector_Entry,
+    stack:   [dynamic] int,
+}
+
+Collector_Entry :: struct {
+    node: ^ast.Node,
+    next: int,
+}
+
+metaprogram_collect_files_and_parse_package :: proc (mp: ^Metaprogram, directory: string) -> (success: bool) {
+    fi, err := os2.read_directory_by_path(directory, -1, context.allocator)
+    if err != nil {
+        fmt.eprintfln("ERROR: The metaprogram failed to read the package %v", directory)
         return false
     }
     
-    // @todo(viktor): Can we unify this simple loop and the tree walk below into a simple api for plugins?
-    files: for _, file in pack.files {
-        for tag in file.tags {
-            if tag.text == "#+private file" do continue files
-        }
-        
-        is_common_file := false
-        for declaration, declaration_index in file.decls {
-            #partial switch declaration in declaration.derived_stmt {
-              case ^ast.When_Stmt:
-                // @note(viktor): We just assume that the block is true and get the bodys statements. If the else branch is missing we should always assume true and if there is an else branch, all relevant declarations need to be mirrored anyways.
-                declaration_ := declaration
-                declaration_ = declaration
-                block := declaration.body.derived_stmt.(^ast.Block_Stmt)
-                for statement in block.stmts {
-                    if value_declaration, vok := statement.derived_stmt.(^ast.Value_Decl); vok {
-                        handle_global_value_declaration(mp, file, value_declaration, is_common_file)
-                    }
-                }
-                
-              case ^ast.Value_Decl:
-                if has_attribute(declaration.attributes[:], "common", `"file"`) {
-                    assert(!is_common_file)
-                    assert(declaration_index == 0)
-                    is_common_file = true
-                }
-                handle_global_value_declaration(mp, file, declaration, is_common_file)
-                
-              case ^ast.Import_Decl:
-                if has_attribute(declaration.attributes[:], "common", `"file"`) {
-                    assert(!is_common_file)
-                    assert(declaration_index == 0)
-                    is_common_file = true
-                }
-            }
-        }
+    for f in fi {
+        bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
+        absolute_path, _ := os2.get_absolute_path(f.fullpath, context.allocator)
+        mp.files[absolute_path] = cast(string) bytes
     }
     
-    v := ast.Visitor{ visit = collect_printlikes_and_procedures, data = mp }
+    pack, ok := parser.parse_package_from_path(directory)
+    if !ok {
+        fmt.eprintfln("ERROR: The metaprogram failed to parse the package %v", directory)
+        return false
+    }
+    
+    collector: Collector
+    
+    v := ast.Visitor{ visit = proc (visitor: ^ast.Visitor, node: ^ast.Node) -> (^ast.Visitor) {
+        s  := cast(^Collector) visitor.data
+        if node != nil {
+            idx := len(s.entries)
+            append(&s.entries, Collector_Entry{ node = node, next = -1 })
+            append(&s.stack, idx)
+            return visitor
+        } else {
+            // nil node means we are done with the children of the last node
+            idx := pop(&s.stack)
+            s.entries[idx].next = len(s.entries)
+            return nil
+        }
+        
+        return visitor
+    }, data = &collector }
+    
     ast.walk(&v, pack)
+    mp.collections[directory] = collector
     
     return true
 }
 
 ////////////////////////////////////////////////
 
-collect_printlikes_and_procedures :: proc (visitor: ^ast.Visitor, node: ^ast.Node) -> (result: ^ast.Visitor) {
-    if node == nil do return nil
+metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (success: b32) {
+    collector, cok := mp.collections[dir]
+    assert(cok)
     
-    using mp := cast(^Metaprogram) visitor.data
-    
-    decl, ok := node.derived.(^ast.Value_Decl);
-    if !ok do return visitor
-    
-    if decl.is_mutable do return nil
-    
-    assert(len(decl.values) == 1)
-    value := decl.values[0]
-    
-    assert(len(decl.names) == 1)
-    name := decl.names[0].derived_expr.(^ast.Ident).name
-    
-    #partial switch procedure in value.derived_expr {
-      case: return nil
-      
-      case ^ast.Ident: // @note(viktor): renaming
-        if procedure.name in procedures {
-            procedures[name] = procedures[procedure.name]
-            
-            if procedure.name in printlikes {
-                printlikes[name] = printlikes[procedure.name]
-            }
+    commons: [dynamic] Info
+    apis: [dynamic] Info
+    files: for index: int; index < len(collector.entries); {
+        e := collector.entries[index]
+        skip_children: bool
+        defer index = skip_children ? e.next : index+1
+        
+        file, ok := e.node.derived.(^ast.File)
+        if !ok do continue files
+        
+        for tag in file.tags {
+            if tag.text == "#+private file" do continue files
         }
         
-      case ^ast.Proc_Lit:
-        attributes := decl.attributes[:]
+        clear(&commons)
+        clear(&apis)
         
-        results := procedure.type.results
-        if results != nil {
-            procedures[name] = {
-                name = name,
-                return_count = cast(u32) len(results.list),
-            }
-        } else {
-            procedures[name] = {
-                name = name,
-                return_count = 0,
-            }
-        }
-        
-        if has_attribute(attributes, "printlike") {
-            printlike := Printlike { name = name }
+        is_common_file := false
+        for declaration, declaration_index in file.decls {
             
-            found: bool
-            params: for param, index in procedure.type.params.list {
-                for name in param.names {
-                    param_name := name.derived_expr.(^ast.Ident).name
-                    
-                    #partial switch type in param.type.derived_expr {
-                      case ^ast.Ident:
-                        if type.name == "string" && param_name == "format" {
-                            printlike.format_index = index
-                        }
-                        
-                      case ^ast.Ellipsis:
-                        type_name := type.expr.derived_expr.(^ast.Ident).name
-                        if type_name == "any" && param_name == "args" {
-                            printlike.args_index = index
-                            found = true
-                            
-                            break params
-                        }
+            #partial switch declaration in declaration.derived_stmt {
+              case ^ast.When_Stmt:
+                // @note(viktor): We just assume that the block is true and get the bodys statements. If the else branch is missing we should always assume true and if there is an else branch, all relevant declarations need to be mirrored anyways.
+                block := declaration.body.derived_stmt.(^ast.Block_Stmt)
+                for statement in block.stmts {
+                    if value_declaration, vok := statement.derived_stmt.(^ast.Value_Decl); vok {
+                        handle_global_value_declaration(mp, file, value_declaration, is_common_file, &commons, &apis)
                     }
                 }
+                
+              case ^ast.Value_Decl:
+                if has_attribute(declaration, "common", `"file"`) {
+                    assert(!is_common_file)
+                    assert(declaration_index == 0)
+                    is_common_file = true
+                }
+                handle_global_value_declaration(mp, file, declaration, is_common_file, &commons, &apis)
+                
+              case ^ast.Import_Decl:
+                if has_attribute(declaration, "common", `"file"`) {
+                    assert(!is_common_file)
+                    assert(declaration_index == 0)
+                    is_common_file = true
+                }
             }
-            
-            assert(found)
-            printlikes[name] = printlike
+        }
+        
+        if len(commons) > 0 {
+            append(&mp.commons, File { file_name = file.fullpath, infos = commons})
+            commons = make([dynamic] Info)
+        }
+        if len(apis) > 0 {
+            append(&mp.apis, File { file_name = file.fullpath, infos = apis})
+            apis = make([dynamic] Info)
         }
     }
     
-    return result
+    
+    
+    slice.sort_by(mp.commons[:], sort_files)
+    slice.sort_by(mp.apis[:],    sort_files)
+    
+    for file in mp.commons do slice.sort_by(file.infos[:], sort_infos)
+    for file in mp.apis    do slice.sort_by(file.infos[:], sort_infos)
+    
+    slice.sort_by(mp.exports[:], sort_infos)
+    
+    
+    
+    {
+        // @note(viktor): assuming all builtins can only return one value
+        // Taken from <path to ols>\builtin\builtin.odin
+        builtins := [?] string {
+            "len", "cap",
+            "size_of", "align_of",
+            "type_of", "type_info_of", "typeid_of",
+            "offset_of_selector", "offset_of_member", "offset_of", "offset_of_by_string",
+            "swizzle",
+            "complex", "quaternion", "real", "imag", "jmag", "kmag", "conj",
+            "min", "max", "abs", "clamp",
+            "raw_data",
+        }
+        
+        for b in builtins {
+            mp.procedures[b] = { name = b, return_count = 1 }
+        }
+    }
+    
+    renames: map[^ast.Ident] ^ast.Ident
+    
+    for index: int; index < len(collector.entries); {
+        e := collector.entries[index]
+        skip_children: bool
+        defer index = skip_children ? e.next : index+1
+        
+        declaration, ok := e.node.derived.(^ast.Value_Decl)
+        if !ok do continue
+        
+        for element in soa_zip(value = declaration.values, name = declaration.names) {
+            // @todo(viktor): lets assume that noone is using non-constant format procs
+            value := element.value
+            ident := element.name.derived_expr.(^ast.Ident)
+            
+            #partial switch expression in value.derived_expr {
+            case ^ast.Ident:
+                renames[ident] = expression
+                
+            case ^ast.Proc_Lit:
+                procedure := expression
+                
+                mp.procedures[ident.name] = {
+                    name = ident.name,
+                    return_count = procedure.type.results != nil ? len(procedure.type.results.list) : 0,
+                }
+                
+                if has_attribute(declaration, "printlike") {
+                    printlike := Printlike { name = ident.name }
+                    
+                    found: bool
+                    params: for param, param_index in procedure.type.params.list {
+                        for name in param.names {
+                            param_name := name.derived_expr.(^ast.Ident).name
+                            
+                            #partial switch type in param.type.derived_expr {
+                            case ^ast.Ident:
+                                if type.name == "string" && param_name == "format" {
+                                    printlike.format_index = param_index
+                                }
+                                
+                            case ^ast.Ellipsis:
+                                type_name := type.expr.derived_expr.(^ast.Ident).name
+                                if type_name == "any" && param_name == "args" {
+                                    printlike.args_index = param_index
+                                    found = true
+                                    
+                                    break params
+                                }
+                            }
+                        }
+                    }
+                    
+                    assert(found)
+                    mp.printlikes[ident.name] = printlike
+                }
+            }
+            // @todo(viktor): how can we know the return value count for overloaded identifiers? do we need to check the types?
+        }
+    }
+    
+    for ident, value in renames {
+        if value.name in mp.printlikes {
+            mp.printlikes[ident.name] = mp.printlikes[value.name]
+        }
+    }
+    
+    return true
 }
 
-handle_global_value_declaration :: proc (using mp: ^Metaprogram, file: ^ast.File, declaration: ^ast.Value_Decl, is_common_file: bool) {
+////////////////////////////////////////////////
+
+handle_global_value_declaration :: proc (mp: ^Metaprogram, file: ^ast.File, declaration: ^ast.Value_Decl, is_common_file: bool, commons, apis: ^[dynamic] Info) {
     if declaration.is_mutable do return
-    if has_attribute(declaration.attributes[:], "private", `"file"`) do return
+    if has_attribute(declaration, "private", `"file"`) do return
 
     assert(len(declaration.names) == 1)
     ident := declaration.names[0].derived_expr.(^ast.Ident)
@@ -186,40 +279,28 @@ handle_global_value_declaration :: proc (using mp: ^Metaprogram, file: ^ast.File
     
     assert(len(declaration.values) == 1)
     value := declaration.values[0]
-    if has_attribute(declaration.attributes[:], "api") {
-        file, file_ok := &apis[declaration.pos.file]
-        if !file_ok {
-            apis[declaration.pos.file] = {}
-            file = &apis[declaration.pos.file]
-        }
-        
+    if has_attribute(declaration, "api") {
         procedure := value.derived_expr.(^ast.Proc_Lit)
-        append(file, Info {
+        append(apis, Info {
             name = ident.name,
             type = read_pos(mp, procedure.type.pos, procedure.type.end),
             location = declaration.pos,
         })
     }
     
-    if has_attribute(declaration.attributes[:], "export") {
+    if has_attribute(declaration, "export") {
         assert(len(declaration.attributes) == 1)
         
         procedure := value.derived_expr.(^ast.Proc_Lit)
-        append(&exports, Info {
+        append(&mp.exports, Info {
             name = ident.name,
             type = read_pos(mp, procedure.type.pos, procedure.type.end),
             location = declaration.pos,
         })
     }
     
-    if is_common_file || has_attribute(declaration.attributes[:], "common") {
-        entries, entries_ok := &commons[file.fullpath]
-        if !entries_ok {
-            commons[file.fullpath] = {}
-            entries = &commons[file.fullpath]
-        }
-        
-        append(entries, Info {
+    if is_common_file || has_attribute(declaration, "common") {
+        append(commons, Info {
             name = ident.name,
             location = declaration.pos,
             // @note(viktor): type is not needed here
@@ -227,26 +308,56 @@ handle_global_value_declaration :: proc (using mp: ^Metaprogram, file: ^ast.File
     }
 }
 
+check_printlikes :: proc (mp: ^Metaprogram, dir: string) -> (success: bool) {
+    collector, cok := mp.collections[dir]
+    if !cok do return false
+    
+    for index: int; index < len(collector.entries); {
+        skip_children: bool
+        node := collector.entries[index]
+        
+        if call, ok := node.node.derived.(^ast.Call_Expr); ok {
+            check_printlike_call(mp, call)
+        }
+        
+        index = skip_children ? node.next : index+1
+    }
+    
+    return !mp.printlikes_failed
+}
+
 ////////////////////////////////////////////////
 
-generate_commons :: proc (using mp: ^Metaprogram, path: string) -> (result: bool) {
-    context.user_ptr = mp
-    
+open_generated_file_and_write_header :: proc (path: string, package_name: string) -> (os.Handle, bool) {
     remove_if_exists(path)
-    platform_file, err2 := os.open(path, mode = os.O_CREATE)
-    defer os.close(platform_file)
-    if err2 != nil do return false
+    file, err2 := os.open(path, mode = os.O_CREATE)
+    if err2 != nil do return file, false
     
-    fmt.fprintf(platform_file, GeneratedHeader, "main")
-    fmt.fprint(platform_file, `import "./game"`)
-    fmt.fprint(platform_file, "\n")
+    fmt.fprintf(file, GeneratedHeader, package_name)
     
-    for file, infos in commons {
-        fmt.fprint(platform_file, "\n////////////////////////////////////////////////\n")
-        fmt.fprintf(platform_file, "// All commons exported from %s @generated by %s\n\n", file, #location())
+    return file, true
+}
+
+////////////////////////////////////////////////
+
+generate_commons :: proc (mp: ^Metaprogram, path: string) -> (result: bool) {
+    out, ok := open_generated_file_and_write_header(path, "main")
+    if !ok do return false
+    defer os.close(out)
+    
+    fmt.fprintf(out, `import "./game" %v`, "\n")
+    
+    for file in mp.commons {
+        fmt.fprint(out, "\n////////////////////////////////////////////////\n")
+        fmt.fprintf(out, "// All commons exported from %s @generated by %s\n\n", file.file_name, #location())
         
-        for info in infos {
-            fmt.fprintf(platform_file, "/* @generated */ %v :: game.%v\n", info.name, info.name,)
+        width: int
+        for info in file.infos {
+            width = max(width, len(info.name))
+        }
+        
+        for info in file.infos {
+            fmt.fprintf(out, "/* @generated */ %-*v :: game.%-*v\n", width, info.name, width, info.name,)
         }
     }
     
@@ -255,53 +366,39 @@ generate_commons :: proc (using mp: ^Metaprogram, path: string) -> (result: bool
     return true
 }
 
-generate_game_api :: proc (using mp: ^Metaprogram, output_file: string) -> (result: bool) {
-    remove_if_exists(output_file)
-    out, err := os.open(output_file, os.O_CREATE)
+generate_game_api :: proc (mp: ^Metaprogram, output_file: string) -> (result: bool) {
+    out, ok := open_generated_file_and_write_header(output_file, "main")
+    if !ok do return false
     defer os.close(out)
-    if err != nil do return
-    fmt.fprintfln(out, GeneratedHeader, "main")
     
     no_stubs: map[string]b32
     no_stubs["output_sound_samples"] = true
     no_stubs["update_and_render"] = true
     no_stubs["debug_frame_end"] = true
     
-    longest_name: string
-    for it in exports {
-        if len(it.name) > len(longest_name) {
-            longest_name = it.name
-        }
+    width: int
+    for it in mp.exports {
+        width = max(width, len(it.name))
     }
-    width := len(longest_name)
     
     fmt.fprint(out, "import win \"core:sys/windows\"\n\n")
     
-    // ugh...
-    name_format := fmt.tprint("%-", width, "s", sep="")
-    
     fmt.fprintf(out, "game_stubs :: GameApi {{ // @generated by %s\n", #location())
-    for it in exports {
+    for it in mp.exports {
         if it.name in no_stubs do continue
-        fmt.fprintf(out, "    ")
-        fmt.fprintf(out, name_format, it.name)
-        fmt.fprintf(out, " = %s {{ return }},\n", it.type)
+        fmt.fprintf(out, "    %-*s = %s {{ return }},\n", width, it.name, it.type)
     }
     fmt.fprint(out, "}\n\n")
 
     fmt.fprintf(out, "GameApi :: struct {{ // @generated by %s\n", #location())
-    for it in exports {
-        fmt.fprintf(out, "    ")
-        fmt.fprintf(out, name_format, it.name)
-        fmt.fprintf(out, " : %s,\n", it.type)
+    for it in mp.exports {
+        fmt.fprintf(out, "    %v:%*v %s,\n", space_after(it.name, width), it.type)
     }
     fmt.fprint(out, "}\n\n")
     
     fmt.fprintf(out, "load_game_api :: proc (game_lib: win.HMODULE) {{ // @generated by %s\n", #location())
-    for it in exports {
-        fmt.fprintf(out, "    game.")
-        fmt.fprintf(out, name_format, it.name)
-        fmt.fprintf(out, " = auto_cast win.GetProcAddress(game_lib, \"%s\")\n", it.name)
+    for it in mp.exports {
+        fmt.fprintf(out, "    game.%-*s = auto_cast win.GetProcAddress(game_lib, \"%s\")\n", width, it.name, it.name)
     }
     fmt.fprint(out, "}\n")
     
@@ -309,157 +406,168 @@ generate_game_api :: proc (using mp: ^Metaprogram, output_file: string) -> (resu
     return true
 }
 
-generate_platform_api :: proc (using mp: ^Metaprogram, platform_path, game_path: string) -> (result: bool) {
-    remove_if_exists(game_path)
-    game_file, err := os.open(game_path, mode = os.O_CREATE)
-    defer os.close(game_file)
-    if err != nil do return
-    
-    // @note(viktor): these members need to be in a defined and stable order, so that hotreloads do not mix up the procs.
-    File :: struct { file_name: string, infos: [dynamic] Info }
-    api_files: [dynamic] File
-    for file_name, infos in apis {
-        append(&api_files, File { file_name, infos })
-        slice.sort_by(infos[:], proc (a, b: Info) -> bool { return strings.compare(a.name, b.name) <= 0 })
-    }
-    
-    slice.sort_by(api_files[:], proc (a, b: File) -> bool { return strings.compare(a.file_name, b.file_name) <= 0 })
+generate_platform_api :: proc (mp: ^Metaprogram, platform_path, game_path: string) -> (result: bool) {
+    out_game, ok := open_generated_file_and_write_header(game_path, "game")
+    if !ok do return false
+    defer os.close(out_game)
     
     ////////////////////////////////////////////////
     
-    fmt.fprintf(game_file, GeneratedHeader, "game")
-    
-    fmt.fprintf(game_file, "@(common) Platform: Platform_Api // @generated by %s\n\n", #location())
-    
-    fmt.fprintf(game_file, "@(common) Platform_Api :: struct {{ // @generated by %s\n", #location())
+    fmt.fprintf(out_game, "@(common) Platform: Platform_Api // @generated by %s\n\n", #location())
+    fmt.fprintf(out_game, "@(common) Platform_Api :: struct {{ // @generated by %s\n", #location())
         
-    for file, index in api_files {
-        if index != 0 do fmt.fprint(game_file, "    \n")
+    for file, index in mp.apis {
+        if index != 0 do fmt.fprint(out_game, "    \n")
+        
+        name_width: int
+        type_width: int
+        for info in file.infos {
+            name_width = max(name_width, len(info.name))
+            type_width = max(type_width, len(info.type))
+        }
         
         for info in file.infos {
-            fmt.fprintf(game_file, "    // @generated exported from %s(%d:%d)\n", info.location.file, info.location.line, info.location.column)
-            
-            fmt.fprintf(game_file, "    %v: %v,\n", info.name, info.type)
+            fmt.fprintf(out_game, "    // exported from %s(%d:%d)\n", info.location.file, info.location.line, info.location.column)
+            fmt.fprintf(out_game, "    %v:%*v %v,%*v\n", space_after(info.name, name_width), space_after(info.type, type_width))
         }
     }
-    fmt.fprint(game_file, "}\n")
+    fmt.fprint(out_game, "}\n")
     
     ////////////////////////////////////////////////
     
-    remove_if_exists(platform_path)
-    platform_file, err2 := os.open(platform_path, mode = os.O_CREATE)
-    defer os.close(platform_file)
-    if err2 != nil do return
+    out_main, pok := open_generated_file_and_write_header(platform_path, "main")
+    if !pok do return false
+    defer os.close(out_main)
     
-    fmt.fprintf(platform_file, GeneratedHeader, "main")
-    fmt.fprintf(platform_file, "Platform := Platform_Api {{ // @generated by %s\n", #location())
+    fmt.fprintf(out_main, "Platform := Platform_Api {{ // @generated by %s\n", #location())
     // @note(viktor): We need to cast here, as we cannot expose some type to the game, but those are passed by pointer so the actual definition and size doesn't matter and we can safely cast.
-    for file, index in api_files {
-        if index != 0 do fmt.fprint(platform_file, "    \n")
+    for file, index in mp.apis {
+        if index != 0 do fmt.fprint(out_main, "\n")
         
+        length := 0
         for info in file.infos {
-            fmt.fprintf(platform_file, "    %v = auto_cast %v,\n", info.name, info.name)
+            length = max(length, len(info.name))
+        }
+        for info in file.infos {
+            fmt.fprintf(out_main, "    %-*v = auto_cast %v,\n", length, info.name, info.name)
         }
         
     }
-    fmt.fprint(platform_file, "}\n")
+    fmt.fprint(out_main, "}\n")
     
     fmt.printfln("INFO: generated platform api")
     return true
 }
 
-////////////////////////////////////////////////
-
-check_printlikes :: proc (using mp: ^Metaprogram, dir: string) -> (success: bool) {
-    pkg, ok := parser.parse_package_from_path(dir)
-    assert(ok)
-    
-    v := ast.Visitor{ visit = visit_and_check_printlikes, data = mp }
-    ast.walk(&v, pkg)
-    
-    return !mp.printlikes_failed
+space_after :: proc (s: string, width: int) -> (string, int, string) {
+    width_after := width - len(s)
+    return s, width_after, ""
 }
 
-visit_and_check_printlikes :: proc (visitor: ^ast.Visitor, node: ^ast.Node) -> (result: ^ast.Visitor) {
-    if node == nil do return nil
+////////////////////////////////////////////////
+
+union_contains :: proc (value: $U, $T: typeid) -> bool {
+    _, ok := value.(T)
+    return ok
+}
+
+check_printlike_call :: proc (mp: ^Metaprogram, call: ^ast.Call_Expr) {
+    proc_ident: ^ast.Ident
+    if ident, iok := call.expr.derived_expr.(^ast.Ident); iok {
+        proc_ident = ident
+    } else if selector, sok := call.expr.derived_expr.(^ast.Selector_Expr); sok {
+        proc_ident = selector.field
+    } else if union_contains(call.expr.derived_expr, ^ast.Basic_Directive) || union_contains(call.expr.derived_expr, ^ast.Paren_Expr) {
+        return
+    } else {
+        unimplemented()
+    }
     
-    using mp := cast(^Metaprogram) visitor.data
+    name := proc_ident.name
+    printlike, ok := mp.printlikes[name]
+    if !ok do return
     
-    #partial switch call in node.derived {
-      case ^ast.Call_Expr:
-        call_text := read_pos(mp, call.pos, call.open)
-        name := call_text
-        index := strings.index_byte(name, '.')
-        if index != -1 {
-            name = name[index+1:]
-        }
-        
-        printlike, ok := printlikes[name]
-        if !ok do return visitor
-        
-        assert(printlike.format_index <= len(call.args))
-        
-        format_arg := call.args[printlike.format_index]
-        // @todo(viktor): @incomplete handle the format being set by name
-        if _, set_format_by_name := format_arg.derived_expr.(^ast.Field_Value); set_format_by_name do return visitor
-        
-        format := read_pos(mp, format_arg.pos, format_arg.end)
-        format_string_ok, expected := get_expected_format_string_arg_count(format)
-        
-        the_actual_arg_count_is_unknown := false
-        the_actual_arg_count_is_unknown_because: string
-        
-        actual: u32
-        if format_string_ok {
-            if printlike.args_index >= len(call.args) {
-                // @note(viktor): no args where passed
-                actual = 0
+    assert(printlike.format_index <= len(call.args))
+    format_arg := call.args[printlike.format_index]
+    
+    format: string
+    if format_field_value, set_format_by_name := format_arg.derived_expr.(^ast.Field_Value); set_format_by_name {
+        format_value := ast.unparen_expr(format_field_value.value)
+        if lit, lok := format_value.derived_expr.(^ast.Basic_Lit); lok {
+            if lit.tok.kind == .String {
+                format = lit.tok.text
             } else {
-                args := call.args[printlike.args_index]
-                if _, set_args_by_name := args.derived_expr.(^ast.Field_Value); set_args_by_name {
-                    the_actual_arg_count_is_unknown = true
-                    the_actual_arg_count_is_unknown_because = "The args are assigned by name, therefore we cannot know where they were declared and check them there."
+                // @incomplete not handling any other kind or nested expression
+            }
+        } else {
+            // @incomplete Not handling non-literal asignments
+        }
+    } else {
+        format = read_pos(mp, format_arg.pos, format_arg.end)
+    }
+    
+    if format == "" do return
+    
+    format_string_ok, expected := get_expected_format_string_arg_count(format)
+    
+    the_actual_arg_count_is_unknown := false
+    the_actual_arg_count_is_unknown_because: string
+    
+    actual: int
+    if format_string_ok {
+        if printlike.args_index >= len(call.args) {
+            // @note(viktor): no args where passed
+            actual = 0
+        } else {
+            args := call.args[printlike.args_index]
+            if arg_field_value, set_args_by_name := args.derived_expr.(^ast.Field_Value); set_args_by_name {
+                fmt.printfln("%v:%v:%v", args.pos.file, args.pos.line, args.pos.column)
+                arg_value := ast.unparen_expr(arg_field_value.value)
+                if !union_contains(arg_value.derived_expr, ^ast.Ident) {
                     // @todo(viktor): if it is an array literal we can still check it
                 } else {
-                    outer: for arg in call.args[printlike.args_index:] {
-                        if _, set_parameter_by_name := arg.derived_expr.(^ast.Field_Value); set_parameter_by_name do continue
-                        
-                        handled: b32
-                        // @todo(viktor): some other expressions like ternary expressions could also yield more than one arg, but that would require a recursive approach
-                        #partial switch value in arg.derived_expr {
-                          case ^ast.Call_Expr:
-                            expr_name := value.expr.derived_expr.(^ast.Ident).name
-                            if procedure, proc_ok := procedures[expr_name]; proc_ok {
-                                actual += procedure.return_count
-                                handled = true
-                            } else {
-                                // @incomplete if the name is a proc group we dont know which of the procs is called, thanks bill..
-                                the_actual_arg_count_is_unknown = true
-                                the_actual_arg_count_is_unknown_because = "The args contain at least one call to a proc-groups."
-                            }
-                        }
-                        
-                        if !handled do actual += 1
-                    }
+                    the_actual_arg_count_is_unknown = true
+                    the_actual_arg_count_is_unknown_because = "Cannot check the value of the variable assigned to the args parameter."
                 }
-            }
-        }
-        
-        if the_actual_arg_count_is_unknown {
-            report_unchecked_printlike_call(mp, call, expected, the_actual_arg_count_is_unknown_because)
-        } else {
-            if expected != actual {
-                report_printlike_error(mp, call, expected, actual)
+            } else {
+                outer: for arg in call.args[printlike.args_index:] {
+                    if union_contains(arg.derived_expr, ^ast.Field_Value) do continue
+                    
+                    handled: b32
+                    // @todo(viktor): some other expressions like ternary expressions could also yield more than one arg, but that would require a recursive approach
+                    arg := arg
+                    arg = ast.unparen_expr(arg)
+                    #partial switch value in arg.derived_expr {
+                    case ^ast.Call_Expr:
+                        expr_name := value.expr.derived_expr.(^ast.Ident).name
+                        if procedure, proc_ok := mp.procedures[expr_name]; proc_ok {
+                            actual += procedure.return_count
+                            handled = true
+                        } else {
+                            // @incomplete if the name is a proc group we dont know which of the procs is called, thanks bill..
+                            the_actual_arg_count_is_unknown = true
+                            the_actual_arg_count_is_unknown_because = "The args contain at least one call to a proc-groups."
+                        }
+                    }
+                    
+                    if !handled do actual += 1
+                }
             }
         }
     }
     
-    return visitor
+    if the_actual_arg_count_is_unknown {
+        report_unchecked_printlike_call(mp, call, expected, the_actual_arg_count_is_unknown_because)
+    } else {
+        if expected != actual {
+            report_printlike_error(mp, call, expected, actual)
+        }
+    }
 }
 
 ////////////////////////////////////////////////
 
-report_printlike_error :: proc (using mp: ^Metaprogram, call: ^ast.Call_Expr, expected, actual: u32) {
+report_printlike_error :: proc (mp: ^Metaprogram, call: ^ast.Call_Expr, expected, actual: int) {
     mp.printlikes_failed = true
     
     fmt.eprintf("%v%v:%v:%v: ", White, call.pos.file, call.pos.line, call.pos.column)
@@ -485,61 +593,48 @@ report_printlike_error :: proc (using mp: ^Metaprogram, call: ^ast.Call_Expr, ex
     report_highlight_percent_signs(full_call, expected)
 }
 
-report_unchecked_printlike_call :: proc (using mp: ^Metaprogram, call: ^ast.Call_Expr, expected: u32, excuse: string) {
-    fmt.printf("%v%v:%v:%v: ", White, call.pos.file, call.pos.line, call.pos.column)
-    fmt.printf("%vFormat Warning: %v", Yellow, Reset)
-    fmt.printf("%v %v\n", "Unable to check the arguments count.", excuse)
+report_unchecked_printlike_call :: proc (mp: ^Metaprogram, call: ^ast.Call_Expr, expected: int, excuse: string) {
+    fmt.eprintf("%v%v:%v:%v: ", White, call.pos.file, call.pos.line, call.pos.column)
+    fmt.eprintf("%vFormat Warning: %v", Yellow, Reset)
+    fmt.eprintf("%v %v\n", "Unable to check the arguments count.", excuse)
     
-    fmt.printf("\t%v", White)
+    fmt.eprintf("\t%v", White)
     
     full_call := read_pos(mp, call.pos, call.end)
     report_highlight_percent_signs(full_call, expected)
 }
 
-report_highlight_percent_signs :: proc (full_call: string, expected: u32) {
-    // @volatile :PrintlikeChecking the loop structure must be the same as in format_string 
+report_highlight_percent_signs :: proc (full_call: string, expected: int) {
+    escaped: int
     
-    skip: b32
-    for r, i in full_call {
-        if skip {
-            skip = false
-            continue
-        }
-        if r == '%' {
-            if i < len(full_call)-1 && full_call[i+1] == '%' {
-                fmt.eprint("%%")
-                skip = true
-            } else {
-                fmt.eprintf("%v%%%v", Blue, White)
-            }
+    iter := shared.make_format_iterator(full_call)
+    for part in shared.iterate_format(&iter) {
+        if part.kind == .Percent {
+            fmt.eprintf("%v%v%v", Blue, part.text, White)
+        } else if part.kind == .Escaped {
+            fmt.eprintf("%v%v%v", Yellow, part.text, White)
+            escaped += 1
         } else {
-            fmt.eprint(r)
+            fmt.eprintf("%v", part.text)
         }
     }
     
     fmt.eprintfln("%v", Reset)
     
-    if expected == 0 {
-        fmt.eprintfln("\n")
-    } else if expected == 1 {
-        fmt.eprintfln("\tThe percent sign that consumes an argument is highlighted.\n")
-    } else {
-        fmt.eprintfln("\tThe percent signs that consume an argument are highlighted.\n")
-    }
+    if expected > 0 do fmt.eprintf("\t%v%v%v indicates a formatting percent sign.\n", Blue, "%",  Reset)
+    if escaped  > 0 do fmt.eprintf("\t%v%v%v indicates an escaped percent sign.\n", Yellow, "%%", Reset)
+    
+    fmt.eprintf("\n")
 }
 
-// @volatile :PrintlikeChecking the loop structure must be the same as in format_string 
-get_expected_format_string_arg_count :: proc (format: string) -> (ok: bool, count: u32) {
+get_expected_format_string_arg_count :: proc (format: string) -> (ok: bool, count: int) {
     if format[0] == '"' || format[0] == '`' {
         ok = true
         
-        for index: int; index < len(format); index += 1 {
-            if format[index] == '%' {
-                if index+1 < len(format) && format[index+1] == '%' {
-                    index += 1
-                } else {
-                    count += 1
-                }
+        iter := shared.make_format_iterator(format)
+        for element in shared.iterate_format(&iter) {
+            if element.kind == .Percent {
+                count += 1
             }
         }
     }
@@ -569,7 +664,14 @@ Blue   :: ansi.CSI + ansi.FG_BRIGHT_BLUE   + ansi.SGR
 Green  :: ansi.CSI + ansi.FG_BRIGHT_GREEN  + ansi.SGR
 Reset  :: ansi.CSI + ansi.FG_DEFAULT       + ansi.SGR
 
-has_attribute :: proc (attributes: [] ^ast.Attribute, target: string, target_value := "") -> (result: bool) {
+has_attribute :: proc { has_attribute_import, has_attribute_value, has_attribute_raw }
+has_attribute_import :: proc (Import: ^ast.Import_Decl, target: string, target_value := "") -> (result: bool) {
+    return has_attribute(Import.attributes[:], target, target_value)
+}
+has_attribute_value :: proc (value: ^ast.Value_Decl, target: string, target_value := "") -> (result: bool) {
+    return has_attribute(value.attributes[:], target, target_value)
+}
+has_attribute_raw :: proc (attributes: [] ^ast.Attribute, target: string, target_value := "") -> (result: bool) {
     loop: for attribute in attributes {
         for elem in attribute.elems {
             name: string
@@ -597,28 +699,22 @@ has_attribute :: proc (attributes: [] ^ast.Attribute, target: string, target_val
     return result
 }
 
-collect_all_files :: proc (files: ^map[string] string, directory: string) {
-    fi, _ := os2.read_directory_by_path(directory, -1, context.allocator)
-    for f in fi {
-        bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
-        absolute_path, _ := os2.get_absolute_path(f.fullpath, context.allocator)
-        files[absolute_path] = cast(string) bytes
-    }
-}
-
-read_pos :: proc (using mp: ^Metaprogram, start, end: tokenizer.Pos) -> (result: string) {
+read_pos :: proc (mp: ^Metaprogram, start, end: tokenizer.Pos) -> (result: string) {
     if start.file != end.file {
-        fmt.println("bad pos pair:", start, end)
+        fmt.eprintln("bad pos pair:", start, end)
         assert(false)
     }
     
-    file, ok := files[start.file]
+    file, ok := mp.files[start.file]
     
     if !ok {
-        fmt.println("unknown file:", start.file)
+        fmt.eprintln("unknown file:", start.file)
         assert(false)
     }
     
     result = file[start.offset:end.offset]
     return result
 }
+
+sort_files :: proc (a, b: File) -> bool { return a.file_name < b.file_name }
+sort_infos :: proc (a, b: Info) -> bool { return a.name < b.name }
