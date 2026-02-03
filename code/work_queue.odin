@@ -8,10 +8,10 @@ import win "core:sys/windows"
 WorkQueue :: struct {
     semaphore_handle: win.HANDLE,
     
-    completion_goal, 
+    completion_goal:  u32,
     completion_count: u32,
      
-    next_entry_to_write, 
+    next_entry_to_write: u32,
     next_entry_to_read:  u32,
     
     entries: [4096] WorkQueueEntry,
@@ -28,10 +28,10 @@ CreateThreadInfo :: struct {
 }
 
 @(private="file") next_thread_index: u32 = 1
-@(private="file") infos: [1024] CreateThreadInfo
+@(private="file") infos: [128] CreateThreadInfo
 
 init_work_queue :: proc (queue: ^WorkQueue, count: u32) {
-    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast count, nil)
+    queue_create_semaphore(queue, count)
     
     for &info in infos[next_thread_index:][:count] {
         info.queue = queue
@@ -71,7 +71,7 @@ enqueue_work :: proc (queue: ^WorkQueue, data: pmm, callback: proc (data: pmm)) 
     ok, _ = atomic_compare_exchange(&queue.next_entry_to_write, old_next_entry, new_next_entry)
     assert(ok)
     
-    win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
+    queue_release_one_work_unit(queue)
 }
 
 @(api)
@@ -96,8 +96,6 @@ do_next_work_queue_entry :: proc (queue: ^WorkQueue) -> (should_sleep: b32) {
         ok, index := atomic_compare_exchange(&queue.next_entry_to_read, old_next_entry, new_next_entry)
         
         if ok {
-            assert(index == old_next_entry)
-            
             entry := &queue.entries[index]
             entry.callback(entry.data)
             
@@ -119,8 +117,22 @@ worker_thread :: proc (parameter: pmm) {
     
     for {
         if do_next_work_queue_entry(queue) { 
-            INFINITE :: transmute(win.DWORD) cast(i32) -1
-            win.WaitForSingleObjectEx(queue.semaphore_handle, INFINITE, false)
+            worker_yield(queue)
         }
     }
+}
+
+////////////////////////////////////////////////
+
+queue_create_semaphore :: proc (queue: ^WorkQueue, count: u32) {
+    queue.semaphore_handle = win.CreateSemaphoreW(nil, 0, auto_cast count, nil)
+}
+
+queue_release_one_work_unit :: proc (queue: ^WorkQueue) {
+    win.ReleaseSemaphore(queue.semaphore_handle, 1, nil)
+}
+
+worker_yield :: proc (queue: ^WorkQueue) {
+    INFINITE :: transmute(win.DWORD) cast(i32) -1
+    win.WaitForSingleObjectEx(queue.semaphore_handle, INFINITE, false)
 }

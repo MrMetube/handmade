@@ -9,9 +9,9 @@ import "core:simd/x86"
 ////////////////////////////////////////////////
 // Atomics
 
-atomic_compare_exchange :: proc (dst: ^$T, old, new: T) -> (ok: bool, was: T) {
-    was, ok = intrinsics.atomic_compare_exchange_strong(dst, old, new)
-    return ok, was
+atomic_compare_exchange :: proc (destination: ^$T, old_value, new_value: T) -> (ok: bool, was_value: T) {
+    was_value, ok = intrinsics.atomic_compare_exchange_strong(destination, old_value, new_value)
+    return ok, was_value
 }
 
 volatile_load      :: intrinsics.volatile_load

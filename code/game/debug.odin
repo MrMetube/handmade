@@ -88,7 +88,7 @@ DebugState :: struct {
     root_info: [] u8,
     
     // Per-frame storage management
-    per_frame_arena:         Arena,
+    per_frame_arena:       Arena,
     stored_event_freelist: FreeList(DebugStoredEvent),
     
     tooltips: FixedArray(16, [256] u8),
@@ -432,8 +432,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
             store_event(debug, event, element)
             
           case EndDataBlock:
-            matching_block := thread.first_open_data_block
-            if matching_block != nil {
+            if thread.first_open_data_block != nil {
                 free_open_block(thread, &thread.first_open_data_block)
             }
             
@@ -515,8 +514,8 @@ store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugEleme
     return result 
 }
 
-increment_frame_ordinal :: proc (value:^i32) {
-    value ^= (value^+1) % len(DebugState{}.frames)
+increment_frame_ordinal :: proc (value: ^i32) {
+    value^ = (value^+1) % len(DebugState{}.frames)
 }
 
 init_frame :: proc (debug: ^DebugState, frame: ^DebugFrame, begin_clock: i64) {
@@ -652,7 +651,6 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
 }
 
 alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
-    
     result = freelist_push(&thread.freelist, offset_of(DebugOpenBlock, next_free), no_clear())
     
     result^ = {
@@ -661,7 +659,7 @@ alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index:
         element     = element,
     }
     
-    list_push_next_pointer(parent, result, &result.parent)
+    list_push(parent, result, &result.parent)
     
     return result
 }
@@ -674,7 +672,7 @@ free_open_block :: proc (thread: ^DebugThread, first_open_block: ^^DebugOpenBloc
 ////////////////////////////////////////////////
 
 begin_debug_statistic :: proc (stat: ^DebugStatistic) {
-    stat ^= {
+    stat^ = {
         min = max(f32),
         max = min(f32),
     }
