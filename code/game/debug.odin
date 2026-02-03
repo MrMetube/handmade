@@ -111,13 +111,13 @@ DebugThread :: struct {
     next: ^DebugThread,
     thread_index: u16,
     
-    first_free_block:       ^DebugOpenBlock,
+    freelist:               FreeList(DebugOpenBlock),
     first_open_timed_block: ^DebugOpenBlock,
     first_open_data_block:  ^DebugOpenBlock,
 }
 
 DebugOpenBlock :: struct {
-    using next: struct #raw_union {
+    using _: struct #raw_union {
         parent, next_free: ^DebugOpenBlock,
     },
     
@@ -376,6 +376,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
         if thread == nil {
             thread = freelist_push(&debug.thread_free_list, no_clear())
             thread ^= { thread_index = event.thread_index }
+            freelist_init(&thread.freelist, &debug.arena)
             
             list_push(&debug.thread, thread)
         }
@@ -614,6 +615,10 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
                 file_path = copy_string(&debug.arena, event.guid.file_path),
                 procedure = copy_string(&debug.arena, event.guid.procedure),
             }
+            
+            
+            
+            // @cleanup is this even used anymore?
             // @todo(viktor): There should be a better way of copying just the tag.
             raw_union :: struct{
                 data: [size_of(DebugValue)-size_of(u64)] u8,
@@ -624,7 +629,9 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
             raw_result := cast(^raw_union) &result.type
             raw_value  := transmute(raw_union) event.value
             raw_result.tag = raw_value.tag
-
+            
+            
+            
             index := hash_value % len(debug.element_hash)
             list_push(&debug.element_hash[index], result)
             
@@ -645,32 +652,23 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
 }
 
 alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
-    result = thread.first_free_block
-    if result != nil {
-        thread.first_free_block = result.next_free
-    } else {
-        result = push(&debug.arena, DebugOpenBlock, no_clear())
-        result = result
-    }
     
-    result ^= {
+    result = freelist_push(&thread.freelist, offset_of(DebugOpenBlock, next_free), no_clear())
+    
+    result^ = {
         frame_index = frame_index,
         begin_clock = begin_clock,
         element     = element,
     }
     
-    result.parent = parent^
-    parent ^= result
+    list_push_next_pointer(parent, result, &result.parent)
     
     return result
 }
 
 free_open_block :: proc (thread: ^DebugThread, first_open_block: ^^DebugOpenBlock) {
-    free_block := first_open_block^
-    first_open_block ^= free_block.parent
-    
-    free_block.next_free    = thread.first_free_block
-    thread.first_free_block = free_block
+    free_block := list_pop_head_next_offset(first_open_block, offset_of(DebugOpenBlock, parent))
+    freelist_free(&thread.freelist, free_block, &free_block.next_free)
 }
 
 ////////////////////////////////////////////////

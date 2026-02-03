@@ -5,14 +5,12 @@ World :: struct {
     
     chunk_dim_meters: v3,
     
-    // @todo(viktor): chunk_hash should probably switch to pointers IF
-    // tile_entity_blocks continue to be stored en masse in the tile chunk!
+    // @todo(viktor): chunk_hash should probably switch to pointers IF tile_entity_blocks continue to be stored en masse in the tile chunk!
     chunk_hash: [4096] ^Chunk,
-    first_free: ^WorldEntityBlock,
     
     chunk_freelist: FreeList(Chunk),
     block_freelist: FreeList(WorldEntityBlock),
-
+    
     game_entropy: RandomSeries,
     
     change_ticket: TicketMutex,
@@ -486,7 +484,7 @@ extract_chunk :: proc (world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
     }
     
     end_ticket_mutex(&world.change_ticket)    
-
+    
     return result
 }
 

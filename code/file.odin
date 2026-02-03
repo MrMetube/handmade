@@ -88,9 +88,8 @@ read_data_from_file :: proc (handle: ^PlatformFileHandle, #any_int position, amo
         
         bytes_read: u32
         amount_32 := safe_truncate(u32, amount)
-        if win.ReadFile(file_handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount {
-            // @note(viktor): File read succeded
-        } else {
+        read_succeded := win.ReadFile(file_handle.handle, destination, amount_32, &bytes_read, &overlap_info) && cast(u64) bytes_read == amount
+        if !read_succeded {
             mark_file_error(handle, "Read file failed")
         }
     }

@@ -352,33 +352,28 @@ list_remove :: proc (element: ^$T) {
 // Single Linked List
 // [Head] -> [..] ... -> [..] -> [Tail]
 
-list_push :: proc { list_push_next, list_push_custom_member }
-list_push_next          :: proc (head: ^^$T, element: ^T)             { list_push(head, element, offset_of(T, next)) }
-list_push_custom_member :: proc (head: ^^$T, element: ^T, $next: umm) {
-    element_next := get(element, next) 
-    #assert(type_of(element_next^) == ^T)
-
-    element_next ^= head^
-    head         ^= element
+list_push :: proc { list_push_next, list_push_next_pointer }
+list_push_next :: proc (head: ^^$T, element: ^T) {
+    list_push(head, element, &element.next)
+}
+list_push_next_pointer :: proc (head: ^^$T, element: ^T, next: ^^T) {
+    next^ = head^
+    head^ = element
 }
 
-list_pop_head :: proc { list_pop_head_custom_member, list_pop_head_next }
-list_pop_head_next          :: proc (head: ^^$T)             -> (result: ^T, ok: b32) #optional_ok { return list_pop_head(head, offset_of(head^.next)) }
-list_pop_head_custom_member :: proc (head: ^^$T, $next: umm) -> (result: ^T, ok: b32) #optional_ok {
-    if head^ != nil {
-        result = head^
-        head ^= get(result, next)^
-        
-        ok = true
-    }
+
+list_pop_head:: proc { list_pop_head_next, list_pop_head_next_offset }
+list_pop_head_next :: proc (head: ^^$T) -> (result: ^T, ok: b32) #optional_ok { 
+    result, ok = list_pop_head(head, offset_of(T, next))
     return result, ok
 }
-
-///////////////////////////////////////////////
-
-@(private="file")
-get :: #force_inline proc (type: ^$T, $offset: umm) -> (result: ^^T) {
-    raw_link := cast([^]u8) type
-    slot := cast(^^T) &raw_link[offset]
-    return slot
+list_pop_head_next_offset :: proc (head: ^^$T, $next_offset: umm) -> (result: ^T, ok: b32) #optional_ok {
+    ok = head^ != nil
+    if ok {
+        result = head^
+        next  := cast(^^T) (cast(umm) result + next_offset)
+        head^  = next^
+    }
+    
+    return result, ok
 }
