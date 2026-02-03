@@ -10,11 +10,15 @@ import "core:time"
 import "core:thread"
 import win "core:sys/windows"
 
+// @todo(viktor): think about "#all_or_none" for structs. Do i make this mistake and should I take precautions?
+
 optimizations    := false ? "-o:speed" : "-o:none"
 PedanticGame     :: false
 PedanticPlatform :: false
 
-flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native" }
+// @todo(viktor): get radlink working?
+flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native", "-linker:lld" }
+// "-build-diagnostics"
 
 debug    :: "-debug"
 internal :: "-define:INTERNAL=true"
@@ -44,6 +48,29 @@ debug_exe_path :: `.\`+debug_exe
  - get rid of INTERNAL define
  */
  
+////////////////////////////////////////////////
+/*
+Should the build script itself have flags or should it all be in the file?
+
+- Metaprogram Plugins
+  - print checker
+  - code gen
+  - (build HHAs)
+
+- Pedantic build until no errors
+  - all vets and checks
+  - first only the game layer, then if that builds also do the platform layer
+
+- Debug build with no optimizations then run
+  - debug symbols and start debugger
+
+- GPU Debug
+  - build and start through renderdoc
+  
+- Optimized build then run 
+  - o:speed, target, microarch
+
+*/
 ////////////////////////////////////////////////
 
 Task :: enum {
@@ -90,7 +117,7 @@ main :: proc () {
     make_directory_if_not_exists(data_dir)
     { err := os.set_current_directory(build_dir); assert(err == nil) }
     
-    // @todo(viktor): these coult also be tasks
+    // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
     if !metaprogram_collect_data(&metaprogram, code_dir) do os.exit(1)
     if !metaprogram_collect_data(&metaprogram, game_dir) do os.exit(1)

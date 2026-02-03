@@ -6,7 +6,6 @@ package game
 
 import "base:intrinsics"
 import "base:runtime"
-import "base:builtin"
 
 import "core:mem"
 import "core:simd"
