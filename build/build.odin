@@ -17,8 +17,7 @@ PedanticGame     :: false
 PedanticRender   :: false
 PedanticPlatform :: false
 
-// @todo(viktor): get radlink working?
-flags    := [] string { "-vet-cast", "-vet-shadowing", /* "-target:windows_amd64", "-microarch:native", "-linker:lld" */ }
+flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native", "-linker:radlink" }
 // "-build-diagnostics"
 
 debug    :: "-debug"
@@ -32,11 +31,14 @@ build_dir :: `.\build\`
 data_dir  :: `.\data`
 
 main_package      :: `main` 
-game_package      :: `game` 
-render_package    :: `render` 
 code_dir          :: `..\code` 
+
+game_package      :: `game` 
 game_dir          :: `..\code\game` 
+
+render_package    :: `render` 
 render_dir        :: `..\code\render` 
+
 asset_builder_dir :: `..\code\asset_builder` 
 
 ////////////////////////////////////////////////
@@ -61,10 +63,6 @@ Should the build script itself have flags or should it all be in the file?
   - print checker
   - code gen
   - (build HHAs)
-
-- Pedantic build until no errors
-  - all vets and checks
-  - first only the game layer, then if that builds also do the platform layer
 
 - Debug build with no optimizations then run
   - debug symbols and start debugger
@@ -129,6 +127,7 @@ main :: proc () {
     if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir,   main_package)   do os.exit(1)
     if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir,   game_package)   do os.exit(1)
     // if !metaprogram_collect_files_and_parse_package(&metaprogram, render_dir, render_package) do os.exit(1)
+    
     if !metaprogram_collect_plugin_data(&metaprogram, code_dir,   main_package)   do os.exit(1)
     if !metaprogram_collect_plugin_data(&metaprogram, game_dir,   game_package)   do os.exit(1)
     // if !metaprogram_collect_plugin_data(&metaprogram, render_dir, render_package) do os.exit(1)
@@ -165,7 +164,7 @@ main :: proc () {
     if tasks & BuildTasks == {} do tasks += { .game, .platform }
     
     if tasks & Tool_Tasks != {} {
-        if !did_change(debug_exe_path, code_dir, game_dir, render_dir, `.\`) {
+        if !did_change(debug_exe_path, code_dir, game_dir, `.\`) {
             fmt.println("INFO: Skipping build, because no changes to the source files were detected.")
             tasks -= BuildTasks
         }

@@ -407,10 +407,10 @@ main :: proc () {
                         
                         our_controller_index := controller_index+1
                         
-                        old_controller := old_input.controllers[our_controller_index]
+                        old_controller :=  old_input.controllers[our_controller_index]
                         new_controller := &new_input.controllers[our_controller_index]
                         
-                        if xbox_controller_present[controller_index] && XInputGetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
+                        if xbox_controller_present[controller_index] && xinput.GetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
                             new_controller.is_connected = true
                             new_controller.is_analog = old_controller.is_analog
                             // @todo(viktor): see if dwPacketNumber increments too rapidly

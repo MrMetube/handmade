@@ -385,33 +385,6 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
         }
     }
     
-    // // :PrintlikeChecking @volatile printable parts
-    // // the loop structure is copied in the metaprogram to check the arg count, any changes here need to be propagated to there
-    // start_of_text: int
-    // for index: int; index < len(format); index += 1 {
-    //     if format[index] == '%' {
-    //         part := format[start_of_text:index]
-    //         if part != "" {
-    //             format_any(&ctx, part)
-    //         }
-    //         start_of_text = index+1
-            
-    //         if index+1 < len(format) && format[index+1] == '%' {
-    //             index += 1
-    //             // @note(viktor): start_of_text now points at the percent sign and will append it next time saving processing one view
-    //         } else {
-    //             arg := args[arg_index]
-    //             arg_index += 1
-                
-    //             // @incomplete Would be ever want to display a raw View? if so put in a flag to make it use the normal path
-    //             format_any(&ctx, arg)
-    //         }
-    //     }
-    // }
-    
-    // end := format[start_of_text:]
-    // format_any(&ctx, end)
-    
     assert(arg_index == auto_cast len(args))
     
     if .AppendZero in flags {

@@ -8,17 +8,20 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
     
     dSound_lib := win.LoadLibraryW("dsound.dll")
     if dSound_lib == nil {
-        // @logging 
+        // @logging
+        return
     }
     
     DirectSoundCreate := cast(ProcDirectSoundCreate) win.GetProcAddress(dSound_lib, "DirectSoundCreate")
     if DirectSoundCreate == nil {
         // @logging 
+        return
     }
     
     direct_sound : ^IDirectSound
     if result := DirectSoundCreate(nil, &direct_sound, nil); win.FAILED(result) {
         // @logging 
+        return
     }
     
     wave_format: WAVEFORMATEX = {
@@ -31,6 +34,7 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
     }
     if result := direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY); win.FAILED(result) {
         // @logging 
+        return
     }
     
     fake_sound_buffer_description: DSBUFFERDESC = {
@@ -41,10 +45,12 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
     fake_sound_buffer_for_setup: ^IDirectSoundBuffer
     if result := direct_sound->CreateSoundBuffer(&fake_sound_buffer_description, &fake_sound_buffer_for_setup, nil); win.FAILED(result) {
         // @logging 
+        return
     }
     
     if result := fake_sound_buffer_for_setup->SetFormat(&wave_format); win.FAILED(result) {
         // @logging 
+        return
     }
     
     actual_sound_buffer_description := DSBUFFERDESC{
@@ -53,6 +59,7 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
         dwBufferBytes = buffer_size_in_bytes,
         lpwfxFormat   = &wave_format,
     }
+    
     when INTERNAL {
         // @todo(viktor): should this be a setting?
         actual_sound_buffer_description.dwFlags |= DSBCAPS_GLOBALFOCUS
@@ -60,6 +67,7 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
     
     if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &GlobalSoundBuffer, nil); win.FAILED(result) {
         // @logging 
+        return
     }
 }
 
