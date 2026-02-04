@@ -4,7 +4,6 @@ package game
 @(common="file")
 
 import "base:builtin"
-import "base:intrinsics"
 import "base:runtime"
 
 Array :: struct ($T: typeid) {
@@ -88,6 +87,10 @@ append_fixed_array_many_slice :: proc (a: ^FixedArray($N, $T), values: [] T) -> 
 
 make_array :: proc (arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
     result.data = push_slice(arena, T, len, params)
+    return result
+}
+make_array_allocator :: proc (allocator: Allocator, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
+    result.data = make_slice(allocator, T, len, params)
     return result
 }
 

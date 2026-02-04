@@ -1,3 +1,4 @@
+#+vet explicit-allocators
 package main
 
 import "base:runtime"
@@ -113,8 +114,8 @@ main :: proc () {
     list_init_sentinel(&GlobalPlatformState.block_sentinel)
     
     set_platform_api_in_the_statically_linked_game_code(Platform)
-    platform_arena: Arena
-    
+    _platform_arena: Arena
+    platform_allocator := arena_allocator(&_platform_arena)
     {
         frequency: win.LARGE_INTEGER
         win.QueryPerformanceFrequency(&frequency)
@@ -139,7 +140,7 @@ main :: proc () {
         {
             buffer := &GlobalBackBuffer
             assert(align(16, buffer.dimension.x) == buffer.dimension.x)
-            buffer.memory = push(&platform_arena, Color, buffer.dimension.x * buffer.dimension.y)
+            buffer.memory = make(platform_allocator, Color, buffer.dimension.x * buffer.dimension.y)
         }
         
         if win.RegisterClassW(&window_class) == 0 {
@@ -184,7 +185,7 @@ main :: proc () {
     {
         exe_path_buffer: [win.MAX_PATH_WIDE] u16
         size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
-        exe_path_and_name := win.wstring_to_utf8(cast(cstring16) &exe_path_buffer[0], cast(int) size_of_filename) or_else ""
+        exe_path_and_name := win.wstring_to_utf8(cast(cstring16) &exe_path_buffer[0], cast(int) size_of_filename, context.temp_allocator) or_else ""
         on_last_slash: u32
         for r, i in exe_path_and_name {
             if r == '\\' {
@@ -265,21 +266,22 @@ main :: proc () {
     // @todo(viktor): make this like sixty seconds?
     // @todo(viktor): remove MaxPossibleOverlap
     MaxPossibleOverlap :: 8
-    samples := push(&platform_arena, Sample, sound_output.samples_per_second + MaxPossibleOverlap)
+    samples := make(platform_allocator, Sample, sound_output.samples_per_second + MaxPossibleOverlap)
     assert(samples != nil)
     
-    frame_arena := Arena { allocation_flags = { .not_restored } }
+    _frame_arena := Arena { allocation_flags = { .not_restored } }
+    frame_allocator := arena_allocator(&_frame_arena)
     
     render_commands: RenderCommands
     {
         // @todo(viktor): decide what our sizes should be
-        push_buffer := push(&frame_arena, u8, 32 * Megabyte)
+        push_buffer := make(frame_allocator, u8, 32*Megabyte)
         render_commands.push_buffer        = make_byte_buffer(push_buffer)
-        render_commands.vertex_buffer      = make_array(&frame_arena, Textured_Vertex, 1 << 20)
-        render_commands.quad_bitmap_buffer = make_array(&frame_arena, ^Bitmap, 1 << 20)
+        render_commands.vertex_buffer      = make_array_allocator(frame_allocator, Textured_Vertex, 1 << 20)
+        render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
         
         // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
-        render_commands.white_bitmap.memory = push(&frame_arena, Color, 1)
+        render_commands.white_bitmap.memory = make(frame_allocator, Color, 1)
         render_commands.white_bitmap.memory[0] = 255
         render_commands.white_bitmap.dimension = 1
         render_commands.white_bitmap.width_over_height = 1
@@ -301,10 +303,10 @@ main :: proc () {
     }
     
     { // @note(viktor): initialize game_memory
-        game_memory.debug_table = push(&platform_arena, DebugTable)
+        game_memory.debug_table = make(platform_allocator, DebugTable)
         
         texture_op_count := 1024
-        texture_ops := push(&platform_arena, TextureOp, texture_op_count)
+        texture_ops := make(platform_allocator, TextureOp, texture_op_count)
         for &op, index in texture_ops[:texture_op_count-1] {
             op.next = &texture_ops[index + 1]
         }
@@ -325,8 +327,8 @@ main :: proc () {
     expected_frames_per_update: f32 = 1
     target_seconds_per_frame: f32
     for GlobalRunning {
-        check_arena(&platform_arena)  
-        check_arena(&frame_arena)  
+        check_arena_allocator(platform_allocator)  
+        check_arena_allocator(frame_allocator)  
         
         clear_render_commands(&render_commands)
         
@@ -501,8 +503,8 @@ main :: proc () {
             
             { debug_data_block("Profile")
                 { debug_data_block("Memory")
-                    game.debug_ui_element(ArenaOccupancy{ &platform_arena }, "Platform Arena")
-                    game.debug_ui_element(ArenaOccupancy{ &frame_arena }, "Platform Frame Arena")
+                    game.debug_ui_element(ArenaOccupancy{ &_platform_arena }, "Platform Arena")
+                    game.debug_ui_element(ArenaOccupancy{ &_frame_arena }, "Platform Frame Arena")
                 }
             }
         }
@@ -667,7 +669,7 @@ main :: proc () {
         ////////////////////////////////////////////////
         { timed_block("render")
             
-            render_to_window(&render_commands, &high_queue, draw_region, &frame_arena, window_dim)
+            render_to_window(&render_commands, &high_queue, draw_region, frame_allocator, window_dim)
         }
         ////////////////////////////////////////////////
         { timed_block("sleep at frame end")
@@ -742,7 +744,7 @@ main :: proc () {
 
 ////////////////////////////////////////////////
 
-render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: ^Arena, windows_dim: v2i) {
+render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: Allocator, windows_dim: v2i) {
     commands.clear_color.rgb = square(commands.clear_color.rgb)
     
     if GlobalUseSoftwareRenderer {

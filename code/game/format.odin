@@ -26,7 +26,7 @@ print_to_console :: proc (format: string, args: ..any, flags: Format_Context_Fla
 @(printlike)
 print_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: string) {
     s := format_string(buffer = console_buffer[:], format = format, args = args, flags = flags)
-    buffer := make([]u8, len(s), allocator)
+    buffer := make(allocator, u8, len(s), no_clear())
     copy(buffer, s)
     result = transmute(string) buffer
     return result
@@ -34,7 +34,7 @@ print_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: 
 @(printlike)
 cprint_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: cstring) {
     s, length := format_cstring(buffer = console_buffer[:], format = format, args = args, flags = flags)
-    buffer := make([]u8, length, allocator)
+    buffer := make(allocator, u8, length, no_clear())
     copy(buffer, slice_from_parts(u8, cast(^u8) s, length))
     result = cast(cstring) raw_data(buffer)
     return result
@@ -309,7 +309,8 @@ begin_temp_views :: proc (width: Maybe(u16) = nil) {
     
     if temp_view_allocator.procedure == nil {
         // @todo(viktor): find a better place for this
-        buffer := make([] u8, 64*4096)
+        // @todo(viktor): Use our arena for this
+        buffer := make(context.allocator, u8, 64*4096)
         mem.arena_init(&temp_view_arena, buffer)
         temp_view_allocator = mem.arena_allocator(&temp_view_arena)
         assert(temp_view_allocator.procedure != nil)
@@ -329,8 +330,8 @@ append_temp_view :: proc (value: any) {
     info := type_info_of(view.value.id)
     
     size := info.size
-    copied := make([] u8, size, temp_view_allocator)
-    copy(copied, slice_from_parts_cast(u8, view.value.data, size))
+    copied := make(temp_view_allocator, u8, size)
+    copy(copied, slice_from_parts_type(u8, view.value.data, size))
     view.value.data = raw_data(copied)
     
     temp_view_buffer[temp_view_next_index] = view

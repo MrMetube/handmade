@@ -42,17 +42,17 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, base_target: Bitmap, arena: ^Arena) {
+software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, base_target: Bitmap, arena: Allocator) {
     timed_function()
     
     // @todo(viktor): removed from commands on day 384
     max_render_target_index := 1
     
-    targets := push_slice(arena, Bitmap, max_render_target_index + 1)
+    targets := make(arena, Bitmap, max_render_target_index + 1)
     targets[0] = base_target
     for &target in targets[1:] {
         target = base_target
-        target.memory = push_slice(arena, Color, target.dimension.x * target.dimension.y, align_no_clear(LaneWidth * size_of(Color)))
+        target.memory = make(arena, Color, target.dimension.x * target.dimension.y, align_no_clear(LaneWidth * size_of(Color)))
     }
     
     /* @todo(viktor):

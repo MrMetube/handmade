@@ -180,11 +180,11 @@ assert :: proc (condition: $B, message := #caller_expression(condition), loc := 
     }
 }
 
-slice_from_parts :: proc { slice_from_parts_cast, slice_from_parts_pointer }
-slice_from_parts_cast :: proc ($T: typeid, data: pmm, #any_int count: i64) -> [] T {
+slice_from_parts :: proc { slice_from_parts_type, slice_from_parts_type_of_data_pointer }
+slice_from_parts_type :: proc ($T: typeid, data: pmm, #any_int count: i64) -> [] T {
     return (cast([^]T) data)[:count] // :PointerArithmetic
 }
-slice_from_parts_pointer :: proc (data: ^$T, #any_int count: i64) -> [] T {
+slice_from_parts_type_of_data_pointer :: proc (data: ^$T, #any_int count: i64) -> [] T {
     return (cast([^]T) data)[:count] // :PointerArithmetic
 }
 
@@ -200,20 +200,7 @@ to_bytes :: proc (value: ^$T) -> (result: [] u8) {
     return result
 }
 
-
-make :: proc {
-    make_slice,
-    make_dynamic_array,
-    make_dynamic_array_len,
-    make_dynamic_array_len_cap,
-    make_map,
-    make_map_cap,
-    make_multi_pointer,
-    make_soa_slice,
-    make_soa_dynamic_array,
-    make_soa_dynamic_array_len,
-    make_soa_dynamic_array_len_cap,
-    
+make_by_pointer :: proc {
     make_by_pointer_slice,
     make_by_pointer_dynamic_array,
     make_by_pointer_dynamic_array_len,

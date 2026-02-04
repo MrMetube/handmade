@@ -29,6 +29,7 @@
 package game
 
 import "base:intrinsics"
+import "base:builtin"
 
 RYU_FLOAT_FULL_TABLE :: #config(RYU_FLOAT_FULL_TABLE, false)
 RYU_OPTIMIZE_SIZE    :: #config(RYU_OPTIMIZE_SIZE,    false)
@@ -722,7 +723,7 @@ d2d_small_int :: proc (ieeeMantissa: u64, ieeeExponent: i32, v: ^floating_decima
 
 @(private="package")
 d2s :: proc (f: f64, allocator := context.allocator) -> (result: string) {
-    buffer := make([]u8, 25, allocator)
+    buffer := builtin.make([]u8, 25, allocator)
     result = d2s_buffered(f, buffer) 
     return result
 }
@@ -996,7 +997,7 @@ to_chars_32 :: proc (v: floating_decimal_32, sign: bool, result: []u8) -> int {
 
 @(private="package")
 f2s :: proc (f: f32, allocator := context.allocator) -> string {
-    buffer := make([]u8, 16, allocator)
+    buffer := builtin.make([]u8, 16, allocator)
     result := f2s_buffered(f, buffer) 
     return result
 }
@@ -1249,7 +1250,7 @@ copy_special_str_printf :: proc (result: []u8, sign: bool, mantissa: u64) -> int
 
 @(private="package")
 d2fixed :: proc (d: f64, precision: u32, allocator:= context.allocator) -> (result: string) {
-    buffer := make([]u8, 2000, allocator)
+    buffer := builtin.make([]u8, 2000, allocator)
     result = d2fixed_buffered(d, precision, buffer)
     return result
 }
@@ -1431,7 +1432,7 @@ d2fixed_buffered :: proc (d: f64, precision: u32, buffer: []u8) -> (result: stri
 }
 
 d2exp :: proc (d: f64, precision: u32, allocator := context.allocator) -> (result: string) {
-    buffer := make([]u8, 2000, allocator)
+    buffer := builtin.make([]u8, 2000, allocator)
     result = d2exp_buffered(d, precision, buffer)
     return result
 }
