@@ -113,6 +113,7 @@ main :: proc () {
     
     list_init_sentinel(&GlobalPlatformState.block_sentinel)
     
+    // @hack
     set_platform_api_in_the_statically_linked_game_code(Platform)
     _platform_arena: Arena
     platform_allocator := arena_allocator(&_platform_arena)
@@ -1256,6 +1257,8 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
 }
 
 build_exe_path :: proc (filename: string) -> (result: cstring16) {
+    assert(GlobalPlatformState.exe_path != "")
+    
     buffer: [256] u8
     path := format_string(buffer[:], `%\%`, GlobalPlatformState.exe_path, filename)
     result = win.utf8_to_wstring(path, context.temp_allocator)

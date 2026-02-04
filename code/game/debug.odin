@@ -14,10 +14,7 @@ package game
 
 // @todo(viktor): "Mark Loop Point" for input recording(currently on 'L' key) as debug action
 
-// @idea Memory Debugger with tracking allocator and maybe a 
-// tree graph to visualize the size of the allocated types and 
-// such in each arena? Maybe a table view of largest entries or 
-// most entries of a type.
+// @idea Memory Debugger with tracking allocator and maybe a tree graph to visualize the size of the allocated types and such in each arena? Maybe a table view of largest entries or most entries of a type.
 
 GlobalDebugMemory: ^GameMemory
 GlobalDebugTable:  ^DebugTable

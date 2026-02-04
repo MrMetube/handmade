@@ -136,7 +136,7 @@ make_assets :: proc (memory_size: u64, tran_state: ^TransientState, texture_op_q
     
     list_init_sentinel(&assets.memory_sentinel)
     
-    insert_block(&assets.memory_sentinel, push(&assets.arena, memory_size), memory_size)
+    insert_block(&assets.memory_sentinel, push(&assets.arena, memory_size, align_of(u8)), memory_size)
     list_init_sentinel(&assets.loaded_asset_sentinel)
     
     assets.tran_state = tran_state

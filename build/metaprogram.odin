@@ -38,8 +38,8 @@ Metaprogram :: struct {
     
     collections: map[string] Collector,
     
-    commons: [dynamic] File,
-    exports: [dynamic] Info,
+    commons: map[string][dynamic] File,
+    exports: map[string][dynamic] Info,
     
     apis: [dynamic] File,
     
@@ -59,7 +59,7 @@ Collector_Entry :: struct {
     next: int,
 }
 
-metaprogram_collect_files_and_parse_package :: proc (mp: ^Metaprogram, directory: string) -> (success: bool) {
+metaprogram_collect_files_and_parse_package :: proc (mp: ^Metaprogram, directory, package_name: string) -> (success: bool) {
     fi, err := os2.read_directory_by_path(directory, -1, context.allocator)
     if err != nil {
         fmt.eprintfln("ERROR: The metaprogram failed to read the package %v", directory)
@@ -98,18 +98,21 @@ metaprogram_collect_files_and_parse_package :: proc (mp: ^Metaprogram, directory
     }, data = &collector }
     
     ast.walk(&v, pack)
-    mp.collections[directory] = collector
+    mp.collections[package_name] = collector
     
     return true
 }
 
 ////////////////////////////////////////////////
 
-metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (success: b32) {
-    collector, cok := mp.collections[dir]
+metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, path_from_build, package_name: string) -> (success: b32) {
+    collector, cok := mp.collections[package_name]
     assert(cok)
     
-    commons: [dynamic] Info
+    commons := map_insert(&mp.commons, package_name, [dynamic] File {})
+    exports := map_insert(&mp.exports, package_name, [dynamic] Info {})
+    
+    file_commons: [dynamic] Info
     apis: [dynamic] Info
     files: for index: int; index < len(collector.entries); {
         e := collector.entries[index]
@@ -123,7 +126,7 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (succ
             if tag.text == "#+private file" do continue files
         }
         
-        clear(&commons)
+        clear(&file_commons)
         clear(&apis)
         
         is_common_file := false
@@ -135,7 +138,7 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (succ
                 block := declaration.body.derived_stmt.(^ast.Block_Stmt)
                 for statement in block.stmts {
                     if value_declaration, vok := statement.derived_stmt.(^ast.Value_Decl); vok {
-                        handle_global_value_declaration(mp, file, value_declaration, is_common_file, &commons, &apis)
+                        handle_global_value_declaration(mp, file, value_declaration, is_common_file, &file_commons, &apis, exports)
                     }
                 }
                 
@@ -145,7 +148,7 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (succ
                     assert(declaration_index == 0)
                     is_common_file = true
                 }
-                handle_global_value_declaration(mp, file, declaration, is_common_file, &commons, &apis)
+                handle_global_value_declaration(mp, file, declaration, is_common_file, &file_commons, &apis, exports)
                 
               case ^ast.Import_Decl:
                 if has_attribute(declaration, "common", `"file"`) {
@@ -156,9 +159,9 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (succ
             }
         }
         
-        if len(commons) > 0 {
-            append(&mp.commons, File { file_name = file.fullpath, infos = commons})
-            commons = make([dynamic] Info)
+        if len(file_commons) > 0 {
+            append(commons, File { file_name = file.fullpath, infos = file_commons})
+            file_commons = make([dynamic] Info)
         }
         if len(apis) > 0 {
             append(&mp.apis, File { file_name = file.fullpath, infos = apis})
@@ -168,13 +171,13 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (succ
     
     
     
-    slice.sort_by(mp.commons[:], sort_files)
+    slice.sort_by(commons[:], sort_files)
     slice.sort_by(mp.apis[:],    sort_files)
     
-    for file in mp.commons do slice.sort_by(file.infos[:], sort_infos)
-    for file in mp.apis    do slice.sort_by(file.infos[:], sort_infos)
+    for file in commons do slice.sort_by(file.infos[:], sort_infos)
+    for file in mp.apis do slice.sort_by(file.infos[:], sort_infos)
     
-    slice.sort_by(mp.exports[:], sort_infos)
+    slice.sort_by(exports[:], sort_infos)
     
     
     
@@ -269,7 +272,7 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, dir: string) -> (succ
 
 ////////////////////////////////////////////////
 
-handle_global_value_declaration :: proc (mp: ^Metaprogram, file: ^ast.File, declaration: ^ast.Value_Decl, is_common_file: bool, commons, apis: ^[dynamic] Info) {
+handle_global_value_declaration :: proc (mp: ^Metaprogram, file: ^ast.File, declaration: ^ast.Value_Decl, is_common_file: bool, commons, apis, exports: ^[dynamic] Info) {
     if declaration.is_mutable do return
     if has_attribute(declaration, "private", `"file"`) do return
 
@@ -292,7 +295,7 @@ handle_global_value_declaration :: proc (mp: ^Metaprogram, file: ^ast.File, decl
         assert(len(declaration.attributes) == 1)
         
         procedure := value.derived_expr.(^ast.Proc_Lit)
-        append(&mp.exports, Info {
+        append(exports, Info {
             name = ident.name,
             type = read_pos(mp, procedure.type.pos, procedure.type.end),
             location = declaration.pos,
@@ -308,8 +311,8 @@ handle_global_value_declaration :: proc (mp: ^Metaprogram, file: ^ast.File, decl
     }
 }
 
-check_printlikes :: proc (mp: ^Metaprogram, dir: string) -> (success: bool) {
-    collector, cok := mp.collections[dir]
+check_printlikes :: proc (mp: ^Metaprogram, package_name: string) -> (success: bool) {
+    collector, cok := mp.collections[package_name]
     if !cok do return false
     
     for index: int; index < len(collector.entries); {
@@ -328,26 +331,46 @@ check_printlikes :: proc (mp: ^Metaprogram, dir: string) -> (success: bool) {
 
 ////////////////////////////////////////////////
 
-open_generated_file_and_write_header :: proc (path: string, package_name: string) -> (os.Handle, bool) {
+open_generated_file_and_write_header :: proc (path: string, package_name: string, loc := #caller_location) -> (os.Handle, bool) {
     remove_if_exists(path)
     file, err2 := os.open(path, mode = os.O_CREATE)
     if err2 != nil do return file, false
     
-    fmt.fprintf(file, GeneratedHeader, package_name)
+    GeneratedHeader :: 
+`#+vet !unused-procedures
+package %v
+///////////////////////////////////////////////
+//                @important                 //
+///////////////////////////////////////////////
+//                                           //
+//    THIS CODE IS GENERATED. DO NOT EDIT!   //
+//                                           //
+///////////////////////////////////////////////
+// @generated by %v
+
+`
+
+    fmt.fprintf(file, GeneratedHeader, package_name, loc)
     
     return file, true
 }
 
 ////////////////////////////////////////////////
 
-generate_commons :: proc (mp: ^Metaprogram, path: string) -> (result: bool) {
-    out, ok := open_generated_file_and_write_header(path, "main")
-    if !ok do return false
+generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string, source_package, source_path: string) -> (result: bool) {
+    out, ok := open_generated_file_and_write_header(output_path, output_package)
+    if !ok {
+        fmt.println("ERROR: Could not extract declarations marked with @common into %v", output_package)
+        return false
+    }
     defer os.close(out)
     
-    fmt.fprintf(out, `import "./game" %v`, "\n")
+    fmt.fprintf(out, `import "%v" %v`, source_path, "\n")
     
-    for file in mp.commons {
+    commons, cok := mp.commons[source_package]
+    assert(cok)
+    
+    for file in commons {
         fmt.fprint(out, "\n////////////////////////////////////////////////\n")
         fmt.fprintf(out, "// All commons exported from %s @generated by %s\n\n", file.file_name, #location())
         
@@ -357,85 +380,152 @@ generate_commons :: proc (mp: ^Metaprogram, path: string) -> (result: bool) {
         }
         
         for info in file.infos {
-            fmt.fprintf(out, "/* @generated */ %-*v :: game.%-*v\n", width, info.name, width, info.name,)
+            fmt.fprintf(out, "/* @generated */ %-*v :: %v.%v\n", width, info.name, source_package, info.name,)
         }
     }
     
-    fmt.printfln("INFO: generated commons")
+    fmt.printfln("INFO: generated %v commons for %v", source_package, output_package)
     
     return true
 }
 
-generate_game_api :: proc (mp: ^Metaprogram, output_file: string) -> (result: bool) {
-    out, ok := open_generated_file_and_write_header(output_file, "main")
-    if !ok do return false
+generate_game_api :: proc (mp: ^Metaprogram, output_file, exports_package, output_package: string) -> (result: bool) {
+    exports, eok := mp.exports[exports_package]
+    assert(eok)
+    
+    out, ok := open_generated_file_and_write_header(output_file, output_package)
+    if !ok {
+        fmt.println("ERROR: Could not generate game api")
+        return false
+    }
     defer os.close(out)
     
-    no_stubs: map[string]b32
+    no_stubs: map[string] bool
     no_stubs["output_sound_samples"] = true
     no_stubs["update_and_render"] = true
     no_stubs["debug_frame_end"] = true
     
+    // @todo(viktor): this is terrible @cleanup
+    ignore: map[string] bool
+    if output_package == "render" {
+        ignore["debug_set_event_recording"] = true
+    }
+    
     width: int
-    for it in mp.exports {
+    for it in exports {
         width = max(width, len(it.name))
     }
     
     fmt.fprint(out, "import win \"core:sys/windows\"\n\n")
     
+    fmt.fprintf(out, "game := game_stubs // @generated by %s\n\n", #location())
+    
     fmt.fprintf(out, "game_stubs :: GameApi {{ // @generated by %s\n", #location())
-    for it in mp.exports {
+    for it in exports {
         if it.name in no_stubs do continue
+        if it.name in ignore do continue
         fmt.fprintf(out, "    %-*s = %s {{ return }},\n", width, it.name, it.type)
     }
     fmt.fprint(out, "}\n\n")
 
     fmt.fprintf(out, "GameApi :: struct {{ // @generated by %s\n", #location())
-    for it in mp.exports {
+    for it in exports {
+        if it.name in ignore do continue
         fmt.fprintf(out, "    %v:%*v %s,\n", space_after(it.name, width), it.type)
     }
     fmt.fprint(out, "}\n\n")
     
-    fmt.fprintf(out, "load_game_api :: proc (game_lib: win.HMODULE) {{ // @generated by %s\n", #location())
-    for it in mp.exports {
-        fmt.fprintf(out, "    game.%-*s = auto_cast win.GetProcAddress(game_lib, \"%s\")\n", width, it.name, it.name)
+    fmt.fprintf(out, "load_game_api :: proc (lib: win.HMODULE) {{ // @generated by %s\n", #location())
+    for it in exports {
+        if it.name in ignore do continue
+        fmt.fprintf(out, "    game.%-*s = auto_cast win.GetProcAddress(lib, \"%s\")\n", width, it.name, it.name)
     }
     fmt.fprint(out, "}\n")
     
-    fmt.printfln("INFO: generated game api")
+    fmt.printfln("INFO: generated game api %v", output_package)
     return true
 }
 
-generate_platform_api :: proc (mp: ^Metaprogram, platform_path, game_path: string) -> (result: bool) {
-    out_game, ok := open_generated_file_and_write_header(game_path, "game")
-    if !ok do return false
-    defer os.close(out_game)
+_ := generate_render_api
+generate_render_api :: proc (mp: ^Metaprogram, output_file, exports_package, output_package: string) -> (result: bool) {
+    exports, eok := mp.exports[exports_package]
+    assert(eok)
     
-    ////////////////////////////////////////////////
-    
-    fmt.fprintf(out_game, "@(common) Platform: Platform_Api // @generated by %s\n\n", #location())
-    fmt.fprintf(out_game, "@(common) Platform_Api :: struct {{ // @generated by %s\n", #location())
-        
-    for file, index in mp.apis {
-        if index != 0 do fmt.fprint(out_game, "    \n")
-        
-        name_width: int
-        type_width: int
-        for info in file.infos {
-            name_width = max(name_width, len(info.name))
-            type_width = max(type_width, len(info.type))
-        }
-        
-        for info in file.infos {
-            fmt.fprintf(out_game, "    // exported from %s(%d:%d)\n", info.location.file, info.location.line, info.location.column)
-            fmt.fprintf(out_game, "    %v:%*v %v,%*v\n", space_after(info.name, name_width), space_after(info.type, type_width))
-        }
+    out, ok := open_generated_file_and_write_header(output_file, output_package)
+    if !ok {
+        fmt.println("ERROR: Could not generate render api")
+        return false
     }
-    fmt.fprint(out_game, "}\n")
+    defer os.close(out)
+    
+    no_stubs: map[string]b32
+    // no_stubs["output_sound_samples"] = true
+    
+    width: int
+    for it in exports {
+        width = max(width, len(it.name))
+    }
+    
+    fmt.fprint(out, "import win \"core:sys/windows\"\n\n")
+    
+    fmt.fprintf(out, "render := render_stubs // @generated by %s\n\n", #location())
+    
+    fmt.fprintf(out, "render_stubs :: RenderApi {{ // @generated by %s\n", #location())
+    for it in exports {
+        if it.name in no_stubs do continue
+        fmt.fprintf(out, "    %-*s = %s {{ return }},\n", width, it.name, it.type)
+    }
+    fmt.fprint(out, "}\n\n")
+
+    fmt.fprintf(out, "RenderApi :: struct {{ // @generated by %s\n", #location())
+    for it in exports {
+        fmt.fprintf(out, "    %v:%*v %s,\n", space_after(it.name, width), it.type)
+    }
+    fmt.fprint(out, "}\n\n")
+    
+    fmt.fprintf(out, "load_render_api :: proc (lib: win.HMODULE) {{ // @generated by %s\n", #location())
+    for it in exports {
+        fmt.fprintf(out, "    render.%-*s = auto_cast win.GetProcAddress(lib, \"%s\")\n", width, it.name, it.name)
+    }
+    fmt.fprint(out, "}\n")
+    
+    fmt.printfln("INFO: generated render api for %v", output_package)
+    return true
+}
+
+generate_platform_api :: proc (mp: ^Metaprogram, platform_path, platform_package, output_path, output_package: string, common: bool) -> (result: bool) {
+    out_pack, ok := open_generated_file_and_write_header(output_path, output_package)
+    if !ok do return false
+    defer os.close(out_pack)
+    
+    ////////////////////////////////////////////////
+    fmt.fprintf(out_pack, "Platform: Platform_Api // @generated by %s\n\n", #location())
+    // @cleanup @api how should the platform expose functions to the dlls?
+    if common {
+        fmt.fprintf(out_pack, "@(common) ")
+        fmt.fprintf(out_pack, "Platform_Api :: struct {{ // @generated by %s\n", #location())
+            
+        for file, index in mp.apis {
+            if index != 0 do fmt.fprint(out_pack, "    \n")
+            
+            name_width: int
+            type_width: int
+            for info in file.infos {
+                name_width = max(name_width, len(info.name))
+                type_width = max(type_width, len(info.type))
+            }
+            
+            for info in file.infos {
+                fmt.fprintf(out_pack, "    // exported from %s(%d:%d)\n", info.location.file, info.location.line, info.location.column)
+                fmt.fprintf(out_pack, "    %v:%*v %v,%*v\n", space_after(info.name, name_width), space_after(info.type, type_width))
+            }
+        }
+        fmt.fprint(out_pack, "}\n")
+    }
     
     ////////////////////////////////////////////////
     
-    out_main, pok := open_generated_file_and_write_header(platform_path, "main")
+    out_main, pok := open_generated_file_and_write_header(platform_path, platform_package)
     if !pok do return false
     defer os.close(out_main)
     
@@ -455,7 +545,7 @@ generate_platform_api :: proc (mp: ^Metaprogram, platform_path, game_path: strin
     }
     fmt.fprint(out_main, "}\n")
     
-    fmt.printfln("INFO: generated platform api")
+    fmt.printfln("INFO: generated platform api for %v", output_package)
     return true
 }
 
@@ -643,19 +733,6 @@ get_expected_format_string_arg_count :: proc (format: string) -> (ok: bool, coun
 }
 
 ////////////////////////////////////////////////
-
-GeneratedHeader :: 
-`#+vet !unused-procedures
-package %v
-///////////////////////////////////////////////
-//                @important                 //
-///////////////////////////////////////////////
-//                                           //
-//    THIS CODE IS GENERATED. DO NOT EDIT!   //
-//                                           //
-///////////////////////////////////////////////
- 
-`
 
 White  :: ansi.CSI + ansi.FG_BRIGHT_WHITE  + ansi.SGR
 Red    :: ansi.CSI + ansi.FG_BRIGHT_RED    + ansi.SGR

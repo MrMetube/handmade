@@ -3,9 +3,6 @@ package main
 import "core:os"
 import win "core:sys/windows"
 
-// @todo(viktor): maybe also do a separate debug struct that can be optional
-game := game_stubs
-
 @(private="file")
 game_lib: win.HMODULE
 

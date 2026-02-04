@@ -14,6 +14,7 @@ import win "core:sys/windows"
 
 optimizations    := false ? "-o:speed" : "-o:none"
 PedanticGame     :: false
+PedanticRender   :: false
 PedanticPlatform :: false
 
 // @todo(viktor): get radlink working?
@@ -30,8 +31,12 @@ pedantic := [] string { "-warnings-as-errors", "-vet-unused-imports", "-vet-semi
 build_dir :: `.\build\`
 data_dir  :: `.\data`
 
+main_package      :: `main` 
+game_package      :: `game` 
+render_package    :: `render` 
 code_dir          :: `..\code` 
 game_dir          :: `..\code\game` 
+render_dir        :: `..\code\render` 
 asset_builder_dir :: `..\code\asset_builder` 
 
 ////////////////////////////////////////////////
@@ -77,6 +82,7 @@ Task :: enum {
     help,
     
     game,
+    render,
     platform,
     asset_builder,
     
@@ -87,7 +93,7 @@ Task :: enum {
 }
 
 Tasks :: bit_set [Task]
-BuildTasks := Tasks { .game, .platform, .asset_builder }
+BuildTasks := Tasks { .game, .platform, .asset_builder, .render }
 Tool_Tasks := Tasks { .debugger, .renderdoc }
 
 tasks: Tasks
@@ -100,6 +106,7 @@ main :: proc () {
           case "run":           tasks += { .run }
           
           case "game":          tasks += { .game }
+          case "render":        tasks += { .render }
           case "platform":      tasks += { .platform }
           case "asset_builder": tasks += { .asset_builder }
           
@@ -119,10 +126,12 @@ main :: proc () {
     
     // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
-    if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir) do os.exit(1)
-    if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir) do os.exit(1)
-    if !metaprogram_collect_plugin_data(&metaprogram, code_dir) do os.exit(1)
-    if !metaprogram_collect_plugin_data(&metaprogram, game_dir) do os.exit(1)
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir,   main_package)   do os.exit(1)
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir,   game_package)   do os.exit(1)
+    // if !metaprogram_collect_files_and_parse_package(&metaprogram, render_dir, render_package) do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, code_dir,   main_package)   do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, game_dir,   game_package)   do os.exit(1)
+    // if !metaprogram_collect_plugin_data(&metaprogram, render_dir, render_package) do os.exit(1)
     
     // @todo(viktor): let the metaprogramms define these attributes at initialization
     sb := strings.builder_make()
@@ -132,8 +141,9 @@ main :: proc () {
     
     sb = strings.builder_make()
     fmt.sbprint(&sb, "-vet-packages:")
-    if PedanticPlatform do fmt.sbprint(&sb, "main,")
-    if PedanticGame do fmt.sbprint(&sb, "game,")
+    if PedanticGame     do fmt.sbprint(&sb, game_package, ",")
+    // if PedanticRender   do fmt.sbprint(&sb, render_package, ",")
+    if PedanticPlatform do fmt.sbprint(&sb, main_package, ",")
     fmt.sbprint(&sb, "hha")
     pedantic_vet_packages := strings.to_string(sb)
     
@@ -155,7 +165,7 @@ main :: proc () {
     if tasks & BuildTasks == {} do tasks += { .game, .platform }
     
     if tasks & Tool_Tasks != {} {
-        if !did_change(debug_exe_path, code_dir, game_dir, `.\`) {
+        if !did_change(debug_exe_path, code_dir, game_dir, render_dir, `.\`) {
             fmt.println("INFO: Skipping build, because no changes to the source files were detected.")
             tasks -= BuildTasks
         }
@@ -172,18 +182,19 @@ main :: proc () {
     }
     
     if .game in tasks {
-        if !check_printlikes(&metaprogram, game_dir) do os.exit(1)
-
-        generate_platform_api(&metaprogram, `..\code\generated-platform_api.odin`, `..\code\game\generated-platform_api.odin`)
+        if !check_printlikes(&metaprogram, game_package) do os.exit(1)
+        if !generate_platform_api(&metaprogram, `..\code\generated-platform_api.odin`, main_package, `..\code\game\generated-platform_api.odin`, game_package, true) do os.exit(1)
         
+        ////////////////////////////////////////////////
+            
         delete_all_like(`.\game*.pdb`)
         delete_all_like(`.\game*.rdi`)
         
+        // @todo(viktor): Share this definition
         // @note(viktor): the platform checks for this lock file when hot-reloading
-        lock_path := `.\lock.tmp` 
+        lock_path := `.\game.lock` 
         lock, err := os.open(lock_path, mode = os.O_CREATE)
         if err != nil do fmt.print("ERROR: ", os.error_string(err))
-        
         defer {
             os.close(lock)
             os.remove(lock_path)
@@ -191,11 +202,12 @@ main :: proc () {
         
         fmt.fprint(lock, "WAITING FOR PDB")
         
-        pdb := fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number())
+        // @todo(viktor): Share this definition
+        dll_name := "game.dll"
         
-        odin_build(&cmd, game_dir, `.\game.dll`)
+        odin_build(&cmd, game_dir, dll_name)
         append(&cmd, "-build-mode:dll")
-        append(&cmd, pdb)
+        append(&cmd, fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number()))
         append(&cmd, debug)
         append(&cmd, ..flags)
         append(&cmd, custom_attribute_flag)
@@ -208,24 +220,67 @@ main :: proc () {
         
         silence: string
         run_command(&cmd, stdout = &silence)
+        fmt.printf("INFO: Successfully build %v\n", dll_name)
+    }
+    
+    if .render in tasks {
+        // @note(viktor): the platform api is imported through the game commons
+        if !check_printlikes(&metaprogram, render_package) do os.exit(1)
+        if !generate_platform_api(&metaprogram, `..\code\generated-platform_api.odin`, main_package, `..\code\render\generated-platform_api.odin`, render_package, false) do os.exit(1)
+        if !generate_game_api(&metaprogram, `..\code\render\generated-game_api.odin`, game_package, render_package) do os.exit(1)
+        if !generate_commons(&metaprogram,  `..\code\render\generated-commons.odin`,  render_package, game_package, "../game") do os.exit(1)
+        
+        ////////////////////////////////////////////////
+        delete_all_like(`.\render*.pdb`)
+        delete_all_like(`.\render*.rdi`)
+        
+        // @todo(viktor): Share this definition
+        // @note(viktor): the platform checks for this lock file when hot-reloading
+        lock_path := `.\render.lock` 
+        lock, err := os.open(lock_path, mode = os.O_CREATE)
+        if err != nil do fmt.print("ERROR: ", os.error_string(err))
+        
+        defer {
+            os.close(lock)
+            os.remove(lock_path)
+        }
+        
+        fmt.fprint(lock, "WAITING FOR PDB")
+        
+        // @todo(viktor): Share this definition
+        dll_name := "render.dll"
+        
+        odin_build(&cmd, render_dir, dll_name)
+        append(&cmd, "-build-mode:dll")
+        append(&cmd, fmt.tprintf(`-pdb-name:.\render-%d.pdb`, random_number()))
+        append(&cmd, debug)
+        append(&cmd, ..flags)
+        append(&cmd, custom_attribute_flag)
+        append(&cmd, internal)
+        append(&cmd, optimizations)
+        if PedanticRender {
+            append(&cmd, pedantic_vet_packages)
+            append(&cmd, ..pedantic)
+        }
+        
+        silence: string
+        run_command(&cmd, stdout = &silence)
+        fmt.printf("INFO: Successfully build %v\n", dll_name)
     }
     
     if .platform in tasks { 
         if handle_running_exe_gracefully(debug_exe, .Skip) {
-            if !check_printlikes(&metaprogram, code_dir) do os.exit(1)
+            if !check_printlikes(&metaprogram, main_package) do os.exit(1)
             
             // @todo(viktor): these could be run in parallel with each other and the build of the game
-            if !generate_game_api(&metaprogram, `..\code\generated-game_api.odin`) {
-                fmt.println("ERROR: Could not generate game api")
-                os.exit(1)
-            }
+            if !generate_game_api(&metaprogram,   `..\code\generated-game_api.odin`,   game_package,   main_package) do os.exit(1)
+            // if !generate_render_api(&metaprogram, `..\code\generated-render_api.odin`, render_package, main_package) do os.exit(1)
             
-            if !generate_commons(&metaprogram, `..\code\generated-commons.odin`) {
-                fmt.println("ERROR: Could not extract declarations marked with @common")
-                os.exit(1)
-            }
+            if !generate_commons(&metaprogram, `..\code\generated-commons-game.odin`,   main_package, game_package,   "./game")   do os.exit(1)
+            // if !generate_commons(&metaprogram, `..\code\generated-commons-render.odin`, main_package, render_package, "./render") do os.exit(1)
             
-            odin_build(&cmd, code_dir, `.\`+debug_exe)
+            exe_name := `.\`+debug_exe
+            odin_build(&cmd, code_dir, exe_name)
             append(&cmd, debug)
             append(&cmd, ..flags)
             append(&cmd, custom_attribute_flag)
@@ -237,6 +292,7 @@ main :: proc () {
             }
             
             run_command(&cmd)
+            fmt.printf("INFO: Successfully build %v\n", exe_name)
         }
     }
     
@@ -309,18 +365,19 @@ Options:
         .help          = "Print this usage information.",
         .run           = "Run the game.",
         
-        .game          = "Rebuild the game. If it is running it will be hotreloaded.",
+        .game          = "Rebuild the game. If the game is running it will be hotreloaded.",
+        .render        = "Rebuild the renderer. If the game is running it will be hotreloaded.",
+        
         .platform      = "Rebuild the platform, if the game isn't running.",
         .asset_builder = "Rebuild the asset builder.",
         
         .debugger      = "Start/Restart the debugger.",
         .renderdoc     = "Run the program with renderdoc attached and launch renderdoc with the capture after the program closes.",
     }
-    // Ughh..
+    
     width: int
     for task in Task do width = max(len(fmt.tprint(task)), width)
-    format := fmt.tprintf("  %%-%vv - %%v\n", width)
-    for text, task in infos do fmt.printf(format, task, text)
+    for text, task in infos do fmt.printf("  %-*v - %v\n", width, task, text)
     
     os.exit(1)
 }
