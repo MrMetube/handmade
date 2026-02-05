@@ -245,8 +245,10 @@ draw_tree :: proc (layout: ^Layout, mouse_p: v2, tree: ^DebugTree, link: ^DebugE
     }
 }
 
-draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement) {
+draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
     timed_function()
+    
+    debug := layout.debug
     
     view := get_view_for_variable(debug, id)
     
@@ -381,7 +383,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
             
             #partial switch value in element.type {
               case ArenaOccupancy:
-                draw_arena_occupancy(debug, arena, mouse_p, rect)
+                draw_arena_occupancy(debug, arena, layout.mouse_p, rect)
               case: unreachable()
             }
         }
@@ -407,7 +409,7 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         ui_element := begin_ui_element_rectangle(layout,&graph.block.size)
         ui_element.flags += {.HasBorder, .Resizable}
         end_ui_element(&ui_element, false)
-        draw_frame_slider(debug, mouse_p, ui_element.bounds, element)
+        draw_frame_slider(debug, layout.mouse_p, ui_element.bounds, element)
         
       case ThreadProfileGraph, FrameBarsGraph, TopClocksList:
         graph, ok := &view.kind.(DebugViewProfileGraph)
@@ -457,17 +459,17 @@ draw_element :: proc (using layout: ^Layout, id: DebugId, element: ^DebugElement
         
         transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
         
-        if contains(rect, mouse_p) {
+        if contains(rect, layout.mouse_p) {
             debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
         }
         
         #partial switch value in element.type {
           case ThreadProfileGraph:
-            draw_profile(debug, &graph.root, mouse_p, dt, rect, viewed_element)
+            draw_profile(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element)
           case FrameBarsGraph:
-            draw_frame_bars(debug, &graph.root, mouse_p, dt, rect, viewed_element)
+            draw_frame_bars(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element)
           case TopClocksList:
-            draw_top_clocks(debug, &graph.root, mouse_p, rect, viewed_element)
+            draw_top_clocks(debug, &graph.root, layout.mouse_p, rect, viewed_element)
           case: unreachable()
         }
     }
@@ -978,8 +980,10 @@ set_ui_element_default_interaction :: proc (element: ^LayoutElement, interaction
     element.interaction = interaction
 }
 
-end_ui_element :: proc (using element: ^LayoutElement, use_generic_spacing: b32) {
+end_ui_element :: proc (element: ^LayoutElement, use_generic_spacing: b32) {
     timed_function()
+    
+    layout := element.layout
     
     if !layout.line_initialized {
         layout.line_initialized = true

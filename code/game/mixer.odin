@@ -65,7 +65,7 @@ play_sound :: proc (mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 =
     list_push(&mixer.first_playing_sound, playing_sound)
 }
 
-change_volume :: proc (mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2]f32) {
+change_volume :: proc (mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2] f32) {
     if fade_duration_in_seconds <= 0 {
         sound.current_volume = volume
         sound.target_volume  = volume

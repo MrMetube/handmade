@@ -473,9 +473,9 @@ _shader_uv_and_mask :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v
     return {u, v}
 }
 
-_shader_load_pixels :: proc (using ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
-    at      = &buffer.memory[x + y * buffer.dimension.x]
-    pixel_ := simd.masked_load(at, cast(lane_u32) 0, mask)
+_shader_load_pixels :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
+    ctx.at  = &ctx.buffer.memory[x + y * ctx.buffer.dimension.x]
+    pixel_ := simd.masked_load(ctx.at, cast(lane_u32) 0, ctx.mask)
     result  = unpack_pixel(pixel_)
     
     result = srgb_to_linear(result)

@@ -94,7 +94,9 @@ execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State
       case .Room: unreachable() // @note(viktor): See the comment in the definition above.
       
       case .Hero:
-        using brain.hero
+        body  := brain.hero.body
+        head  := brain.hero.head
+        glove := brain.hero.glove
         
         controller_index := brain.id - cast(BrainId) ReservedBrainId.FirstHero
         

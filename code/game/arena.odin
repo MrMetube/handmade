@@ -222,7 +222,7 @@ check_arena :: proc (arena: ^Arena) {
 
 ////////////////////////////////////////////////
 
-Allocator :: rt.Allocator
+Allocator       :: rt.Allocator
 Allocator_Error :: rt.Allocator_Error
 
 make :: proc { make_struct, make_slice, make_dynamic_array }
@@ -240,11 +240,11 @@ make_slice :: proc (allocator: Allocator, $Element: typeid, #any_int count: u64,
     result := slice_from_parts(Element, raw_data(data), count)
     return result, error
 }
+@(require_results)
 make_dynamic_array :: proc (allocator: Allocator, $Element: typeid, #any_int length, capacity: u64, params := DefaultPushParams, loc := #caller_location) -> ([dynamic] Element, Allocator_Error) #optional_allocator_error {
     assert(length <= capacity)
     data, error := make_size(allocator, size_of(Element) * capacity, align_of(Element), params, loc)
     
-    // @todo(viktor): Should we default to nil allocator to not break the handmade's code expectation of non growing/relocating Arrays? assuming this is used to make an Array(Element).
     result := dynamic_array_from_parts(Element, raw_data(data), length, capacity, allocator)
     return result, error
 }
