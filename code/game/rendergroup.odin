@@ -360,7 +360,7 @@ get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {
     if group.current_quads == nil {
         group.current_quads = push_render_element(group, Textured_Quads)
         group.current_quads ^= {
-            bitmap_offset = cast(u32) group.commands.quad_bitmap_buffer.count,
+            bitmap_offset = cast(u32) len(group.commands.quad_bitmap_buffer.data),
             setup         = group.last_setup,
         }        
     }

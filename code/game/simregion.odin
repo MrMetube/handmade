@@ -116,7 +116,7 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                             // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
                             assert(source.id != 0)
                             
-                            if region.entities.count < auto_cast len(region.entities.data) {
+                            if len(region.entities.data) < cap(region.entities.data) {
                                 dest := append(&region.entities)
                                 
                                 // @todo(viktor): this should really be a decompression not a copy
@@ -210,7 +210,7 @@ pack_traversable_reference :: proc (region: ^SimRegion, ref: ^TraversableReferen
 
 create_entity :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity) {
     result = &region.null_entity
-    if region.entities.count < auto_cast len(region.entities.data) {
+    if len(region.entities.data) < cap(region.entities.data) {
         result = append(&region.entities)
     } else {
         unreachable()
@@ -277,7 +277,7 @@ get_closest_traversable :: proc (region: ^SimRegion, from_p: v3, flags: bit_set[
     // @todo(viktor): make spatial queries easy for things
     closest_point_dsq :f32= 1000
     for &test in slice(region.entities) {
-        for point_index in 0..<test.traversables.count {
+        for point_index in 0 ..< cast(i64) len(test.traversables.data) {
             point := get_sim_space_traversable(&test, point_index)
             
             valid := true

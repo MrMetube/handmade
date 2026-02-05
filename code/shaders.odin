@@ -522,10 +522,10 @@ compile_program_common :: proc (program: ^$Program, common: string) {
     gl_generate(&fb, type_of(program.shared_uniforms), "uniform")
     gl_generate(&fb, type_of(program.fragment_uniforms), "uniform")
     
-    append(&vb, common)
+    append_string(&vb, common)
     append(&fb, common)
     
-    vertex_code := to_cstring(&vb)
+    vertex_code   := to_cstring(&vb)
     fragment_code := to_cstring(&fb)
     
     program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)

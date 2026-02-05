@@ -381,7 +381,7 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     open_gl.settings = settings
     
     open_gl.multisampling    = settings.multisampling_hint
-    open_gl.depth_peel_count = min(settings.depth_peel_count_hint, len(open_gl.depth_peel_buffers.data))
+    open_gl.depth_peel_count = min(settings.depth_peel_count_hint, cap(open_gl.depth_peel_buffers.data))
     
     resolve_flags := CreateFramebufferFlags{ .color }
     if !settings.pixelation_hint {
@@ -546,7 +546,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             gl.Scissor(get_xywh(setup.clip_rect))
             
             copy := game.begin_timed_block("gl copy buffer data")
-            gl.BufferData(gl.ARRAY_BUFFER, cast(int) commands.vertex_buffer.count * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
+            gl.BufferData(gl.ARRAY_BUFFER, len(commands.vertex_buffer.data) * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
             game.end_timed_block(copy)
             
             ////////////////////////////////////////////////

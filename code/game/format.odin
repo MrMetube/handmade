@@ -665,8 +665,7 @@ format_float_with_ryu :: proc (dest: ^String_Builder, view: View) {
     if size == 8 {
         float := view.value.(f64)
         result := d2fixed_buffered(float, precision, buffer)
-        // set_len(dest, len(dest) + len(result))
-        dest.count += auto_cast len(result)
+        set_len(&dest.data, len(dest.data) + len(result))
     } else if size == 4 {
         float := view.value.(f32)
         when false {
@@ -674,8 +673,7 @@ format_float_with_ryu :: proc (dest: ^String_Builder, view: View) {
         } else {
             result := d2fixed_buffered(cast(f64) float, precision, buffer)
         }
-        // set_len(dest, len(dest) + len(result))
-        dest.count += auto_cast len(result)
+        set_len(&dest.data, len(dest.data) + len(result))
     } else if size == 2 {
         // float := view.value.(f16)
         unimplemented()

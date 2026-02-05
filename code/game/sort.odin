@@ -64,7 +64,7 @@ merge_sort :: proc (entries: []$T, temp_space: []T, comes_before: proc (a, b: T)
         
         // @todo(viktor): This can probably be done with less memory, by being smarter 
         // about where we copy from and to.
-        cs := Array(T) { data = temp_space }
+        cs := make_array_with_slice(temp_space)
         ai, bi: int
         for ai < len(as) && bi < len(bs) {
             a := &as[ai]
@@ -82,7 +82,7 @@ merge_sort :: proc (entries: []$T, temp_space: []T, comes_before: proc (a, b: T)
         append(&cs, as[ai:])
         append(&cs, bs[bi:])
         
-        assert(cs.count == auto_cast len(entries))
+        assert(len(cs.data) == len(entries))
         
         for c, index in slice(cs) {
             entries[index] = c

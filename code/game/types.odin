@@ -6,9 +6,9 @@ package game
 import "base:builtin"
 import "base:runtime"
 
+// @todo(viktor): maybe get just rid of this boxing and use dynamic arrays, but then be sure that the correct allocators are used
 Array :: struct ($T: typeid) {
-    data:  [] T,
-    count: i64,
+    data: [dynamic] T,
 }
 
 FixedArray :: struct ($N: i64, $T: typeid) {
@@ -24,8 +24,8 @@ append :: proc {
     builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
 }
 @(require_results) append_array_ :: proc (a: ^Array($T)) -> (result: ^T) {
-    result = &a.data[a.count]
-    a.count += 1
+    set_len(&a.data, len(a.data)+1)
+    result = last(a^)
     return result
 }
 @(require_results) append_fixed_array_ :: proc (a: ^FixedArray($N, $T)) -> (result: ^T) {
@@ -34,8 +34,8 @@ append :: proc {
     return result
 }
 append_array :: proc (a: ^Array($T), value: T) -> (result: ^T) {
-    a.data[a.count] = value
-    result = append_array_(a)
+    append(&a.data, value)
+    result = last_array(a^)
     return result
 }
 append_fixed_array :: proc (a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
@@ -45,23 +45,15 @@ append_fixed_array :: proc (a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
     return result
 }
 append_array_many :: proc (a: ^Array($T), values: ..T) -> (result: []T) {
-    start := a.count
-    for &value in values {
-        a.data[a.count] = value
-        a.count += 1
-    }
-    
-    result = a.data[start:a.count]
+    start := len(a.data)
+    append(&a.data, ..values)
+    result = a.data[start:]
     return result
 }
 append_array_many_slice :: proc (a: ^Array($T), values: []T) -> (result: []T) {
-    start := a.count
-    for &value in values {
-        a.data[a.count] = value
-        a.count += 1
-    }
-    
-    result = a.data[start:a.count]
+    start := len(a.data)
+    append(&a.data, ..values)
+    result = a.data[start:]
     return result
 }
 append_fixed_array_many :: proc (a: ^FixedArray($N, $T), values: ..T) -> (result: []T) {
@@ -85,12 +77,18 @@ append_fixed_array_many_slice :: proc (a: ^FixedArray($N, $T), values: [] T) -> 
     return result
 }
 
-make_array :: proc (arena: ^Arena, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
-    result.data = push_slice(arena, T, len, params)
+make_array :: proc (arena: ^Arena, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> (result: Array(T)) {
+    alloc := arena_allocator(arena)
+    result.data = make_dynamic_array(alloc, T, 0, capacity, params)
+    result.data.allocator = runtime.nil_allocator()
     return result
 }
-make_array_allocator :: proc (allocator: Allocator, $T: typeid, #any_int len: i32, params := DefaultPushParams) -> (result: Array(T)) {
-    result.data = make_slice(allocator, T, len, params)
+make_array_with_slice :: proc (_data: [] $T) -> (result: Array(T)) {
+    result.data = dynamic_array_from_parts(T, raw_data(_data), 0, len(_data))
+    return result
+}
+make_array_allocator :: proc (allocator: Allocator, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> (result: Array(T)) {
+    result.data = make_dynamic_array(allocator, T, 0, capacity, params)
     return result
 }
 
@@ -105,7 +103,7 @@ slice_fixed_array :: proc (array: ^FixedArray($N, $T)) -> []T {
     return array.data[:array.count]
 }
 slice_array :: proc (array: Array($T)) -> []T {
-    return array.data[:array.count]
+    return array.data[:]
 }
 slice_array_pointer :: proc (array: ^Array($T)) -> []T {
     return array.data[:array.count]
@@ -116,20 +114,34 @@ rest_fixed_array :: proc (array: ^FixedArray($N, $T)) -> []T {
     return array.data[array.count:]
 }
 rest_array :: proc (array: Array($T)) -> []T {
-    return array.data[array.count:]
+    return rest_dynamic_array(array.data)
 }
 rest_dynamic_array :: proc (array: [dynamic] $T) -> []T {
-    return slice_from_parts(raw_data(array), cap(array))
+    #no_bounds_check _data := &array[len(array)]
+    result := slice_from_parts(_data, cap(array))
+    return result
 }
 
+last :: proc { last_array, last_slice }
+last_array :: proc (a: Array($T)) -> ^T {
+    result := &a.data[len(a.data)-1]
+    return result
+}
+last_slice :: proc (a: [] $T) -> ^T {
+    result := &a._data[len(a._data)-1]
+    return result
+}
+
+
 set_len :: proc (array: ^[dynamic] $T, len: int) {
+    assert(len <= cap(array))
     raw := cast(^Raw_Dynamic_Array) array
     raw.len = len
 }
 
 clear :: proc { builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array, clear_byte_buffer, array_clear, fixed_array_clear }
 array_clear :: proc (a: ^Array($T)) {
-    a.count = 0
+    clear(&a.data)
 }
 fixed_array_clear :: proc (a: ^FixedArray($N, $T)) {
     a.count = 0
@@ -137,8 +149,8 @@ fixed_array_clear :: proc (a: ^FixedArray($N, $T)) {
 
 ordered_remove :: proc { builtin.ordered_remove, ordered_remove_array }
 ordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
-    data := slice(a^)
-    copy(data[index:], data[index+1:])
+    _data := slice(a^)
+    copy(_data[index:], _data[index+1:])
     a.count -= 1
 }
 unordered_remove :: proc { builtin.unordered_remove, unordered_remove_array }
@@ -155,18 +167,18 @@ String_Builder :: Array(u8)
 appendf :: proc (a: ^String_Builder, format: string, args: ..any) -> (result: string) {
     buf := rest(a^)
     result = format_string(buf, format, ..args)
-    a.count += auto_cast len(result)
+    set_len(&a.data, len(a.data) + len(result))
     return result
 }
 
 append_string :: proc (a: ^String_Builder, value: string) -> (result: string) {
-    append(a, (transmute([]u8) value))
-    return cast(string) a.data[:a.count]
+    append_array_many_slice(a, (transmute([]u8) value))
+    return cast(string) a.data[:]
 }
 
 make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
-make_string_builder_buffer :: proc (buffer: []u8) -> (result: String_Builder) {
-    result.data = buffer
+make_string_builder_buffer :: proc (buffer: [] u8) -> String_Builder {
+    result := make_array_with_slice(buffer)
     return result
 }
 make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
@@ -176,7 +188,7 @@ make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := D
 }
 
 to_string :: proc (sb: String_Builder) -> string {
-    return cast(string) sb.data[:sb.count]
+    return cast(string) sb.data[:]
 }
 to_cstring :: proc (sb: ^String_Builder) -> cstring {
     append(sb, 0)
