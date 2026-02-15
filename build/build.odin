@@ -11,7 +11,8 @@ PedanticGame     :: false
 PedanticRender   :: false
 PedanticPlatform :: false
 
-flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native", "-linker:radlink" }
+flags    := [] string { "-vet-cast", "-vet-shadowing", "-target:windows_amd64", "-microarch:native", /* "-linker:radlink", */ }
+platform_flags := [] string { "-subsystem:windows", `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 // "-build-diagnostics"
 
 debug    :: "-debug"
@@ -272,6 +273,7 @@ main :: proc () {
             odin_build(&cmd, code_dir, debug_exe_path)
             append(&cmd, debug)
             append(&cmd, ..flags)
+            append(&cmd, ..platform_flags)
             append(&cmd, custom_attribute_flag)
             append(&cmd, internal)
             append(&cmd, optimizations)

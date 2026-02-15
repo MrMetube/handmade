@@ -8,7 +8,6 @@ import "base:runtime"
 import "core:os"
 import "core:unicode/utf8"
 import "core:fmt"
-import "core:mem"
 import "shared"
 
 // @volatile This breaks if in the midst of a print we start another print on the same thread. we could use a cursor to know from where onwards we can use the buffer.
@@ -24,7 +23,7 @@ print_to_console :: proc (format: string, args: ..any, flags: Format_Context_Fla
 
 // @todo(viktor): string and cstring is a bunch of @copypasta code, that sucks especially because all the format code changes is if it appends a zero at the end
 @(printlike)
-print_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: string) {
+print_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: string) {
     s := format_string(buffer = console_buffer[:], format = format, args = args, flags = flags)
     buffer := make(allocator, u8, len(s), no_clear())
     copy(buffer, s)
@@ -32,7 +31,7 @@ print_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: 
     return result
 }
 @(printlike)
-cprint_to_allocator :: proc (allocator: runtime.Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: cstring) {
+cprint_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: cstring) {
     s, length := format_cstring(buffer = console_buffer[:], format = format, args = args, flags = flags)
     buffer := make(allocator, u8, length, no_clear())
     copy(buffer, slice_from_parts(u8, cast(^u8) s, length))
@@ -292,8 +291,8 @@ Format_Context :: struct {
 ////////////////////////////////////////////////
 
 
-@(private="file") temp_view_arena:     mem.Arena
-@(private="file") temp_view_allocator: mem.Allocator
+@(private="file") temp_view_arena:     Arena
+@(private="file") temp_view_allocator: Allocator
 
 @(private="file") temp_view_buffer:       [1024] View
 @(private="file") temp_view_inside_block: bool
@@ -309,10 +308,7 @@ begin_temp_views :: proc (width: Maybe(u16) = nil) {
     
     if temp_view_allocator.procedure == nil {
         // @todo(viktor): find a better place for this
-        // @todo(viktor): Use our arena for this
-        buffer := make(context.allocator, u8, 64*4096)
-        mem.arena_init(&temp_view_arena, buffer)
-        temp_view_allocator = mem.arena_allocator(&temp_view_arena)
+        temp_view_allocator = arena_allocator(&temp_view_arena)
         assert(temp_view_allocator.procedure != nil)
     }
 }

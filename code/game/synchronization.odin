@@ -4,7 +4,6 @@ package game
 @(common="file") 
 
 import "base:intrinsics"
-import "core:simd/x86"
 
 ////////////////////////////////////////////////
 // Atomics
@@ -17,18 +16,26 @@ atomic_compare_exchange :: proc (destination: ^$T, old_value, new_value: T) -> (
 volatile_load      :: intrinsics.volatile_load
 volatile_store     :: intrinsics.volatile_store
 atomic_add         :: intrinsics.atomic_add
-read_cycle_counter :: intrinsics.read_cycle_counter
 atomic_exchange    :: intrinsics.atomic_exchange
+
+read_cycle_counter :: intrinsics.read_cycle_counter
 
 // @todo(viktor): Is this correct? How can I validated this?
 @(enable_target_feature="sse2,sse")
 complete_previous_writes_before_future_writes :: proc () {
-    x86._mm_sfence()
-    x86._mm_lfence()
+    intrinsics.atomic_thread_fence(.Release)
 }
 @(enable_target_feature="sse2")
 complete_previous_reads_before_future_reads :: proc () {
-    x86._mm_lfence()
+    intrinsics.atomic_thread_fence(.Acquire)
+}
+
+// @study(viktor): When would "Sequentially Consistent" ordering be required. Reminder: It ensures not just local order, but global order between all threads and all other "Sequentially Consistent" fences(if I understood it correctly).
+compiler_fence :: proc () {
+    intrinsics.atomic_signal_fence(.Acq_Rel)
+}
+compiler_and_cpu_fence :: proc () {
+    intrinsics.atomic_thread_fence(.Acq_Rel)
 }
 
 ////////////////////////////////////////////////
@@ -42,10 +49,22 @@ TicketMutex :: struct #align(64) {
 begin_ticket_mutex :: proc (mutex: ^TicketMutex) {
     ticket := atomic_add(&mutex.ticket, 1)
     for ticket != volatile_load(&mutex.serving) {
-        x86._mm_pause()
+        spin_hint()
     }
 }
 
 end_ticket_mutex :: proc (mutex: ^TicketMutex) {
     atomic_add(&mutex.serving, 1)
+}
+
+spin_hint :: proc() {
+    when ODIN_ARCH == .amd64 || ODIN_ARCH == .i386 {
+        asm { "pause" , "" } ()
+    } else when ODIN_ARCH == .arm32 || ODIN_ARCH == .arm64 {
+        asm { "yield", "" } ()
+    } else when ODIN_ARCH == .riscv64 || ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32 || ODIN_ARCH == .Unknown {
+        // no-op fallback
+    } else {
+        #assert(false, "new microarch was added")
+    }
 }

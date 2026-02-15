@@ -80,7 +80,7 @@ append_fixed_array_many_slice :: proc (a: ^FixedArray($N, $T), values: [] T) -> 
 make_array :: proc (arena: ^Arena, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> (result: Array(T)) {
     alloc := arena_allocator(arena)
     result.data = make_dynamic_array(alloc, T, 0, capacity, params)
-    result.data.allocator = runtime.nil_allocator()
+    result.data.allocator = {}
     return result
 }
 make_array_with_slice :: proc (_data: [] $T) -> (result: Array(T)) {

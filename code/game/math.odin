@@ -6,7 +6,6 @@ package game
 
 import "base:intrinsics"
 import "base:builtin"
-import "core:math"
 import "core:simd"
 
 ////////////////////////////////////////////////
@@ -80,8 +79,8 @@ MaxF64Precision :: 16 // Maximum number of meaningful digits after the decimal p
 MaxF32Precision ::  8 // Maximum number of meaningful digits after the decimal point for 'f32'
 MaxF16Precision ::  4 // Maximum number of meaningful digits after the decimal point for 'f16'
 
-Infinity   :: math.INF_F32
-Infinity64 :: math.INF_F64
+Infinity   :: _INF_F32
+Infinity64 :: _INF_F64
 
 RadiansPerDegree :: Tau / 360.0
 DegreesPerRadian :: 360.0 / Tau
@@ -104,8 +103,6 @@ square_root :: proc (x: $T) -> (result: T) {
     }
     return result
 }
- 
-power :: math.pow
 
 linear_blend  :: proc { linear_blend_v_e, linear_blend_e }
 linear_blend_v_e :: proc (from: $V/[$N]$E, to: V, t: E) -> V {
@@ -133,6 +130,10 @@ sin_01 :: proc (t: $T) -> T {
     result := sin(Pi*t)
     return result
 }
+
+atan2     :: proc { atan2_s, atan2_v }
+atan2_s :: proc (y, x: $T)  -> T { return _atan2(y, x) }
+atan2_v :: proc (v: [2] $T) -> T { return atan2(v.y, v.x) }
 
 safe_ratio_n :: proc (numerator: $T, divisor, n: T) -> (result: T) {
     when intrinsics.type_is_array(T) {
@@ -180,14 +181,14 @@ modulus_i :: proc (value: $I, divisor: I) -> I where intrinsics.type_is_integer(
     return value % divisor
 }
 modulus_f :: proc (value: f32, divisor: f32) -> f32 {
-    return math.mod(value, divisor)
+    return _mod(value, divisor)
 }
 modulus_vf :: proc (value: [$N] f32, divisor: f32) -> (result: [N]f32) where N > 1 {
-    #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor) 
+    #unroll for i in 0..<N do result[i] = _mod(value[i], divisor) 
     return result
 }
 modulus_v :: proc (value: [$N] f32, divisor: [N] f32) -> (result: [N]f32) {
-    #unroll for i in 0..<N do result[i] = math.mod(value[i], divisor[i]) 
+    #unroll for i in 0..<N do result[i] = _mod(value[i], divisor[i]) 
     return result
 }
 
@@ -195,11 +196,11 @@ round :: proc { round_f, round_v }
 round_f :: proc ($T: typeid, f: $F) -> (result: T) 
 where !intrinsics.type_is_array(F)
 {
-    result = cast(T) (f < 0 ? -math.round(-f) : math.round(f))
+    result = cast(T) (f < 0 ? -_round(-f) : _round(f))
     return result
 }
 round_v :: proc ($T: typeid, v: [$N] $F) -> (result: [N] T) {
-    #unroll for i in 0..<N do result[i] = cast(T) math.round(v[i]) 
+    #unroll for i in 0..<N do result[i] = round(T, v[i]) 
     return result
 }
 
@@ -237,10 +238,6 @@ distance :: proc (to: $T, from: T) -> (result: T) {
     return abs(a - b)
 }
 
-log2 :: math.log2
-sin  :: math.sin
-cos  :: math.cos
-tan  :: math.tan
 acos :: proc (x: $T) -> (result: T) {
     when intrinsics.type_is_simd_vector(T) {
         a := simd.to_array(x)
@@ -251,8 +248,6 @@ acos :: proc (x: $T) -> (result: T) {
     }
     return result
 }
-atan2     :: proc { math.atan2_f64, math.atan2_f32, atan2_vec }
-atan2_vec :: proc (v: [2] $T) -> (result: T) { return math.atan2(v.y, v.x) }
 
 ////////////////////////////////////////////////
 // Vector operations

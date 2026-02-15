@@ -7,7 +7,6 @@ package game
 import "base:intrinsics"
 import "base:runtime"
 
-import "core:mem"
 import "core:simd"
 
 _ :: simd
@@ -113,24 +112,25 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
 }
 
 // @todo(viktor): Naming vec_max max_vec
-@(require_results) min_vec :: proc (a,b: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
+@(require_results) min_vec :: proc (a,b: [$N] $E) -> (result: [N] E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = min(a[i], b[i])
     }
     return result
 }
-@(require_results) max_vec :: proc (a,b: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
+@(require_results) max_vec :: proc (a,b: [$N] $E) -> (result: [N] E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = max(a[i], b[i])
     }
     return result
 }
-@(require_results) abs_vec :: proc (a: [$N] $E) -> (result: [N] E) where intrinsics.type_is_numeric(E) {
+@(require_results) abs_vec :: proc (a: [$N] $E) -> (result: [N] E) {
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = abs(a[i])
     }
     return result
 }
+
 
 vec_max :: proc (a: $T, b: T) -> (result: T) {
     when intrinsics.type_is_simd_vector(T) {
@@ -224,17 +224,17 @@ make_by_pointer :: proc {
     make_by_pointer_soa_dynamic_array_len_cap,
 }
 
-make_by_pointer_slice                     :: proc (pointer: ^$T/[] $E,             #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
-make_by_pointer_dynamic_array             :: proc (pointer: ^$T/[dynamic] $E,                              allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T,           allocator, loc) or_return;  return nil }
-make_by_pointer_dynamic_array_len         :: proc (pointer: ^$T/[dynamic] $E,      #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
-make_by_pointer_dynamic_array_len_cap     :: proc (pointer: ^$T/[dynamic] $E,      #any_int len, cap: int, allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len, cap, allocator, loc) or_return;  return nil }
-make_by_pointer_map                       :: proc (pointer: ^$T/map[$K] $E,                                allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T,           allocator, loc);            return nil }
-make_by_pointer_map_cap                   :: proc (pointer: ^$T/map[$K] $E,        #any_int cap: int,      allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, cap,      allocator, loc) or_return;  return nil }
-make_by_pointer_multi_pointer             :: proc (pointer: ^$T/[^] $E,            #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
-make_by_pointer_soa_slice                 :: proc (pointer: ^$T/#soa [] $E,        #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
-make_by_pointer_soa_dynamic_array         :: proc (pointer: ^$T/#soa [dynamic] $E,                         allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T,           allocator, loc) or_return;  return nil }
-make_by_pointer_soa_dynamic_array_len     :: proc (pointer: ^$T/#soa [dynamic] $E, #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
-make_by_pointer_soa_dynamic_array_len_cap :: proc (pointer: ^$T/#soa [dynamic] $E, #any_int len, cap: int, allocator := context.allocator, loc := #caller_location) -> (result: mem.Allocator_Error) { pointer ^= make(T, len, cap, allocator, loc) or_return;  return nil }
+make_by_pointer_slice                     :: proc (pointer: ^$T/[] $E,             #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
+make_by_pointer_dynamic_array             :: proc (pointer: ^$T/[dynamic] $E,                              allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T,           allocator, loc) or_return;  return nil }
+make_by_pointer_dynamic_array_len         :: proc (pointer: ^$T/[dynamic] $E,      #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
+make_by_pointer_dynamic_array_len_cap     :: proc (pointer: ^$T/[dynamic] $E,      #any_int len, cap: int, allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len, cap, allocator, loc) or_return;  return nil }
+make_by_pointer_map                       :: proc (pointer: ^$T/map[$K] $E,                                allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T,           allocator, loc);            return nil }
+make_by_pointer_map_cap                   :: proc (pointer: ^$T/map[$K] $E,        #any_int cap: int,      allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, cap,      allocator, loc) or_return;  return nil }
+make_by_pointer_multi_pointer             :: proc (pointer: ^$T/[^] $E,            #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
+make_by_pointer_soa_slice                 :: proc (pointer: ^$T/#soa [] $E,        #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
+make_by_pointer_soa_dynamic_array         :: proc (pointer: ^$T/#soa [dynamic] $E,                         allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T,           allocator, loc) or_return;  return nil }
+make_by_pointer_soa_dynamic_array_len     :: proc (pointer: ^$T/#soa [dynamic] $E, #any_int len: int,      allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len,      allocator, loc) or_return;  return nil }
+make_by_pointer_soa_dynamic_array_len_cap :: proc (pointer: ^$T/#soa [dynamic] $E, #any_int len, cap: int, allocator := context.allocator, loc := #caller_location) -> (result: Allocator_Error) { pointer ^= make(T, len, cap, allocator, loc) or_return;  return nil }
 
 ////////////////////////////////////////////////
 
@@ -242,7 +242,7 @@ Raw_Dynamic_Array :: struct {
     data: rawptr,
     len:  int,
     cap:  int,
-    allocator: mem.Allocator,
+    allocator: Allocator,
 }
 RawSlice :: struct {
     data: rawptr,

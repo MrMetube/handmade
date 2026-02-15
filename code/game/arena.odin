@@ -4,7 +4,7 @@ package game
 @(common="file")
 
 import "base:intrinsics"
-import rt "base:runtime"
+import "base:runtime"
 
 
 Arena :: struct {
@@ -221,9 +221,13 @@ check_arena :: proc (arena: ^Arena) {
 
 
 ////////////////////////////////////////////////
+// Wrappers for base:runtime 
 
-Allocator       :: rt.Allocator
-Allocator_Error :: rt.Allocator_Error
+Allocator          :: runtime.Allocator
+Allocator_Error    :: runtime.Allocator_Error
+Allocator_Mode     :: runtime.Allocator_Mode
+Allocator_Mode_Set :: runtime.Allocator_Mode_Set
+
 
 make :: proc { make_struct, make_slice, make_dynamic_array }
 @(require_results)
@@ -261,9 +265,9 @@ make_size :: proc(allocator: Allocator, #any_int size: u64, #any_int default_ali
     data: [] u8
     error: Allocator_Error
     if .ClearToZero in params.flags {
-        data, error = rt.mem_alloc(auto_cast size, auto_cast params.alignment, allocator, loc)
+        data, error = runtime.mem_alloc(auto_cast size, auto_cast params.alignment, allocator, loc)
     } else {
-        data, error = rt.mem_alloc_non_zeroed(auto_cast size, auto_cast params.alignment, allocator, loc)
+        data, error = runtime.mem_alloc_non_zeroed(auto_cast size, auto_cast params.alignment, allocator, loc)
     }
     
     return data, error
@@ -280,7 +284,7 @@ arena_allocator :: proc (arena: ^Arena) -> Allocator {
     return result
 }
 
-arena_allocator_procedure :: proc(data: rawptr, mode: rt.Allocator_Mode, size, alignment: int, old_memory: rawptr, old_size: int, location := #caller_location) -> ([]byte, rt.Allocator_Error) {
+arena_allocator_procedure :: proc(data: rawptr, mode: Allocator_Mode, size, alignment: int, old_memory: rawptr, old_size: int, location := #caller_location) -> ([]byte, Allocator_Error) {
     arena := cast(^Arena) data
     
     params: PushParams
@@ -293,13 +297,13 @@ arena_allocator_procedure :: proc(data: rawptr, mode: rt.Allocator_Mode, size, a
     case .Resize_Non_Zeroed: // nothing
     case .Resize:            params.flags += { .ClearToZero }
     
-    case .Free_All: clear_arena(arena)
+    case .Free_All: clear_arena(arena); return nil, nil
     
     
     case .Free, .Query_Info: return nil, .Mode_Not_Implemented
-    case .Query_Features: // @volatile
+    case .Query_Features:
         if old_memory != nil {
-            set := cast(^rt.Allocator_Mode_Set) old_memory
+            set := cast(^Allocator_Mode_Set) old_memory
             set^ = (~{}) - { .Free, .Query_Info }
         }
         return nil, nil
@@ -309,7 +313,7 @@ arena_allocator_procedure :: proc(data: rawptr, mode: rt.Allocator_Mode, size, a
     // @note(viktor): For resizes, we cannot free the allocation, but if its a shrinking we could return the same address (ignoring alignment changes). For now just always reallocate.
     
     result := push_slice(arena, u8, size, params)
-    error := result == nil ? rt.Allocator_Error.Out_Of_Memory : nil
+    error := result == nil ? Allocator_Error.Out_Of_Memory : nil
     
     if old_memory != nil {
         // source := slice_from_parts(u8, old_memory, old_size)
