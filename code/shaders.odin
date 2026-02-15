@@ -138,9 +138,13 @@ void main (void) {
 #ifdef FRAGMENT
 out v4 result_color;
 
+#define Lighting 0
+
 void main (void) {
+#if Lighting
     v3  light_p = light_p;
     v3 light_strength = V3(6, 1, 4);
+#endif
 
     f32 frag_z = gl_FragCoord.z;
     
@@ -164,6 +168,7 @@ void main (void) {
         f32 camera_distance = length(to_camera);
         to_camera *= (1.0f / camera_distance);
         
+#if Lighting
         v3 to_light = light_p - world_p;
         f32 light_distance = length(to_light);
         to_light *= (1.0f / light_distance);
@@ -198,6 +203,9 @@ void main (void) {
         v3 spec_light = spec_c * cos_reflected * light_amount;
         
         v3 light_total = diffuse_light + spec_light;
+#else
+        v3 light_total = v3(1.0f,1.0f,1.0f);
+#endif
         
         result_color.rgb = linear_blend(modulated.rgb, fog_color, fog_amount);
         result_color.rgb *= light_total;
