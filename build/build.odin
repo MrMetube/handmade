@@ -20,9 +20,6 @@ optimize :: false
 internal :: "-define:INTERNAL=true"
 
 
-raddbg      :: `raddbg.exe`
-raddbg_path :: `C:\tools\raddbg\`+ raddbg
-
 /* 
  @todo(viktor):
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"

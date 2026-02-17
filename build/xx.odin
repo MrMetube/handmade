@@ -23,6 +23,9 @@ procs := &the_state.procs
 ////////////////////////////////////////////////
 // Internal state
 
+raddbg      :: `raddbg.exe`
+raddbg_path :: `C:\tools\raddbg\`+ raddbg
+
 Procs :: [dynamic] os.Process
 Cmd   :: [dynamic] string
 
