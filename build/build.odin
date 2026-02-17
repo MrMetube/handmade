@@ -83,33 +83,7 @@ main :: proc () {
     fmt.sbprint(&sb, "hha")
     pedantic_vet_packages := strings.to_string(sb)
     
-    // @todo(viktor): build game, platform, asset_builder
-    // @todo(viktor): metaprogram
-    
-    // @todo(viktor): skip build if dependent files did not change?
-    // @todo(viktor): skip builds like assetbuilder somehow
-    
-    
-    
-    /* 
-    
-    if .debugger in tasks {
-        if ok, _ := is_running(raddbg); ok {
-            append(&cmd, raddbg_path)
-            append(&cmd, "--ipc")
-            append(&cmd, "kill_all")
-            run_command(&cmd)
-        } else  {
-            append(&cmd, raddbg_path)
-            run_command(&cmd, async = &procs)
-        }
-    }
-    
-    */
-    
-    
-    
-     if begin_build(cmd, "code/asset_builder", "asset_builder.exe") {
+    if begin_build(cmd, "code/asset_builder", "asset_builder.exe") {
         build_meander()
         build_native(native)
         append(cmd, custom_attribute_flag)

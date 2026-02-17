@@ -163,7 +163,7 @@ run_or_debug_according_to_args :: proc () {
             
             append(cmd, raddbg_path)
             append(cmd, "--ipc")
-            append(cmd, "run")
+            append(cmd, "restart")
             run_command(cmd)
         }
     }
