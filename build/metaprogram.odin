@@ -357,7 +357,7 @@ package %v
 
 ////////////////////////////////////////////////
 
-generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string, source_package, source_path: string) -> (result: bool) {
+generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string, source_package, source_path_from_output_path: string) -> (result: bool) {
     out, ok := open_generated_file_and_write_header(output_path, output_package)
     if !ok {
         fmt.println("ERROR: Could not extract declarations marked with @common into %v", output_package)
@@ -365,7 +365,7 @@ generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string,
     }
     defer os.close(out)
     
-    fmt.fprintf(out, `import "%v" %v`, source_path, "\n")
+    fmt.fprintf(out, `import "%v" %v`, source_path_from_output_path, "\n")
     
     commons, cok := mp.commons[source_package]
     assert(cok)
