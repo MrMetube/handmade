@@ -147,13 +147,13 @@ fixed_array_clear :: proc (a: ^FixedArray($N, $T)) {
     a.count = 0
 }
 
-ordered_remove :: proc { builtin.ordered_remove, ordered_remove_array }
+ordered_remove :: proc { builtin.ordered_remove_dynamic_array, ordered_remove_fixed_capacity_dynamic_array, ordered_remove_array }
 ordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
     _data := slice(a^)
     copy(_data[index:], _data[index+1:])
     a.count -= 1
 }
-unordered_remove :: proc { builtin.unordered_remove, unordered_remove_array }
+unordered_remove :: proc { builtin.unordered_remove_dynamic_array, builtin.unordered_remove_fixed_capacity_dynamic_array, unordered_remove_array }
 unordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
     a.data[index] = a.data[a.count-1]
     a.count -= 1

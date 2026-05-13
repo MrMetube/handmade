@@ -1,6 +1,6 @@
 package main
 
-import "core:os"
+import os "core:os/old"
 import win "core:sys/windows"
 
 @(private="file")

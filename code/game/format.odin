@@ -564,6 +564,9 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
           case runtime.Type_Info_Union:
             format_union(ctx, value.id, value.data, variant)
             
+          case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
+            unimplemented()
+            
           case runtime.Type_Info_Dynamic_Array:
             slice := cast(^RawSlice) value.data
             raw_slice := RawAny{slice.data, value.id}
@@ -1082,6 +1085,9 @@ draw_type :: proc (ctx: ^Format_Context, type_info: ^runtime.Type_Info) {
             draw_type(ctx, info.index)
             format_any(ctx, ']')
             draw_type(ctx, info.elem)
+            
+          case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
+            unimplemented()
             
           case runtime.Type_Info_Dynamic_Array:
             format_any(ctx, "[dynamic]")

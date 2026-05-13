@@ -3,7 +3,7 @@ package build
 import "base:intrinsics"
 
 import "core:fmt"
-import os "core:os/os2"
+import "core:os"
 import "core:text/regex"
 import "core:strings"
 import win "core:sys/windows"
@@ -225,7 +225,7 @@ handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Runnin
                         fmt.printf("  Failed to kill '%v': %v\n", exe_name, err)
                         ok = false
                     } else {
-                        err = os.process_close(process)
+                        err = os.process_terminate(process)
                         if err != nil {
                             fmt.printf("  Failed to close '%v': %v\n", exe_name, err)
                             ok = false
@@ -300,7 +300,7 @@ procs_flush :: proc (procs: ^Procs) {
 
 procs_close :: proc (procs: ^Procs) {
     for &p in procs {
-        _ = os.process_close(p)
+        _ = os.process_terminate(p)
     }
     
     clear(procs)

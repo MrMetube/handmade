@@ -7,7 +7,6 @@ import "base:intrinsics"
 import "core:fmt"
 import "core:math"
 import "core:os"
-import win "core:sys/windows"
 
 import tt "vendor:stb/truetype"
 
@@ -343,7 +342,7 @@ output_hha_file :: proc (file_name: string, hha: ^HHA) {
     write_slice(out, &at, hha.data[:header.asset_count])
 }
 
-write_slice :: proc (out: os.Handle, at: ^i64, slice: []$T) {
+write_slice :: proc (out: ^os.File, at: ^i64, slice: []$T) {
     size := len(slice) * size_of(T)
     written, _ := os.write_at(out, (cast([^]u8) raw_data(slice))[:size], at^)
     at^ += auto_cast written
@@ -458,14 +457,14 @@ end_asset_type :: proc (hha: ^HHA) {
 }
 
 load_font :: proc (pixels: f32, path_to_font: string) -> (result: ^SourceFont) {
-    font_file, ok := os.read_entire_file(path_to_font)
-    if !ok {
-        fmt.println(os.error_string(cast(os.Platform_Error) win.GetLastError()))
+    font_file, err := os.read_entire_file(path_to_font, context.allocator)
+    if err != nil {
+        fmt.println(err)
         assert(false)
     }
     
     result = new(SourceFont)
-    ok = auto_cast tt.InitFont(&result.font, raw_data(font_file), 0)
+    ok := cast(bool) tt.InitFont(&result.font, raw_data(font_file), 0)
     assert(ok, "Failed to initialize font :(")
     
     result.scale = tt.ScaleForPixelHeight(&result.font, pixels)
@@ -552,7 +551,7 @@ load_glyph_bitmap :: proc (font: ^SourceFont, codepoint: rune, info: ^BitmapInfo
 }
 
 load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
-    contents, _ := os.read_entire_file(file_name)
+    contents, _ := os.read_entire_file(file_name, context.allocator)
     
     BMPHeader :: struct #packed {
         file_type:      [2]u8,
@@ -634,7 +633,7 @@ load_bmp :: proc (file_name: string) -> (result: SourceBitmap) {
 }
 
 load_wav :: proc (file_name: string, section_first_sample_index, section_sample_count: u32) -> (result: SourceSound) {
-    contents, _ := os.read_entire_file(file_name)
+    contents, _ := os.read_entire_file(file_name, context.allocator)
     
     WAVE_Header :: struct #packed {
         riff:    u32,

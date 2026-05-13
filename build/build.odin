@@ -2,8 +2,7 @@
 package build
 
 import "core:fmt"
-import os_old "core:os"
-import os "core:os/os2"
+import "core:os"
 import "core:strings"
 
 
@@ -101,10 +100,10 @@ main :: proc () {
         // @note(viktor): the platform checks for this lock file when hot-reloading
         // @todo(viktor): use the new os once I know how to fprint into its handle
         lock_path := "./game.lock"
-        lock, err := os_old.open(lock_path, mode = os_old.O_CREATE)
-        if err != nil do fmt.printf("ERROR: %v\n", os_old.error_string(err))
+        lock, err := os.open(lock_path, {.Create})
+        if err != nil do fmt.printf("ERROR: %v\n", err)
         defer {
-            os_old.close(lock)
+            os.close(lock)
             os.remove(lock_path)
         }
         fmt.fprint(lock, "WAITING FOR PDB")

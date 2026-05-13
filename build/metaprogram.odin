@@ -6,7 +6,6 @@ import "core:odin/ast"
 import "core:odin/parser"
 import "core:odin/tokenizer"
 import "core:os"
-import "core:os/os2"
 import "core:slice"
 import "core:terminal/ansi"
 import "../code/game/shared" // Get the shared format string iterator. Ughh...
@@ -60,15 +59,15 @@ Collector_Entry :: struct {
 }
 
 metaprogram_collect_files_and_parse_package :: proc (mp: ^Metaprogram, directory, package_name: string) -> (success: bool) {
-    fi, err := os2.read_directory_by_path(directory, -1, context.allocator)
+    fi, err := os.read_directory_by_path(directory, -1, context.allocator)
     if err != nil {
         fmt.eprintfln("ERROR: The metaprogram failed to read the package %v", directory)
         return false
     }
     
     for f in fi {
-        bytes, _ := os2.read_entire_file_from_path(f.fullpath, context.allocator)
-        absolute_path, _ := os2.get_absolute_path(f.fullpath, context.allocator)
+        bytes, _ := os.read_entire_file_from_path(f.fullpath, context.allocator)
+        absolute_path, _ := os.get_absolute_path(f.fullpath, context.allocator)
         mp.files[absolute_path] = cast(string) bytes
     }
     
@@ -331,9 +330,9 @@ check_printlikes :: proc (mp: ^Metaprogram, package_name: string) -> (success: b
 
 ////////////////////////////////////////////////
 
-open_generated_file_and_write_header :: proc (path: string, package_name: string, loc := #caller_location) -> (os.Handle, bool) {
+open_generated_file_and_write_header :: proc (path: string, package_name: string, loc := #caller_location) -> (^os.File, bool) {
     remove_if_exists(path)
-    file, err2 := os.open(path, mode = os.O_CREATE)
+    file, err2 := os.open(path, {.Create})
     if err2 != nil do return file, false
     
     GeneratedHeader :: 
