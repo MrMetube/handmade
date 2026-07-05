@@ -28,7 +28,7 @@ WorldEntityBlock :: struct {
     next: ^WorldEntityBlock,
     entity_count: u32,
     // @note(viktor): entity_data'count =^= size_of(Entity) * entity_count  for now, because there is no compression
-    entity_data: FixedArray(1 << 14, u8),
+    entity_data: [dynamic; 1 << 14] u8,
 }
 
 WorldPosition :: struct {
@@ -528,8 +528,9 @@ use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (re
     block := chunk.first_block
     
     // :PointerArithmetic
-    result = cast(^Entity) &block.entity_data.data[block.entity_data.count]
-    block.entity_data.count += pack_size
+    count := len(block.entity_data)
+    resize(&block.entity_data, count + cast(int) pack_size)
+    result = cast(^Entity) &block.entity_data[count]
     block.entity_count += 1
     
     return result
@@ -537,13 +538,13 @@ use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (re
 
 clear_world_entity_block :: proc (block: ^WorldEntityBlock) {
     block.entity_count = 0
-    block.entity_data.count = 0
+    clear(&block.entity_data)
     block.next = nil
 }
 
 block_has_room :: proc (block: ^WorldEntityBlock, size: i64) -> (result: bool) {
     if block != nil {
-        result = block.entity_data.count + size < len(block.entity_data.data)
+        result = len(block.entity_data) + cast(int) size < cap(block.entity_data)
     }
     
     return result

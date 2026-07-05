@@ -51,8 +51,8 @@ OpenGL :: struct {
     // @note(viktor): Dynamic resources take get recreated when settings change:
     
     resolve_buffer: FrameBuffer,
-    depth_peel_buffers:         FixedArray(16, FrameBuffer),
-    depth_peel_resolve_buffers: FixedArray(16, FrameBuffer),
+    depth_peel_buffers:         [dynamic; 16] FrameBuffer,
+    depth_peel_resolve_buffers: [dynamic; 16] FrameBuffer,
     
     zbias_no_depth_peel: ZBiasProgram, // @note(viktor): pass 0
     zbias_depth_peel:    ZBiasProgram, // @note(viktor): passes 1 through n
@@ -60,7 +60,7 @@ OpenGL :: struct {
     final_stretch:       FinalStretchProgram,
     multisample_resolve: MultisampleResolve,
  
-    light_buffers: FixedArray(12, LightBuffer),
+    light_buffers: [dynamic; 12] LightBuffer,
 }
 
 LightBuffer :: struct {
@@ -360,13 +360,13 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     timed_function()
     
     delete_framebuffer(&open_gl.resolve_buffer)
-    for &buffer in slice(&open_gl.depth_peel_buffers) {
+    for &buffer in open_gl.depth_peel_buffers {
         delete_framebuffer(&buffer)
     }
-    for &buffer in slice(&open_gl.depth_peel_resolve_buffers) {
+    for &buffer in open_gl.depth_peel_resolve_buffers {
         delete_framebuffer(&buffer)
     }
-    for &buffer in slice(&open_gl.light_buffers) {
+    for &buffer in open_gl.light_buffers {
         delete_lightbuffer(&buffer)
     }
     clear(&open_gl.depth_peel_buffers)
@@ -381,7 +381,7 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     open_gl.settings = settings
     
     open_gl.multisampling    = settings.multisampling_hint
-    open_gl.depth_peel_count = min(settings.depth_peel_count_hint, cap(open_gl.depth_peel_buffers.data))
+    open_gl.depth_peel_count = min(settings.depth_peel_count_hint, cap(open_gl.depth_peel_buffers))
     
     resolve_flags := CreateFramebufferFlags{ .color }
     if !settings.pixelation_hint {
@@ -412,8 +412,8 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     }
     
     texture_dim := settings.dimension
-    open_gl.light_buffers.count = 10
-    for &buffer in slice(&open_gl.light_buffers) {
+    resize(&open_gl.light_buffers, 10)
+    for &buffer in open_gl.light_buffers {
         filter_type: i32 = gl.LINEAR
         // @note(viktor): Drop these down to 16F once we know what's what and probably use RGB8 for surface_color? And normal_xz_and_depth could probably be encoded in RGB8?
         buffer.front_emission      = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
@@ -471,7 +471,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     assert(open_gl.depth_peel_count > 0)
     
-    for buffer, index in slice(&open_gl.depth_peel_buffers) {
+    for buffer, index in open_gl.depth_peel_buffers {
         gl_bind_frame_buffer(buffer, settings.dimension)
         gl.Scissor(0, 0, settings.dimension.x, settings.dimension.y)
         
@@ -486,7 +486,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
         gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     }
     
-    gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[0], render_dim)
+    gl_bind_frame_buffer(open_gl.depth_peel_buffers[0], render_dim)
     
     peeling: bool
     peel_index: u32
@@ -507,8 +507,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             
           case .EndPeels:
             if open_gl.multisampling {
-                from := open_gl.depth_peel_buffers.data[peel_index]
-                to   := open_gl.depth_peel_resolve_buffers.data[peel_index]
+                from := open_gl.depth_peel_buffers[peel_index]
+                to   := open_gl.depth_peel_resolve_buffers[peel_index]
                 when true {
                     resolve_multisample(from, to, render_dim)
                 } else {
@@ -525,7 +525,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 peel_index += 1
                 peeling = peel_index > 0
                 
-                gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[peel_index], render_dim)
+                gl_bind_frame_buffer(open_gl.depth_peel_buffers[peel_index], render_dim)
             } else {
                 assert(peel_index == open_gl.depth_peel_count-1)
                 
@@ -540,7 +540,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             entry := read(&commands.push_buffer, Textured_Quads)
             
             ////////////////////////////////////////////////
-            gl_bind_frame_buffer(open_gl.depth_peel_buffers.data[peel_index], render_dim)
+            gl_bind_frame_buffer(open_gl.depth_peel_buffers[peel_index], render_dim)
             
             setup := entry.setup
             gl.Scissor(get_xywh(setup.clip_rect))
@@ -589,8 +589,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
         }
     }
     
-    from := open_gl.depth_peel_buffers.data[peel_index]
-    to   := open_gl.depth_peel_resolve_buffers.data[peel_index]
+    from := open_gl.depth_peel_buffers[peel_index]
+    to   := open_gl.depth_peel_resolve_buffers[peel_index]
     resolve_multisample(from, to, render_dim)
     
     ////////////////////////////////////////////////
@@ -694,9 +694,9 @@ resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
 }
 
 get_depth_peel_read_buffer :: proc (index: u32) -> (result: FrameBuffer) {
-    result = open_gl.depth_peel_buffers.data[index]
+    result = open_gl.depth_peel_buffers[index]
     if open_gl.multisampling {
-        result = open_gl.depth_peel_resolve_buffers.data[index]
+        result = open_gl.depth_peel_resolve_buffers[index]
     }
     return result
 }

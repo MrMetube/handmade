@@ -11,26 +11,15 @@ Array :: struct ($T: typeid) {
     data: [dynamic] T,
 }
 
-FixedArray :: struct ($N: i64, $T: typeid) {
-    data:  [N] T,
-    count: i64,
-}
-
 append :: proc { 
-    append_fixed_array, append_array, append_array_, append_fixed_array_, 
-    append_array_many, append_fixed_array_many, 
-    append_array_many_slice, append_fixed_array_many_slice,
-    append_string, 
+    append_array, append_array_, append_fixed_array,
+    append_array_many, append_array_many_slice, append_string, 
     builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
+    builtin.append_fixed_capacity_elem, builtin.append_fixed_capacity_elems,
 }
 @(require_results) append_array_ :: proc (a: ^Array($T)) -> (result: ^T) {
     set_len(&a.data, len(a.data)+1)
     result = last(a^)
-    return result
-}
-@(require_results) append_fixed_array_ :: proc (a: ^FixedArray($N, $T)) -> (result: ^T) {
-    result = &a.data[a.count]
-    a.count += 1
     return result
 }
 append_array :: proc (a: ^Array($T), value: T) -> (result: ^T) {
@@ -38,10 +27,9 @@ append_array :: proc (a: ^Array($T), value: T) -> (result: ^T) {
     result = last_array(a^)
     return result
 }
-append_fixed_array :: proc (a: ^FixedArray($N, $T), value: T) -> (result: ^T) {
-    a.data[a.count] = value
-    result = &a.data[a.count]
-    a.count += 1
+append_fixed_array :: proc (a: ^[dynamic; $N]$T) -> (result: ^T) {
+    append_nothing(a)
+    result = last(a)
     return result
 }
 append_array_many :: proc (a: ^Array($T), values: ..T) -> (result: []T) {
@@ -54,26 +42,6 @@ append_array_many_slice :: proc (a: ^Array($T), values: []T) -> (result: []T) {
     start := len(a.data)
     append(&a.data, ..values)
     result = a.data[start:]
-    return result
-}
-append_fixed_array_many :: proc (a: ^FixedArray($N, $T), values: ..T) -> (result: []T) {
-    start := a.count
-    for &value in values {
-        a.data[a.count] = value
-        a.count += 1
-    }
-    
-    result = a.data[start:a.count]
-    return result
-}
-append_fixed_array_many_slice :: proc (a: ^FixedArray($N, $T), values: [] T) -> (result: []T) {
-    start := a.count
-    for &value in values {
-        a.data[a.count] = value
-        a.count += 1
-    }
-    
-    result = a.data[start:a.count]
     return result
 }
 
@@ -98,10 +66,7 @@ peek :: proc (a: [dynamic] $T) -> (result: ^T) {
     return result
 }
 
-slice :: proc { slice_fixed_array, slice_array, slice_array_pointer }
-slice_fixed_array :: proc (array: ^FixedArray($N, $T)) -> []T {
-    return array.data[:array.count]
-}
+slice :: proc { slice_array, slice_array_pointer }
 slice_array :: proc (array: Array($T)) -> []T {
     return array.data[:]
 }
@@ -109,10 +74,7 @@ slice_array_pointer :: proc (array: ^Array($T)) -> []T {
     return array.data[:array.count]
 }
 
-rest :: proc { rest_fixed_array, rest_array, rest_dynamic_array }
-rest_fixed_array :: proc (array: ^FixedArray($N, $T)) -> []T {
-    return array.data[array.count:]
-}
+rest :: proc { rest_array, rest_dynamic_array }
 rest_array :: proc (array: Array($T)) -> []T {
     return rest_dynamic_array(array.data)
 }
@@ -122,13 +84,17 @@ rest_dynamic_array :: proc (array: [dynamic] $T) -> []T {
     return result
 }
 
-last :: proc { last_array, last_slice }
+last :: proc { last_array, last_slice, last_fixed }
 last_array :: proc (a: Array($T)) -> ^T {
     result := &a.data[len(a.data)-1]
     return result
 }
 last_slice :: proc (a: [] $T) -> ^T {
     result := &a._data[len(a._data)-1]
+    return result
+}
+last_fixed :: proc (a: ^[dynamic; $N] $T) -> ^T {
+    result := &a[len(a)-1]
     return result
 }
 
@@ -138,13 +104,15 @@ set_len :: proc (array: ^[dynamic] $T, len: int) {
     raw := cast(^Raw_Dynamic_Array) array
     raw.len = len
 }
+set_len_fixed :: proc (array: ^[dynamic; $N] $T, len: int) {
+    assert(len <= cap(array))
+    raw := cast(^Raw_) array
+    raw.len = len
+}
 
-clear :: proc { builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array, clear_byte_buffer, array_clear, fixed_array_clear }
+clear :: proc { builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array, clear_byte_buffer, array_clear, builtin.clear_fixed_capacity_dynamic_array }
 array_clear :: proc (a: ^Array($T)) {
     clear(&a.data)
-}
-fixed_array_clear :: proc (a: ^FixedArray($N, $T)) {
-    a.count = 0
 }
 
 ordered_remove :: proc { builtin.ordered_remove_dynamic_array, ordered_remove_fixed_capacity_dynamic_array, ordered_remove_array }

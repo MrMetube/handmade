@@ -88,7 +88,7 @@ DebugState :: struct {
     per_frame_arena:       Arena,
     stored_event_freelist: FreeList(DebugStoredEvent),
     
-    tooltips: FixedArray(16, [256] u8),
+    tooltips: [dynamic; 16] [256] u8,
 }
 
 DebugFrame :: struct {

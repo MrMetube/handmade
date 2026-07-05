@@ -111,7 +111,7 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                     for block := first_block; block != nil; block = block.next {
                         last_block = block
                         
-                        entities := slice_from_parts(Entity, &block.entity_data.data, block.entity_count)
+                        entities := slice_from_parts(Entity, &block.entity_data[0], block.entity_count)
                         for &source in entities {
                             // @todo(viktor): check a seconds rectangle to set the source to be "moveable" or not
                             assert(source.id != 0)

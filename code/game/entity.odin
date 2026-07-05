@@ -30,7 +30,7 @@ Entity :: struct {
     
     distance_limit: f32,
     
-    hit_points: FixedArray(16, HitPoint),
+    hit_points: [dynamic; 16] HitPoint,
     
     movement_mode: MovementMode,
     t_movement:    f32,
@@ -52,7 +52,7 @@ Entity :: struct {
     
     traversables: Array(TraversablePoint),
     
-    pieces: FixedArray(4, VisiblePiece),
+    pieces: [dynamic; 4] VisiblePiece,
     
     auto_boost_to: TraversableReference,
 }
@@ -255,7 +255,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             shadow_transform.offset.y -= 0.5
             
             rendering_pieces := begin_timed_block("entity rendering pieces")
-            for piece in slice(&entity.pieces) {
+            for piece in &entity.pieces {
                 offset := piece.offset
                 color  := piece.color
                 x_axis := entity.x_axis
@@ -318,7 +318,7 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
     defer if debug_requested(debug_id) do debug_end_data_block()
     
     if .active in entity.flags {
-        for piece in slice(&entity.pieces) {
+        for piece in &entity.pieces {
             if debug_requested(debug_id) { 
                 facing_match   := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
                 bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match)
@@ -352,12 +352,12 @@ debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: 
 }
 
 draw_hitpoints :: proc (group: ^RenderGroup, entity: ^Entity, offset_y: f32, transform: Transform) {
-    if entity.hit_points.count > 1 {
+    if len(entity.hit_points) > 1 {
         health_size: v2 = 0.1
         spacing_between: f32 = health_size.x * 1.5
-        health_x := -0.5 * (cast(f32) entity.hit_points.count - 1) * spacing_between
+        health_x := -0.5 * (cast(f32) len(entity.hit_points) - 1) * spacing_between
 
-        for hit_point in slice(&entity.hit_points) {
+        for hit_point in &entity.hit_points {
             color := hit_point.filled_amount == 0 ? Gray : Red
             // @cleanup rect
             push_rectangle(group, rectangle_center_dimension(v3{health_x, -offset_y, 0}, V3(health_size, 0)), transform, color)

@@ -16,8 +16,8 @@ sl_f32 :: sl(f32)
 sl_v2  :: sl(v2)
 sl_v3  :: sl(v3)
 sl_v4  :: sl(v4)
-sl_sampler2D :: sl(i32)
-sl_sampler2DMS :: sl(i32)
+sl_sampler2D   :: distinct sl(i32)
+sl_sampler2DMS :: distinct sl(i32)
 
 gl_m4          :: distinct i32
 gl_i32         :: distinct i32

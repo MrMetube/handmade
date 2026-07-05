@@ -198,6 +198,24 @@ dynamic_array_from_parts :: proc ($T: typeid, data: pmm, #any_int length, capaci
     return transmute([dynamic] T) result
 }
 
+append_into :: proc { append_into_array, append_into_fixed_array }
+append_into_array :: proc (array: ^[dynamic] $T) -> ^T {
+    appended := append_nothing(array)
+    result: ^T 
+    if appended != 0 {
+        result = last(array^)
+    }
+    return result
+}
+append_into_fixed_array :: proc (array: ^[dynamic; $N] $T) -> ^T {
+    appended, ok := append_nothing(array)
+    result: ^T 
+    if appended != 0 && ok {
+        result = last(array)
+    }
+    return result
+}
+
                 
 slice_to_bytes :: proc (value: [] $T) -> (result: [] u8) {
     data := raw_data(value)

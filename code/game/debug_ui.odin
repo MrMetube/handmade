@@ -528,11 +528,11 @@ draw_arena_occupancy :: proc (debug: ^DebugState, arena: ^Arena, mouse_p: v2, re
 
 add_tooltip :: proc (debug: ^DebugState, text: string) {
     // @todo(viktor): we could return this buffer and let the caller fill it, to not need to copy it
-    assert(len(text) < len(debug.tooltips.data[0]))
+    assert(len(text) < len(debug.tooltips[0]))
     
     slot: ^[256]u8
-    if debug.tooltips.count == auto_cast len(debug.tooltips.data) {
-        slot = &debug.tooltips.data[debug.tooltips.count-1]
+    if len(debug.tooltips) == auto_cast cap(debug.tooltips) {
+        slot = &debug.tooltips[len(debug.tooltips)-1]
     } else {
         slot = append(&debug.tooltips)
     }
@@ -540,7 +540,7 @@ add_tooltip :: proc (debug: ^DebugState, text: string) {
 }
 
 draw_tooltips :: proc (debug: ^DebugState) {
-    for &tooltip in slice(&debug.tooltips) {
+    for &tooltip in debug.tooltips {
         text := cast(string) transmute(cstring) &tooltip
         
         layout := &debug.mouse_text_layout
@@ -564,7 +564,7 @@ draw_tooltips :: proc (debug: ^DebugState) {
         push_text(debug, text, p, Isabelline)
     }
     
-    for &tooltip in slice(&debug.tooltips) {
+    for &tooltip in debug.tooltips {
         zero(tooltip[:])
     }
     clear(&debug.tooltips)
