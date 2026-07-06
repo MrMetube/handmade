@@ -546,7 +546,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             gl.Scissor(get_xywh(setup.clip_rect))
             
             copy := game.begin_timed_block("gl copy buffer data")
-            gl.BufferData(gl.ARRAY_BUFFER, len(commands.vertex_buffer.data) * size_of(Textured_Vertex), raw_data(commands.vertex_buffer.data), gl.STREAM_DRAW)
+            gl.BufferData(gl.ARRAY_BUFFER, len(commands.vertex_buffer) * size_of(Textured_Vertex), raw_data(commands.vertex_buffer), gl.STREAM_DRAW)
             game.end_timed_block(copy)
             
             ////////////////////////////////////////////////
@@ -569,7 +569,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             
             loop := game.begin_timed_block("gl quad loop")
             for bitmap_index in entry.bitmap_offset ..< entry.bitmap_offset + entry.quad_count {
-                bitmap := commands.quad_bitmap_buffer.data[bitmap_index]
+                bitmap := commands.quad_bitmap_buffer[bitmap_index]
                 gl.BindTexture(gl.TEXTURE_2D, bitmap.texture_handle)
                 
                 vertex_index := cast(i32) bitmap_index * 4

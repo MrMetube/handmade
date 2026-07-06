@@ -79,12 +79,12 @@ merge_sort :: proc (entries: []$T, temp_space: []T, comes_before: proc (a, b: T)
             }
         }
         
-        append(&cs, as[ai:])
-        append(&cs, bs[bi:])
+        append(&cs, ..as[ai:])
+        append(&cs, ..bs[bi:])
         
-        assert(len(cs.data) == len(entries))
+        assert(len(cs) == len(entries))
         
-        for c, index in slice(cs) {
+        for c, index in cs {
             entries[index] = c
         }
     }

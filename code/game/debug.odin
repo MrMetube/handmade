@@ -286,7 +286,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
         debug.ascent = get_baseline(debug.font_info)
     }
     
-    array_index: u32 = GlobalDebugTable.current_events_index == 0 ? 1 : 0 
+    array_index := GlobalDebugTable.current_events_index == 0 ? cast(u32) 1 : 0 
     GlobalDebugTable.current_events_index = array_index
     events_state := atomic_exchange(&GlobalDebugTable.events_state, { events_index = 0, array_index = array_index})
     

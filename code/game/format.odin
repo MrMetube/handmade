@@ -356,7 +356,7 @@ format_cstring :: proc (buffer: []u8, format: string, args: ..any, flags := Form
 @(printlike)
 format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Format_Context_Flags{}) -> (result: string) {
     ctx := Format_Context { 
-        dest  = make_string_builder_buffer(buffer),
+        dest  = make_array_with_slice(buffer),
         flags = flags,
         
         indentation = "  ",
@@ -400,7 +400,7 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
     @(static)
     temp_buffer: [4096*16] u8
     
-    temp := make_string_builder(temp_buffer[:])
+    temp : String_Builder = make_array_with_slice(temp_buffer[:])
     defer append(&ctx.dest, to_string(temp))
     // padding := max(0, cast(i32) view.width - cast(i32) temp.count)
     // if       !view.pad_right_side && view.width != 0 do for _ in 0..<padding do append(&ctx.dest, ' ')
@@ -423,7 +423,7 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
         // @todo(viktor): maybe do this myself
         buf, count := utf8.encode_rune(value)
         bytes := buf[:count]
-        append(&temp, bytes)
+        append(&temp, ..bytes)
         
       case string:    append(&temp, value)
       case cstring:   append(&temp, string(value))
@@ -664,7 +664,7 @@ format_float_with_ryu :: proc (dest: ^String_Builder, view: View) {
     if size == 8 {
         float := view.value.(f64)
         result := d2fixed_buffered(float, precision, buffer)
-        set_len(&dest.data, len(dest.data) + len(result))
+        set_len(dest, len(dest) + len(result))
     } else if size == 4 {
         float := view.value.(f32)
         when false {
@@ -672,7 +672,7 @@ format_float_with_ryu :: proc (dest: ^String_Builder, view: View) {
         } else {
             result := d2fixed_buffered(cast(f64) float, precision, buffer)
         }
-        set_len(&dest.data, len(dest.data) + len(result))
+        set_len(dest, len(dest) + len(result))
     } else if size == 2 {
         // float := view.value.(f16)
         unimplemented()

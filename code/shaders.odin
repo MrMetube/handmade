@@ -510,8 +510,8 @@ compile_program_common :: proc (program: ^$Program, common: string) {
     defines: cstring = "#version 330\n"
     
     vertex_buffer, fragment_buffer: [4096] u8
-    vb := make_string_builder(vertex_buffer[:])
-    fb := make_string_builder(fragment_buffer[:])
+    vb : String_Builder = make_array_with_slice(vertex_buffer[:])
+    fb : String_Builder = make_array_with_slice(fragment_buffer[:])
     
     append(&vb, `
 #define INOUT out

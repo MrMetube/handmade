@@ -534,7 +534,7 @@ add_tooltip :: proc (debug: ^DebugState, text: string) {
     if len(debug.tooltips) == auto_cast cap(debug.tooltips) {
         slot = &debug.tooltips[len(debug.tooltips)-1]
     } else {
-        slot = append(&debug.tooltips)
+        slot = append_into(&debug.tooltips)
     }
     copy_slice(slot[:len(text)], transmute([] u8) text)
 }

@@ -6,91 +6,41 @@ package game
 import "base:builtin"
 import "base:runtime"
 
-// @todo(viktor): maybe get just rid of this boxing and use dynamic arrays, but then be sure that the correct allocators are used
-Array :: struct ($T: typeid) {
-    data: [dynamic] T,
-}
-
-append :: proc { 
-    append_array, append_array_, append_fixed_array,
-    append_array_many, append_array_many_slice, append_string, 
-    builtin.append_elem, builtin.append_elems, builtin.append_soa_elems, builtin.append_soa_elem, 
-    builtin.append_fixed_capacity_elem, builtin.append_fixed_capacity_elems,
-}
-@(require_results) append_array_ :: proc (a: ^Array($T)) -> (result: ^T) {
-    set_len(&a.data, len(a.data)+1)
-    result = last(a^)
-    return result
-}
-append_array :: proc (a: ^Array($T), value: T) -> (result: ^T) {
-    append(&a.data, value)
-    result = last_array(a^)
-    return result
-}
-append_fixed_array :: proc (a: ^[dynamic; $N]$T) -> (result: ^T) {
-    append_nothing(a)
-    result = last(a)
-    return result
-}
-append_array_many :: proc (a: ^Array($T), values: ..T) -> (result: []T) {
-    start := len(a.data)
-    append(&a.data, ..values)
-    result = a.data[start:]
-    return result
-}
-append_array_many_slice :: proc (a: ^Array($T), values: []T) -> (result: []T) {
-    start := len(a.data)
-    append(&a.data, ..values)
-    result = a.data[start:]
-    return result
-}
-
-make_array :: proc (arena: ^Arena, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> (result: Array(T)) {
+make_array :: proc (arena: ^Arena, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> [dynamic] T {
     alloc := arena_allocator(arena)
-    result.data = make_dynamic_array(alloc, T, 0, capacity, params)
-    result.data.allocator = {}
+    result := make_dynamic_array(alloc, T, 0, capacity, params)
+    result.allocator = {}
     return result
 }
-make_array_with_slice :: proc (_data: [] $T) -> (result: Array(T)) {
-    result.data = dynamic_array_from_parts(T, raw_data(_data), 0, len(_data))
+make_array_with_slice :: proc (data: [] $T) -> [dynamic] T {
+    result := dynamic_array_from_parts(T, raw_data(data), 0, len(data))
     return result
 }
-make_array_allocator :: proc (allocator: Allocator, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> (result: Array(T)) {
-    result.data = make_dynamic_array(allocator, T, 0, capacity, params)
+make_array_allocator :: proc (allocator: Allocator, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> [dynamic] T {
+    result := make_dynamic_array(allocator, T, 0, capacity, params)
     return result
 }
 
-peek :: proc (a: [dynamic] $T) -> (result: ^T) { 
+peek :: proc (a: [dynamic] $T) ->^T { 
     assert(len(a) != 0)
     #no_bounds_check result = &a[len(a)-1]
     return result
 }
 
-slice :: proc { slice_array, slice_array_pointer }
-slice_array :: proc (array: Array($T)) -> []T {
-    return array.data[:]
-}
-slice_array_pointer :: proc (array: ^Array($T)) -> []T {
-    return array.data[:array.count]
-}
-
-rest :: proc { rest_array, rest_dynamic_array }
-rest_array :: proc (array: Array($T)) -> []T {
-    return rest_dynamic_array(array.data)
-}
+rest :: proc { rest_dynamic_array }
 rest_dynamic_array :: proc (array: [dynamic] $T) -> []T {
-    #no_bounds_check _data := &array[len(array)]
-    result := slice_from_parts(_data, cap(array))
+    #no_bounds_check data := &array[len(array)]
+    result := slice_from_parts(data, cap(array))
     return result
 }
 
 last :: proc { last_array, last_slice, last_fixed }
-last_array :: proc (a: Array($T)) -> ^T {
-    result := &a.data[len(a.data)-1]
+last_array :: proc (a: [dynamic] $T) -> ^T {
+    result := &a[len(a)-1]
     return result
 }
 last_slice :: proc (a: [] $T) -> ^T {
-    result := &a._data[len(a._data)-1]
+    result := &a[len(a)-1]
     return result
 }
 last_fixed :: proc (a: ^[dynamic; $N] $T) -> ^T {
@@ -110,57 +60,41 @@ set_len_fixed :: proc (array: ^[dynamic; $N] $T, len: int) {
     raw.len = len
 }
 
-clear :: proc { builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array, clear_byte_buffer, array_clear, builtin.clear_fixed_capacity_dynamic_array }
-array_clear :: proc (a: ^Array($T)) {
-    clear(&a.data)
-}
-
-ordered_remove :: proc { builtin.ordered_remove_dynamic_array, ordered_remove_fixed_capacity_dynamic_array, ordered_remove_array }
-ordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
-    _data := slice(a^)
-    copy(_data[index:], _data[index+1:])
-    a.count -= 1
-}
-unordered_remove :: proc { builtin.unordered_remove_dynamic_array, builtin.unordered_remove_fixed_capacity_dynamic_array, unordered_remove_array }
-unordered_remove_array :: proc (a: ^Array($T), #any_int index: i64) {
-    a.data[index] = a.data[a.count-1]
-    a.count -= 1
+clear :: proc { 
+    clear_byte_buffer, 
+    builtin.clear_dynamic_array, builtin.clear_map, runtime.clear_soa_dynamic_array, builtin.clear_fixed_capacity_dynamic_array,
 }
 
 ////////////////////////////////////////////////
 
-String_Builder :: Array(u8)
+String_Builder :: [dynamic] u8
 
 @(printlike)
-appendf :: proc (a: ^String_Builder, format: string, args: ..any) -> (result: string) {
+appendf :: proc (a: ^String_Builder, format: string, args: ..any) -> string {
     buf := rest(a^)
-    result = format_string(buf, format, ..args)
-    set_len(&a.data, len(a.data) + len(result))
+    result := format_string(buf, format, ..args)
+    set_len(a, len(a) + len(result))
     return result
 }
 
-append_string :: proc (a: ^String_Builder, value: string) -> (result: string) {
-    append_array_many_slice(a, (transmute([]u8) value))
-    return cast(string) a.data[:]
+append_string :: proc (a: ^String_Builder, value: string) -> string {
+    append(a, ..(transmute([]u8) value))
+    return cast(string) a[:]
 }
 
-make_string_builder :: proc { make_string_builder_buffer, make_string_builder_arena }
-make_string_builder_buffer :: proc (buffer: [] u8) -> String_Builder {
-    result := make_array_with_slice(buffer)
-    return result
-}
-make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> (result: String_Builder) {
+make_string_builder :: proc { make_string_builder_arena }
+make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> String_Builder {
     buffer := push_slice(arena, u8, len, params)
-    result = make_string_builder_buffer(buffer)
+    result := make_array_with_slice(buffer)
     return result
 }
 
 to_string :: proc (sb: String_Builder) -> string {
-    return cast(string) sb.data[:]
+    return cast(string) sb[:]
 }
 to_cstring :: proc (sb: ^String_Builder) -> cstring {
     append(sb, 0)
-    return cast(cstring) &sb.data[0]
+    return cast(cstring) &sb[0]
 }
 
 ////////////////////////////////////////////////
@@ -173,17 +107,17 @@ Byte_Buffer :: struct {
     write_cursor: int,
 }
 
-make_byte_buffer :: proc (buffer: [] u8) -> (result: Byte_Buffer) {
-    result = { bytes = buffer }
+make_byte_buffer :: proc (buffer: [] u8) -> Byte_Buffer {
+    result := Byte_Buffer { bytes = buffer }
     return result
 }
 
-write_reserve :: proc (b: ^Byte_Buffer, $T: typeid) -> (result: ^T) {
+write_reserve :: proc (b: ^Byte_Buffer, $T: typeid) -> ^T {
     dest := b.bytes[b.write_cursor:]
     size := size_of(T)
     assert(len(dest) >= size)
     
-    result = cast(^T) &dest[0]
+    result := cast(^T) &dest[0]
     b.write_cursor += size
     
     return result
@@ -226,17 +160,17 @@ read_align :: proc (b: ^Byte_Buffer, #any_int alignment: int) {
     }
 }
 
-read :: proc (b: ^Byte_Buffer, $T: typeid) -> (result: ^T) {
+read :: proc (b: ^Byte_Buffer, $T: typeid) -> ^T {
     source := b.bytes[b.read_cursor:]
     assert(size_of(T) <= len(source))
     
-    result = cast(^T) &source[0]
+    result := cast(^T) &source[0]
     b.read_cursor += size_of(T)
     
     return result
 }
 
-read_slice :: proc (b: ^Byte_Buffer, $T: typeid/ [] $E, count: int) -> (result: [] E) {
+read_slice :: proc (b: ^Byte_Buffer, $T: typeid/ [] $E, count: int) -> [] E {
     size := count * size_of(T)
     source := b.bytes[b.read_cursor:]
     assert(size <= len(source))
@@ -247,7 +181,7 @@ read_slice :: proc (b: ^Byte_Buffer, $T: typeid/ [] $E, count: int) -> (result: 
 }
 
 begin_reading :: proc (b: ^Byte_Buffer) { b.read_cursor = 0 }
-can_read :: proc (b: ^Byte_Buffer) -> (result: bool) { return b.read_cursor < b.write_cursor }
+can_read :: proc (b: ^Byte_Buffer) -> bool { return b.read_cursor < b.write_cursor }
 
 clear_byte_buffer :: proc (b: ^Byte_Buffer) {
     b.read_cursor = 0
@@ -282,8 +216,8 @@ deque_append :: proc (deque: ^Deque($L), element: ^L) {
     }
 }
 
-deque_remove_from_end :: proc (deque: ^Deque($L)) -> (result: ^L) {
-    result = deque.last
+deque_remove_from_end :: proc (deque: ^Deque($L)) -> ^L {
+    result := deque.last
     
     if result != nil {
         deque.last = result.next

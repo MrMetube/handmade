@@ -50,7 +50,7 @@ Entity :: struct {
     
     x_axis, y_axis: v2,
     
-    traversables: Array(TraversablePoint),
+    traversables: [dynamic] TraversablePoint,
     
     pieces: [dynamic; 4] VisiblePiece,
     
@@ -134,13 +134,13 @@ Camera_Behaviour :: bit_set[enum {
 update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_group: ^RenderGroup, typical_floor_height: f32, particle_cache: ^Particle_Cache) {
     timed_function()
     
-    for &entity in slice(sim_region.entities) {
+    for &entity in sim_region.entities {
         if .active in entity.flags {
             boost := begin_timed_block("entity boost")
             // @todo(viktor): Should non-active entities not do simmy stuff?
             boost_to := get_traversable(entity.auto_boost_to)
             if boost_to != nil {
-                for traversable in slice(entity.traversables) {
+                for traversable in entity.traversables {
                     occupant := traversable.occupant
                     if occupant != nil && occupant.movement_mode == .Planted {
                         occupant.came_from = occupant.occupying

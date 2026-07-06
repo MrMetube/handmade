@@ -55,8 +55,8 @@ RenderCommands :: struct {
     // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
     push_buffer: Byte_Buffer,
     
-    vertex_buffer:      Array(Textured_Vertex),
-    quad_bitmap_buffer: Array(^Bitmap),
+    vertex_buffer:      [dynamic] Textured_Vertex,
+    quad_bitmap_buffer: [dynamic] ^Bitmap,
     
     white_bitmap: Bitmap,
 }
@@ -360,7 +360,7 @@ get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {
     if group.current_quads == nil {
         group.current_quads = push_render_element(group, Textured_Quads)
         group.current_quads ^= {
-            bitmap_offset = cast(u32) len(group.commands.quad_bitmap_buffer.data),
+            bitmap_offset = cast(u32) len(group.commands.quad_bitmap_buffer),
             setup         = group.last_setup,
         }        
     }

@@ -315,7 +315,7 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
     in_room: ^Entity
     special: ^Entity
     // @todo(viktor): Probably don't want to loop over all entities - maintain a separate list of room entities during unpack!
-    for &test in slice(region.entities) {
+    for &test in region.entities {
         if test.brain_kind == .Room && entity_overlaps_entity(&test, entity) {
             in_room = &test
         }
