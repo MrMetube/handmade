@@ -215,7 +215,7 @@ floor_f :: proc ($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.floor(f)
 }
 floor_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T {
-    return vec_cast(T, simd.to_array(simd.floor(simd.from_array(fs))))
+    return cast([N] T) simd.to_array(simd.floor(simd.from_array(fs)))
 }
 
 ceil :: proc { ceil_f, ceil_v }
@@ -223,7 +223,7 @@ ceil_f :: proc ($T: typeid, f: f32) -> (i: T) {
     return cast(T) math.ceil(f)
 }
 ceil_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T {
-    return vec_cast(T, simd.to_array(simd.ceil(simd.from_array(fs))))
+    return cast([N] T) simd.to_array(simd.ceil(simd.from_array(fs)))
 }
 
 truncate :: proc { truncate_f, truncate_v }
@@ -231,7 +231,7 @@ truncate_f :: proc ($T: typeid, f: f32) -> T {
     return cast(T) f
 }
 truncate_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T where N > 1 {
-    return vec_cast(T, fs)
+    return cast([N] T) fs
 }
 
 fractional :: proc (x: $F) -> (fractional: F, integer: i32) {
@@ -302,11 +302,11 @@ V4_xy_z_w :: proc (xy: [2] $T, z, w: T) -> (result: [4] T) {
 }
 
 v4_to_rgba :: proc (rgba: v4) -> (result: Color) {
-    result = vec_cast(u8, rgba * 255)
+    result = cast(Color) (rgba * 255)
     return result
 }
 rgba_to_v4 :: proc (rgba: Color) -> (result: v4) {
-    result = vec_cast(f32, rgba)
+    result = cast(v4) rgba
     result /= 255
     return result
 }
@@ -484,7 +484,7 @@ when LaneWidth != 1 {
     }
 
     pack_pixel :: proc (value: lane_v4) -> (result: lane_u32) {
-        color := vec_cast(lane_u32, value)
+        color := cast([4] lane_u32) value
         result = color.r | simd.shl_masked(color.g, 8) | simd.shl_masked(color.b, 16) | simd.shl_masked(color.a, 24)
         
         return result

@@ -169,7 +169,7 @@ clear_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, dest, clip_rect, clip_rect)
     assert(ok)
     
-    color := vec_cast(lane_f32, color * 255)
+    color := cast(lane_v4) color * 255
     color = srgb_to_linear(color)
     packed := pack_pixel(color)
     
@@ -192,7 +192,7 @@ draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Recta
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, buffer, clip_rect, fill_rect)
     if !ok do return
     
-    color := vec_cast(lane_f32, color * 255)
+    color := cast(lane_v4) color * 255
     
     color = srgb_to_linear(color)
     color.rgb = clamp(color.rgb, 0, MaxColorValue)
@@ -219,7 +219,7 @@ draw_rectangle_fill_color :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origi
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx, buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return
     
-    color := vec_cast(lane_f32, color * 255)
+    color := cast(lane_v4) color * 255
     
     color = srgb_to_linear(color)
     color.rgb = clamp(color.rgb, 0, MaxColorValue)
@@ -251,9 +251,9 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx,  buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return
     
-    color := vec_cast(lane_f32, color)
+    color := cast(lane_v4) color
     
-    texture_size := vec_cast(lane_f32, texture.dimension) - 2
+    texture_size := cast(lane_v2) texture.dimension - 2
     
     texture_width  := cast(lane_u32) texture.dimension.x
     texture_memory := cast(lane_umm) raw_data(texture.memory)
@@ -269,8 +269,8 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
             
             // @note(viktor): Bias texture coordinates to start on the boundary between the 0,0 and 1,1 pixels
             t := uv * texture_size + 0.5
-            s :=     vec_cast(lane_u32, t)
-            f := t - vec_cast(lane_f32, s)
+            s :=     cast([2] lane_u32) t
+            f := t - cast(lane_v2) s
             
             // @note(viktor): bilinear sample
             index_a := cast(lane_umm) ((s.x + 0) + (s.y + 0) * texture_width)
@@ -381,10 +381,10 @@ shader_init_with_rotation :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_re
     normal_x_axis_ := v2{ y_axis.y, -y_axis.x} / determinant
     normal_y_axis_ := v2{-x_axis.y,  x_axis.x} / determinant
     
-    ctx.normal_x_axis = vec_cast(lane_f32, normal_x_axis_)
-    ctx.normal_y_axis = vec_cast(lane_f32, normal_y_axis_)
+    ctx.normal_x_axis = cast(lane_v2) normal_x_axis_
+    ctx.normal_y_axis = cast(lane_v2) normal_y_axis_
     
-    delta := vec_cast(lane_f32, ctx.fill_rect.min) - vec_cast(lane_f32, origin) 
+    delta := cast(lane_v2) ctx.fill_rect.min - cast(lane_v2) origin
     when LaneWidth == 4 {
         delta.x += { 0, 1, 2, 3 }
     } else when LaneWidth == 8 {

@@ -851,7 +851,7 @@ allocate_asset_memory:: proc (assets: ^Assets, kind: AssetKind, #any_int id: u32
         info := asset.info.bitmap
           
         asset.header.value = Bitmap{
-            dimension = vec_cast(i32, info.dimension),
+            dimension = cast(iv2) info.dimension,
             
             align_percentage = info.align_percentage,
             width_over_height = cast(f32) info.dimension.x / cast(f32) info.dimension.y,

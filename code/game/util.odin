@@ -92,9 +92,9 @@ where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is
 }
 
 @(require_results) rec_cast :: proc ($T: typeid, rec: $R/Rectangle([$N] $E)) -> Rectangle([N] T) where T != E {
-    return { vec_cast(T, rec.min), vec_cast(T, rec.max)}
+    return { cast([N] T) rec.min, cast([N] T) rec.max}
 }
-vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
+vec_cast :: proc { vcast_2, vcast_3, vcast_4 }
 @(require_results) vcast_2 :: proc ($T: typeid, x, y: $E) -> ([2] T) where T != E {
     return {cast(T) x, cast(T) y}
 }
@@ -103,12 +103,6 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4, vcast_vec }
 }
 @(require_results) vcast_4 :: proc ($T: typeid, x, y, z, w: $E) -> ([4] T) where T != E {
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
-}
-@(require_results) vcast_vec :: proc ($T: typeid, v: [$N] $E) -> (result: [N] T) where T != E {
-    #no_bounds_check #unroll for i in 0..<N {
-        result[i] = cast(T) v[i]
-    }
-    return result
 }
 
 // @todo(viktor): Naming vec_max max_vec

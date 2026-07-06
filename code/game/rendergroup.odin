@@ -169,7 +169,7 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         assets   = assets,
         commands = commands,
         
-        screen_size   = vec_cast(f32, commands.dimension),
+        screen_size   = cast(v2) commands.dimension,
         generation_id = generation_id,
     }
     
@@ -440,7 +440,7 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     }
     
     // @note(viktor): step in one texel because the bitmaps are padded on all sides with a blank strip of pixels
-    d_texel := 1 / vec_cast(f32, bitmap.dimension)
+    d_texel := 1 / cast(v2) bitmap.dimension
     min_uv := 0 + d_texel
     max_uv := 1 - d_texel
     

@@ -362,7 +362,7 @@ main :: proc () {
                     
                     mouse_in_window_y_up := vec_cast(f32, mouse_in_window_y_down.x, window_dim.y - 1 - mouse_in_window_y_down.y)
                     draw_region := rec_cast(f32, draw_region)
-                    mouse_in_draw_region := vec_cast(f32, render_commands.dimension) * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
+                    mouse_in_draw_region := cast(v2) render_commands.dimension * clamp_01_map_to_range(draw_region.min, mouse_in_window_y_up, draw_region.max)
                     
                     new_input.mouse.p = mouse_in_draw_region
                     for &button, index in new_input.mouse.buttons {

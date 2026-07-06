@@ -142,10 +142,10 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     
     { debug_data_block("Renderer")
         // @todo(viktor): tell the debug ui to move back into the screen area
-        dim := vec_cast(f32, render_commands.dimension)
+        dim := cast(v2) render_commands.dimension
         debug_record_value(&dim.x, "Render Width")
         debug_record_value(&dim.y, "Render Height")
-        render_commands.dimension = vec_cast(i32, dim)
+        render_commands.dimension = cast(iv2) dim
         
         debug_record_value(&render_commands.multisampling_hint, "Multisampling")
         debug_record_value(&render_commands.pixelation_hint, "Pixelation")
@@ -174,7 +174,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     
     if SoundPanningWithMouse {
         // @note(viktor): test sound panning with the mouse 
-        music_volume := input.mouse.p - vec_cast(f32, render_commands.dimension) * 0.5
+        music_volume := input.mouse.p - cast(v2) render_commands.dimension * 0.5
         if state.music == nil {
             if state.mixer.first_playing_sound == nil {
                 play_sound(&state.mixer, first_sound_from(tran_state.assets, .Music))

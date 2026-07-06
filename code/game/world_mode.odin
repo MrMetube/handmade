@@ -511,7 +511,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
     p := chunk_position_from_tile_positon(mode, tile_p)
     scale := v3{tile, tile, mode.typical_floor_height}
     
-    size := V3(vec_cast(f32, radius) * 2 + 1, 2) * scale
+    size := V3(cast(v2) radius * 2 + 1, 2) * scale
     
     room := begin_entity(mode)
     room.collision_volume = grounded_collision(size)

@@ -40,7 +40,7 @@ update_and_render_particle_systems :: proc (cache: ^Particle_Cache, render_group
 update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderGroup, dt: f32, frame_displacement_init: v3) {
     timed_function()
     
-    frame_displacement := vec_cast(lane_f32, frame_displacement_init)
+    frame_displacement := cast(lane_v3) frame_displacement_init
     transform := default_upright_transform()
     
     when false {
@@ -140,7 +140,7 @@ spawn_fire :: proc (cache: ^Particle_Cache, at: v3) {
     system  := &cache.fire_system
     entropy := &cache.entropy
     
-    at := vec_cast(lane_f32, at)
+    at := cast(lane_v3) at
     
     index := system.next_lane_particle
     system.next_lane_particle += 1

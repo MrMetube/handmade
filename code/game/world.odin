@@ -57,7 +57,7 @@ chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i, additi
     
     tile_depth_in_meters := world.chunk_dim_meters.z
     
-    offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (vec_cast(f32, tile_p) + {0.5, 0.5, 0})
+    offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (cast(v3) tile_p + {0.5, 0.5, 0})
     offset.z -= 0.4 * tile_depth_in_meters
     result = map_into_worldspace(world, result, additional_offset + offset)
     
@@ -397,7 +397,7 @@ map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = 
     
     rounded_offset := round(i32, result.offset / world.chunk_dim_meters)
     result.chunk   += rounded_offset
-    result.offset  -= vec_cast(f32, rounded_offset) * world.chunk_dim_meters
+    result.offset  -= cast(v3) rounded_offset * world.chunk_dim_meters
     
     assert(is_canonical(world, result.offset))
     
@@ -405,13 +405,13 @@ map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = 
 }
 
 get_chunk_bounds :: proc (world: ^World, chunk_p: v3i) -> (result: Rectangle3) {
-    chunk_center := vec_cast(f32, chunk_p) * world.chunk_dim_meters
+    chunk_center := cast(v3) chunk_p * world.chunk_dim_meters
     result = rectangle_center_dimension(chunk_center, world.chunk_dim_meters)
     return result
 }
 
 world_distance :: proc (world: ^World, a, b: WorldPosition) -> (result: v3) {
-    chunk_delta  := vec_cast(f32, a.chunk) - vec_cast(f32, b.chunk)
+    chunk_delta  := cast(v3) a.chunk - cast(v3) b.chunk
     offset_delta := a.offset - b.offset
     result = chunk_delta * world.chunk_dim_meters
     result += offset_delta
