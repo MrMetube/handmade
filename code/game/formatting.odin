@@ -42,14 +42,6 @@ view_percentage_ratio :: proc (value: $F) -> (result: Temp_Views) {
     return result
 }
 
-view_variable :: proc (value: $T, middle := " = ", expression := #caller_expression(value)) -> (Temp_Views) {
-    begin_temp_views()
-    append_temp_view(view_string(expression))
-    append_temp_view(view_string(middle))
-    append_temp_view(view_integer(value))
-    return end_temp_views()
-}
-
 ////////////////////////////////////////////////
 // @todo(viktor): multi magnitude support, 10 Billion 583 Million 699 Thousand 496 and whatever
 // @todo(viktor): should there be a view_debug which shows all the types instead of that being a flag on the format_context?

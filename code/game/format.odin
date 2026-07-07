@@ -50,14 +50,6 @@ aprint :: print_to_allocator
 
 ////////////////////////////////////////////////
 
-/* @todo(viktor): 
-    - make ryu able to print fixed precision f32s
-    - store defaults for floats, ints, structs, arrays and pointers explicitly
-    - push context and defered pop context? to override defaults
-*/
-
-////////////////////////////////////////////////
-
 Default_Views:      map[typeid] View_Proc
 View_Proc        :: proc (value: pmm) -> View_Proc_Result
 View_Proc_Result :: union{ View, Temp_Views, any }
@@ -652,64 +644,46 @@ format_optional_type :: proc (ctx: ^Format_Context, type: typeid) {
 // @todo(viktor): 
 // This is wrong when we use the format_integer subroutine view.flags += {.LeadingZero}
 // as hexadecimal 0h (endianess relevant?)
-format_float :: format_float_with_ryu when true else format_float_badly
-format_float_with_ryu :: proc (dest: ^String_Builder, view: View) {
-    precision: u32 = 6
-    info := view.info.(View_Float)
-    if info.precision_set do precision = cast(u32) info.precision
-    
-    buffer := rest(dest^)
-    size := info.value_size_in_bytes
-    
-    if size == 8 {
-        float := view.value.(f64)
-        result := d2fixed_buffered(float, precision, buffer)
-        set_len(dest, len(dest) + len(result))
-    } else if size == 4 {
-        float := view.value.(f32)
-        when false {
-            result := f2s_buffered(float, buffer)
-        } else {
-            result := d2fixed_buffered(cast(f64) float, precision, buffer)
-        }
-        set_len(dest, len(dest) + len(result))
-    } else if size == 2 {
-        // float := view.value.(f16)
-        unimplemented()
-    } else do panic("convert the general algorithm from ryu you laze bum")
-    
-    if .Uppercase in info.flags {
-        for r, i in string(buffer) {
-            if r >= 'a' && r <= 'z' {
-                buffer[i] = cast(u8) ('A' + (r-'a'))
-            }
-        }
-    }
-}
+format_float :: format_float_badly
 format_float_badly :: proc (dest: ^String_Builder, view: View) {
-    when false {
-        fraction, integer := fractional(float)
+    info := view.info.(View_Float)
+    
+    float: f64
+    switch value in view.value {
+    case f16: float = cast(f64) value; info.value_size_in_bytes = size_of(f16)
+    case f32: float = cast(f64) value; info.value_size_in_bytes = size_of(f32)
+    case f64: float =           value; info.value_size_in_bytes = size_of(f64)
+    case: unreachable()
+    }
+    
+    fraction, integer := fractional(float)
+    
+    int_view := View {
+        value = integer,
+        info = View_Integer {
+            positive_sign = info.positive_sign,
+            is_signed     = true,
+            base          = 10,
+        },
+    }
+    draw_signed_integer(dest, int_view)
+    
+    precision: u8 = 6
+    if info.precision_set do precision = info.precision
+    
+    if fraction != 0 && precision != 0 {
+        append(dest, '.')
         
-        draw_signed_integer(dest, cast(i64) integer, view)
+        digits := .Uppercase in info.flags ? DigitsUppercase : DigitsLowercase
         
-        precision: u8 = 6
-        if .Precision in view.settings do precision = view.precision
-        
-        if fraction != 0 && precision != 0 {
-            append(dest, '.')
-            
-            digits := .Uppercase in view.flags ? DigitsUppercase : DigitsLowercase
-            
-            val: i32
-            for _ in 0..<precision {
-                fraction, val = fractional(fraction * 10)
-                if val >= 0 && val < auto_cast len(digits) {
-                    append(dest, digits[val])
-                } else { /* ??? */ }
-            }
+        val: i64
+        for _ in 0..<precision {
+            fraction, val = fractional(fraction * 10)
+            if val >= 0 && val < auto_cast len(digits) {
+                append(dest, digits[val])
+            } else { /* ??? */ }
         }
     }
-    unimplemented()
 }
 
 draw_signed_integer :: proc (dest: ^String_Builder, view: View) {

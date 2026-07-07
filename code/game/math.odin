@@ -234,13 +234,13 @@ truncate_v :: proc ($T: typeid, fs: [$N] f32) -> [N] T where N > 1 {
     return cast([N] T) fs
 }
 
-fractional :: proc (x: $F) -> (fractional: F, integer: i32) {
-    integer = cast(i32) x
+fractional :: proc (x: $F) -> (fractional: F, integer: i64) {
+    integer = cast(i64) x
     fractional = x - cast(F) integer
     return 
 }
 
-distance :: proc (to: $T, from: T) -> (result: T) {
+distance :: proc (to: $T, from: T) -> T {
     return abs(a - b)
 }
 
