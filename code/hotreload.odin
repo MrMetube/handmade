@@ -1,6 +1,6 @@
 package main
 
-import os "core:os/old"
+import os "core:os"
 import win "core:sys/windows"
 
 @(private="file")
@@ -28,8 +28,8 @@ load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> 
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
         } else {
             // @logging 
-            message := os.error_string(os.get_last_error())
-            print("Failed to initialize game api: %\n", message)
+            // @todo use dynlib?
+            print("Failed to initialize game api\n")
         }
     }
     

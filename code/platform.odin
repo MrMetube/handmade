@@ -53,8 +53,7 @@ GlobalPause:               b32
 GlobalDebugShowCursor:     b32 = INTERNAL
 GlobalUseSoftwareRenderer: b32 = false
 
-_GlobalDebugTable: DebugTable
-GlobalDebugTable: ^DebugTable = &_GlobalDebugTable
+GlobalDebugTable := &DebugTable
 
 ////////////////////////////////////////////////
 // Types

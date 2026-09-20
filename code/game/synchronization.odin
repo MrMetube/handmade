@@ -59,9 +59,9 @@ end_ticket_mutex :: proc (mutex: ^TicketMutex) {
 
 spin_hint :: proc() {
     when ODIN_ARCH == .amd64 || ODIN_ARCH == .i386 {
-        asm { "pause" , "" } ()
+        asm () [#volatile] { pause } ()
     } else when ODIN_ARCH == .arm32 || ODIN_ARCH == .arm64 {
-        asm { "yield", "" } ()
+        asm () [#volatile] { yield } ()
     } else when ODIN_ARCH == .riscv64 || ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32 || ODIN_ARCH == .Unknown {
         // no-op fallback
     } else {

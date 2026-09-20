@@ -167,7 +167,7 @@ clamp :: proc (value: $T, min, max: T) -> (result: T) {
 
     return result
 }
-clamp_01 :: proc (value: $T) -> T { return clamp(value, 0, 1) }
+clamp_01 :: proc (value: $T) -> T { return clamp(value, cast(T) 0, cast(T) 1) }
 
 clamp_01_map_to_range :: proc (min: $T, t, max: T ) -> (result: T) {
     range := max - min

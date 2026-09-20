@@ -169,7 +169,7 @@ clear_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, dest, clip_rect, clip_rect)
     assert(ok)
     
-    color := cast(lane_v4) color * 255
+    color := cast(lane_v4) (color * 255)
     color = srgb_to_linear(color)
     packed := pack_pixel(color)
     
@@ -192,10 +192,10 @@ draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Recta
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, buffer, clip_rect, fill_rect)
     if !ok do return
     
-    color := cast(lane_v4) color * 255
+    color := cast(lane_v4) (color * 255)
     
     color = srgb_to_linear(color)
-    color.rgb = clamp(color.rgb, 0, MaxColorValue)
+    color.rgb = clamp(color.rgb, cast(lane_f32) 0, cast(lane_f32) MaxColorValue)
     inv_color_a := (1 - (Inv255 * color.a))
     
     for y := pmin.y; y < pmax.y; y += pstep.y {
@@ -219,10 +219,10 @@ draw_rectangle_fill_color :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origi
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx, buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return
     
-    color := cast(lane_v4) color * 255
+    color := cast(lane_v4) (color * 255)
     
     color = srgb_to_linear(color)
-    color.rgb = clamp(color.rgb, 0, MaxColorValue)
+    color.rgb = clamp(color.rgb, cast(lane_f32) 0, cast(lane_f32) MaxColorValue)
     inv_color_a := (1 - (Inv255 * color.a))
     
     for y := pmin.y; y < pmax.y; y += pstep.y {
@@ -253,7 +253,7 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
     
     color := cast(lane_v4) color
     
-    texture_size := cast(lane_v2) texture.dimension - 2
+    texture_size := cast(lane_v2) (texture.dimension - 2)
     
     texture_width  := cast(lane_u32) texture.dimension.x
     texture_memory := cast(lane_umm) raw_data(texture.memory)
@@ -301,7 +301,7 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
             texel := bilinear_blend(ta, tb, tc, td, f)
             
             texel *= color
-            texel.rgb = clamp(texel.rgb, 0, MaxColorValue)
+            texel.rgb = clamp(texel.rgb, cast(lane_f32) 0, cast(lane_f32) MaxColorValue)
             
             // @note(viktor): blend with target pixel
             inv_texel_a := (1 - (Inv255 * texel.a))

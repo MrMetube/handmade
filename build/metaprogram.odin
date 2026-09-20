@@ -566,7 +566,7 @@ check_printlike_call :: proc (mp: ^Metaprogram, call: ^ast.Call_Expr) {
         proc_ident = ident
     } else if selector, sok := call.expr.derived_expr.(^ast.Selector_Expr); sok {
         proc_ident = selector.field
-    } else if union_contains(call.expr.derived_expr, ^ast.Basic_Directive) || union_contains(call.expr.derived_expr, ^ast.Paren_Expr) || union_contains(call.expr.derived_expr, ^ast.Inline_Asm_Expr) {
+    } else if union_contains(call.expr.derived_expr, ^ast.Basic_Directive) || union_contains(call.expr.derived_expr, ^ast.Paren_Expr) || union_contains(call.expr.derived_expr, ^ast.Asm_Template) {
         return
     } else {
         fmt.println(call)
