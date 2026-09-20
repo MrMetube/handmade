@@ -52,8 +52,9 @@ GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMEN
 GlobalPause:               b32
 GlobalDebugShowCursor:     b32 = INTERNAL
 GlobalUseSoftwareRenderer: b32 = false
+GlobalUseVulkanRenderer:   b32 = true
 
-GlobalDebugTable := &DebugTable
+GlobalDebugTable := &DebugTable{}
 
 ////////////////////////////////////////////////
 // Types
@@ -175,7 +176,11 @@ main :: proc () {
         window_dc := win.GetDC(window)
         defer win.ReleaseDC(window, window_dc)
         
-        init_opengl(window_dc)
+        if GlobalUseVulkanRenderer {
+            init_vulkan(window)
+        } else {
+            init_opengl(window_dc)
+        }
     }
     
     high_queue, low_queue: WorkQueue
@@ -285,7 +290,11 @@ main :: proc () {
         render_commands.white_bitmap.memory[0] = 255
         render_commands.white_bitmap.dimension = 1
         render_commands.white_bitmap.width_over_height = 1
-        render_commands.white_bitmap.texture_handle = gl_allocate_texture(render_commands.white_bitmap)
+        if GlobalUseVulkanRenderer {
+            render_commands.white_bitmap.texture_handle = vk_allocate_texture(render_commands.white_bitmap)
+        } else {
+            render_commands.white_bitmap.texture_handle = gl_allocate_texture(render_commands.white_bitmap)
+        }
         
         render_commands.dimension = GlobalBackBuffer.dimension
         
@@ -658,7 +667,11 @@ main :: proc () {
                 
                 if last != nil {
                     assert(first != nil)
-                    gl_manage_textures(last)
+                    if GlobalUseVulkanRenderer {
+                        vk_manage_textures(last)
+                    } else {
+                        gl_manage_textures(last)
+                    }
                     
                     begin_ticket_mutex(&texture_op_queue.mutex)
                         freelist_free_list(&texture_op_queue.freelist, last, first)
@@ -750,6 +763,8 @@ render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, d
     if GlobalUseSoftwareRenderer {
         software_render_commands(render_queue, commands, GlobalBackBuffer, arena)
         gl_display_bitmap(GlobalBackBuffer, draw_region, commands.clear_color)
+    } else if GlobalUseVulkanRenderer {
+        vk_render_commands(commands, draw_region, windows_dim)
     } else {
         gl_render_commands(commands, draw_region, windows_dim)
     }
