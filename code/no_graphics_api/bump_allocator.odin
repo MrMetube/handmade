@@ -22,9 +22,15 @@ bump_allocator :: proc (storage: GpuCpuRange(u8)) -> BumpAllocator {
 bump_allocate        :: proc { bump_allocate_bytes, bump_allocate_type }
 bump_allocate_atomic :: proc { bump_allocate_atomic_bytes, bump_allocate_atomic_type }
 
-// The request must be nonzero. Reservations are rounded up to 16 bytes an empty allocation reports exhausted storage.
+// Zero-sized allocations are valid and leave the offset unchanged. Nonzero reservations are rounded up to 16 bytes.
 bump_allocate_bytes :: proc (bump: ^BumpAllocator, #any_int byte_size: u64) -> GpuCpuRange(u8) {
-    assert(byte_size != 0)
+    if byte_size == 0 {
+        allocation := GpuCpuRange(u8) {
+            cpu = bump.storage.cpu[bump.offset:bump.offset],
+            gpu = bump.storage.gpu[bump.offset:],
+        }
+        return allocation
+    }
     
     remaining := bump.storage.size_in_bytes - bump.offset
     if byte_size > remaining { return {} }

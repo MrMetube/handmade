@@ -14,7 +14,7 @@ struct QuadRoot
     float4 fog_direction;
     float4 fog_color;
     float4 fog_and_clip;
-    uint texture_descriptor;
+    uint* texture_descriptors;
     uint vertex_base;
     uint previous_depth_descriptor;
     uint peeling;
@@ -28,6 +28,7 @@ struct VertexOutput
     float4 position : SV_Position;
     float2 uv       : TEXCOORD0;
     float4 color    : COLOR0;
+    nointerpolation uint texture_descriptor : TEXCOORD1;
 };
 
 [shader("vertex")]
@@ -37,8 +38,9 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
     // current graphics PSO uses triangle lists. Reuse the four stored vertices
     // as the two triangles (0,1,2) and (2,1,3).
     uint quad_vertex_indices[6] = { 0u, 1u, 2u, 2u, 1u, 3u };
+    uint quad_index = vertex_id / 6u;
     uint quad_vertex_index = quad_vertex_indices[vertex_id % 6u];
-    TexturedVertex vertex = root.vertices[root.vertex_base + quad_vertex_index];
+    TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + quad_vertex_index];
 
     VertexOutput output;
     // Match the OpenGL Z-bias vertex path. p.w is not a homogeneous coordinate;
@@ -57,6 +59,7 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
     output.position.y = -output.position.y;
     output.position.z = 0.5f * (output.position.z + output.position.w);
     output.uv = vertex.uv;
+    output.texture_descriptor = root.texture_descriptors[quad_index];
     output.color = float4(
         (vertex.color >>  0u) & 0xffu,
         (vertex.color >>  8u) & 0xffu,
@@ -68,7 +71,7 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target0
 {
-    Texture2D<float4> texture = ResourceDescriptorHeap[root.texture_descriptor];
+    Texture2D<float4> texture = ResourceDescriptorHeap[input.texture_descriptor];
     SamplerState sampler = SamplerDescriptorHeap[0];
     float4 modulated = input.color * texture.Sample(sampler, input.uv);
 

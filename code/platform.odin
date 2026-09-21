@@ -291,7 +291,7 @@ main :: proc () {
         render_commands.white_bitmap.dimension = 1
         render_commands.white_bitmap.width_over_height = 1
         if GlobalUseVulkanRenderer {
-            render_commands.white_bitmap.texture_handle = vk_allocate_texture(render_commands.white_bitmap)
+            render_commands.white_bitmap.texture_handle = vk_allocate_texture(render_commands.white_bitmap, true)
         } else {
             render_commands.white_bitmap.texture_handle = gl_allocate_texture(render_commands.white_bitmap)
         }
