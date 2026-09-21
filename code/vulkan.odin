@@ -22,6 +22,13 @@ VulkanQuadRoot :: struct {
     projection:                m4,
     vertices:                  [^] Textured_Vertex,
     texture_descriptors:       [^] u32,
+    camera_p:                  v3,
+    fog_direction:             v3,
+    fog_color:                 v3,
+    fog_begin:                 f32,
+    fog_end:                   f32,
+    clip_alpha_begin:          f32,
+    clip_alpha_end:            f32,
     vertex_base:               u32,
     previous_depth_descriptor: u32,
     alpha_threshold:           f32,
@@ -68,13 +75,19 @@ VulkanFrameUploads :: struct {
     texture_descriptors: gpu.GpuCpuRange(u32),
 }
 
+VulkanFrame :: struct {
+    data_heap:      gpu.GpuHeap,
+    data_allocator: gpu.BumpAllocator,
+    completion:     gpu.TimelinePoint,
+}
+
 vulkan: struct {
     settings: RenderSettings,
     
     device: gpu.Device,
     
-    frame_data_heap:      gpu.GpuHeap,
-    frame_data_allocator: gpu.BumpAllocator,
+    frames: [VulkanFrameCount] VulkanFrame,
+    next_frame_index: u32,
 
     texture_upload_heap:      gpu.GpuHeap,
     texture_upload_allocator: gpu.BumpAllocator,
@@ -103,6 +116,7 @@ vulkan: struct {
 frame_data_heap_size     ::  32 * Megabyte
 texture_upload_heap_size ::  64 * Megabyte
 texture_heap_size        :: 256 * Megabyte
+VulkanFrameCount         :: 2
 
 max_vulkan_textures :: 256
 max_vulkan_texture_descriptors :: cast(u32) VulkanTextureDescriptor.count
@@ -112,15 +126,19 @@ Debug_vulkan_depth_peel_index: i32 = -1 // -1 composites all layers
 ////////////////////////////////////////////////
 
 init_vulkan :: proc (window: pmm) {
-    device, error := gpu.create_device(window = window, swapchain_format = .bgra8_srgb)
+    device, error := gpu.create_device(window = window, swapchain_format = .bgra8_srgb, desired_swapchain_image_count = VulkanFrameCount)
     assert(error == .none && device != nil)
     
     vulkan.device = device
     
     caps := gpu.get_device_caps(device)
     
-    vulkan.frame_data_heap      = gpu.create_gpu_heap(device, frame_data_heap_size)
-    vulkan.frame_data_allocator = gpu.bump_allocator(vulkan.frame_data_heap.range)
+    vulkan.latest_completion = gpu.TimelinePoint { semaphore = gpu.create_timeline_semaphore(device) }
+    for &frame in vulkan.frames {
+        frame.data_heap      = gpu.create_gpu_heap(device, frame_data_heap_size)
+        frame.data_allocator = gpu.bump_allocator(frame.data_heap.range)
+        frame.completion.semaphore = vulkan.latest_completion.semaphore
+    }
 
     vulkan.texture_upload_heap      = gpu.create_gpu_heap(device, texture_upload_heap_size)
     vulkan.texture_upload_allocator = gpu.bump_allocator(vulkan.texture_upload_heap.range)
@@ -132,7 +150,6 @@ init_vulkan :: proc (window: pmm) {
     max_vulkan_texture_allocations :: max_vulkan_texture_descriptors
     vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, max_vulkan_texture_allocations)
     
-    vulkan.latest_completion = gpu.TimelinePoint { semaphore = gpu.create_timeline_semaphore(device) }
     vulkan.next_texture_descriptor = cast(u32) VulkanTextureDescriptor.first_dynamic_texture
     gpu.write_sampler_descriptor(device, sampler_descriptor(0), min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     gpu.write_sampler_descriptor(device, sampler_descriptor(1), min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
@@ -216,9 +233,8 @@ vk_manage_textures :: proc (last: ^TextureOp) {
     timed_function()
     allocs, deallocs: u32
 
-    // :VulkanRenderer: Texture destruction is immediate in NoGraphicsAPI. The
-    // simple renderer has one frame in flight, so draining it here is enough
-    // until a delete queue is introduced with the asynchronous frame allocator.
+    // :VulkanRenderer: Texture destruction is immediate in NoGraphicsAPI.
+    // Wait for every submitted frame before changing shared texture allocations.
     if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
     
     for operation := last; operation != nil; operation = operation.next {
@@ -255,11 +271,16 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     frame := gpu.acquire(vulkan.device)
     game.end_timed_block(zone_1)
     if frame.render_view == nil { return }
+
+    frame_index := vulkan.next_frame_index
+    vulkan.next_frame_index = (frame_index + 1) % cast(u32) VulkanFrameCount
+    frame_data := &vulkan.frames[frame_index]
+    if frame_data.completion.value != 0 do gpu.wait_timeline(frame_data.completion)
     
     render_extent := cast(uv2) render_commands.dimension
     depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
     
-    uploads := upload_frame_data(render_commands)
+    uploads := upload_frame_data(render_commands, frame_data)
     
     zone0 := game.begin_timed_block("begin commands")
     commands := gpu.begin_commands(vulkan.device)
@@ -320,6 +341,13 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
                 vertices                  = uploads.vertices.gpu,
                 projection                = (setup.projection),
                 texture_descriptors       = &uploads.texture_descriptors.gpu[entry.bitmap_offset],
+                camera_p                  = setup.camera_p,
+                fog_direction             = setup.fog_direction,
+                fog_color                 = setup.fog_color,
+                fog_begin                 = setup.fog_begin,
+                fog_end                   = setup.fog_end,
+                clip_alpha_begin          = setup.clip_alpha_begin,
+                clip_alpha_end            = setup.clip_alpha_end,
                 vertex_base               = entry.bitmap_offset * 4,
                 previous_depth_descriptor = peel_index != 0 ? vulkan.depth_peel_buffers[peel_index-1].depth.descriptor_index : 0,
                 alpha_threshold           = peel_index != 0 && peel_index == depth_peel_count - 1 ? 0.9 : 0.02,
@@ -381,6 +409,7 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     
     zone1 := game.begin_timed_block("submit and present")
     vulkan.latest_completion.value += 1
+    frame_data.completion = vulkan.latest_completion
     gpu.submit_and_present(vulkan.device, { commands }, vulkan.latest_completion)
     game.end_timed_block(zone1)
 }
@@ -396,15 +425,13 @@ read_vulkan_spirv :: proc (path: string) -> (result: [] u32) {
     return result
 }
 
-upload_frame_data :: proc (render_commands: ^RenderCommands) -> (result: VulkanFrameUploads) {
+upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame) -> (result: VulkanFrameUploads) {
     timed_function()
     
     game.debug_begin_data_block("frame uploads")
     defer game.debug_end_data_block()
     
-    // :VulkanRenderer: This is the one-frame version of the eventual frame
-    // allocator. A later version gives each frame in flight its own bump.
-    gpu.bump_reset(&vulkan.frame_data_allocator)
+    gpu.bump_reset(&frame.data_allocator)
     
     {
         timed_block("copy textured vertices")
@@ -412,7 +439,7 @@ upload_frame_data :: proc (render_commands: ^RenderCommands) -> (result: VulkanF
         count := cast(i32) len(render_commands.vertex_buffer)
         game.debug_record_i32(&count, "vertex count")
         
-        result.vertices = gpu.bump_allocate(&vulkan.frame_data_allocator, [] Textured_Vertex, len(render_commands.vertex_buffer))
+        result.vertices = gpu.bump_allocate(&frame.data_allocator, [] Textured_Vertex, len(render_commands.vertex_buffer))
         copy(result.vertices.cpu, render_commands.vertex_buffer[:])
     }
     
@@ -422,7 +449,7 @@ upload_frame_data :: proc (render_commands: ^RenderCommands) -> (result: VulkanF
         count := cast(i32) len(render_commands.quad_bitmap_buffer)
         game.debug_record_i32(&count, "bitmap count")
         
-        result.texture_descriptors = gpu.bump_allocate(&vulkan.frame_data_allocator, [] u32, len(render_commands.quad_bitmap_buffer))
+        result.texture_descriptors = gpu.bump_allocate(&frame.data_allocator, [] u32, len(render_commands.quad_bitmap_buffer))
         
         for bitmap, index in render_commands.quad_bitmap_buffer {
             if texture, ok := vulkan.textures[bitmap.texture_handle]; ok {
@@ -441,8 +468,7 @@ destroy_render_target :: proc (target: ^RenderTarget) {
 change_to_settings :: proc (settings: RenderSettings) {
     timed_function()
     
-    // :VulkanRenderer: The first Vulkan path supports four non-MSAA depth peels.
-    // Resolve targets and pixelation remain deferred.
+    // :VulkanRenderer: Multisampled depth peels remain deferred.
     if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
     
     depth_peel_count := clamp(settings.depth_peel_count_hint, 1, cap(vulkan.depth_peel_buffers))
@@ -557,10 +583,17 @@ allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
 #assert(offset_of(VulkanQuadRoot, projection)                == 0)
 #assert(offset_of(VulkanQuadRoot, vertices)                  == 64)
 #assert(offset_of(VulkanQuadRoot, texture_descriptors)       == 72)
-#assert(offset_of(VulkanQuadRoot, vertex_base)               == 80)
-#assert(offset_of(VulkanQuadRoot, previous_depth_descriptor) == 84)
-#assert(offset_of(VulkanQuadRoot, alpha_threshold)           == 88)
-#assert(size_of(VulkanQuadRoot)                              == 96)
+#assert(offset_of(VulkanQuadRoot, camera_p)                  == 80)
+#assert(offset_of(VulkanQuadRoot, fog_direction)             == 92)
+#assert(offset_of(VulkanQuadRoot, fog_color)                 == 104)
+#assert(offset_of(VulkanQuadRoot, fog_begin)                 == 116)
+#assert(offset_of(VulkanQuadRoot, fog_end)                   == 120)
+#assert(offset_of(VulkanQuadRoot, clip_alpha_begin)          == 124)
+#assert(offset_of(VulkanQuadRoot, clip_alpha_end)            == 128)
+#assert(offset_of(VulkanQuadRoot, vertex_base)               == 132)
+#assert(offset_of(VulkanQuadRoot, previous_depth_descriptor) == 136)
+#assert(offset_of(VulkanQuadRoot, alpha_threshold)           == 140)
+#assert(size_of(VulkanQuadRoot)                              == 144)
 
 #assert(offset_of(VulkanCompositeRoot, texture_descriptors) == 0)
 #assert(offset_of(VulkanCompositeRoot, peel_count)          == 16)

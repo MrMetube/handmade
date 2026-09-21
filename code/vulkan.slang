@@ -11,6 +11,13 @@ struct QuadRoot
     float4x4 projection;
     TexturedVertex* vertices;
     uint* texture_descriptors;
+    float3 camera_p;
+    float3 fog_direction;
+    float3 fog_color;
+    float fog_begin;
+    float fog_end;
+    float clip_alpha_begin;
+    float clip_alpha_end;
     uint vertex_base;
     uint previous_depth_descriptor;
     float alpha_threshold;
@@ -24,6 +31,7 @@ struct VertexOutput
     float2 uv       : TEXCOORD0;
     float4 color    : COLOR0;
     nointerpolation uint texture_descriptor : TEXCOORD1;
+    float fog_distance : TEXCOORD2;
 };
 
 [shader("vertex")]
@@ -49,11 +57,11 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
     float modified_depth = (minimum_depth_position.w / maximum_depth_position.w) * maximum_depth_position.z;
 
     output.position = float4(minimum_depth_position.xy, modified_depth, minimum_depth_position.w);
-    // RenderSetup was written for OpenGL clip space. Keep it unchanged while
-    // this backend is brought up, and adapt only at the Vulkan shader boundary.
+    // Adapt RenderSetup's OpenGL clip space at the Vulkan shader boundary.
     output.position.y = -output.position.y;
     output.position.z = 0.5f * (output.position.z + output.position.w);
     output.uv = vertex.uv;
+    output.fog_distance = dot(biased_position.xyz - root.camera_p, root.fog_direction);
     output.texture_descriptor = root.texture_descriptors[quad_index];
     output.color = float4(
         (vertex.color >>  0u) & 0xffu,
@@ -70,6 +78,12 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
     SamplerState sampler = SamplerDescriptorHeap[0];
     float4 modulated = input.color * texture.Sample(sampler, input.uv);
 
+    float alpha_amount = 0.0f;
+    float alpha_range = root.clip_alpha_end - root.clip_alpha_begin;
+    if (alpha_range != 0.0f)
+        alpha_amount = saturate((input.fog_distance - root.clip_alpha_begin) / alpha_range);
+    modulated *= alpha_amount;
+
     if (root.previous_depth_descriptor != 0)
     {
         Texture2D<float> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
@@ -79,6 +93,12 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 
     if (modulated.a <= root.alpha_threshold)
         discard;
+
+    float fog_amount = 0.0f;
+    float fog_range = root.fog_end - root.fog_begin;
+    if (fog_range != 0.0f)
+        fog_amount = saturate((input.fog_distance - root.fog_begin) / fog_range);
+    modulated.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
 
     return modulated;
 }
