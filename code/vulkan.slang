@@ -30,9 +30,9 @@ struct VertexOutput
 VertexOutput vertexMain(uint vertex_id : SV_VertexID)
 {
     // The command stream stores quads as triangle strips, but NoGraphicsAPI's
-    // current graphics PSO uses triangle lists. Reuse the four stored vertices
-    // as the two triangles (0,1,2) and (2,1,3).
-    uint quad_vertex_indices[6] = { 0u, 1u, 2u, 2u, 1u, 3u };
+    // current graphics PSO uses triangle lists. Flip the two triangles to
+    // match the Vulkan rasterizer winding after the Y coordinate conversion.
+    uint quad_vertex_indices[6] = { 0u, 2u, 1u, 2u, 3u, 1u };
     uint quad_index = vertex_id / 6u;
     uint quad_vertex_index = quad_vertex_indices[vertex_id % 6u];
     TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + quad_vertex_index];

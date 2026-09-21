@@ -60,16 +60,21 @@ main :: proc () {
     vulkan_fragment_path :: `build/vulkan.fragment.spirv`
     vulkan_composite_vertex_path   :: `build/vulkan.composite_vertex.spirv`
     vulkan_composite_fragment_path :: `build/vulkan.composite_fragment.spirv`
+    vulkan_final_vertex_path       :: `build/vulkan.final_vertex.spirv`
+    vulkan_final_fragment_path     :: `build/vulkan.final_fragment.spirv`
     vulkan_shader_stages := [] struct { source, stage, output: string } {
         { "code/vulkan.slang",           "vertex",   `data/build/vulkan.vertex.spirv` },
         { "code/vulkan.slang",           "fragment", `data/build/vulkan.fragment.spirv` },
         { "code/vulkan_composite.slang", "vertex",   `data/build/vulkan.composite_vertex.spirv` },
         { "code/vulkan_composite.slang", "fragment", `data/build/vulkan.composite_fragment.spirv` },
+        { "code/vulkan_final.slang",     "vertex",   `data/build/vulkan.final_vertex.spirv` },
+        { "code/vulkan_final.slang",     "fragment", `data/build/vulkan.final_fragment.spirv` },
     }
     for shader in vulkan_shader_stages {
         append(cmd, "slangc")
         append(cmd, shader.source)
         append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
+        // @todo -g for debug info
         append(cmd, fmt.tprintf("%sMain", shader.stage))
         append(cmd, "-stage")
         append(cmd, shader.stage)
@@ -176,6 +181,8 @@ main :: proc () {
             build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
             build_define("VulkanCompositeVertexSpirvPath",   vulkan_composite_vertex_path)
             build_define("VulkanCompositeFragmentSpirvPath", vulkan_composite_fragment_path)
+            build_define("VulkanFinalVertexSpirvPath",       vulkan_final_vertex_path)
+            build_define("VulkanFinalFragmentSpirvPath",     vulkan_final_fragment_path)
             
             end_build(cmd)
         }
