@@ -16,6 +16,9 @@ struct QuadRoot
     float4 fog_and_clip;
     uint texture_descriptor;
     uint vertex_base;
+    uint previous_depth_descriptor;
+    uint peeling;
+    float alpha_threshold;
 };
 
 [[vk::push_constant]] ConstantBuffer<QuadRoot> root;
@@ -69,10 +72,14 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
     SamplerState sampler = SamplerDescriptorHeap[0];
     float4 modulated = input.color * texture.Sample(sampler, input.uv);
 
-    // Match the first OpenGL pass: transparent texels do not update either
-    // the color or depth attachments. This keeps transparent black pixels out
-    // of the opaque, depth-writing Vulkan path.
-    if (modulated.a <= 0.02f)
+    if (root.peeling != 0)
+    {
+        Texture2D<float> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
+        if (input.position.z <= previous_depth.Load(int3(input.position.xy, 0)))
+            discard;
+    }
+
+    if (modulated.a <= root.alpha_threshold)
         discard;
 
     return modulated;
