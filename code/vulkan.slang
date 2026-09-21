@@ -10,14 +10,9 @@ struct QuadRoot
 {
     float4x4 projection;
     TexturedVertex* vertices;
-    float4 camera_p;
-    float4 fog_direction;
-    float4 fog_color;
-    float4 fog_and_clip;
     uint* texture_descriptors;
     uint vertex_base;
     uint previous_depth_descriptor;
-    uint peeling;
     float alpha_threshold;
 };
 
@@ -75,7 +70,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
     SamplerState sampler = SamplerDescriptorHeap[0];
     float4 modulated = input.color * texture.Sample(sampler, input.uv);
 
-    if (root.peeling != 0)
+    if (root.previous_depth_descriptor != 0)
     {
         Texture2D<float> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
         if (input.position.z <= previous_depth.Load(int3(input.position.xy, 0)))
