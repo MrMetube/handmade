@@ -4,9 +4,12 @@ import "core:os"
 
 import gpu "./no_graphics_api"
 
-// @todo this is ok for now, but the platform should control the paths like for all other things like the platform_api that the game layer uses
+// :VulkanRenderer: The platform should own shader loading and expose the paths
+// through the game/platform API rather than this renderer-owned config.
 VulkanVertexSpirvPath   :: #config(VulkanVertexSpirvPath,   "vulkan.vertex.spirv")
 VulkanFragmentSpirvPath :: #config(VulkanFragmentSpirvPath, "vulkan.fragment.spirv")
+VulkanCompositeVertexSpirvPath   :: #config(VulkanCompositeVertexSpirvPath,   "vulkan.composite_vertex.spirv")
+VulkanCompositeFragmentSpirvPath :: #config(VulkanCompositeFragmentSpirvPath, "vulkan.composite_fragment.spirv")
 
 VulkanTexture :: struct {
     placed:           gpu.PlacedTexture,
@@ -16,7 +19,8 @@ VulkanTexture :: struct {
 VulkanQuadRoot :: struct {
     projection:         m4,
     vertices:           [^] Textured_Vertex,
-    // @todo these dont all need to be packed into v4s
+    // :VulkanRenderer: These values can use their natural scalar/vector types
+    // once the rest of the OpenGL shader is ported.
     camera_p:           v4,
     fog_direction:      v4,
     fog_color:          v4,
@@ -25,7 +29,11 @@ VulkanQuadRoot :: struct {
     vertex_base:        u32,
 }
 
-// @todo generate the slang definitions from the odin code in the future
+VulkanCompositeRoot :: struct {
+    texture_descriptor: u32,
+}
+
+// :VulkanRenderer: Generate the Slang declarations from the Odin definitions.
 // Keep these in lockstep with the C-layout SPIR-V declarations in vulkan.slang.
 #assert(offset_of(Textured_Vertex, p)     ==  0)
 #assert(offset_of(Textured_Vertex, n)     == 16)
@@ -41,6 +49,9 @@ VulkanQuadRoot :: struct {
 #assert(offset_of(VulkanQuadRoot, fog_and_clip)       == 120)
 #assert(offset_of(VulkanQuadRoot, texture_descriptor) == 136)
 #assert(offset_of(VulkanQuadRoot, vertex_base)        == 140)
+#assert(size_of(VulkanQuadRoot)                       == 144)
+
+#assert(offset_of(VulkanCompositeRoot, texture_descriptor) == 0)
 
 vulkan: struct {
     settings: RenderSettings,
@@ -62,34 +73,29 @@ vulkan: struct {
     latest_completion: gpu.TimelinePoint,
     
     quad_pso: gpu.PSO,
+    composite_pso: gpu.PSO,
     
     textures: map[u32] VulkanTexture,
-     // @todo move to last_used_xxx so that zero is the correct initial value
+    // :VulkanRenderer: Move this to last_used_xxx so zero is the initial value.
     next_texture_handle:    u32,
     next_texture_descriptor: u32,
     
     depth_extent: uv2,
     depth: gpu.PlacedTexture,
     depth_render_view: gpu.RenderView,
+    depth_peel_color: gpu.PlacedTexture,
+    depth_peel_color_render_view: gpu.RenderView,
+    depth_peel_color_descriptor: u32,
 }
 
-// @todo make these parameters of init and or part of the vulkan state if needed
+// :VulkanRenderer: Make these init parameters or Vulkan-state configuration.
 frame_data_heap_size     ::  32 * Megabyte
 texture_upload_heap_size ::  64 * Megabyte
 texture_heap_size        :: 256 * Megabyte
 max_vulkan_textures      :: 256
+max_vulkan_texture_descriptors :: max_vulkan_textures + 1
 
-// @todo mark all regions that need further iteration to complete the renderer with a tag like the codebase has, i.e. :VulkanRenderer: or something. these are hightlighted in my text editor and make grepping easy. each spot can then be marked and add a explanation if needed or refer to another marking tag.
-// @todo this is not c. functions should be ordered like other files. effectively but not strictly by calling order and sections with /// separators
-
-read_vulkan_spirv :: proc (path: string) -> (result: [] u32) {
-    // @todo long term i dont want the renderer to call to the os. the platform.odin should handle this, but its fine for now.
-    bytes, error := os.read_entire_file(path, context.allocator)
-    assert(error == nil)
-    assert(len(bytes) % size_of(u32) == 0)
-    result = slice_from_parts_type(u32, raw_data(bytes), len(bytes) / size_of(u32))
-    return result
-}
+////////////////////////////////////////////////
 
 init_vulkan :: proc (window: rawptr) {
     device, error := gpu.create_device(window = window, swapchain_format = .bgra8_srgb)
@@ -105,11 +111,11 @@ init_vulkan :: proc (window: rawptr) {
     vulkan.texture_upload_heap      = gpu.create_gpu_heap(device, texture_upload_heap_size)
     vulkan.texture_upload_allocator = gpu.bump_allocator(vulkan.texture_upload_heap.range)
     
-    vulkan.texture_descriptor_heap = gpu.create_gpu_heap(device, caps.texture_descriptor_size_in_bytes * max_vulkan_textures, .texture_descriptor_heap)
+    vulkan.texture_descriptor_heap = gpu.create_gpu_heap(device, caps.texture_descriptor_size_in_bytes * max_vulkan_texture_descriptors, .texture_descriptor_heap)
     vulkan.sampler_descriptor_heap = gpu.create_gpu_heap(device, caps.sampler_descriptor_size_in_bytes, .sampler_descriptor_heap)
     
     vulkan.texture_heap      = gpu.create_texture_heap(device, texture_heap_size)
-    vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, max_vulkan_textures)
+    vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, max_vulkan_texture_descriptors)
     
     vulkan.latest_completion = gpu.TimelinePoint { semaphore = gpu.create_timeline_semaphore(device) }
     vulkan.next_texture_handle = 1
@@ -118,9 +124,13 @@ init_vulkan :: proc (window: rawptr) {
     
     vertex_spirv   := read_vulkan_spirv(VulkanVertexSpirvPath)
     fragment_spirv := read_vulkan_spirv(VulkanFragmentSpirvPath)
+    composite_vertex_spirv   := read_vulkan_spirv(VulkanCompositeVertexSpirvPath)
+    composite_fragment_spirv := read_vulkan_spirv(VulkanCompositeFragmentSpirvPath)
     defer {
         delete(vertex_spirv)
         delete(fragment_spirv)
+        delete(composite_vertex_spirv)
+        delete(composite_fragment_spirv)
     }
     
     vulkan.quad_pso = gpu.create_graphics_pso(device,
@@ -130,36 +140,15 @@ init_vulkan :: proc (window: rawptr) {
         depth_format   = .d32_float,
         rasterization  = { cull = .none },
     )
+    vulkan.composite_pso = gpu.create_graphics_pso(device,
+        vertex_spirv   = composite_vertex_spirv,
+        fragment_spirv = composite_fragment_spirv,
+        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
+        rasterization  = { cull = .none },
+    )
 }
 
-vk_manage_textures :: proc (last: ^TextureOp) {
-    allocs, deallocs: u32
-
-    // Texture destruction is immediate in NoGraphicsAPI. The simple renderer has
-    // one frame in flight, so draining it here is enough until a delete queue is
-    // introduced with the asynchronous frame allocator.
-    if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
-    
-    for operation := last; operation != nil; operation = operation.next {
-        switch &op in operation.value {
-        case: unreachable()
-        
-        case TextureOpAllocate:
-            allocs += 1
-            op.result ^= vk_allocate_texture(op.bitmap)
-            
-        case TextureOpDeallocate:
-            deallocs += 1
-            
-            was, texture := delete_key(&vulkan.textures, op.handle)
-            assert(was == op.handle && texture.placed.texture != nil)
-            gpu.texture_free(&vulkan.texture_allocator, &texture.placed)
-        }
-    }
-    
-    // @todo(viktor): Display in debug system
-    print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
-}
+////////////////////////////////////////////////
 
 vk_allocate_texture :: proc (bitmap: Bitmap) -> u32 {
     assert(vulkan.next_texture_descriptor < max_vulkan_textures)
@@ -196,35 +185,36 @@ vk_allocate_texture :: proc (bitmap: Bitmap) -> u32 {
     return result
 }
 
-vk_begin_frame_uploads :: proc (vertices: [] Textured_Vertex) -> (result: gpu.GpuCpuRange(Textured_Vertex)) {
-    // This is the one-frame version of the eventual frame allocator. A later
-    // version gives each frame in flight its own bump allocator.
-    gpu.bump_reset(&vulkan.frame_data_allocator)
+vk_manage_textures :: proc (last: ^TextureOp) {
+    allocs, deallocs: u32
 
-    if len(vertices) != 0 {
-        result = gpu.bump_allocate(&vulkan.frame_data_allocator, [] Textured_Vertex, len(vertices))
-        assert(result.cpu != nil)
-        copy(result.cpu, vertices)
-    }
-    return result
-}
-
-vk_recreate_depth :: proc (extent: uv2) {
-    if vulkan.depth.texture != nil {
-        gpu.destroy_render_view(vulkan.depth_render_view)
-        gpu.texture_free(&vulkan.texture_allocator, &vulkan.depth)
+    // :VulkanRenderer: Texture destruction is immediate in NoGraphicsAPI. The
+    // simple renderer has one frame in flight, so draining it here is enough
+    // until a delete queue is introduced with the asynchronous frame allocator.
+    if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
+    
+    for operation := last; operation != nil; operation = operation.next {
+        switch &op in operation.value {
+        case: unreachable()
+        
+        case TextureOpAllocate:
+            allocs += 1
+            op.result ^= vk_allocate_texture(op.bitmap)
+            
+        case TextureOpDeallocate:
+            deallocs += 1
+            
+            was, texture := delete_key(&vulkan.textures, op.handle)
+            assert(was == op.handle && texture.placed.texture != nil)
+            gpu.texture_free(&vulkan.texture_allocator, &texture.placed)
+        }
     }
     
-    vulkan.depth = gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
-        extent = { extent.x, extent.y, 1 },
-        format = .d32_float,
-        usage  = { .depth_stencil_attachment },
-    ))
-    assert(vulkan.depth.texture != nil)
-    
-    vulkan.depth_render_view = gpu.create_render_view(vulkan.depth.texture)
-    vulkan.depth_extent = extent
+    // @todo Display this in the debug system.
+    print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
 }
+
+////////////////////////////////////////////////
 
 vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
@@ -238,9 +228,10 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     frame := gpu.acquire(vulkan.device)
     if frame.render_view == nil { return }
 
-    if frame.extent != vulkan.depth_extent {
+    render_extent := cast(uv2) render_commands.dimension
+    if render_extent != vulkan.depth_extent {
         if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
-        vk_recreate_depth(frame.extent)
+        vk_recreate_depth_peel_targets(render_extent)
     }
 
     vertices := vk_begin_frame_uploads(render_commands.vertex_buffer[:])
@@ -249,7 +240,7 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     gpu.set_sampler_descriptor_heap(commands, gpu.gpu_range(vulkan.sampler_descriptor_heap))
 
     gpu.begin_render_pass(commands,
-        colors = { gpu.color_attachment(render_view = frame.render_view, load = .clear, clear = render_commands.clear_color) },
+        colors = { gpu.color_attachment(render_view = vulkan.depth_peel_color_render_view, load = .clear, clear = render_commands.clear_color) },
         depth  = gpu.depth_attachment(render_view = vulkan.depth_render_view, load = .clear, store = .discard),
     )
     gpu.set_depth_stencil(commands, depth_test = true, depth_write = true)
@@ -263,7 +254,7 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
         case .DepthClear:
             gpu.end_render_pass(commands)
             gpu.begin_render_pass(commands,
-                colors = { gpu.color_attachment(render_view = frame.render_view, load = .load) },
+                colors = { gpu.color_attachment(render_view = vulkan.depth_peel_color_render_view, load = .load) },
                 depth  = gpu.depth_attachment(render_view = vulkan.depth_render_view, load = .clear, store = .discard),
             )
             gpu.set_depth_stencil(commands, depth_test = true, depth_write = true)
@@ -277,20 +268,21 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
         case .Textured_Quads:
             entry := read(&render_commands.push_buffer, Textured_Quads)
             setup := entry.setup
-            render_rect := Rectangle2i { min = {}, max = cast(v2i) frame.extent }
+            render_rect := rectangle_zero_min_dimension(render_commands.dimension)
             clip := get_intersection(setup.clip_rect, render_rect)
             if !has_area(clip) do continue
 
-            gpu.set_viewport(commands, 0, 0, cast(f32) frame.extent.x, cast(f32) frame.extent.y)
+            gpu.set_viewport(commands, 0, 0, cast(f32) render_extent.x, cast(f32) render_extent.y)
             dim := get_dimension(clip)
-            gpu.set_scissor(commands, clip.min.x, clip.min.y, cast(u32) dim.x, cast(u32) dim.y)
+            scissor_y := cast(i32) render_extent.y - clip.max.y
+            gpu.set_scissor(commands, clip.min.x, scissor_y, cast(u32) dim.x, cast(u32) dim.y)
 
             for bitmap_index in entry.bitmap_offset ..< entry.bitmap_offset + entry.quad_count {
                 bitmap := render_commands.quad_bitmap_buffer[bitmap_index]
                 texture, ok := vulkan.textures[bitmap.texture_handle]
                 if !ok do continue
 
-                root := VulkanQuadRoot {
+                gpu.draw(commands, gpu.byte_slice(&VulkanQuadRoot {
                     vertices           = vertices.gpu,
                     projection         = (setup.projection),
                     camera_p           = { **setup.camera_p, 1 },
@@ -299,21 +291,84 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
                     fog_and_clip       = { setup.fog_begin, setup.fog_end, setup.clip_alpha_begin, setup.clip_alpha_end },
                     texture_descriptor = texture.descriptor_index,
                     vertex_base        = bitmap_index * 4,
-                }
-                gpu.draw(commands, gpu.byte_slice(&root), 6)
+                }), 6)
             }
         }
     }
 
+    gpu.end_render_pass(commands)
+    gpu.barrier(commands, { .color_output }, { .color_write }, { .fragment }, { .shader_read })
+    gpu.begin_render_pass(commands,
+        colors = { gpu.color_attachment(render_view = frame.render_view, load = .clear, clear = render_commands.clear_color) },
+    )
+    gpu.bind_pso(commands, vulkan.composite_pso)
+    gpu.draw(commands, gpu.byte_slice(&VulkanCompositeRoot { texture_descriptor = vulkan.depth_peel_color_descriptor }), 3)
     gpu.end_render_pass(commands)
 
     vulkan.latest_completion.value += 1
     gpu.submit_and_present(vulkan.device, { commands }, vulkan.latest_completion)
 }
 
+////////////////////////////////////////////////
+
+read_vulkan_spirv :: proc (path: string) -> (result: [] u32) {
+    // :VulkanRenderer: Move this through the platform API with the other file IO.
+    bytes, error := os.read_entire_file(path, context.allocator)
+    assert(error == nil)
+    assert(len(bytes) % size_of(u32) == 0)
+    result = slice_from_parts_type(u32, raw_data(bytes), len(bytes) / size_of(u32))
+    return result
+}
+
+vk_begin_frame_uploads :: proc (vertices: [] Textured_Vertex) -> (result: gpu.GpuCpuRange(Textured_Vertex)) {
+    // :VulkanRenderer: This is the one-frame version of the eventual frame
+    // allocator. A later version gives each frame in flight its own bump.
+    gpu.bump_reset(&vulkan.frame_data_allocator)
+    
+    // @todo make zero sized allocs valid? it should just return a zero len slice, which itself will make the copy a nop
+    if len(vertices) != 0 {
+        result = gpu.bump_allocate(&vulkan.frame_data_allocator, [] Textured_Vertex, len(vertices))
+        assert(result.cpu != nil)
+        copy(result.cpu, vertices)
+    }
+    return result
+}
+
 vk_change_to_settings :: proc (settings: RenderSettings) {
-    // :VulkanRenderer: The first Vulkan path renders directly to the swapchain.
-    // Settings-dependent offscreen peel and resolve targets are deliberately
-    // deferred until the basic textured-quad pass has parity with OpenGL.
+    // :VulkanRenderer: The first Vulkan path has one depth-peel target. Settings-
+    // dependent target arrays, resolve targets, and pixelation remain deferred.
     vulkan.settings = settings
+}
+
+vk_recreate_depth_peel_targets :: proc (extent: uv2) {
+    if vulkan.depth_peel_color.texture != nil {
+        gpu.destroy_render_view(vulkan.depth_peel_color_render_view)
+        gpu.texture_free(&vulkan.texture_allocator, &vulkan.depth_peel_color)
+    }
+    if vulkan.depth.texture != nil {
+        gpu.destroy_render_view(vulkan.depth_render_view)
+        gpu.texture_free(&vulkan.texture_allocator, &vulkan.depth)
+    }
+    
+    vulkan.depth_peel_color = gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
+        extent = { extent.x, extent.y, 1 },
+        format = .bgra8_srgb,
+        usage  = { .sampled, .color_attachment },
+    ))
+    assert(vulkan.depth_peel_color.texture != nil)
+    vulkan.depth_peel_color_render_view = gpu.create_render_view(vulkan.depth_peel_color.texture)
+    vulkan.depth_peel_color_descriptor = max_vulkan_textures
+    descriptor_size := gpu.get_device_caps(vulkan.device).texture_descriptor_size_in_bytes
+    descriptor := &vulkan.texture_descriptor_heap.range.cpu[cast(u64) vulkan.depth_peel_color_descriptor * descriptor_size]
+    gpu.write_texture_descriptor(vulkan.device, descriptor, vulkan.depth_peel_color.texture, .sampled)
+
+    vulkan.depth = gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
+        extent = { extent.x, extent.y, 1 },
+        format = .d32_float,
+        usage  = { .depth_stencil_attachment },
+    ))
+    assert(vulkan.depth.texture != nil)
+    
+    vulkan.depth_render_view = gpu.create_render_view(vulkan.depth.texture)
+    vulkan.depth_extent = extent
 }

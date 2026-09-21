@@ -56,14 +56,28 @@ main :: proc () {
     init_build(run_from_data = true)
     make_directory_if_not_exists("./data/build")
 
-    // Vulkan keeps shader compilation in the build, unlike the OpenGL runtime
-    // compiler. Keep this small while the first renderer pass is being brought up.
     vulkan_vertex_path   :: `build/vulkan.vertex.spirv`
     vulkan_fragment_path :: `build/vulkan.fragment.spirv`
-    append(cmd, "slangc", "code/vulkan.slang", "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry", "vertexMain", "-stage", "vertex", "-o", `data/` + vulkan_vertex_path)
-    run_command(cmd)
-    append(cmd, "slangc", "code/vulkan.slang", "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry", "fragmentMain", "-stage", "fragment", "-o", `data/` + vulkan_fragment_path)
-    run_command(cmd)
+    vulkan_composite_vertex_path   :: `build/vulkan.composite_vertex.spirv`
+    vulkan_composite_fragment_path :: `build/vulkan.composite_fragment.spirv`
+    vulkan_shader_stages := [] struct { source, stage, output: string } {
+        { "code/vulkan.slang",           "vertex",   `data/build/vulkan.vertex.spirv` },
+        { "code/vulkan.slang",           "fragment", `data/build/vulkan.fragment.spirv` },
+        { "code/vulkan_composite.slang", "vertex",   `data/build/vulkan.composite_vertex.spirv` },
+        { "code/vulkan_composite.slang", "fragment", `data/build/vulkan.composite_fragment.spirv` },
+    }
+    for shader in vulkan_shader_stages {
+        append(cmd, "slangc")
+        append(cmd, shader.source)
+        append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
+        append(cmd, fmt.tprintf("%sMain", shader.stage))
+        append(cmd, "-stage")
+        append(cmd, shader.stage)
+        append(cmd, "-o")
+        append(cmd, shader.output)
+        run_command(cmd, async = procs)
+    }
+    procs_flush(procs)
     
     // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
@@ -160,6 +174,8 @@ main :: proc () {
             append(cmd, ..platform_flags)
             build_define("VulkanVertexSpirvPath",   vulkan_vertex_path)
             build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
+            build_define("VulkanCompositeVertexSpirvPath",   vulkan_composite_vertex_path)
+            build_define("VulkanCompositeFragmentSpirvPath", vulkan_composite_fragment_path)
             
             end_build(cmd)
         }
