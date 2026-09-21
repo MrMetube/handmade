@@ -4,6 +4,7 @@ import "core:os"
 
 import gpu "./no_graphics_api"
 
+// @todo this is ok for now, but the platform should control the paths like for all other things like the platform_api that the game layer uses
 VulkanVertexSpirvPath   :: #config(VulkanVertexSpirvPath,   "vulkan.vertex.spirv")
 VulkanFragmentSpirvPath :: #config(VulkanFragmentSpirvPath, "vulkan.fragment.spirv")
 
@@ -24,6 +25,7 @@ VulkanQuadRoot :: struct {
     vertex_base:        u32,
 }
 
+// @todo generate the slang definitions from the odin code in the future
 // Keep these in lockstep with the C-layout SPIR-V declarations in vulkan.slang.
 #assert(offset_of(Textured_Vertex, p)     ==  0)
 #assert(offset_of(Textured_Vertex, n)     == 16)
@@ -71,6 +73,7 @@ vulkan: struct {
     depth_render_view: gpu.RenderView,
 }
 
+// @todo make these parameters of init and or part of the vulkan state if needed
 frame_data_heap_size     ::  32 * Megabyte
 texture_upload_heap_size ::  64 * Megabyte
 texture_heap_size        :: 256 * Megabyte
@@ -249,9 +252,7 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
         colors = { gpu.color_attachment(render_view = frame.render_view, load = .clear, clear = render_commands.clear_color) },
         depth  = gpu.depth_attachment(render_view = vulkan.depth_render_view, load = .clear, store = .discard),
     )
-    // Depth peeling has not been ported yet. Keep the reduced renderer's first
-    // visible pass independent from that incomplete depth path.
-    gpu.set_depth_stencil(commands, depth_test = false, depth_write = false)
+    gpu.set_depth_stencil(commands, depth_test = true, depth_write = true)
     gpu.bind_pso(commands, vulkan.quad_pso)
 
     for begin_reading(&render_commands.push_buffer); can_read(&render_commands.push_buffer); {
@@ -259,10 +260,19 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
 
         switch header.type {
         case .None: unreachable()
-        case .DepthClear, .BeginPeels, .EndPeels:
-            // Breadth-first path: these become real passes once the base textured
-            // quad image matches OpenGL. Keeping the command stream intact now
-            // avoids changing the game-side renderer contract.
+        case .DepthClear:
+            gpu.end_render_pass(commands)
+            gpu.begin_render_pass(commands,
+                colors = { gpu.color_attachment(render_view = frame.render_view, load = .load) },
+                depth  = gpu.depth_attachment(render_view = vulkan.depth_render_view, load = .clear, store = .discard),
+            )
+            gpu.set_depth_stencil(commands, depth_test = true, depth_write = true)
+            gpu.bind_pso(commands, vulkan.quad_pso)
+
+        case .BeginPeels, .EndPeels:
+            // :VulkanRenderer: Depth peeling needs its own color/depth targets
+            // and compositing pass. The basic opaque depth path still honors
+            // DepthClear above while this work remains deferred.
 
         case .Textured_Quads:
             entry := read(&render_commands.push_buffer, Textured_Quads)
@@ -302,8 +312,8 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
 }
 
 vk_change_to_settings :: proc (settings: RenderSettings) {
-    // The first Vulkan path renders directly to the swapchain. Settings-dependent
-    // offscreen peel and resolve targets are deliberately deferred until the basic
-    // textured-quad pass has parity with OpenGL.
+    // :VulkanRenderer: The first Vulkan path renders directly to the swapchain.
+    // Settings-dependent offscreen peel and resolve targets are deliberately
+    // deferred until the basic textured-quad pass has parity with OpenGL.
     vulkan.settings = settings
 }

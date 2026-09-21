@@ -67,5 +67,13 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 {
     Texture2D<float4> texture = ResourceDescriptorHeap[root.texture_descriptor];
     SamplerState sampler = SamplerDescriptorHeap[0];
-    return input.color * texture.Sample(sampler, input.uv);
+    float4 modulated = input.color * texture.Sample(sampler, input.uv);
+
+    // Match the first OpenGL pass: transparent texels do not update either
+    // the color or depth attachments. This keeps transparent black pixels out
+    // of the opaque, depth-writing Vulkan path.
+    if (modulated.a <= 0.02f)
+        discard;
+
+    return modulated;
 }
