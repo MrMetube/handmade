@@ -118,6 +118,10 @@ build_pedantic :: proc (pedantic: bool, imports := "-vet-unused-imports", semico
     }
 }
 
+build_define :: proc (name: string, value: string) {
+    append(cmd, fmt.tprintf("-define:%s=%s", name, value))
+}
+
 end_build :: proc (cmd: ^Cmd) {
     if run_command(cmd) {
         fmt.printf("  Build successful %v.\n", the_state.current_output)

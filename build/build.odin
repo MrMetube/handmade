@@ -54,6 +54,16 @@ main_package :: "main"
 main :: proc () {
     // @todo(viktor): handle being called from ./data instead of ./
     init_build(run_from_data = true)
+    make_directory_if_not_exists("./data/build")
+
+    // Vulkan keeps shader compilation in the build, unlike the OpenGL runtime
+    // compiler. Keep this small while the first renderer pass is being brought up.
+    vulkan_vertex_path   :: `build/vulkan.vertex.spirv`
+    vulkan_fragment_path :: `build/vulkan.fragment.spirv`
+    append(cmd, "slangc", "code/vulkan.slang", "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry", "vertexMain", "-stage", "vertex", "-o", `data/` + vulkan_vertex_path)
+    run_command(cmd)
+    append(cmd, "slangc", "code/vulkan.slang", "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry", "fragmentMain", "-stage", "fragment", "-o", `data/` + vulkan_fragment_path)
+    run_command(cmd)
     
     // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
@@ -148,6 +158,8 @@ main :: proc () {
             append(cmd, custom_attribute_flag)
             append(cmd, internal)
             append(cmd, ..platform_flags)
+            build_define("VulkanVertexSpirvPath",   vulkan_vertex_path)
+            build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
             
             end_build(cmd)
         }
