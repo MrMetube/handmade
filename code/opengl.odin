@@ -311,6 +311,9 @@ set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: b32) {
 ////////////////////////////////////////////////
 
 gl_manage_textures :: proc (last: ^TextureOp) {
+    game.debug_begin_data_block("texture operations")
+    defer game.debug_end_data_block()
+    
     allocs, deallocs: u32
     
     for operation := last; operation != nil; operation = operation.next {
@@ -327,8 +330,12 @@ gl_manage_textures :: proc (last: ^TextureOp) {
         }
     }
     
-    // @todo(viktor): Display in debug system
-    print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
+    count := cast(i32) (allocs + deallocs)
+    game.debug_record_i32(&count, "count")
+    allocations := cast(i32) allocs
+    game.debug_record_i32(&allocations, "allocations")
+    deallocations := cast(i32) deallocs
+    game.debug_record_i32(&deallocations, "deallocations")
 }
 
 gl_allocate_texture :: proc (bitmap: Bitmap) -> (result: u32) {

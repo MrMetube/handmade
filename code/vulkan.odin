@@ -6,17 +6,94 @@ import gpu "./no_graphics_api"
 
 // :VulkanRenderer: The platform should own shader loading and expose the paths
 // through the game/platform API rather than this renderer-owned config.
-VulkanVertexSpirvPath   :: #config(VulkanVertexSpirvPath,   "vulkan.vertex.spirv")
-VulkanFragmentSpirvPath :: #config(VulkanFragmentSpirvPath, "vulkan.fragment.spirv")
+VulkanVertexSpirvPath            :: #config(VulkanVertexSpirvPath,            "vulkan.vertex.spirv")
+VulkanFragmentSpirvPath          :: #config(VulkanFragmentSpirvPath,          "vulkan.fragment.spirv")
 VulkanCompositeVertexSpirvPath   :: #config(VulkanCompositeVertexSpirvPath,   "vulkan.composite_vertex.spirv")
 VulkanCompositeFragmentSpirvPath :: #config(VulkanCompositeFragmentSpirvPath, "vulkan.composite_fragment.spirv")
 VulkanFinalVertexSpirvPath       :: #config(VulkanFinalVertexSpirvPath,       "vulkan.final_vertex.spirv")
 VulkanFinalFragmentSpirvPath     :: #config(VulkanFinalFragmentSpirvPath,     "vulkan.final_fragment.spirv")
 
-VulkanTexture :: struct {
+////////////////////////////////////////////////
+
+frame_data_heap_size     ::  32 * Megabyte
+texture_upload_heap_size ::  64 * Megabyte
+texture_heap_size        :: 256 * Megabyte
+VulkanFrameCount         :: 2
+
+max_vulkan_textures :: 256
+
+Debug_vulkan_depth_peel_index: i32 = -1 // -1 composites all layers
+
+vulkan: struct {
+    settings: RenderSettings,
+    
+    device: gpu.Device,
+    
+    frames: [VulkanFrameCount] VulkanFrame,
+    next_frame_index: u32,
+
+    texture_upload_heap:      gpu.GpuHeap,
+    texture_upload_allocator: gpu.BumpAllocator,
+    
+    texture_heap:      gpu.TextureHeap,
+    texture_allocator: gpu.TextureAllocator,
+    
+    texture_descriptor_heap: gpu.GpuHeap,
+    sampler_descriptor_heap: gpu.GpuHeap,
+    
+    latest_completion: gpu.TimelinePoint,
+    
+    quad_pso:      gpu.PSO,
+    composite_pso: gpu.PSO,
+    final_pso:     gpu.PSO,
+    
+    textures: [1 + cast(u32) VulkanTextureDescriptor.count] gpu.PlacedTexture,
+    next_texture_descriptor:  u32,
+    free_texture_descriptors: [dynamic; VulkanTextureDescriptor.count] u32,
+    
+    depth_peel_buffers: [dynamic; 4] VulkanDepthPeelBuffer,
+    composite_buffer:   RenderTarget,
+}
+
+VulkanTextureDescriptor :: enum u32 {
+    nil_texture,
+    depth_peel_0_color,
+    depth_peel_0_depth,
+    depth_peel_1_color,
+    depth_peel_1_depth,
+    depth_peel_2_color,
+    depth_peel_2_depth,
+    depth_peel_3_color,
+    depth_peel_3_depth,
+    composite,
+    first_dynamic_texture,
+    count = first_dynamic_texture + max_vulkan_textures,
+}
+
+VulkanFrame :: struct {
+    data_heap:      gpu.GpuHeap,
+    data_allocator: gpu.BumpAllocator,
+    completion:     gpu.TimelinePoint,
+}
+
+
+VulkanDepthPeelBuffer :: struct {
+    color: RenderTarget,
+    depth: RenderTarget,
+}
+
+RenderTarget :: struct {
     placed:           gpu.PlacedTexture,
+    render_view:      gpu.RenderView,
     descriptor_index: u32,
 }
+
+VulkanFrameUploads :: struct {
+    vertices:            gpu.GpuCpuRange(Textured_Vertex),
+    texture_descriptors: gpu.GpuCpuRange(u32),
+}
+
+////////////////////////////////////////////////
 
 VulkanQuadRoot :: struct {
     projection:                m4,
@@ -44,85 +121,6 @@ VulkanFinalRoot :: struct {
     sampler_descriptor: u32,
 }
 
-VulkanTextureDescriptor :: enum u32 {
-    nil_texture,
-    depth_peel_0_color,
-    depth_peel_0_depth,
-    depth_peel_1_color,
-    depth_peel_1_depth,
-    depth_peel_2_color,
-    depth_peel_2_depth,
-    depth_peel_3_color,
-    depth_peel_3_depth,
-    composite,
-    first_dynamic_texture,
-    count = first_dynamic_texture + max_vulkan_textures,
-}
-
-RenderTarget :: struct {
-    placed:           gpu.PlacedTexture,
-    render_view:      gpu.RenderView,
-    descriptor_index: u32,
-}
-
-VulkanDepthPeelBuffer :: struct {
-    color: RenderTarget,
-    depth: RenderTarget,
-}
-
-VulkanFrameUploads :: struct {
-    vertices:            gpu.GpuCpuRange(Textured_Vertex),
-    texture_descriptors: gpu.GpuCpuRange(u32),
-}
-
-VulkanFrame :: struct {
-    data_heap:      gpu.GpuHeap,
-    data_allocator: gpu.BumpAllocator,
-    completion:     gpu.TimelinePoint,
-}
-
-vulkan: struct {
-    settings: RenderSettings,
-    
-    device: gpu.Device,
-    
-    frames: [VulkanFrameCount] VulkanFrame,
-    next_frame_index: u32,
-
-    texture_upload_heap:      gpu.GpuHeap,
-    texture_upload_allocator: gpu.BumpAllocator,
-    
-    texture_heap:      gpu.TextureHeap,
-    texture_allocator: gpu.TextureAllocator,
-    
-    texture_descriptor_heap: gpu.GpuHeap,
-    sampler_descriptor_heap: gpu.GpuHeap,
-    
-    latest_completion: gpu.TimelinePoint,
-    
-    quad_pso:      gpu.PSO,
-    composite_pso: gpu.PSO,
-    final_pso:     gpu.PSO,
-    
-    textures: map[u32] VulkanTexture,
-    last_used_texture_handle: u32,
-    next_texture_descriptor:  u32,
-    
-    depth_peel_buffers: [dynamic; 4] VulkanDepthPeelBuffer,
-    composite_buffer: RenderTarget,
-}
-
-// :VulkanRenderer: Make these init parameters or Vulkan-state configuration.
-frame_data_heap_size     ::  32 * Megabyte
-texture_upload_heap_size ::  64 * Megabyte
-texture_heap_size        :: 256 * Megabyte
-VulkanFrameCount         :: 2
-
-max_vulkan_textures :: 256
-max_vulkan_texture_descriptors :: cast(u32) VulkanTextureDescriptor.count
-
-Debug_vulkan_depth_peel_index: i32 = -1 // -1 composites all layers
-
 ////////////////////////////////////////////////
 
 init_vulkan :: proc (window: pmm) {
@@ -143,12 +141,11 @@ init_vulkan :: proc (window: pmm) {
     vulkan.texture_upload_heap      = gpu.create_gpu_heap(device, texture_upload_heap_size)
     vulkan.texture_upload_allocator = gpu.bump_allocator(vulkan.texture_upload_heap.range)
     
-    vulkan.texture_descriptor_heap = gpu.create_gpu_heap(device, caps.texture_descriptor_size_in_bytes * cast(u64) max_vulkan_texture_descriptors, .texture_descriptor_heap)
+    vulkan.texture_descriptor_heap = gpu.create_gpu_heap(device, caps.texture_descriptor_size_in_bytes * cast(u64) VulkanTextureDescriptor.count, .texture_descriptor_heap)
     vulkan.sampler_descriptor_heap = gpu.create_gpu_heap(device, caps.sampler_descriptor_size_in_bytes * 2, .sampler_descriptor_heap)
     
     vulkan.texture_heap      = gpu.create_texture_heap(device, texture_heap_size)
-    max_vulkan_texture_allocations :: max_vulkan_texture_descriptors
-    vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, max_vulkan_texture_allocations)
+    vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, cast(u32) VulkanTextureDescriptor.count)
     
     vulkan.next_texture_descriptor = cast(u32) VulkanTextureDescriptor.first_dynamic_texture
     gpu.write_sampler_descriptor(device, sampler_descriptor(0), min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
@@ -192,7 +189,7 @@ init_vulkan :: proc (window: pmm) {
 
 ////////////////////////////////////////////////
 
-vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> (result: u32) {
+vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> u32 {
     timed_function()
     
     placed := gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
@@ -223,14 +220,17 @@ vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> (re
     vulkan.latest_completion.value += 1
     gpu.submit({ commands }, vulkan.latest_completion)
     
-    vulkan.last_used_texture_handle += 1
-    result = vulkan.last_used_texture_handle
-    vulkan.textures[result] = { placed, descriptor_index }
+    result := 1 + descriptor_index
+    vulkan.textures[result] = placed
+    
     return result
 }
 
 vk_manage_textures :: proc (last: ^TextureOp) {
     timed_function()
+    debug_data_block("Renderer")
+    debug_data_block("texture operations")
+    
     allocs, deallocs: u32
 
     // :VulkanRenderer: Texture destruction is immediate in NoGraphicsAPI.
@@ -248,14 +248,21 @@ vk_manage_textures :: proc (last: ^TextureOp) {
         case TextureOpDeallocate:
             deallocs += 1
             
-            was, texture := delete_key(&vulkan.textures, op.handle)
-            assert(was == op.handle && texture.placed.texture != nil)
-            gpu.texture_free(&vulkan.texture_allocator, &texture.placed)
+            assert(op.handle > cast(u32) VulkanTextureDescriptor.first_dynamic_texture)
+            texture := &vulkan.textures[op.handle]
+            assert(texture.texture != nil)
+            gpu.texture_free(&vulkan.texture_allocator, texture)
+            texture^ = {}
+            append(&vulkan.free_texture_descriptors, op.handle - 1)
         }
     }
     
-    // @todo Display this in the debug system.
-    print("texture ops %, allocs % deallocs %\n", allocs + deallocs, allocs, deallocs)
+    count := cast(i32) (allocs + deallocs)
+    game.debug_record_i32(&count, "count")
+    allocations := cast(i32) allocs
+    game.debug_record_i32(&allocations, "allocations")
+    deallocations := cast(i32) deallocs
+    game.debug_record_i32(&deallocations, "deallocations")
 }
 
 ////////////////////////////////////////////////
@@ -416,23 +423,24 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
 
 ////////////////////////////////////////////////
 
-read_vulkan_spirv :: proc (path: string) -> (result: [] u32) {
+read_vulkan_spirv :: proc (path: string) -> [] u32 {
     // :VulkanRenderer: Move this through the platform API with the other file IO.
     bytes, error := os.read_entire_file(path, context.allocator)
     assert(error == nil)
     assert(len(bytes) % size_of(u32) == 0)
-    result = slice_from_parts_type(u32, raw_data(bytes), len(bytes) / size_of(u32))
+    result := slice_from_parts_type(u32, raw_data(bytes), len(bytes) / size_of(u32))
     return result
 }
 
-upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame) -> (result: VulkanFrameUploads) {
+upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame) -> VulkanFrameUploads {
     timed_function()
     
-    game.debug_begin_data_block("frame uploads")
-    defer game.debug_end_data_block()
+    debug_data_block("Renderer")
+    debug_data_block("frame uploads")
     
     gpu.bump_reset(&frame.data_allocator)
     
+    result: VulkanFrameUploads
     {
         timed_block("copy textured vertices")
         
@@ -444,7 +452,7 @@ upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame
     }
     
     {
-        timed_block("map texture descriptors")
+        timed_block("copy texture descriptors")
         
         count := cast(i32) len(render_commands.quad_bitmap_buffer)
         game.debug_record_i32(&count, "bitmap count")
@@ -452,9 +460,8 @@ upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame
         result.texture_descriptors = gpu.bump_allocate(&frame.data_allocator, [] u32, len(render_commands.quad_bitmap_buffer))
         
         for bitmap, index in render_commands.quad_bitmap_buffer {
-            if texture, ok := vulkan.textures[bitmap.texture_handle]; ok {
-                result.texture_descriptors.cpu[index] = texture.descriptor_index
-            }
+            texture_handle := max(0, bitmap.texture_handle-1)
+            result.texture_descriptors.cpu[index] = texture_handle
         }
     }
     return result
@@ -562,11 +569,19 @@ sampler_descriptor :: proc (index: u32) -> pmm {
 }
 
 allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
-    assert(vulkan.next_texture_descriptor < max_vulkan_texture_descriptors)
+    last_free := len(vulkan.free_texture_descriptors)-1
+    if last_free >= 0 {
+        index = vulkan.free_texture_descriptors[last_free]
+        resize(&vulkan.free_texture_descriptors, last_free)
+    } else {
+        assert(vulkan.next_texture_descriptor < cast(u32) VulkanTextureDescriptor.count)
+        
+        index = vulkan.next_texture_descriptor
+        vulkan.next_texture_descriptor += 1
+    }
     
-    index = vulkan.next_texture_descriptor
-    vulkan.next_texture_descriptor += 1
     descriptor = texture_descriptor(index)
+    
     return descriptor, index
 }
 

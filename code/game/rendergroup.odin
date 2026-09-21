@@ -141,9 +141,9 @@ Textured_Quads :: struct {
     bitmap_offset: u32,
 }
 
-@(common) DepthClear :: struct {}
-@(common) BeginPeels :: struct {}
-@(common) EndPeels   :: struct {}
+DepthClear :: struct {}
+BeginPeels :: struct {}
+EndPeels   :: struct {}
 
 @(common)
 Textured_Vertex :: struct {

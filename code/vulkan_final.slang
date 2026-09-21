@@ -28,6 +28,6 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
 float4 fragmentMain(VertexOutput input) : SV_Target0
 {
     Texture2D<float4> texture = ResourceDescriptorHeap[root.texture_descriptor];
-    SamplerState sampler = SamplerDescriptorHeap[root.sampler_descriptor];
+    SamplerState      sampler = SamplerDescriptorHeap[ root.sampler_descriptor];
     return texture.Sample(sampler, input.uv);
 }

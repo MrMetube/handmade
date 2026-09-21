@@ -74,7 +74,7 @@ main :: proc () {
         append(cmd, "slangc")
         append(cmd, shader.source)
         append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
-        // @todo -g for debug info
+        if !optimize { append(cmd, "-g") }
         append(cmd, fmt.tprintf("%sMain", shader.stage))
         append(cmd, "-stage")
         append(cmd, shader.stage)
