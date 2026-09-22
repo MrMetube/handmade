@@ -45,7 +45,6 @@ TicketMutex :: struct #align(64) {
     serving: u64,
 }
 
-@(enable_target_feature="sse2")
 begin_ticket_mutex :: proc (mutex: ^TicketMutex) {
     ticket := atomic_add(&mutex.ticket, 1)
     for ticket != volatile_load(&mutex.serving) {
@@ -57,14 +56,6 @@ end_ticket_mutex :: proc (mutex: ^TicketMutex) {
     atomic_add(&mutex.serving, 1)
 }
 
-spin_hint :: proc() {
-    when ODIN_ARCH == .amd64 || ODIN_ARCH == .i386 {
-        asm () [#volatile] { pause } ()
-    } else when ODIN_ARCH == .arm32 || ODIN_ARCH == .arm64 {
-        asm () [#volatile] { yield } ()
-    } else when ODIN_ARCH == .riscv64 || ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32 || ODIN_ARCH == .Unknown {
-        // no-op fallback
-    } else {
-        #assert(false, "new microarch was added")
-    }
+spin_hint :: proc () {
+    asm () [#volatile] { pause } ()
 }

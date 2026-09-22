@@ -1,6 +1,5 @@
 package main
 
-import os "core:os"
 import win "core:sys/windows"
 
 @(private="file")
@@ -24,11 +23,10 @@ load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> 
         if game_lib != nil {
             load_game_api(game_lib)
             
-            // @todo(viktor): do we really need to depent on debug_frame_end here?
+            // @todo: do we really need to depent on debug_frame_end here?
             is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
         } else {
             // @logging 
-            // @todo use dynlib?
             print("Failed to initialize game api\n")
         }
     }
@@ -70,7 +68,6 @@ get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
 
 ////////////////////////////////////////////////
 // reimplement to allow the deferred_out to work
-// @todo(viktor): is this still necessary?
 
 end_timed_block :: proc (info: TimedBlockInfo) {
     game.end_timed_block(info)

@@ -165,7 +165,7 @@ main :: proc () {
         
         if window == nil {
             // @logging
-            return 
+            runtime.exit(1)
         }
     }
     
@@ -239,7 +239,10 @@ main :: proc () {
         sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32) sound_output.samples_per_second * cast(f32) sound_output.bytes_per_sample)
     }
     
-    init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
+    if !init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second) {
+        print("Error: Failed to initialize DSound.") // @logging 
+        runtime.exit(1)
+    }
     
     clear_sound_buffer(&sound_output)
     
