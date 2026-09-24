@@ -93,7 +93,7 @@ DebugState :: struct {
 
 DebugFrame :: struct {
     profile_root: ^DebugStoredEvent,
-    frame_index: i32,
+    frame_index:  i32,
     
     begin_clock,
     end_clock:       i64,
@@ -223,7 +223,7 @@ DebugStoredEvent :: struct {
         event: DebugEvent,
         node:  DebugProfileNode,
     },
-
+    
     frame_index: i32,
     // @todo(viktor): Store call attribution data here?
 }
@@ -364,11 +364,11 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
     for &event in events {
         thread: ^DebugThread
-        thread_count: u32 = 1
+        event_thread_count: u32 = 1
         for thread = debug.thread; thread != nil && thread.thread_index != event.thread_index; thread = thread.next {
-            thread_count += 1
+            event_thread_count += 1
         }
-        debug.max_thread_count = max(debug.max_thread_count, thread_count)
+        debug.max_thread_count = max(debug.max_thread_count, event_thread_count)
         
         if thread == nil {
             thread = freelist_push(&debug.thread_free_list, no_clear())
@@ -387,6 +387,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
         
         switch value in event.value {
           case FrameMarker:
+            timed_block("FrameMarker")
             collation_frame.end_clock       = event.clock
             collation_frame.seconds_elapsed = value.seconds_elapsed
             
@@ -413,6 +414,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
             init_frame(debug, collation_frame, event.clock)
             
           case BeginDataBlock:
+            timed_block("BeginDataBlock")
             collation_frame.data_block_count += 1
             
             block := alloc_open_block(debug, thread, frame_index, event.clock, &thread.first_open_data_block, nil)
@@ -424,11 +426,13 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
             FrameInfo, FrameSlider, 
             ArenaOccupancy,
             BitmapId, SoundId, FontId, b32, f32, u32, i32, i64, v2, v3, v4, Rectangle2, Rectangle3:
+            timed_block("Store Data")
             
             element := get_element_from_guid(debug, event, default_parent_group, ElementOps{ .AddToParent, .CreateHierarchy })
             store_event(debug, event, element)
             
           case EndDataBlock:
+            timed_block("EndDataBlock")
             if thread.first_open_data_block != nil {
                 free_open_block(thread, &thread.first_open_data_block)
             }
@@ -532,15 +536,12 @@ free_oldest_frame :: proc (debug: ^DebugState) {
 }
 
 free_frame :: proc (debug: ^DebugState, frame_ordinal: i32) {
-    freed_count: u32
     for element in debug.element_hash {
         for element := element; element != nil; element = element.next {
             frame := &element.frames[frame_ordinal]
             
-            for frame.events.last != nil {
-                free_event := deque_remove_from_end(&frame.events)
-                freed_count += 1
-                freelist_free(&debug.stored_event_freelist, free_event)
+            if frame.events.last != nil {
+                freelist_free_list(&debug.stored_event_freelist, frame.events.last, frame.events.first)
             }
             
             frame ^= {}
@@ -548,7 +549,6 @@ free_frame :: proc (debug: ^DebugState, frame_ordinal: i32) {
     }
     
     frame := &debug.frames[frame_ordinal]
-    assert(freed_count == frame.stored_event_count)
     frame ^= {}
 }
 

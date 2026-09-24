@@ -204,42 +204,40 @@ is_running :: proc (exe_name: string) -> (running: bool, pid: u32) {
 handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Running_Exe) -> bool {
     for {
         ok, pid := is_running(exe_name)
-        if ok {
-            fmt.printf("INFO: Tried to build '%v', but the program is already running.\n", exe_name)
-            switch handling {
-            case .Skip:
-                fmt.printf("  Skipping build.\n", exe_name)
-                ok = false
-                
-            case .Abort: 
-                fmt.printf("  Aborting build!\n", exe_name)
-                os.exit(0)
-                
-            case .Kill: 
-                fmt.printf("  Killing running instance.\n")
-                
-                // @cleanup
-                process, err := os.process_open(auto_cast pid)
+        if !ok do break
+        
+        fmt.printf("INFO: Tried to build '%v', but the program is already running.\n", exe_name)
+        switch handling {
+        case .Skip:
+            fmt.printf("  Skipping build.\n")
+            return false
+            
+        case .Abort: 
+            fmt.printf("  Aborting build!\n")
+            os.exit(0)
+            
+        case .Kill: 
+            fmt.printf("  Killing running instance.\n")
+            
+            // @cleanup
+            process, err := os.process_open(auto_cast pid)
+            if err != nil {
+                fmt.printf("  Failed to open '%v': %v\n", exe_name, err)
+                return false
+            } else {
+                err = os.process_kill(process)
                 if err != nil {
-                    fmt.printf("  Failed to open '%v': %v\n", exe_name, err)
-                    ok = false
+                    fmt.printf("  Failed to kill '%v': %v\n", exe_name, err)
+                    return false
                 } else {
-                    err = os.process_kill(process)
+                    err = os.process_terminate(process)
                     if err != nil {
-                        fmt.printf("  Failed to kill '%v': %v\n", exe_name, err)
-                        ok = false
-                    } else {
-                        err = os.process_terminate(process)
-                        if err != nil {
-                            fmt.printf("  Failed to close '%v': %v\n", exe_name, err)
-                            ok = false
-                        }
+                        fmt.printf("  Failed to close '%v': %v\n", exe_name, err)
+                        return false
                     }
                 }
             }
         }
-        
-        if !ok do break
     }
     
     return true

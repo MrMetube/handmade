@@ -625,7 +625,7 @@ main :: proc () {
         }
         ////////////////////////////////////////////////
         when INTERNAL {
-            debug_collation := game.begin_timed_block("debug collation")
+            game.begin_timed_block("debug collation")
             
             game_memory.reloaded_executable = false
             executable_needs_to_be_reloaded := get_last_write_time(game_dll_name) != game_dll_write_time
@@ -654,7 +654,7 @@ main :: proc () {
                 game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
             }
             
-            game.end_timed_block(debug_collation)
+            game.end_timed_block()
         }
         ////////////////////////////////////////////////
         { timed_block("prepare render")
@@ -1204,7 +1204,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
         second :: max(win.WM_PAINT, win.WM_MOUSEMOVE)
         last   :: max(u32)
         
-        peek_message := game.begin_timed_block("win.PeekMessageW")
+        game.begin_timed_block("win.PeekMessageW")
         has_message := win.PeekMessageW(&message, nil, 0, first - 1, win.PM_REMOVE)
         if !has_message {
             has_message = win.PeekMessageW(&message, nil, first + 1, second - 1, win.PM_REMOVE)
@@ -1212,7 +1212,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
                 has_message = win.PeekMessageW(&message, nil, second + 1, last, win.PM_REMOVE)
             }
         }
-        game.end_timed_block(peek_message)
+        game.end_timed_block()
         
         if !has_message do break
         

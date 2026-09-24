@@ -274,9 +274,9 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
         change_to_settings(render_commands.settings)
     }
     
-    zone_1 := game.begin_timed_block("acquire frame")
+    game.begin_timed_block("acquire frame")
     frame := gpu.acquire(vulkan.device)
-    game.end_timed_block(zone_1)
+    game.end_timed_block()
     if frame.render_view == nil { return }
 
     frame_index := vulkan.next_frame_index
@@ -289,11 +289,11 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     
     uploads := upload_frame_data(render_commands, frame_data)
     
-    zone0 := game.begin_timed_block("begin commands")
+    game.begin_timed_block("begin commands")
     commands := gpu.begin_commands(vulkan.device)
     gpu.set_texture_descriptor_heap(commands, gpu.gpu_range(vulkan.texture_descriptor_heap))
     gpu.set_sampler_descriptor_heap(commands, gpu.gpu_range(vulkan.sampler_descriptor_heap))
-    game.end_timed_block(zone0)
+    game.end_timed_block()
     
     ////////////////////////////////////////////////
     
@@ -414,11 +414,11 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
         gpu.end_render_pass(commands)
     }
     
-    zone1 := game.begin_timed_block("submit and present")
+    game.begin_timed_block("submit and present")
     vulkan.latest_completion.value += 1
     frame_data.completion = vulkan.latest_completion
     gpu.submit_and_present(vulkan.device, { commands }, vulkan.latest_completion)
-    game.end_timed_block(zone1)
+    game.end_timed_block()
 }
 
 ////////////////////////////////////////////////

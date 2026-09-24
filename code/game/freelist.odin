@@ -52,8 +52,8 @@ freelist_free_next_pointer :: proc (list: ^FreeList($T), element: ^T, next: ^^T)
 }
 
 
-// @note(viktor): push the whole list: T, head -> tail onto the freelist
+// @note push the whole list: T, head -> tail onto the freelist
 freelist_free_list :: proc (list: ^FreeList($T), head, tail: ^T) {
-    tail.next = list.first_free
+    tail.next       = list.first_free
     list.first_free = head
 }

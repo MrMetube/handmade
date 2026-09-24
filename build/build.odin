@@ -16,7 +16,7 @@ PedanticPlatform :: false
 
 native   :: true
 optimize :: false
-internal :: "-define:INTERNAL=true"
+internal :: true
 
 
 /* 
@@ -73,8 +73,8 @@ main :: proc () {
     for shader in vulkan_shader_stages {
         append(cmd, "slangc")
         append(cmd, shader.source)
-        append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
         if !optimize { append(cmd, "-g") }
+        append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
         append(cmd, fmt.tprintf("%sMain", shader.stage))
         append(cmd, "-stage")
         append(cmd, shader.stage)
@@ -151,7 +151,7 @@ main :: proc () {
             }
             
             append(cmd, custom_attribute_flag)
-            append(cmd, internal)
+            if internal { build_define("INTERNAL", "true") }
             
             end_build(cmd)
         }
@@ -175,7 +175,7 @@ main :: proc () {
             }
             
             append(cmd, custom_attribute_flag)
-            append(cmd, internal)
+            if internal { build_define("INTERNAL", "true") }
             append(cmd, ..platform_flags)
             build_define("VulkanVertexSpirvPath",   vulkan_vertex_path)
             build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)

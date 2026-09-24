@@ -136,7 +136,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
     
     for &entity in sim_region.entities {
         if .active in entity.flags {
-            boost := begin_timed_block("entity boost")
+            begin_timed_block("entity boost")
             // @todo(viktor): Should non-active entities not do simmy stuff?
             boost_to := get_traversable(entity.auto_boost_to)
             if boost_to != nil {
@@ -151,12 +151,12 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     }
                 }
             }
-            end_timed_block(boost)
+            end_timed_block()
             
             ////////////////////////////////////////////////
             // Physics
             
-            physics := begin_timed_block("entity physics")
+            begin_timed_block("entity physics")
             if entity.movement_mode == .Planted {
                 if entity.occupying.entity.pointer != nil {
                     entity.p = get_sim_space_traversable(entity.occupying).p
@@ -234,7 +234,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     entity.t_movement = 1
                 }
             }
-            end_timed_block(physics)
+            end_timed_block()
                             
             if entity.ddp != 0 || entity.dp != 0 {
                 move_entity(sim_region, &entity, dt)
@@ -244,7 +244,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             ////////////////////////////////////////////////
             // Rendering
             
-            rendering := begin_timed_block("entity rendering")
+            begin_timed_block("entity rendering")
             facing_match := #partial AssetVector{ .FacingDirection = {entity.facing_direction, 1} }
             
             transform := default_upright_transform()
@@ -254,7 +254,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             shadow_transform.offset = entity.p
             shadow_transform.offset.y -= 0.5
             
-            rendering_pieces := begin_timed_block("entity rendering pieces")
+            begin_timed_block("entity rendering pieces")
             for piece in &entity.pieces {
                 offset := piece.offset
                 color  := piece.color
@@ -289,9 +289,9 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             }
             draw_hitpoints(render_group, &entity, 0.5, transform)
             
-            end_timed_block(rendering_pieces)
+            end_timed_block()
             
-            rendering_volumes := begin_timed_block("entity rendering volumes")
+            begin_timed_block("entity rendering volumes")
             if has_volume(entity.collision_volume) {
                 color := srgb_to_linear(SeaGreen)
                 if .Collides in entity.flags {
@@ -299,8 +299,8 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 }
                 push_volume_outline(render_group, entity.collision_volume, transform, color, 0.01)
             }
-            end_timed_block(rendering_volumes)
-            end_timed_block(rendering)
+            end_timed_block()
+            end_timed_block()
             
             debug_pick_entity(&entity, transform, render_group)
         }

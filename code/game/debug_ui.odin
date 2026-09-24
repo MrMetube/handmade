@@ -365,7 +365,7 @@ draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
                         total_size += auto_cast len(block.storage)
                     }
                     
-                    text = debug_print("%: used % / free % / total %", element.guid.name, view_memory_size(total_size - total_used), view_memory_size(total_used), view_memory_size(total_size))
+                    text = debug_print("%: free % / used % / total %", element.guid.name, view_memory_size(total_size - total_used), view_memory_size(total_used), view_memory_size(total_size))
                 } else {
                     text = debug_print("%: unused", element.guid.name)
                 }

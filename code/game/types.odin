@@ -221,7 +221,7 @@ deque_remove_from_end :: proc (deque: ^Deque($L)) -> ^L {
     
     if result != nil {
         deque.last = result.next
-
+        
         if result == deque.first {
             assert(result.next == nil)
             deque.first = nil

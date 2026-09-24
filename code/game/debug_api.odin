@@ -142,39 +142,27 @@ debug_end_data_block :: proc () {
 ////////////////////////////////////////////////
 // Timed Blocks and Functions
 
-@(common) 
-TimedBlockInfo :: struct {
-    name: string,
-    loc:  runtime.Source_Code_Location,
-}
-
 @(export)
-begin_timed_block :: proc (name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
+begin_timed_block :: proc (name: string, loc := #caller_location) {
     when !DebugEnabled do return result 
     
     debug_record_event(BeginTimedBlock{}, name, loc)
-    
-    result.name = name
-    result.loc = loc
-    return result
 }
 
 @(export)
-end_timed_block :: proc (info: TimedBlockInfo) {
+end_timed_block :: proc () {
     when !DebugEnabled do return
-    if info == {} do return
-    
-    debug_record_event(EndTimedBlock{}, info.name, info.loc)
+    debug_record_event(EndTimedBlock{}, {}, {})
 }
 
-@(deferred_out=end_timed_block)
-timed_block :: proc (name: string, loc := #caller_location) -> (result: TimedBlockInfo) {
-    return begin_timed_block(name, loc)
+@(deferred_none=end_timed_block)
+timed_block :: proc (name: string, loc := #caller_location) {
+    begin_timed_block(name, loc)
 }
 
 @(deferred_out = end_timed_block)
-timed_function :: proc (loc := #caller_location) -> (result: TimedBlockInfo) { 
-    return begin_timed_block(loc.procedure, loc)
+timed_function :: proc (loc := #caller_location) { 
+    begin_timed_block(loc.procedure, loc)
 }
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }

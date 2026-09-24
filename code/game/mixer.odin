@@ -107,7 +107,7 @@ output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^
     }
     
     // @note(viktor): Sum all sounds
-    sum_all_sounds := begin_timed_block("sum_all_sounds")
+    begin_timed_block("sum_all_sounds")
     for playing_sound_pointer := &mixer.first_playing_sound; playing_sound_pointer^ != nil;  {
         playing_sound := playing_sound_pointer^
         
@@ -260,7 +260,7 @@ output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^
             playing_sound_pointer = &playing_sound.next
         }
     }
-    end_timed_block(sum_all_sounds)
+    end_timed_block()
     
     { // @note(viktor): convert to 16bit and write into output sound buffer
         timed_block("write_into_sound_buffer")
