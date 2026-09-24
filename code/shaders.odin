@@ -464,12 +464,12 @@ begin_program_common :: proc (program: OpenGLProgram) {
     if program.in_uv != -1 {
         id := cast(u32) program.in_uv
         gl.EnableVertexAttribArray(id)
-        gl.VertexAttribPointer(id, len(dummy.uv), gl.FLOAT, false, stride, offset_of(dummy.uv))
+        gl.VertexAttribPointer(id, 2, gl.UNSIGNED_SHORT, true, stride, offset_of(dummy.uv))
     }
     if program.in_n != -1 {
         id := cast(u32) program.in_n
         gl.EnableVertexAttribArray(id)
-        gl.VertexAttribPointer(id, len(dummy.n), gl.FLOAT, false, stride, offset_of(dummy.n))
+        gl.VertexAttribPointer(id, 4, gl.INT_2_10_10_10_REV, true, stride, offset_of(dummy.n))
     }
     if program.in_color != -1 {
         id := cast(u32) program.in_color

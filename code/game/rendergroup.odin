@@ -101,17 +101,13 @@ Camera_Flags :: bit_set[ enum {
 
 ////////////////////////////////////////////////
 
+@(common)
 RenderEntryType :: enum u8 {
     None,
     Textured_Quads,
     DepthClear,
     BeginPeels,
     EndPeels,
-}
-
-@(common)
-RenderEntryHeader :: struct {
-    type: RenderEntryType,
 }
 
 @(common)
@@ -148,10 +144,19 @@ EndPeels   :: struct {}
 @(common)
 Textured_Vertex :: struct {
     p:     v4,
-    n:     v3,
-    uv:    v2,
+    n:     Packed_Normal,
+    uv:    Packed_UV,
     color: Color,
 }
+
+Packed_Normal :: bit_field u32 {
+    x: i16 | 10,
+    y: i16 | 10,
+    z: i16 | 10,
+    _: i16 |  2,
+}
+
+Packed_UV :: distinct [2] u16
 
 ////////////////////////////////////////////////
 
@@ -175,12 +180,12 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
     
     setup := group.last_setup
     
-    setup.clip_rect = rectangle_zero_min_dimension(commands.dimension)
-    setup.projection = identity()
-    setup.fog_begin = 0
-    setup.fog_end = 1
+    setup.clip_rect        = rectangle_zero_min_dimension(commands.dimension)
+    setup.projection       = identity()
+    setup.fog_begin        = 0
+    setup.fog_end          = 1
     setup.clip_alpha_begin = 0
-    setup.clip_alpha_end = 1
+    setup.clip_alpha_end   = 1
     
     push_setup(group, setup)
 }
@@ -204,8 +209,8 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     }
     assert(type != .None)
     
-    header := render_group_push_size(group, RenderEntryHeader)
-    header ^= { type = type }
+    header := render_group_push_size(group, RenderEntryType)
+    header ^= type
     result = render_group_push_size(group, T)
     
     if reset_quads {
@@ -346,14 +351,32 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     
     n0, n1, n2, n3: v3 = normal, normal, normal, normal
     
-    append(&group.commands.quad_bitmap_buffer, bitmap)
+    append(&group.commands.quad_bitmap_buffer,  bitmap)
     // @note(viktor): reorder from quad ordering to triangle strip ordering
     append(&group.commands.vertex_buffer, 
-        Textured_Vertex {p3, n3, t3, c3},
-        Textured_Vertex {p0, n0, t0, c0},
-        Textured_Vertex {p2, n2, t2, c2},
-        Textured_Vertex {p1, n1, t1, c1},
+        Textured_Vertex {p3, pack(n3), pack(t3), c3},
+        Textured_Vertex {p0, pack(n0), pack(t0), c0},
+        Textured_Vertex {p2, pack(n2), pack(t2), c2},
+        Textured_Vertex {p1, pack(n1), pack(t1), c1},
     )
+}
+
+@(common)
+pack :: proc { pack_normal, pack_uv }
+pack_normal :: proc (normal: v3) -> Packed_Normal {
+    result := Packed_Normal {
+        x = round(i16, clamp(normal.x, -1, 1) * 511),
+        y = round(i16, clamp(normal.y, -1, 1) * 511),
+        z = round(i16, clamp(normal.z, -1, 1) * 511),
+    }
+    return result
+}
+pack_uv :: proc (uv: v2) -> Packed_UV {
+    result := Packed_UV {
+        round(u16, clamp(uv.x, 0, 1) * cast(f32) max(u16)),
+        round(u16, clamp(uv.y, 0, 1) * cast(f32) max(u16)),
+    }
+    return result
 }
 
 get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {

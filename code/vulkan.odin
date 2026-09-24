@@ -302,9 +302,9 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     begin_depth_peel_pass(commands, peel_index, .clear, render_commands.clear_color)
     
     for begin_reading(&render_commands.push_buffer); can_read(&render_commands.push_buffer); {
-        header := read(&render_commands.push_buffer, RenderEntryHeader)
+        type := read(&render_commands.push_buffer, RenderEntryType)
         
-        switch header.type {
+        switch type^ {
         case .None: unreachable()
         case .DepthClear:
             timed_block("depth clear")
@@ -591,9 +591,9 @@ allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
 // Keep these in lockstep with the C-layout SPIR-V declarations in vulkan.slang.
 #assert(offset_of(Textured_Vertex, p)     == 0)
 #assert(offset_of(Textured_Vertex, n)     == 16)
-#assert(offset_of(Textured_Vertex, uv)    == 28)
-#assert(offset_of(Textured_Vertex, color) == 36)
-#assert(size_of(Textured_Vertex)          == 40)
+#assert(offset_of(Textured_Vertex, uv)    == 20)
+#assert(offset_of(Textured_Vertex, color) == 24)
+#assert(size_of(Textured_Vertex)          == 28)
 
 #assert(offset_of(VulkanQuadRoot, projection)                == 0)
 #assert(offset_of(VulkanQuadRoot, vertices)                  == 64)

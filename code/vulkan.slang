@@ -1,42 +1,38 @@
-struct TexturedVertex
-{
+struct TexturedVertex {
     float4 p;
-    float3 n;
-    float2 uv;
-    uint color;
+    uint   n;
+    uint   uv;
+    uint   color;
 };
 
-struct QuadRoot
-{
-    float4x4 projection;
+struct QuadRoot {
+    float4x4        projection;
     TexturedVertex* vertices;
-    uint* texture_descriptors;
-    float3 camera_p;
-    float3 fog_direction;
-    float3 fog_color;
-    float fog_begin;
-    float fog_end;
-    float clip_alpha_begin;
-    float clip_alpha_end;
-    uint vertex_base;
-    uint previous_depth_descriptor;
-    float alpha_threshold;
+    uint*           texture_descriptors;
+    float3          camera_p;
+    float3          fog_direction;
+    float3          fog_color;
+    float           fog_begin;
+    float           fog_end;
+    float           clip_alpha_begin;
+    float           clip_alpha_end;
+    uint            vertex_base;
+    uint            previous_depth_descriptor;
+    float           alpha_threshold;
 };
 
 [[vk::push_constant]] ConstantBuffer<QuadRoot> root;
 
-struct VertexOutput
-{
-    float4 position : SV_Position;
-    float2 uv       : TEXCOORD0;
-    float4 color    : COLOR0;
+struct VertexOutput {
+    float4 position                         : SV_Position;
+    float2 uv                               : TEXCOORD0;
+    float4 color                            : COLOR0;
     nointerpolation uint texture_descriptor : TEXCOORD1;
-    float fog_distance : TEXCOORD2;
+    float fog_distance                      : TEXCOORD2;
 };
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertex_id : SV_VertexID)
-{
+VertexOutput vertexMain(uint vertex_id : SV_VertexID) {
     // The command stream stores quads as triangle strips, but NoGraphicsAPI's
     // current graphics PSO uses triangle lists. Flip the two triangles to
     // match the Vulkan rasterizer winding after the Y coordinate conversion.
@@ -44,23 +40,27 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
     uint quad_index = vertex_id / 6u;
     uint quad_vertex_index = quad_vertex_indices[vertex_id % 6u];
     TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + quad_vertex_index];
-
-    VertexOutput output;
-    // Match the OpenGL Z-bias vertex path. p.w is not a homogeneous coordinate;
-    // it is the per-vertex depth bias used to keep Handmade's render slices apart.
+    
     float4 vertex_position = float4(vertex.p.xyz, 1.0f);
     float4 biased_position = vertex_position;
     biased_position.z += vertex.p.w;
-
+    
     float4 minimum_depth_position = mul(root.projection, vertex_position);
     float4 maximum_depth_position = mul(root.projection, biased_position);
     float modified_depth = (minimum_depth_position.w / maximum_depth_position.w) * maximum_depth_position.z;
-
+    
+    VertexOutput output;
     output.position = float4(minimum_depth_position.xy, modified_depth, minimum_depth_position.w);
     // Adapt RenderSetup's OpenGL clip space at the Vulkan shader boundary.
     output.position.y = -output.position.y;
     output.position.z = 0.5f * (output.position.z + output.position.w);
-    output.uv = vertex.uv;
+    
+    output.uv = float2(vertex.uv & 0xffffu, vertex.uv >> 16u) / 65535.0f;
+    
+    // Lighting will unpack the signed 10:10:10 normal as:
+    // int3 normal = int3(int(vertex.n << 22u) >> 22, int(vertex.n << 12u) >> 22, int(vertex.n << 2u) >> 22);
+    // float3 unit_normal = float3(normal) / 511.0f;
+    
     output.fog_distance = dot(biased_position.xyz - root.camera_p, root.fog_direction);
     output.texture_descriptor = root.texture_descriptors[quad_index];
     output.color = float4(
@@ -72,32 +72,32 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(VertexOutput input) : SV_Target0
-{
+float4 fragmentMain(VertexOutput input) : SV_Target0 {
     Texture2D<float4> texture = ResourceDescriptorHeap[input.texture_descriptor];
     SamplerState sampler = SamplerDescriptorHeap[0];
     float4 modulated = input.color * texture.Sample(sampler, input.uv);
 
     float alpha_amount = 0.0f;
     float alpha_range = root.clip_alpha_end - root.clip_alpha_begin;
-    if (alpha_range != 0.0f)
+    if (alpha_range != 0.0f) {
         alpha_amount = saturate((input.fog_distance - root.clip_alpha_begin) / alpha_range);
+    }
     modulated *= alpha_amount;
 
-    if (root.previous_depth_descriptor != 0)
-    {
+    if (root.previous_depth_descriptor != 0) {
         Texture2D<float> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
-        if (input.position.z <= previous_depth.Load(int3(input.position.xy, 0)))
+        if (input.position.z <= previous_depth.Load(int3(input.position.xy, 0))) {
             discard;
+        }
     }
 
-    if (modulated.a <= root.alpha_threshold)
-        discard;
+    if (modulated.a <= root.alpha_threshold) discard;
 
     float fog_amount = 0.0f;
     float fog_range = root.fog_end - root.fog_begin;
-    if (fog_range != 0.0f)
+    if (fog_range != 0.0f) {
         fog_amount = saturate((input.fog_distance - root.fog_begin) / fog_range);
+    }
     modulated.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
 
     return modulated;

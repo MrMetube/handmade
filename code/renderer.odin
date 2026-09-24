@@ -119,9 +119,9 @@ do_tile_render_work :: proc (data: pmm) {
     target: Bitmap
     
     for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
-        header := read(&commands.push_buffer, RenderEntryHeader)
+        type := read(&commands.push_buffer, RenderEntryType)
         
-        switch header.type {
+        switch type^ {
           case .None: unreachable()
             
           case .DepthClear: unimplemented()

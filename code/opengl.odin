@@ -499,9 +499,9 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     peel_index: u32
     peel_header_restore: int
     for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
-        header := read(&commands.push_buffer, RenderEntryHeader)
+        type := read(&commands.push_buffer, RenderEntryType)
         
-        switch header.type {
+        switch type^ {
           case .None: unreachable()
           case: panic("Unhandled Entry")
             
@@ -610,10 +610,10 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.Scissor(0, 0, render_dim.x, render_dim.y)
     
     vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, {0, 0, 0}, {0, 1}, 0xff},
-        {{-1, -1, 0, 1}, {0, 0, 0}, {0, 0}, 0xff},
-        {{ 1,  1, 0, 1}, {0, 0, 0}, {1, 1}, 0xff},
-        {{ 1, -1, 0, 1}, {0, 0, 0}, {1, 0}, 0xff},
+        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff},
+        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff},
+        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff},
+        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
@@ -673,10 +673,10 @@ resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
     gl.Scissor(0, 0, dim.x, dim.y)
     
     vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, {0, 0, 0}, {0, 1}, 0xff},
-        {{-1, -1, 0, 1}, {0, 0, 0}, {0, 0}, 0xff},
-        {{ 1,  1, 0, 1}, {0, 0, 0}, {1, 1}, 0xff},
-        {{ 1, -1, 0, 1}, {0, 0, 0}, {1, 0}, 0xff},
+        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff},
+        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff},
+        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff},
+        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
