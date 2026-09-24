@@ -436,12 +436,12 @@ get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> (resul
     
     if arena != nil && result == nil {
         assert(arena == world.chunk_freelist.arena, "When I started using the freelist, all callers used world.arena, so its hardcoded as that in the freelist")
-        result = freelist_push(&world.chunk_freelist, no_clear())
+        result = freelist_push_next(&world.chunk_freelist, no_clear())
         result ^= {
             chunk = chunk_p,
         }
         
-        list_push(next_pointer_of_the_chunks_previous_chunk, result) 
+        list_push_next(next_pointer_of_the_chunks_previous_chunk, result) 
     }
     
     return result
@@ -491,7 +491,7 @@ extract_chunk :: proc (world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
 add_to_free_list :: proc (world: ^World, chunk: ^Chunk, first_block, last_block: ^WorldEntityBlock) {
     begin_ticket_mutex(&world.change_ticket)
     
-    freelist_free(&world.chunk_freelist, chunk)
+    freelist_free_next(&world.chunk_freelist, chunk)
     if first_block != nil {
         // @note(viktor): push on the whole list from first to last
         freelist_free_list(&world.block_freelist, first_block, last_block)
@@ -517,11 +517,11 @@ use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (re
     assert(chunk != nil)
     
     if !block_has_room(chunk.first_block, pack_size) {
-        new_block := freelist_push(&world.block_freelist, no_clear())
+        new_block := freelist_push_next(&world.block_freelist, no_clear())
         
         clear_world_entity_block(new_block)
         
-        list_push(&chunk.first_block, new_block)
+        list_push_next(&chunk.first_block, new_block)
     }
     assert(block_has_room(chunk.first_block, pack_size))
     

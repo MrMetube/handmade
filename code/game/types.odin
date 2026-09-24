@@ -269,26 +269,26 @@ list_remove :: proc (element: ^$T) {
 // Single Linked List
 // [Head] -> [..] ... -> [..] -> [Tail]
 
-list_push :: proc { list_push_next, list_push_next_pointer }
 list_push_next :: proc (head: ^^$T, element: ^T) {
     list_push(head, element, &element.next)
 }
-list_push_next_pointer :: proc (head: ^^$T, element: ^T, next: ^^T) {
+list_push :: proc (head: ^^$T, element: ^T, next: ^^T) {
     next^ = head^
     head^ = element
 }
 
 
-list_pop_head:: proc { list_pop_head_next, list_pop_head_next_offset }
-list_pop_head_next :: proc (head: ^^$T) -> (result: ^T, ok: b32) #optional_ok { 
-    result, ok = list_pop_head(head, offset_of(T, next))
+list_pop_head_next :: proc (head: ^^$T) -> (^T, b32) #optional_ok { 
+    result, ok := list_pop_head_pointer(head, head^.next)
     return result, ok
 }
-list_pop_head_next_offset :: proc (head: ^^$T, $next_offset: umm) -> (result: ^T, ok: b32) #optional_ok {
-    ok = head^ != nil
-    if ok {
+// @note next is a ^^T so that we don't read the value unless head^ is not nil.
+list_pop_head :: proc (head: ^^$T, next: ^^T) -> (^T, b32) #optional_ok { 
+    result: ^T
+    ok: b32
+    if head^ != nil {
+        ok = true
         result = head^
-        next  := cast(^^T) (cast(umm) result + next_offset)
         head^  = next^
     }
     

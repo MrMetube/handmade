@@ -76,7 +76,7 @@ clear_arena :: proc (arena: ^Arena) {
 }
 
 free_last_block :: proc (arena: ^Arena) {
-    block := list_pop_head(&arena.current_block, offset_of(Platform_Memory_Block, arena_previous_block))
+    block := list_pop_head(&arena.current_block, &arena.current_block.arena_previous_block)
     Platform.deallocate_memory_block(block)
 }
 

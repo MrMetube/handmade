@@ -371,11 +371,11 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
         debug.max_thread_count = max(debug.max_thread_count, event_thread_count)
         
         if thread == nil {
-            thread = freelist_push(&debug.thread_free_list, no_clear())
+            thread = freelist_push_next(&debug.thread_free_list, no_clear())
             thread ^= { thread_index = event.thread_index }
             freelist_init(&thread.freelist, &debug.arena)
             
-            list_push(&debug.thread, thread)
+            list_push_next(&debug.thread, thread)
         }
         assert(thread.thread_index == event.thread_index)
         
@@ -502,7 +502,7 @@ store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugEleme
     collation_frame.stored_event_count += 1
     
     for result == nil {
-        result = freelist_push(&debug.stored_event_freelist, no_clear())
+        result = freelist_push_next(&debug.stored_event_freelist, no_clear())
     }
     
     result ^= {
@@ -629,7 +629,7 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
             
             
             index := hash_value % len(debug.element_hash)
-            list_push(&debug.element_hash[index], result)
+            list_push_next(&debug.element_hash[index], result)
             
             if .CreateHierarchy in ops {
                 parent := parent
@@ -648,7 +648,7 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
 }
 
 alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
-    result = freelist_push(&thread.freelist, offset_of(DebugOpenBlock, next_free), no_clear())
+    result = freelist_push(&thread.freelist, &thread.freelist.first_free.next_free, no_clear())
     
     result^ = {
         frame_index = frame_index,
@@ -662,7 +662,7 @@ alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index:
 }
 
 free_open_block :: proc (thread: ^DebugThread, first_open_block: ^^DebugOpenBlock) {
-    free_block := list_pop_head_next_offset(first_open_block, offset_of(DebugOpenBlock, parent))
+    free_block := list_pop_head(first_open_block, &first_open_block^.parent)
     freelist_free(&thread.freelist, free_block, &free_block.next_free)
 }
 

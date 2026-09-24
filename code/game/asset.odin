@@ -701,7 +701,7 @@ add_texture_op :: proc (queue: ^TextureOpQueue, source: TextureOp) {
     // @todo(viktor): Can we devise a soft failure case for running out of ops?
     assert(!freelist_empty(queue.freelist))
     
-    dest := freelist_push(&queue.freelist, no_clear())
+    dest := freelist_push_next(&queue.freelist, no_clear())
     dest ^= source
     assert(dest.next == nil)
     

@@ -11,7 +11,7 @@ FreeList :: struct ($T: typeid) {
 ////////////////////////////////////////////////
 
 // @compilerbug first_free should just be = nil by default but that is broken on "odin version dev-2026-01:393fec2f6"
-freelist_init :: proc (list: ^FreeList($T), backing: ^Arena, first_free : ^T = auto_cast cast(umm) 0) {
+freelist_init :: proc (list: ^FreeList($T), backing: ^Arena, first_free : ^T = nil) {
     list.arena      = backing
     list.first_free = first_free
 }
@@ -23,31 +23,31 @@ freelist_empty :: proc (list: FreeList($T)) -> bool {
 
 ////////////////////////////////////////////////
 
-freelist_push :: proc { freelist_push_next, freelist_push_next_pointer }
 freelist_push_next :: proc (list: ^FreeList($T), params := DefaultPushParams) -> ^T {
-    return freelist_push(list, offset_of(T, next), params)
+    return freelist_push(list, &list.first_free.next, params)
 }
-freelist_push_next_pointer :: proc (list: ^FreeList($T), $next_offset: umm, params := DefaultPushParams) -> ^T {
-    result, ok := list_pop_head(&list.first_free, next_offset)
+freelist_push :: proc (list: ^FreeList($T), next: ^^T, params := DefaultPushParams) -> ^T {
+    result, ok := list_pop_head(&list.first_free, next)
     
-    if ok {
-        if .ClearToZero in params.flags {
-            result^ = {}
-        }
-    } else {
+    if !ok {
         assert(list.arena != nil)
+        sub_params := params
+        sub_params.flags -= { .ClearToZero }
         result = push(list.arena, T, params)
+    }
+    
+    if .ClearToZero in params.flags {
+        result^ = {}
     }
     
     return result
 }
 
 
-freelist_free :: proc { freelist_free_next, freelist_free_next_pointer }
 freelist_free_next :: proc (list: ^FreeList($T), element: ^T) { 
     freelist_free(list, element, &element.next)
 }
-freelist_free_next_pointer :: proc (list: ^FreeList($T), element: ^T, next: ^^T) {
+freelist_free :: proc (list: ^FreeList($T), element: ^T, next: ^^T) {
     list_push(&list.first_free, element, next)
 }
 

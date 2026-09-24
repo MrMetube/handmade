@@ -1433,7 +1433,7 @@ get_view_for_variable :: proc (debug: ^DebugState, id: DebugId) -> (result: ^Deb
     if result == nil {
         result = push(&debug.arena, DebugView)
         result.id = id
-        list_push(slot, result)
+        list_push_next(slot, result)
     }
     
     return 

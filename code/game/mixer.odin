@@ -49,7 +49,7 @@ init_mixer :: proc (mixer: ^Mixer, arena: ^Arena) {
 }
 
 play_sound :: proc (mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 = 1) {
-    playing_sound := freelist_push(&mixer.playing_sound_freelist, no_clear())
+    playing_sound := freelist_push_next(&mixer.playing_sound_freelist, no_clear())
     
     // @todo(viktor): should volume default to [0.5,0.5] to be centered?
     playing_sound ^= {
@@ -62,7 +62,7 @@ play_sound :: proc (mixer: ^Mixer, id: SoundId, volume: [2]f32 = 1, pitch: f32 =
         d_current_volume = 0,
     }
     
-    list_push(&mixer.first_playing_sound, playing_sound)
+    list_push_next(&mixer.first_playing_sound, playing_sound)
 }
 
 change_volume :: proc (mixer: ^Mixer, sound: ^PlayingSound, fade_duration_in_seconds: f32, volume: [2] f32) {
@@ -254,7 +254,7 @@ output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^
         
         if sound_finished {
             // :ListEntryRemovalInLoop
-            freelist_free(&mixer.playing_sound_freelist, playing_sound)
+            freelist_free_next(&mixer.playing_sound_freelist, playing_sound)
             playing_sound_pointer ^= playing_sound.next
         } else {
             playing_sound_pointer = &playing_sound.next
