@@ -569,7 +569,7 @@ create_program :: proc (defines, header_code, vertex_code, fragment_code: cstrin
     gl.LinkProgram(result)
     
     gl.ValidateProgram(result)
-    linked: b32
+    linked: bool
     gl.GetProgramiv(result, gl.LINK_STATUS, cast(^i32) &linked)
     
     if !linked {

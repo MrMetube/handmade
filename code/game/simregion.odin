@@ -256,7 +256,7 @@ get_closest_entity_by_brain_kind :: proc (region: ^SimRegion, from: v3, kind: Br
     return result, distance_squared
 }
 
-get_closest_traversable_along_ray :: proc (region: ^SimRegion, from_p: v3, dir: v3, skip: TraversableReference, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: b32) {
+get_closest_traversable_along_ray :: proc (region: ^SimRegion, from_p: v3, dir: v3, skip: TraversableReference, flags: bit_set[enum{ Unoccupied }] = {}) -> (result: TraversableReference, ok: bool) {
     timed_function()
     // @todo(viktor): Actually implement a smarter spatial query
     for probe in 0..<10 {
@@ -306,13 +306,13 @@ get_closest_traversable :: proc (region: ^SimRegion, from_p: v3, flags: bit_set[
     return result, ok
 }
 
-entity_overlaps_rectangle :: proc (bounds: Rectangle3, entity_p: v3, entity_volume: Rectangle3) -> (result: b32) {
-    result = intersects(bounds, add_offset(entity_volume, entity_p))
+entity_overlaps_rectangle :: proc (bounds: Rectangle3, entity_p: v3, entity_volume: Rectangle3) -> bool {
+    result := intersects(bounds, add_offset(entity_volume, entity_p))
     return result
 }
 
-entity_overlaps_entity :: proc (a, b: ^Entity) -> (result: b32) {
-    result = intersects(add_offset(a.collision_volume, a.p), add_offset(b.collision_volume, b.p))
+entity_overlaps_entity :: proc (a, b: ^Entity) -> bool {
+    result := intersects(add_offset(a.collision_volume, a.p), add_offset(b.collision_volume, b.p))
     return result
 }
 
@@ -481,7 +481,8 @@ get_sim_space_traversable_raw :: proc (entity: ^Entity, index: i64) -> (result: 
     return result
 }
 
-transactional_occupy :: proc (entity: ^Entity, dest_ref: ^TraversableReference, desired_ref: TraversableReference) -> (result: b32) {
+transactional_occupy :: proc (entity: ^Entity, dest_ref: ^TraversableReference, desired_ref: TraversableReference) -> bool {
+    result: bool
     desired := get_traversable(desired_ref)
     if desired.occupant == nil {
         dest := get_traversable(dest_ref^)
@@ -555,12 +556,12 @@ move_entity :: proc (region: ^SimRegion, entity: ^Entity, dt: f32) {
                         
                         TEpsilon :: 0.0000001
                         #assert(TEpsilon < OverlapEpsilon)
-                        test_hit: b32
+                        test_hit: bool
                         test_wall_normal: v2
                         test_t := t_min
                         
                         for wall in walls {
-                            collided: b32
+                            collided: bool
                             if wall.delta_x != 0 {
                                 t_result := (wall.x - wall.rel_x) / wall.delta_x
                                 y        := wall.rel_y + t_result * wall.delta_y
@@ -625,7 +626,8 @@ move_entity :: proc (region: ^SimRegion, entity: ^Entity, dt: f32) {
     }
 }
 
-can_collide :: proc (a, b: ^Entity) -> (result: b32) {
+can_collide :: proc (a, b: ^Entity) -> bool {
+    result: bool
     if a != b {
         a, b := a, b
         if a.id > b.id do a, b = b, a
@@ -640,7 +642,8 @@ can_collide :: proc (a, b: ^Entity) -> (result: b32) {
 }
 
 
-handle_collision :: proc (a, b: ^Entity) -> (stops_on_collision: b32) {
+handle_collision :: proc (a, b: ^Entity) -> bool {
+    stops_on_collision: bool
     when false {
         a, b := a, b
     

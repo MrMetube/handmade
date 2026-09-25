@@ -87,7 +87,7 @@ HitPoint :: struct {
 
 PairwiseCollsionRule :: struct {
     next: ^PairwiseCollsionRule,
-    can_collide: b32,
+    can_collide: bool,
     id_a, id_b:  EntityId,
 }
 

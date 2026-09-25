@@ -104,7 +104,7 @@ metaprogram_collect_files_and_parse_package :: proc (mp: ^Metaprogram, directory
 
 ////////////////////////////////////////////////
 
-metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, path_from_build, package_name: string) -> (success: b32) {
+metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, path_from_build, package_name: string) -> (success: bool) {
     collector, cok := mp.collections[package_name]
     assert(cok)
     
@@ -457,7 +457,7 @@ generate_render_api :: proc (mp: ^Metaprogram, output_file, exports_package, out
     }
     defer os.close(out)
     
-    no_stubs: map[string]b32
+    no_stubs: map[string] bool
     // no_stubs["output_sound_samples"] = true
     
     width: int
@@ -623,7 +623,7 @@ check_printlike_call :: proc (mp: ^Metaprogram, call: ^ast.Call_Expr) {
                 outer: for arg in call.args[printlike.args_index:] {
                     if union_contains(arg.derived_expr, ^ast.Field_Value) do continue
                     
-                    handled: b32
+                    handled: bool
                     // @todo(viktor): some other expressions like ternary expressions could also yield more than one arg, but that would require a recursive approach
                     arg := arg
                     arg = ast.unparen_expr(arg)

@@ -22,10 +22,17 @@ debug_record_value :: proc (value: ^$Value, name: string = #caller_expression(va
     guid := DebugGUID{ name = name }
     
     event := debug_record_event(nil, guid)
-    if GlobalDebugTable.edit_event.guid == guid {
-        value ^= GlobalDebugTable.edit_event.value.(Value)
+    when Value == bool { // @cleanup
+        if GlobalDebugTable.edit_event.guid == guid {
+            value ^= cast(bool) GlobalDebugTable.edit_event.value.(b32)
+        }
+        event.value = cast(b32) value^
+    } else {
+        if GlobalDebugTable.edit_event.guid == guid {
+            value ^= GlobalDebugTable.edit_event.value.(Value)
+        }
+        event.value = value^
     }
-    event.value = value^
 }
 
 ////////////////////////////////////////////////
@@ -62,7 +69,7 @@ debug_hit :: proc (id: DebugId, z: f32) {
     }
 }
 
-debug_highlighted :: proc (id: DebugId) -> (highlighted: b32, color: v4) {
+debug_highlighted :: proc (id: DebugId) -> (highlighted: bool, color: v4) {
     when !DebugEnabled do return highlighted, color
     
     debug := get_debug_state()
@@ -81,12 +88,13 @@ debug_highlighted :: proc (id: DebugId) -> (highlighted: b32, color: v4) {
     return highlighted, color
 }
 
-debug_requested :: proc (id: DebugId) -> (result: b32) {
+debug_requested :: proc (id: DebugId) -> bool {
     when !DebugEnabled do return
     
     debug := get_debug_state()
-    if debug == nil do return
-
+    if debug == nil do return false
+    
+    result: bool
     if is_selected(debug, id) {
         result = true
     }
@@ -105,7 +113,8 @@ clear_selection :: proc (debug: ^DebugState) {
     debug.selected_count = 0
 }
 
-is_selected :: proc (debug: ^DebugState, id: DebugId) -> (result: b32) {
+is_selected :: proc (debug: ^DebugState, id: DebugId) -> bool {
+    result: bool
     for it in debug.selected_ids[:debug.selected_count] {
         if it == id {
             result = true
@@ -194,7 +203,7 @@ debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> (result:
 // Only used by the platform layer
 
 @(export)
-debug_set_event_recording :: proc (active: b32, table := GlobalDebugTable) {
+debug_set_event_recording :: proc (active: bool, table := GlobalDebugTable) {
     if !DebugEnabled do return
     if table == nil do return
     

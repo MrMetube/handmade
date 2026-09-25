@@ -672,63 +672,65 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
         cb_size:               u16,
         valid_bits_per_sample: u16,
         channel_mask:          u32,
-        sub_format:            [16]u8,
+        sub_format:            [16] u8,
     }
 
     RiffIterator :: struct {
-        at:   [^]u8,
+        at:   [^] u8,
         stop: pmm,
     }
     
     if len(contents) > 0 {
-        headers := cast([^]WAVE_Header) &contents[0]
+        headers := cast([^] WAVE_Header) &contents[0]
         header := headers[0]
-        behind_header := cast([^]u8) &headers[1]
+        behind_header := cast([^] u8) &headers[1]
         
         assert(header.riff == cast(u32) WAVE_Chunk_ID.RIFF)
         assert(header.wave_id == cast(u32) WAVE_Chunk_ID.WAVE)
         
-        parse_chunk_at :: proc (at: pmm, stop: pmm) -> (result: RiffIterator) {
+        parse_chunk_at :: proc (at: pmm, stop: pmm) -> RiffIterator {
+            result: RiffIterator
             result.at    = cast([^]u8) at
             result.stop  = stop
             
             return result
         }
         
-        is_valid_riff_iter :: proc (it: RiffIterator) -> (result: b32) {
+        is_valid_riff_iter :: proc (it: RiffIterator) -> bool {
             at := cast(uintpointer) it.at
             stop := cast(uintpointer) it.stop
-            result = at < stop 
+            result := at < stop 
             
             return result
         }
         
-        next_chunk :: proc (it: RiffIterator) -> (result: RiffIterator) {
+        next_chunk :: proc (it: RiffIterator) -> RiffIterator {
             chunk := cast(^WAVE_Chunk)it.at
             size := chunk.size
             if size % 2 != 0 {
                 size += 1
             }
+            result: RiffIterator
             result.at = cast([^]u8) &it.at[size + size_of(WAVE_Chunk)]
             result.stop = it.stop
             return result
         }
         
-        get_chunk_data :: proc (it: RiffIterator) -> (result: pmm) {
-            result = &it.at[size_of(WAVE_Chunk)]
+        get_chunk_data :: proc (it: RiffIterator) -> pmm {
+            result := &it.at[size_of(WAVE_Chunk)]
             return result
         }
         
-        get_chunk_size :: proc (it: RiffIterator) -> (result: u32) {
+        get_chunk_size :: proc (it: RiffIterator) -> u32 {
             chunk := cast(^WAVE_Chunk)it.at
-            result = chunk.size
+            result := chunk.size
             
             return result
         }
         
-        get_type :: proc (it: RiffIterator) -> (result: WAVE_Chunk_ID) {
+        get_type :: proc (it: RiffIterator) -> WAVE_Chunk_ID {
             chunk := cast(^WAVE_Chunk)it.at
-            result = chunk.id
+            result := chunk.id
             return result
         }
         
@@ -797,7 +799,7 @@ load_wav :: proc (file_name: string, section_first_sample_index, section_sample_
     return result
 }
 
-premuliply_alpha :: proc (r, g, b, a: u8) -> (result: [4]u8) {
+premuliply_alpha :: proc (r, g, b, a: u8) -> [4] u8 {
     texel := vec_cast(f32, r, g, b, a)
     
     texel = srgb_255_to_linear_1(texel)
@@ -806,7 +808,7 @@ premuliply_alpha :: proc (r, g, b, a: u8) -> (result: [4]u8) {
     
     texel = linear_1_to_srgb_255(texel)
     
-    result = vec_cast(u8, texel + 0.5)
+    result := vec_cast(u8, texel + 0.5)
     
     return result
 }
@@ -819,8 +821,8 @@ premuliply_alpha :: proc (r, g, b, a: u8) -> (result: [4]u8) {
 pmm :: rawptr
 uintpointer :: uintptr
 
-v2 :: [2]f32
-v4 :: [4]f32
+v2 :: [2] f32
+v4 :: [4] f32
 
 Pi  :: 3.14159265358979323846264338327950288
 

@@ -278,14 +278,15 @@ list_push :: proc (head: ^^$T, element: ^T, next: ^^T) {
 }
 
 
-list_pop_head_next :: proc (head: ^^$T) -> (^T, b32) #optional_ok { 
+list_pop_head_next :: proc (head: ^^$T) -> (^T, bool) #optional_ok { 
     result, ok := list_pop_head_pointer(head, head^.next)
     return result, ok
 }
 // @note next is a ^^T so that we don't read the value unless head^ is not nil.
-list_pop_head :: proc (head: ^^$T, next: ^^T) -> (^T, b32) #optional_ok { 
+list_pop_head :: proc (head: ^^$T, next: ^^T) -> (^T, bool) #optional_ok { 
     result: ^T
-    ok: b32
+    ok:     bool
+    
     if head^ != nil {
         ok = true
         result = head^

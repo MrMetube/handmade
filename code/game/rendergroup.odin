@@ -40,8 +40,8 @@ Bitmap :: struct {
 RenderSettings :: struct {
     dimension:             v2i,
     depth_peel_count_hint: u32,
-    multisampling_hint:    b32,
-    pixelation_hint:       b32,
+    multisampling_hint:    bool,
+    pixelation_hint:       bool,
 }
 
 @(common)
@@ -87,7 +87,7 @@ RenderTransform :: struct {
 }
 
 Transform :: struct {
-    is_upright: b32,
+    is_upright: bool,
     offset: v3,  
     
     // @cleanup scale is never read from or writen to
@@ -426,7 +426,7 @@ push_line_segment_direct :: proc (group: ^RenderGroup, bitmap: ^Bitmap, from_p, 
 
 ////////////////////////////////////////////////
 
-push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis := v2{1, 0}, y_axis := v2{0, 1}) {
+push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment := true, x_axis := v2{1, 0}, y_axis := v2{0, 1}) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     // @todo(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap != nil && bitmap.texture_handle != 0 {
@@ -437,7 +437,7 @@ push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, he
     }
 }
 
-push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment: b32 = true, x_axis2 := v2{1, 0}, y_axis2 := v2{0, 1}) {
+push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transform, height: f32, offset := v3{}, color := v4{1, 1, 1, 1}, use_alignment := true, x_axis2 := v2{1, 0}, y_axis2 := v2{0, 1}) {
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle != 0)
     
@@ -642,7 +642,7 @@ store_color :: proc (color: v4) -> (result: v4) {
 
 ////////////////////////////////////////////////
 
-get_used_bitmap_dim :: proc (group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, use_alignment: b32 = true, x_axis := v2{1,0}, y_axis := v2{0,1}) -> (result: UsedBitmapDim) {
+get_used_bitmap_dim :: proc (group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, use_alignment := true, x_axis := v2{1,0}, y_axis := v2{0,1}) -> (result: UsedBitmapDim) {
     result.size  = v2{bitmap.width_over_height, 1} * height
     result.align = use_alignment ? bitmap.align_percentage * result.size : 0
     result.p.z   = offset.z

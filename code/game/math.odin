@@ -610,43 +610,43 @@ add_offset :: proc (rect: $R/Rectangle($T), offset: T) -> (result: R) {
 
 contains :: proc { rectangle_contains, dimension_contains, rectangle_contains_rectangle, range_contains }
 
-rectangle_contains :: proc (rect: Rectangle($T), point: T) -> (result: b32) {
-    result = true
+rectangle_contains :: proc (rect: Rectangle($T), point: T) -> bool {
+    result := true
     #unroll for i in 0..<len(T) {
         result &&= rect.min[i] <= point[i] && point[i] < rect.max[i] 
     }
     return result
 }
 
-contains_inclusive :: proc (rect: Rectangle($T), point: T) -> (result: b32) {
-    result = true
+contains_inclusive :: proc (rect: Rectangle($T), point: T) -> bool {
+    result := true
     #unroll for i in 0..<len(T) {
         result &&= rect.min[i] <= point[i] && point[i] <= rect.max[i] 
     }
     return result
 }
 
-dimension_contains :: proc (dimension: $V/[$N] $T, point: V) -> (result: b32) {
-    result = true
+dimension_contains :: proc (dimension: $V/[$N] $T, point: V) -> bool {
+    result := true
     #unroll for i in 0..<N {
         result &&= 0 <= point[i] && point[i] < dimension[i] 
     }
     return result
 }
 
-rectangle_contains_rectangle :: proc (a: $R/Rectangle($T), b: R) -> (result: b32) {
+rectangle_contains_rectangle :: proc (a: $R/Rectangle($T), b: R) -> bool {
     u := get_union(a, b)
-    result = a == u
+    result := a == u
     return result
 }
 
-range_contains :: proc (min, t, max: f32) -> (result: b32) {
-    result = min <= t && t <= max
+range_contains :: proc (min, t, max: f32) -> bool {
+    result := min <= t && t <= max
     return result
 }
 
-intersects :: proc (a, b: Rectangle($T)) -> (result: b32) {
-    result = true
+intersects :: proc (a, b: Rectangle($T)) -> bool {
+    result := true
     #unroll for i in 0..<len(T) {
         result &&= !(b.max[i] <= a.min[i] || b.min[i] >= a.max[i])
     }
@@ -724,9 +724,9 @@ get_area_or_zero_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: T) {
 }
 
 has_volume_inclusive :: has_area_inclusive
-has_area_inclusive :: proc (rect: $R/Rectangle($T)) -> (result: b32) {
+has_area_inclusive :: proc (rect: $R/Rectangle($T)) -> bool {
     area := get_area_or_zero_inclusive(rect)
-    result = area != 0
+    result := area != 0
     return result
 }
 

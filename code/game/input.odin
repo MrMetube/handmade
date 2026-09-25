@@ -16,20 +16,20 @@ Input :: struct {
     
     shift_down, 
     alt_down, 
-    control_down: b32,
+    control_down: bool,
 }
 
 @(common) 
 InputButton :: struct {
     half_transition_count: u32,
-    ended_down:            b32,
+    ended_down:            bool,
 }
 
 @(common) 
 InputController :: struct {
     // @todo(viktor): allow outputing vibration
-    is_connected: b32,
-    is_analog:    b32,
+    is_connected: bool,
+    is_analog:    bool,
     
     stick_average: v2,
     
@@ -55,10 +55,10 @@ Mouse_Button :: enum {
     extra2,
 }
 
-was_pressed :: proc (button: InputButton) -> b32 {
+was_pressed :: proc (button: InputButton) -> bool {
     return button.half_transition_count > 1 || button.half_transition_count == 1 && button.ended_down
 }
 
-is_down :: proc (button: InputButton) -> b32 {
+is_down :: proc (button: InputButton) -> bool {
     return button.ended_down
 }

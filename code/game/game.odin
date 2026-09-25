@@ -17,7 +17,7 @@ TimestepPercentage:       f32 = 100
 
 @(common) 
 GameMemory :: struct {
-    reloaded_executable: b32,
+    reloaded_executable: bool,
     
     state:           ^State,
     transient_state: ^TransientState,
@@ -74,8 +74,8 @@ Game_Mode :: union {
 }
 
 TaskWithMemory :: struct {
-    in_use: b32,
-    depends_on_game_mode: b32,
+    in_use: bool,
+    depends_on_game_mode: bool,
     arena: Arena,
     
     memory_flush: TemporaryMemory,
@@ -285,7 +285,7 @@ debug_get_game_assets_work_queue_and_generation_id :: proc (memory: ^GameMemory)
 
 ////////////////////////////////////////////////
 
-begin_task_with_memory :: proc (tran_state: ^TransientState, depends_on_game_mode: b32) -> (result: ^TaskWithMemory) {
+begin_task_with_memory :: proc (tran_state: ^TransientState, depends_on_game_mode: bool) -> (result: ^TaskWithMemory) {
     for &task in tran_state.tasks {
         if !task.in_use {
             result = &task

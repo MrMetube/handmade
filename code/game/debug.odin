@@ -27,7 +27,7 @@ DebugPrintBuffer: [1024] u8
 ////////////////////////////////////////////////
 
 DebugState :: struct {
-    paused: b32,
+    paused: bool,
     
     arena: Arena,
 
@@ -58,7 +58,7 @@ DebugState :: struct {
     selected_count: u32,
     selected_ids:   [64] DebugId,
     
-    alt_ui:               b32,
+    alt_ui:               bool,
     last_mouse_p:         v2,
     interaction:          DebugInteraction,
     hot_interaction:      DebugInteraction,

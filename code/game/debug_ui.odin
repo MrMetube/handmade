@@ -9,12 +9,12 @@ DebugEventLink :: struct {
     element:  ^DebugElement,
 }
 
-sentinel :: proc (from: ^DebugEventLink) -> (result: ^DebugEventLink) {
-    result = cast(^DebugEventLink) &from.first_child
+sentinel :: proc (from: ^DebugEventLink) -> ^DebugEventLink {
+    result := cast(^DebugEventLink) &from.first_child
     return result
 }
-has_children :: proc (link: ^DebugEventLink) -> (result: b32) {
-    result = sentinel(link) != link.first_child
+has_children :: proc (link: ^DebugEventLink) -> bool {
+    result := sentinel(link) != link.first_child
     return result
 }
 
@@ -116,7 +116,7 @@ Layout :: struct {
     spacing:      v2,
     
     no_line_feed:     u32,
-    line_initialized: b32,
+    line_initialized: bool,
 }
 
 LayoutElement :: struct {
@@ -980,7 +980,7 @@ set_ui_element_default_interaction :: proc (element: ^LayoutElement, interaction
     element.interaction = interaction
 }
 
-end_ui_element :: proc (element: ^LayoutElement, use_generic_spacing: b32) {
+end_ui_element :: proc (element: ^LayoutElement, use_generic_spacing: bool) {
     timed_function()
     
     layout := element.layout
@@ -1087,9 +1087,13 @@ basic_text_element :: proc (layout: ^Layout, text: string, interaction: DebugInt
 
 set_value_interaction :: proc (id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
     result.id = id
-    result.kind = .SetValue
+    result.kind   = .SetValue
     result.target = target
-    result.value = value
+    when T == bool {
+        result.value  = cast(b32) value
+    } else {
+        result.value  = value
+    }
     
     return result
 }
@@ -1345,7 +1349,7 @@ add_tree :: proc (debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: 
     return result
 }
 
-get_group_by_hierarchical_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: b32) -> (result: ^DebugEventLink) {
+get_group_by_hierarchical_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: bool) -> (result: ^DebugEventLink) {
     assert(parent != nil)
     result = parent
 

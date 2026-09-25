@@ -5,7 +5,7 @@ import win "core:sys/windows"
 @(private="file")
 game_lib: win.HMODULE
 
-load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: b32, last_write_time: u64) {
+load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: bool, last_write_time: u64) {
     if game_lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
     } else {

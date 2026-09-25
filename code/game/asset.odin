@@ -320,33 +320,37 @@ get_font :: proc (assets: ^Assets, id: FontId, generation_id: AssetGenerationId)
 ////////////////////////////////////////////////
 // Additional Information
 
-is_valid_asset :: proc (id: $T/u32) -> (result: b32) {
-    result = id != 0
+is_valid_asset :: proc (id: $T/u32) -> bool {
+    result := id != 0
     return result
 }
 
-get_bitmap_info :: proc (assets: ^Assets, id: BitmapId) -> (result: ^BitmapInfo) {
+get_bitmap_info :: proc (assets: ^Assets, id: BitmapId) -> ^BitmapInfo {
+    result: ^BitmapInfo
     if is_valid_asset(id) {
         result = &assets.assets[id].info.bitmap
     }
     return result
 }
 
-get_sound_info :: proc (assets: ^Assets, id: SoundId) -> (result: ^SoundInfo) {
+get_sound_info :: proc (assets: ^Assets, id: SoundId) -> ^SoundInfo {
+    result: ^SoundInfo
     if is_valid_asset(id) {
         result = &assets.assets[id].info.sound
     }
     return result
 }
 
-get_font_info :: proc (assets: ^Assets, id: FontId) -> (result: ^FontInfo) {
+get_font_info :: proc (assets: ^Assets, id: FontId) -> ^FontInfo {
+    result: ^FontInfo
     if is_valid_asset(id) {
         result = &assets.assets[id].info.font
     }
     return result
 }
 
-get_next_sound_in_chain :: proc (assets: ^Assets, id: SoundId) -> (result: SoundId) {
+get_next_sound_in_chain :: proc (assets: ^Assets, id: SoundId) -> SoundId {
+    result: SoundId
     switch get_sound_info(assets, id).chain {
     case .None:    result = 0
     case .Advance: result = id + 1
@@ -355,28 +359,28 @@ get_next_sound_in_chain :: proc (assets: ^Assets, id: SoundId) -> (result: Sound
     return result
 }
 
-get_horizontal_advance_for_pair :: proc (font: ^Font, info: ^FontInfo, previous_codepoint, codepoint: rune) -> (result: f32) {
+get_horizontal_advance_for_pair :: proc (font: ^Font, info: ^FontInfo, previous_codepoint, codepoint: rune) -> f32 {
     previous_glyph := get_glyph_from_codepoint(font, info, previous_codepoint)
     glyph          := get_glyph_from_codepoint(font, info, codepoint)
     
-    result = font.advances[previous_glyph * cast(u16) len(font.glyphs) + glyph]
+    result := font.advances[previous_glyph * cast(u16) len(font.glyphs) + glyph]
     
     return result
 }
 
-get_baseline :: proc (info: ^FontInfo) -> (result: f32) {
-    result = info.ascent
+get_baseline :: proc (info: ^FontInfo) -> f32 {
+    result := info.ascent
     return result
 }
 
-get_line_advance :: proc (info: ^FontInfo) -> (result: f32) {
-    result = info.ascent - info.descent + info.linegap
+get_line_advance :: proc (info: ^FontInfo) -> f32 {
+    result := info.ascent - info.descent + info.linegap
     return result
 }
 
-get_bitmap_for_glyph :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: BitmapId) {
+get_bitmap_for_glyph :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> BitmapId {
     glyph := get_glyph_from_codepoint(font, info, codepoint)
-    result = font.glyphs[glyph].bitmap
+    result := font.glyphs[glyph].bitmap
     
     // @todo(viktor): find out why  font.bitmap_id_offset is 0 instead of the 26 we expect
     result += 26
@@ -384,7 +388,8 @@ get_bitmap_for_glyph :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> 
     return result
 }
 
-get_glyph_from_codepoint :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> (result: u16) {
+get_glyph_from_codepoint :: proc (font: ^Font, info: ^FontInfo, codepoint: rune) -> u16 {
+    result: u16
     if codepoint < info.one_past_highest_codepoint {
         result = font.unicode_map[codepoint]
     }
@@ -509,8 +514,8 @@ end_generation :: proc (assets: ^Assets, generation: AssetGenerationId) {
     end_asset_lock(assets)
 }
 
-generation_has_completed :: proc (assets: ^Assets, check: AssetGenerationId) -> (result: b32) {
-    result = true
+generation_has_completed :: proc (assets: ^Assets, check: AssetGenerationId) -> bool {
+    result := true
     
     tran_state :=  assets.tran_state
     for in_flight in tran_state.in_flight_generations[:tran_state.in_flight_generation_count] {
@@ -645,7 +650,8 @@ find_block_for_size :: proc (assets: ^Assets, size: u64) -> (result: ^AssetMemor
     return result
 }
 
-merge_if_possible :: proc (assets: ^Assets, first, second: ^AssetMemoryBlock) -> (result: b32) {
+merge_if_possible :: proc (assets: ^Assets, first, second: ^AssetMemoryBlock) -> bool {
+    result: bool
     if first != &assets.memory_sentinel && second != &assets.memory_sentinel && second != nil {
         if .Used not_in first.flags && .Used not_in second.flags {
             // :PointerArithmetic
@@ -681,8 +687,8 @@ prefetch_bitmap :: proc (assets: ^Assets, id: BitmapId) { load_bitmap(assets, id
 prefetch_font   :: proc (assets: ^Assets, id: FontId)   { load_font(assets,   id, false) }
 
 load_sound  :: proc (assets: ^Assets, id: SoundId)                  { load_asset(assets, .Sound,  cast(u32) id, false)}
-load_bitmap :: proc (assets: ^Assets, id: BitmapId, immediate: b32) { load_asset(assets, .Bitmap, cast(u32) id, immediate)}
-load_font   :: proc (assets: ^Assets, id: FontId,   immediate: b32) { load_asset(assets, .Font,   cast(u32) id, immediate)}
+load_bitmap :: proc (assets: ^Assets, id: BitmapId, immediate: bool) { load_asset(assets, .Bitmap, cast(u32) id, immediate)}
+load_font   :: proc (assets: ^Assets, id: FontId,   immediate: bool) { load_asset(assets, .Font,   cast(u32) id, immediate)}
 
 get_file :: proc (assets: ^Assets, file_index: u32) -> (result: ^AssetFile) {
     result = &assets.files[file_index]
@@ -759,7 +765,7 @@ do_load_asset_work :: proc (data: pmm) {
 }
 
 AssetKind :: enum {Font, Bitmap, Sound}
-load_asset :: proc (assets: ^Assets, kind: AssetKind, id: u32, immediate: b32) {
+load_asset :: proc (assets: ^Assets, kind: AssetKind, id: u32, immediate: bool) {
     immediate := immediate 
     immediate ||= LoadAssetsSingleThreaded
     

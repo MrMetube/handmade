@@ -39,7 +39,7 @@ LowPriorityThreads  :: 2
 
 GlobalPlatformState: PlatformState
 
-GlobalRunning: b32
+GlobalRunning: bool
 GlobalSoundBuffer: ^IDirectSoundBuffer
 
 GlobalPerformanceCounterFrequency: f64
@@ -202,7 +202,7 @@ main :: proc () {
     
     // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
     desired_scheduler_ms :: 1
-    sleep_is_granular: b32 = win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
+    sleep_is_granular := win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
     
     GlobalRunning = true
     
@@ -248,7 +248,7 @@ main :: proc () {
     
     GlobalSoundBuffer->Play(0, 0, DSBPLAY_LOOPING)
     
-    sound_is_valid: b32
+    sound_is_valid: bool
     
     ////////////////////////////////////////////////
     //  Input Setup
@@ -256,7 +256,7 @@ main :: proc () {
     init_xInput()
     
     // @todo(viktor): Monitor xbox controllers for being plugged in after the fact
-    xbox_controller_present: [XUSER_MAX_COUNT] b32 = true
+    xbox_controller_present: [XUSER_MAX_COUNT] bool = true
     
     input: [2] Input
     old_input, new_input := &input[0], &input[1]
@@ -354,7 +354,7 @@ main :: proc () {
             {
                 new_input.delta_time = target_seconds_per_frame
                 
-                is_down :: proc (vk: win.INT) -> b32 {
+                is_down :: proc (vk: win.INT) -> bool {
                     is_down_mask :: transmute(i16) (cast(u16) 1 << 15)
                     return (win.GetKeyState(vk) & is_down_mask) != 0
                 }
@@ -428,7 +428,7 @@ main :: proc () {
                             pad := controller_state.Gamepad
                             
                             process_Xinput_button :: proc (new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
-                                new_state.ended_down = cast(b32) (xInput_button_state & button_bit)
+                                new_state.ended_down = cast(bool) (xInput_button_state & button_bit)
                                 new_state.half_transition_count = (old_state.ended_down == new_state.ended_down) ? 1 : 0
                             }
                             
@@ -1189,7 +1189,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
     return result
 }
 
-process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: b32) {
+process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: bool) {
     if is_down != new_state.ended_down {
         new_state.ended_down             = is_down
         new_state.half_transition_count += 1
@@ -1229,9 +1229,9 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             WasDown :: 1 << 30
             IsUp    :: 1 << 31
             
-            alt_down: b32 = (message.lParam & AltDown) != 0
-            was_down: b32 = (message.lParam & WasDown) != 0
-            is_down:  b32 = (message.lParam & IsUp)    == 0
+            alt_down := (message.lParam & AltDown) != 0
+            was_down := (message.lParam & WasDown) != 0
+            is_down  := (message.lParam & IsUp)    == 0
             
             if was_down == is_down do continue
             switch vk_code {

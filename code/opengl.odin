@@ -23,7 +23,7 @@ GlAttribs := [?] i32 {
 ////////////////////////////////////////////////
 
 OpenGlInfo :: struct {
-    modern_context: b32,
+    modern_context: bool,
     
     vendor, 
     renderer,
@@ -31,7 +31,7 @@ OpenGlInfo :: struct {
     shading_language_version: cstring,
     
     GL_EXT_texture_sRGB,
-    GL_EXT_framebuffer_sRGB: b32,
+    GL_EXT_framebuffer_sRGB: bool,
 }
 
 OpenGL :: struct {
@@ -40,12 +40,12 @@ OpenGL :: struct {
     max_color_attachments:   i32,
     max_samplers_per_shader: i32,
     
-    multisampling:    b32,
+    multisampling:     bool,
     multisample_count: i32,
     depth_peel_count:  u32,
     
     default_texture_format: u32,
-    vertex_buffer_handle: u32,
+    vertex_buffer_handle:   u32,
     blit_buffer: FrameBuffer, // @note(viktor): used when software rendering
     
     // @note(viktor): Dynamic resources take get recreated when settings change:
@@ -69,8 +69,8 @@ LightBuffer :: struct {
     
     // @note(viktor): these are all 3-element textures
     front_emission: u32,
-    back_emission: u32,
-    surface_color: u32,
+    back_emission:  u32,
+    surface_color:  u32,
     normal_xz_and_depth: u32,
 }
 
@@ -103,7 +103,7 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         gl_context = win.wglCreateContextAttribsARB(dc, nil, raw_data(GlAttribs[:]))
     }
     
-    context_is_modern: b32 = true
+    context_is_modern := true
     if gl_context == nil {
         context_is_modern = false
         gl_context = win.wglCreateContext(dc)
@@ -170,7 +170,7 @@ gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, l
     }
 }
 
-load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
+load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: bool) {
     window_class := win.WNDCLASSW {
         lpfnWndProc = win.DefWindowProcW,
         hInstance = auto_cast win.GetModuleHandleW(nil),
@@ -229,7 +229,7 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: b32) {
     return framebuffer_supports_srgb
 }
 
-opengl_get_extensions :: proc (modern_context: b32) -> (result: OpenGlInfo) {
+opengl_get_extensions :: proc (modern_context: bool) -> (result: OpenGlInfo) {
     result.modern_context = modern_context
     
     result.vendor   = gl.GetString(gl.VENDOR)
@@ -265,7 +265,7 @@ opengl_get_extensions :: proc (modern_context: b32) -> (result: OpenGlInfo) {
     return result
 }
 
-set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: b32) {
+set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: bool) {
     suggested_pixel_format_index: i32
     extended_pick: u32
     

@@ -240,7 +240,7 @@ execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State
                     no_push := length_squared(con_ddp) < 0.1
                     cp: f32 = no_push ? 300 : 25
                     
-                    recenter: [3]b32
+                    recenter: [3] bool
                     for i in 0..<3 {
                         if no_push || timer_is_up && square(con_ddp[i]) < 0.1 {
                             recenter[i] = true
@@ -352,7 +352,7 @@ execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State
         }
         
       case .Snake:
-        head_moved: b32
+        head_moved: bool
         for segment, index in brain.snake.segments {
             if segment == nil do break
             

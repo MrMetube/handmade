@@ -42,8 +42,8 @@ DefaultPushParams :: PushParams {
 }
 
 no_clear       :: proc () -> PushParams { return { DefaultAlignment, {} }}
-align_no_clear :: proc (#any_int alignment: umm, clear_to_zero: b32 = false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
-align_clear    :: proc (#any_int alignment: umm, clear_to_zero: b32 = true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+align_no_clear :: proc (#any_int alignment: umm, clear_to_zero: bool = false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+align_clear    :: proc (#any_int alignment: umm, clear_to_zero: bool = true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 
 ////////////////////////////////////////////////
 

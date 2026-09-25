@@ -88,7 +88,7 @@ complete_all_work :: proc (queue: ^WorkQueue) {
     assert(ok)
 }
 
-do_next_work_queue_entry :: proc (queue: ^WorkQueue) -> (should_sleep: b32) {
+do_next_work_queue_entry :: proc (queue: ^WorkQueue) -> (should_sleep: bool) {
     old_next_entry := queue.next_entry_to_read
     
     if old_next_entry != queue.next_entry_to_write {

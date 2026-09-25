@@ -117,7 +117,7 @@ output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^
         
         total_chunks_to_mix := chunk_count
         
-        sound_finished: b32
+        sound_finished: bool
         for total_chunks_to_mix != 0 && !sound_finished {
             if sound != nil {
                 next_sound_in_chain := get_next_sound_in_chain(assets, playing_sound.id)

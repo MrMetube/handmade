@@ -883,7 +883,7 @@ format_union :: proc (ctx: ^Format_Context, union_type: typeid, data: pmm, varia
     }
 }
 
-format_matrix :: proc (ctx: ^Format_Context, matrix_type: typeid, data: pmm, type: ^runtime.Type_Info, #any_int column_count, row_count: umm, is_row_major: b32) {
+format_matrix :: proc (ctx: ^Format_Context, matrix_type: typeid, data: pmm, type: ^runtime.Type_Info, #any_int column_count, row_count: umm, is_row_major: bool) {
     if ctx.max_depth <= 0 do return
     ctx.max_depth -= 1
     defer ctx.max_depth += 1
