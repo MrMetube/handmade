@@ -182,8 +182,8 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
 
 ////////////////////////////////////////////////
 
-begin_entity :: proc (mode: ^World_Mode) -> (result: ^Entity) {
-    result = create_entity(mode.creation_region, allocate_entity_id(mode))
+begin_entity :: proc (mode: ^World_Mode) -> ^Entity {
+    result := create_entity(mode.creation_region, allocate_entity_id(mode))
  
     // @todo(viktor): Worry about this taking a while, once the entities are large (sparse clear?)
     result ^= { id = result.id }
@@ -194,9 +194,9 @@ begin_entity :: proc (mode: ^World_Mode) -> (result: ^Entity) {
     return result
 }
 
-allocate_entity_id :: proc (mode: ^World_Mode) -> (result: EntityId) {
+allocate_entity_id :: proc (mode: ^World_Mode) -> EntityId {
     mode.last_used_entity_id += 1
-    result = mode.last_used_entity_id
+    result := mode.last_used_entity_id
  
     return result
 }
@@ -205,12 +205,12 @@ end_entity :: proc (mode: ^World_Mode, entity: ^Entity, p: WorldPosition) {
     entity.p = world_distance(mode.world, p, mode.creation_region.origin)
 }
 
-add_brain :: proc (mode: ^World_Mode) -> (result: BrainId) {
+add_brain :: proc (mode: ^World_Mode) -> BrainId {
     mode.last_used_entity_id += 1
     for mode.last_used_entity_id < cast(EntityId) ReservedBrainId.FirstFree {
         mode.last_used_entity_id += 1
     }
-    result = cast(BrainId) mode.last_used_entity_id
+    result := cast(BrainId) mode.last_used_entity_id
     
     return result
 }
@@ -394,7 +394,8 @@ StandartRoom :: struct {
     ground: [64][64] TraversableReference,
 }
 
-add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> (result: StandartRoom) {
+add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> StandartRoom {
+    result: StandartRoom
     floor_tile_height :: 0.5
     
     for offset_y in -radius.y ..= radius.y {
@@ -527,8 +528,8 @@ init_hitpoints :: proc (entity: ^Entity, count: u32) {
     }
 }
 
-grounded_collision :: proc (size: v3, offset_z: f32 = 0) -> (result: Rectangle3) {
-    result = rectangle_center_dimension(v3{0, 0, 0.5 * size.z}, size)
+grounded_collision :: proc (size: v3, offset_z: f32 = 0) -> Rectangle3 {
+    result := rectangle_center_dimension(v3{0, 0, 0.5 * size.z}, size)
     result = add_offset(result, v3{0, 0, offset_z})
     return result
 }

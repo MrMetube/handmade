@@ -243,7 +243,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     check_arena(&tran_state.arena)
 }
 
-set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid) -> (result: ^mode) {
+set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid) -> ^mode {
     need_to_wait := false
     for task in tran_state.tasks {
         need_to_wait ||= task.depends_on_game_mode
@@ -254,7 +254,7 @@ set_game_mode :: proc (state: ^State, tran_state: ^TransientState, $mode: typeid
     }
     clear_arena(&state.mode_arena)
     
-    result = push(&state.mode_arena, mode)
+    result := push(&state.mode_arena, mode)
     state.game_mode = result
     return result
 }
@@ -285,7 +285,8 @@ debug_get_game_assets_work_queue_and_generation_id :: proc (memory: ^GameMemory)
 
 ////////////////////////////////////////////////
 
-begin_task_with_memory :: proc (tran_state: ^TransientState, depends_on_game_mode: bool) -> (result: ^TaskWithMemory) {
+begin_task_with_memory :: proc (tran_state: ^TransientState, depends_on_game_mode: bool) -> ^TaskWithMemory {
+    result: ^TaskWithMemory
     for &task in tran_state.tasks {
         if !task.in_use {
             result = &task

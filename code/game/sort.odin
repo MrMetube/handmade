@@ -110,8 +110,8 @@ bubble_sort :: proc (entries: []SortEntry) {
 
 ////////////////////////////////////////////////
 
-sort_key_to_u32 :: proc (sort_key: f32) -> (result: u32) {
-    result = transmute(u32) sort_key
+sort_key_to_u32 :: proc (sort_key: f32) -> u32 {
+    result := transmute(u32) sort_key
 
     SignBit :: 0x8000_0000
     is_negative := (result & SignBit) != 0

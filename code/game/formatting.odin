@@ -12,21 +12,21 @@ import "core:time"
 
 @(init)
 default_views :: proc "contextless" () {
-    Default_Views[time.Duration] = proc (raw: pmm) -> (result: View_Proc_Result) {
+    Default_Views[time.Duration] = proc (raw: pmm) -> View_Proc_Result {
         value := (cast(^time.Duration) raw)^
-        result = view_time_duration(value)
+        result := view_time_duration(value)
         return result
     }
     
-    Default_Views[time.Time] = proc (value: pmm) -> (result: View_Proc_Result) {
+    Default_Views[time.Time] = proc (value: pmm) -> View_Proc_Result {
         value := (cast(^time.Time) value)^
-        result = view_time(value)
+        result := view_time(value)
         return result
     }
     
-    Default_Views[runtime.Source_Code_Location] = proc (value: pmm) -> (result: View_Proc_Result) {
+    Default_Views[runtime.Source_Code_Location] = proc (value: pmm) -> View_Proc_Result {
         value := (cast(^runtime.Source_Code_Location) value)^
-        result = view_source_code_location(value)
+        result := view_source_code_location(value)
         return result
     }
 }
@@ -34,11 +34,11 @@ default_views :: proc "contextless" () {
 ////////////////////////////////////////////////
 
 // @todo(viktor): make precision and width parameters
-view_percentage :: proc (a, b: $N)  -> (result: Temp_Views) { return view_percentage(cast(f64) a / cast(f64) b) }
-view_percentage_ratio :: proc (value: $F) -> (result: Temp_Views) {
+view_percentage :: proc (a, b: $N)  -> Temp_Views { return view_percentage(cast(f64) a / cast(f64) b) }
+view_percentage_ratio :: proc (value: $F) -> Temp_Views {
     begin_temp_views()
     append_temp_view(view_float(value * 100, precision = 2, width = 2))
-    result = end_temp_views()
+    result := end_temp_views()
     return result
 }
 
@@ -83,7 +83,7 @@ time_table := [?] Magnitude (time.Duration) {
     {   0,  "h"},
 }
 
-view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), expand_lower := 0, precision: u8 = 0) -> Temp_Views {
     // @todo(viktor): there needs to be a better way to do this. make this best match strategy explicit
     begin_temp_views()
     
@@ -134,7 +134,7 @@ view_magnitude_raw :: proc (value: $T, table: [] Magnitude (T), expand_lower := 
         append_temp_view(best_magnitude.symbol)
     }
     
-    result = end_temp_views()
+    result := end_temp_views()
     return result
 }
 
@@ -222,7 +222,7 @@ Integer_Amount :: enum {
 }
 
 // @todo(viktor): width
-view_magnitude :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_integer(T) {
+view_magnitude :: proc (value: $T, precision: u8 = 0) -> Temp_Views where intrinsics.type_is_integer(T) {
     @(static, rodata)
     integer_table := [?] Magnitude (T) {
         {1000, ""}, 
@@ -242,11 +242,11 @@ view_magnitude :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) wh
         {1000, "R"}, // ronna
         {   0, "Q"}, // quetta
     }
-    result = view_magnitude_raw(value, integer_table[:], precision = precision)
+    result := view_magnitude_raw(value, integer_table[:], precision = precision)
     return result
 }
 
-view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> (result: Temp_Views) where intrinsics.type_is_float(T) {
+view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> Temp_Views where intrinsics.type_is_float(T) {
     @(static, rodata)
     decimal_table := [?] Magnitude (T) {
         {1000, "q"}, // quecto
@@ -274,24 +274,24 @@ view_magnitude_decimal :: proc (value: $T, precision: u8 = 0) -> (result: Temp_V
         {   0, "Q"}, // quetta
     }
     // @todo(viktor): here a scale parameter would be useful
-    result = view_magnitude_raw(value, decimal_table[Decimal_Amount.unit:], precision = precision)
+    result := view_magnitude_raw(value, decimal_table[Decimal_Amount.unit:], precision = precision)
     return result
 }
 
 ////////////////////////////////////////////////
 
-view_memory_size :: proc (#any_int value: umm, expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+view_memory_size :: proc (#any_int value: umm, expand_lower := 0, precision: u8 = 0) -> Temp_Views {
     return view_magnitude_raw(value, bytes_table[:], expand_lower = expand_lower, precision = precision)
 }
 
-view_time_duration :: proc (value: time.Duration, expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+view_time_duration :: proc (value: time.Duration, expand_lower := 0, precision: u8 = 0) -> Temp_Views {
     return view_magnitude_raw(value, time_table[:], expand_lower = expand_lower, precision = precision)
 }
-view_seconds :: proc (value: f32, expand_lower := 0, precision: u8 = 0) -> (result: Temp_Views) {
+view_seconds :: proc (value: f32, expand_lower := 0, precision: u8 = 0) -> Temp_Views {
     return view_time_duration(cast(time.Duration) (value * cast(f32) time.Second), expand_lower = expand_lower, precision = precision)
 }
 
-view_time :: proc (value: time.Time) -> (result: Temp_Views) {
+view_time :: proc (value: time.Time) -> Temp_Views {
     t := value
     y, mon, d := time.date(t)
     h, min, s := time.clock(t)
@@ -321,13 +321,13 @@ view_time :: proc (value: time.Time) -> (result: Temp_Views) {
     append_temp_view(view_integer((ns),          width = 9))
     append_temp_view(" +0000 UTC")
     
-    result = end_temp_views()
+    result := end_temp_views()
     return result
 }
 
 ////////////////////////////////////////////////
 
-view_source_code_location :: proc (value: runtime.Source_Code_Location, show_procedure := false) -> (result: Temp_Views) {
+view_source_code_location :: proc (value: runtime.Source_Code_Location, show_procedure := false) -> Temp_Views {
     begin_temp_views()
     
     append_temp_view(value.file_path)
@@ -356,6 +356,6 @@ view_source_code_location :: proc (value: runtime.Source_Code_Location, show_pro
         append_temp_view(value.procedure)
     }
     
-    result = end_temp_views()
+    result := end_temp_views()
     return result
 }

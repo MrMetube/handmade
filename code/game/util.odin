@@ -84,10 +84,10 @@ align        :: proc (#any_int alignment: u64, value: $T) -> T    { return (valu
 align_offset :: proc (#any_int alignment: u64, value: $T) -> T    { return (value & (cast(T) alignment-1)) }
 is_aligned   :: proc (#any_int alignment: u64, value: $T) -> bool { return align_offset(alignment, value) == 0 }
 
-safe_truncate :: proc ($R: typeid, value: $T) -> (result: R)
+safe_truncate :: proc ($R: typeid, value: $T) -> R
 where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is_integer(R){
     assert(value <= cast(T) max(R))
-    result = cast(R) value
+    result := cast(R) value
     return result
 }
 
@@ -106,19 +106,22 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4 }
 }
 
 // @todo(viktor): Naming vec_max max_vec
-@(require_results) min_vec :: proc (a,b: [$N] $E) -> (result: [N] E) {
+@(require_results) min_vec :: proc (a,b: [$N] $E) -> [N] E {
+    result: [N] E
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = min(a[i], b[i])
     }
     return result
 }
-@(require_results) max_vec :: proc (a,b: [$N] $E) -> (result: [N] E) {
+@(require_results) max_vec :: proc (a,b: [$N] $E) -> [N] E {
+    result: [N] E
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = max(a[i], b[i])
     }
     return result
 }
-@(require_results) abs_vec :: proc (a: [$N] $E) -> (result: [N] E) {
+@(require_results) abs_vec :: proc (a: [$N] $E) -> [N] E {
+    result: [N] E
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = abs(a[i])
     }
@@ -126,7 +129,8 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4 }
 }
 
 
-vec_max :: proc (a: $T, b: T) -> (result: T) {
+vec_max :: proc (a: $T, b: T) -> T {
+    result: T
     when intrinsics.type_is_simd_vector(T) {
         result = simd.max(a, b)
     } else {
@@ -135,7 +139,8 @@ vec_max :: proc (a: $T, b: T) -> (result: T) {
     return result
 }
 
-vec_min :: proc (a: $T, b: T) -> (result: T) {
+vec_min :: proc (a: $T, b: T) -> T {
+    result: T
     when intrinsics.type_is_simd_vector(T) {
         result = simd.min(a, b)
     } else {
@@ -149,7 +154,8 @@ swap :: proc (a, b: ^$T ) { a^, b^ = b^, a^ }
 unused :: proc (_: $T) {}
 
 
-absolute_difference :: proc (a, b: $T) -> (result: T) {
+absolute_difference :: proc (a, b: $T) -> T {
+    result: T
     when T == v3 {
         result = abs_vec(a - b)
     } else {
@@ -211,14 +217,14 @@ append_into_fixed_array :: proc (array: ^[dynamic; $N] $T) -> ^T {
 }
 
                 
-slice_to_bytes :: proc (value: [] $T) -> (result: [] u8) {
+slice_to_bytes :: proc (value: [] $T) -> [] u8 {
     data := raw_data(value)
     len := size_of(T) * len(value)
-    result = slice_from_parts(u8, data, len)
+    result := slice_from_parts(u8, data, len)
     return result
 }
-to_bytes :: proc (value: ^$T) -> (result: [] u8) {
-    result = (cast([^] u8) value)[:size_of(T)]
+to_bytes :: proc (value: ^$T) -> [] u8 {
+    result := (cast([^] u8) value)[:size_of(T)]
     return result
 }
 

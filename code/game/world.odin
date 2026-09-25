@@ -39,8 +39,8 @@ WorldPosition :: struct {
 
 ////////////////////////////////////////////////
 
-create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ World) {
-    result = push(arena, World)
+create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> ^World {
+    result := push(arena, World)
     result.chunk_dim_meters = chunk_dim_in_meters
     result.arena = arena
     result.game_entropy = seed_random_series(123)
@@ -51,7 +51,7 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> (result: ^ Worl
     return result
 }
 
-chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i, additional_offset: v3 = {}) -> (result: WorldPosition) {
+chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i, additional_offset: v3 = {}) -> WorldPosition {
     world := mode.world
     tile_size_in_meters  := mode.tile_size_in_meters
     
@@ -59,6 +59,7 @@ chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i, additi
     
     offset := v3{tile_size_in_meters, tile_size_in_meters, tile_depth_in_meters} * (cast(v3) tile_p + {0.5, 0.5, 0})
     offset.z -= 0.4 * tile_depth_in_meters
+    result: WorldPosition
     result = map_into_worldspace(world, result, additional_offset + offset)
     
     assert(is_canonical(world, result.offset))
@@ -404,16 +405,16 @@ map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = 
     return result
 }
 
-get_chunk_bounds :: proc (world: ^World, chunk_p: v3i) -> (result: Rectangle3) {
+get_chunk_bounds :: proc (world: ^World, chunk_p: v3i) -> Rectangle3 {
     chunk_center := cast(v3) chunk_p * world.chunk_dim_meters
-    result = rectangle_center_dimension(chunk_center, world.chunk_dim_meters)
+    result := rectangle_center_dimension(chunk_center, world.chunk_dim_meters)
     return result
 }
 
-world_distance :: proc (world: ^World, a, b: WorldPosition) -> (result: v3) {
+world_distance :: proc (world: ^World, a, b: WorldPosition) -> v3 {
     chunk_delta  := cast(v3) a.chunk - cast(v3) b.chunk
     offset_delta := a.offset - b.offset
-    result = chunk_delta * world.chunk_dim_meters
+    result := chunk_delta * world.chunk_dim_meters
     result += offset_delta
     return result
 }
@@ -428,11 +429,11 @@ is_canonical :: proc (world: ^World, offset: v3) -> bool {
 
 ////////////////////////////////////////////////
 
-get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> (result: ^Chunk) {
+get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> ^Chunk {
     chunk_p := point.chunk
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
-    result = next_pointer_of_the_chunks_previous_chunk^
+    result := next_pointer_of_the_chunks_previous_chunk^
     
     if arena != nil && result == nil {
         assert(arena == world.chunk_freelist.arena, "When I started using the freelist, all callers used world.arena, so its hardcoded as that in the freelist")
@@ -447,7 +448,7 @@ get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> (resul
     return result
 }
 
-get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
+get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> ^^Chunk {
     ChunkSafeMargin :: 256
     
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -463,7 +464,7 @@ get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
     
     assert(hash_slot < len(world.chunk_hash))
     
-    result = &world.chunk_hash[hash_slot]
+    result := &world.chunk_hash[hash_slot]
     for result^ != nil && chunk_p != (result^).chunk {
         result = &(result^).next
     }
@@ -473,11 +474,11 @@ get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> (result: ^^Chunk) {
 
 ////////////////////////////////////////////////
 
-extract_chunk :: proc (world: ^World, chunk_p: v3i) -> (result: ^Chunk) {
+extract_chunk :: proc (world: ^World, chunk_p: v3i) -> ^Chunk {
     begin_ticket_mutex(&world.change_ticket)
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)
-    result = next_pointer_of_the_chunks_previous_chunk^
+    result := next_pointer_of_the_chunks_previous_chunk^
     
     if result != nil {
         next_pointer_of_the_chunks_previous_chunk ^= result.next
@@ -500,20 +501,20 @@ add_to_free_list :: proc (world: ^World, chunk: ^Chunk, first_block, last_block:
     end_ticket_mutex(&world.change_ticket)
 }
 
-use_space_in_world :: proc (world: ^World, pack_size: i64, p: WorldPosition) -> (result: ^Entity) {
+use_space_in_world :: proc (world: ^World, pack_size: i64, p: WorldPosition) -> ^Entity {
     begin_ticket_mutex(&world.change_ticket)
     
     chunk := get_chunk(world.arena, world, p)
     assert(chunk != nil)
     
-    result = use_space_in_chunk(world, pack_size, chunk)
+    result := use_space_in_chunk(world, pack_size, chunk)
     
     end_ticket_mutex(&world.change_ticket)
     
     return result
 }
 
-use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (result: ^Entity) {
+use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> ^Entity {
     assert(chunk != nil)
     
     if !block_has_room(chunk.first_block, pack_size) {
@@ -530,7 +531,7 @@ use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> (re
     // :PointerArithmetic
     count := len(block.entity_data)
     resize(&block.entity_data, count + cast(int) pack_size)
-    result = cast(^Entity) &block.entity_data[count]
+    result := cast(^Entity) &block.entity_data[count]
     block.entity_count += 1
     
     return result
@@ -542,7 +543,8 @@ clear_world_entity_block :: proc (block: ^WorldEntityBlock) {
     block.next = nil
 }
 
-block_has_room :: proc (block: ^WorldEntityBlock, size: i64) -> (result: bool) {
+block_has_room :: proc (block: ^WorldEntityBlock, size: i64) -> bool {
+    result: bool
     if block != nil {
         result = len(block.entity_data) + cast(int) size < cap(block.entity_data)
     }

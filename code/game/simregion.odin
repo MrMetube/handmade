@@ -208,8 +208,8 @@ pack_traversable_reference :: proc (region: ^SimRegion, ref: ^TraversableReferen
 
 ////////////////////////////////////////////////
 
-create_entity :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity) {
-    result = &region.null_entity
+create_entity :: proc (region: ^SimRegion, id: EntityId) -> ^Entity {
+    result := &region.null_entity
     if len(region.entities) < cap(region.entities) {
         result = append_into(&region.entities)
     } else {
@@ -230,9 +230,9 @@ mark_for_deletion :: proc (entity: ^Entity) {
     }
 }
 
-get_entity_by_id :: proc (region: ^SimRegion, id: EntityId) -> (result: ^Entity) {
+get_entity_by_id :: proc (region: ^SimRegion, id: EntityId) -> ^Entity {
     entry := get_entity_hash_from_id(region, id)
-    result = entry != nil ? entry.pointer : nil
+    result := entry != nil ? entry.pointer : nil
     return result
 }
 
@@ -318,16 +318,17 @@ entity_overlaps_entity :: proc (a, b: ^Entity) -> bool {
 
 ////////////////////////////////////////////////
 
-get_brain_hash_from_id :: proc (region: ^SimRegion, id: BrainId) -> (result: ^BrainHash) {
-    result = get_hash_from_id(region.brain_hash[:], region.brain_hash_occupancy[:], cast(u32) id)
+get_brain_hash_from_id :: proc (region: ^SimRegion, id: BrainId) -> ^BrainHash {
+    result := get_hash_from_id(region.brain_hash[:], region.brain_hash_occupancy[:], cast(u32) id)
     return result
 }
-get_entity_hash_from_id :: proc (region: ^SimRegion, id: EntityId) -> (result: ^EntityHash) {
-    result = get_hash_from_id(region.entity_hash[:], region.entity_hash_occupancy[:], cast(u32) id)
+get_entity_hash_from_id :: proc (region: ^SimRegion, id: EntityId) -> ^EntityHash {
+    result := get_hash_from_id(region.entity_hash[:], region.entity_hash_occupancy[:], cast(u32) id)
     return result
 }
 
-get_hash_from_id :: proc (hashes: [] $T, occupancy: [] u64, id: u32) -> (result: ^T) {
+get_hash_from_id :: proc (hashes: [] $T, occupancy: [] u64, id: u32) -> ^T {
+    result: ^T
     assert(id != 0)
     
     hash := cast(u32) id
@@ -369,9 +370,9 @@ add_entity_to_hash :: proc (region: ^SimRegion, entity: ^Entity) {
     assert(test.pointer == entity)
 }
 
-get_or_add_brain :: proc (region: ^SimRegion, id: BrainId, kind: BrainKind) -> (result: ^Brain) {
+get_or_add_brain :: proc (region: ^SimRegion, id: BrainId, kind: BrainKind) -> ^Brain {
     entry := get_brain_hash_from_id(region, id)
-    result = entry.pointer
+    result := entry.pointer
     
     if result == nil {
         // :PointerArithmetic
@@ -417,10 +418,10 @@ mark_bit :: proc (array: [] u64, #any_int index: u64) {
     array[occ_index] |= (1 << bit_index)
 }
 
-is_empty :: proc (array: [] u64, #any_int index: u64) -> (result: bool) {
+is_empty :: proc (array: [] u64, #any_int index: u64) -> bool {
     occ_index := index / 64
     bit_index := index % 64
-    result = (array[occ_index] & (1 << bit_index)) == 0
+    result := (array[occ_index] & (1 << bit_index)) == 0
     return result
 }
 
@@ -454,10 +455,11 @@ load_traversable_reference :: proc (region: ^SimRegion, ref: ^TraversableReferen
 ////////////////////////////////////////////////
 
 get_traversable :: proc { get_traversable_ref, get_traversable_raw }
-get_traversable_ref :: proc (ref: TraversableReference) -> (result: ^TraversablePoint) {
+get_traversable_ref :: proc (ref: TraversableReference) -> ^TraversablePoint {
     return get_traversable_raw(ref.entity.pointer, ref.index)
 }
-get_traversable_raw :: proc (entity: ^Entity, index: i64) -> (result: ^TraversablePoint) {
+get_traversable_raw :: proc (entity: ^Entity, index: i64) -> ^TraversablePoint {
+    result: ^TraversablePoint
     if entity != nil {
         result = &entity.traversables[index]
     }
@@ -465,10 +467,11 @@ get_traversable_raw :: proc (entity: ^Entity, index: i64) -> (result: ^Traversab
 }
 
 get_sim_space_traversable :: proc { get_sim_space_traversable_ref, get_sim_space_traversable_raw }
-get_sim_space_traversable_ref :: proc (ref: TraversableReference) -> (result: TraversablePoint) {
+get_sim_space_traversable_ref :: proc (ref: TraversableReference) -> TraversablePoint {
     return get_sim_space_traversable_raw(ref.entity.pointer, ref.index)
 }
-get_sim_space_traversable_raw :: proc (entity: ^Entity, index: i64) -> (result: TraversablePoint) {
+get_sim_space_traversable_raw :: proc (entity: ^Entity, index: i64) -> TraversablePoint {
+    result: TraversablePoint
     if entity != nil {
         point := get_traversable(entity, index)
         if point != nil {

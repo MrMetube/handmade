@@ -23,19 +23,19 @@ print_to_console :: proc (format: string, args: ..any, flags: Format_Context_Fla
 
 // @todo(viktor): string and cstring is a bunch of @copypasta code, that sucks especially because all the format code changes is if it appends a zero at the end
 @(printlike)
-print_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: string) {
+print_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> string {
     s := format_string(buffer = console_buffer[:], format = format, args = args, flags = flags)
     buffer := make(allocator, u8, len(s), no_clear())
     copy(buffer, s)
-    result = transmute(string) buffer
+    result := transmute(string) buffer
     return result
 }
 @(printlike)
-cprint_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> (result: cstring) {
+cprint_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, flags: Format_Context_Flags = {}) -> cstring {
     s, length := format_cstring(buffer = console_buffer[:], format = format, args = args, flags = flags)
     buffer := make(allocator, u8, length, no_clear())
     copy(buffer, slice_from_parts(u8, cast(^u8) s, length))
-    result = cast(cstring) raw_data(buffer)
+    result := cast(cstring) raw_data(buffer)
     return result
 }
 
@@ -43,10 +43,10 @@ cprint_to_allocator :: proc (allocator: Allocator, format: string, args: ..any, 
 
 print  :: print_to_console
 aprint :: print_to_allocator
-@(printlike) tprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> (result: string)  { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
-@(printlike) sprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> (result: string)  { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
-@(printlike) ctprint :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> (result: cstring) { return cprint_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
-@(printlike) cprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> (result: cstring) { return cprint_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) tprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> string  { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) sprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> string  { return print_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) ctprint :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.temp_allocator) -> cstring { return cprint_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
+@(printlike) cprint  :: proc (format: string, args: ..any, flags: Format_Context_Flags = {}, allocator := context.allocator)      -> cstring { return cprint_to_allocator(allocator = allocator, format = format, args = args, flags = flags) }
 
 ////////////////////////////////////////////////
 
@@ -169,7 +169,8 @@ view_float :: proc (
     flags: Format_Number_Flags = {}, positive_sign: Format_Number_Sign = .Never, 
     precision: Maybe(u8) = nil, kind: Format_Float_Kind = .Shortest,
     size := 0,
-) -> (result: View) {
+) -> View {
+    result: View
     type_info := type_info_of(value.id)
     core_info := runtime.type_info_core(type_info)
     _ = core_info.variant.(runtime.Type_Info_Float)
@@ -205,7 +206,8 @@ view_integer :: proc (
     flags: Format_Number_Flags = {}, positive_sign: Format_Number_Sign = .Never, 
     base: u8 = 10,
     size := 0,
-) -> (result: View) {
+) -> View {
+    result: View
     type_info := type_info_of(value.id)
     core_info := runtime.type_info_core(type_info)
     int_info  := core_info.variant.(runtime.Type_Info_Integer)
@@ -236,7 +238,7 @@ view_pointer :: proc (
     padding: u8 = 48,
     digits_per_comma: u8 = 4,
     comma_string: string = "_",
-) -> (result: View_Pointer) {
+) -> View_Pointer {
     unimplemented()
 }
 
@@ -251,7 +253,7 @@ A list of currently-supported views are below:
  - `raw(expr)`: Ignores all views used in `expr`, including those automatically applied by type views.
 */
 
-view_raw :: proc (value: $T) -> (result: View) {}
+view_raw :: proc (value: $T) -> View {}
 
 // - `sequence(expr)`: Interprets `expr` as an integer, encoding how many sub-expressions `expr` should expand to produce. This can be used in combination with the `table` view to easily generate tables, indexing amongst many arrays.
 view_sequence :: proc (value: $T) { unimplemented() }
@@ -260,7 +262,7 @@ view_rows :: proc (value: $T) { unimplemented() }
 // - `omit(expr, ...)`: Interpreting all post-`expr` arguments as member names, expands to show all members of `expr`, except those with matching names.
 view_omit :: proc (value: $T) { unimplemented() }
 
-view_array :: proc (value: ^$T, count: $N) -> (result: [] T) {
+view_array :: proc (value: ^$T, count: $N) -> [] T {
     return (cast([^]T) value)[:count]
 }
 
@@ -327,11 +329,11 @@ append_temp_view :: proc (value: any) {
     assert(temp_view_next_index < len(temp_view_buffer))
 }
 
-end_temp_views :: proc () -> (result: Temp_Views) {
+end_temp_views :: proc () -> Temp_Views {
     assert(temp_view_inside_block)
     temp_view_inside_block = false
     
-    result = cast(Temp_Views) temp_view_buffer[temp_view_start_index : temp_view_next_index]
+    result := cast(Temp_Views) temp_view_buffer[temp_view_start_index : temp_view_next_index]
     return result
 }
 
@@ -346,7 +348,7 @@ format_cstring :: proc (buffer: []u8, format: string, args: ..any, flags := Form
 }
 
 @(printlike)
-format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Format_Context_Flags{}) -> (result: string) {
+format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Format_Context_Flags{}) -> string {
     ctx := Format_Context { 
         dest  = make_array_with_slice(buffer),
         flags = flags,

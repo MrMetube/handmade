@@ -349,7 +349,8 @@ debug_init :: proc (dimension: v2i) -> (debug: ^DebugState) {
     return debug
 }
 
-get_debug_state :: proc () -> (result: ^DebugState) {
+get_debug_state :: proc () -> ^DebugState {
+    result: ^DebugState
     if GlobalDebugMemory != nil {
         result = auto_cast GlobalDebugMemory.debug_state
     }
@@ -495,8 +496,9 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
     }
 }
 
-store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugElement) -> (result: ^DebugStoredEvent) {
-    if debug.root_group == nil do return
+store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugElement) -> ^DebugStoredEvent {
+    result: ^DebugStoredEvent
+    if debug.root_group == nil do return result
     
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
     collation_frame.stored_event_count += 1
@@ -552,8 +554,9 @@ free_frame :: proc (debug: ^DebugState, frame_ordinal: i32) {
     frame ^= {}
 }
 
-get_hash_from_guid :: proc (guid: DebugGUID) -> (result: u32) {
+get_hash_from_guid :: proc (guid: DebugGUID) -> u32 {
     // @todo(viktor): BETTER HASH FUNCTION
+    result: u32 = 0
     for i in 0..<len(guid.name)      do result = result * 65599 + cast(u32) guid.name[i]
     for i in 0..<len(guid.file_path) do result = result * 65599 + cast(u32) guid.file_path[i]
     for i in 0..<len(guid.procedure) do result = result * 65599 + cast(u32) guid.procedure[i]
@@ -563,18 +566,20 @@ get_hash_from_guid :: proc (guid: DebugGUID) -> (result: u32) {
 }
 
 get_element_from_guid :: proc { get_element_from_guid_by_hash, get_element_from_guid_by_parent, get_element_from_guid_raw }
-get_element_from_guid_raw :: proc (debug: ^DebugState, guid: DebugGUID) -> (result: ^DebugElement) {
+get_element_from_guid_raw :: proc (debug: ^DebugState, guid: DebugGUID) -> ^DebugElement {
+    result: ^DebugElement
     hash_value := get_hash_from_guid(guid)
     if hash_value != 0 {
         result = get_element_from_guid_by_hash(debug, guid, hash_value)
     }
     return result
 }
-get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash_value: u32) -> (result: ^DebugElement) {
+get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash_value: u32) -> ^DebugElement {
     assert(hash_value != 0)
-
+    
     index := hash_value % len(debug.element_hash)
     
+    result: ^DebugElement
     for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
         guids_are_equal := true
         
@@ -596,7 +601,8 @@ get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash
 ElementOp :: enum { CreateHierarchy, AddToParent }
 ElementOps :: bit_set[ElementOp]
 
-get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, parent: ^DebugEventLink, ops: ElementOps) -> (result: ^DebugElement) {
+get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, parent: ^DebugEventLink, ops: ElementOps) -> ^DebugElement {
+    result: ^DebugElement
     if event.guid != {} {   
         hash_value := get_hash_from_guid(event.guid)
         
@@ -647,8 +653,8 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
     return result
 }
 
-alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> (result: ^DebugOpenBlock) {
-    result = freelist_push(&thread.freelist, &thread.freelist.first_free.next_free, no_clear())
+alloc_open_block :: proc (debug: ^DebugState, thread: ^DebugThread, frame_index: i32, begin_clock: i64, parent: ^^DebugOpenBlock, element: ^DebugElement) -> ^DebugOpenBlock {
+    result := freelist_push(&thread.freelist, &thread.freelist.first_free.next_free, no_clear())
     
     result^ = {
         frame_index = frame_index,

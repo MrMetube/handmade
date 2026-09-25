@@ -47,13 +47,13 @@ align_clear    :: proc (#any_int alignment: umm, clear_to_zero: bool = true ) ->
 
 ////////////////////////////////////////////////
 
-bootstrap_arena :: proc ($type_with_arena: typeid, $arena_member: string, minimum_block_size: umm = 0, params := DefaultPushParams, allocation_flags := Platform_Allocation_Flags {} ) -> (result: ^type_with_arena){
+bootstrap_arena :: proc ($type_with_arena: typeid, $arena_member: string, minimum_block_size: umm = 0, params := DefaultPushParams, allocation_flags := Platform_Allocation_Flags {} ) -> ^type_with_arena{
     boot_strap := Arena { 
         minimum_block_size = minimum_block_size, 
         allocation_flags = allocation_flags,
     }
     
-    result = push(&boot_strap, type_with_arena, params = params)
+    result := push(&boot_strap, type_with_arena, params = params)
     bytes := slice_from_parts(u8, result, size_of(type_with_arena))
     
     offset := offset_of_by_string(type_with_arena, arena_member)
@@ -84,23 +84,23 @@ free_last_block :: proc (arena: ^Arena) {
 
 push :: proc { push_slice, push_struct, push_size, copy_string }
 @(require_results)
-push_slice :: proc (arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> (result: [] Element) {
+push_slice :: proc (arena: ^Arena, $Element: typeid, #any_int count: u64, params := DefaultPushParams) -> [] Element {
     data := push_size(arena, size_of(Element) * count, align_of(Element), params)
     
-    result = slice_from_parts(Element, data, count)
+    result := slice_from_parts(Element, data, count)
     return result
 }
 
 @(require_results)
-push_struct :: proc (arena: ^Arena, $T: typeid, params := DefaultPushParams) -> (result: ^T) {
+push_struct :: proc (arena: ^Arena, $T: typeid, params := DefaultPushParams) -> ^T {
     data := push_size(arena, size_of(T), align_of(T), params)
     
-    result = cast(^T) data
+    result := cast(^T) data
     return result
 }
 
 @(require_results)
-push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alignment: umm, params := DefaultPushParams) -> (result: pmm) {
+push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alignment: umm, params := DefaultPushParams) -> pmm {
     params := params
     if params.alignment == DefaultAlignment {
         params.alignment = default_alignment
@@ -132,7 +132,7 @@ push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alig
     assert(size >= size_init)
     
     alignment_offset = arena_alignment_offset(arena, params.alignment)
-    result = &arena.current_block.storage[arena.current_block.used + alignment_offset]
+    result := &arena.current_block.storage[arena.current_block.used + alignment_offset]
     arena.current_block.used += size
     
     
@@ -143,13 +143,14 @@ push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alig
     return result
 }
 
-arena_alignment_offset :: proc (arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> (result: umm) {
+arena_alignment_offset :: proc (arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> umm {
     if arena.current_block.storage == nil do return 0
     if arena.current_block.used == auto_cast len(arena.current_block.storage) do return 0
     
     pointer := transmute(umm) &arena.current_block.storage[arena.current_block.used]
 
     alignment_mask := alignment - 1
+    result: umm
     if pointer & alignment_mask != 0 {
         result = alignment - (pointer & alignment_mask) 
     }
@@ -168,22 +169,23 @@ zero_slice :: proc (data: []$T){
 // @note(viktor): This is generally not for production use, this is probably
 // only really something we need during testing, but who knows
 @(require_results)
-copy_string :: proc (arena: ^Arena, s: string) -> (result: string) {
+copy_string :: proc (arena: ^Arena, s: string) -> string {
     // @todo(viktor): handle zero sized allocations better in push_size
-    if s == "" do return
+    if s == "" do return ""
     buffer := push_slice(arena, u8, len(s), no_clear())
     bytes  := transmute([]u8) s
     
     copy_slice(buffer, bytes)
     
-    result = transmute(string) buffer
+    result := transmute(string) buffer
     
     return result
 }
 
 ////////////////////////////////////////////////
 
-begin_temporary_memory :: proc (arena: ^Arena) -> (result: TemporaryMemory) {
+begin_temporary_memory :: proc (arena: ^Arena) -> TemporaryMemory {
+    result: TemporaryMemory
     result.arena = arena
     result.block = arena.current_block
     if result.block != nil {

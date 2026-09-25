@@ -56,6 +56,6 @@ end_ticket_mutex :: proc (mutex: ^TicketMutex) {
     atomic_add(&mutex.serving, 1)
 }
 
-spin_hint :: proc () {
+spin_hint :: #force_inline proc () {
     asm () [#volatile] { pause } ()
 }

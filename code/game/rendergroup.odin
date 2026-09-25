@@ -197,7 +197,7 @@ default_upright_transform :: proc () -> Transform { return { scale = 1, is_uprig
 
 ////////////////////////////////////////////////
 
-push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
+push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
     reset_quads := true
     type: RenderEntryType
     switch typeid_of(T) {
@@ -211,7 +211,7 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     
     header := render_group_push_size(group, RenderEntryType)
     header ^= type
-    result = render_group_push_size(group, T)
+    result := render_group_push_size(group, T)
     
     if reset_quads {
         group.current_quads = nil
@@ -220,8 +220,8 @@ push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
     return result
 }
 
-render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> (result: ^T) {
-    result = write_reserve(&group.commands.push_buffer, T)
+render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
+    result := write_reserve(&group.commands.push_buffer, T)
     return result
 }
 
@@ -232,7 +232,7 @@ push_setup :: proc (group: ^RenderGroup, setup: RenderSetup) {
     group.current_quads = nil
 }
 
-get_screen_point :: proc (group: ^RenderGroup, transform: Transform, world_p: v3) -> (result: v2) {
+get_screen_point :: proc (group: ^RenderGroup, transform: Transform, world_p: v3) -> v2 {
     p := multiply(group.last_setup.projection, world_p + transform.offset)
     
     p.xy = group.screen_size * 0.5 * (1 + p.xy)
@@ -240,11 +240,11 @@ get_screen_point :: proc (group: ^RenderGroup, transform: Transform, world_p: v3
     return p.xy
 }
 
-get_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> (result: Rectangle2i) {
+get_clip_rect_with_transform :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform) -> Rectangle2i {
     min_corner := get_screen_point(group, transform, V3(rect.min, 0))
     max_corner := get_screen_point(group, transform, V3(rect.max, 0))
     
-    result = round_outer(Rectangle2{min_corner, max_corner})
+    result := round_outer(Rectangle2{min_corner, max_corner})
     
     return result
 }
@@ -379,7 +379,7 @@ pack_uv :: proc (uv: v2) -> Packed_UV {
     return result
 }
 
-get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {
+get_current_quads :: proc (group: ^RenderGroup) -> ^Textured_Quads {
     if group.current_quads == nil {
         group.current_quads = push_render_element(group, Textured_Quads)
         group.current_quads ^= {
@@ -388,7 +388,7 @@ get_current_quads :: proc (group: ^RenderGroup) -> (result: ^Textured_Quads) {
         }        
     }
     
-    result = group.current_quads
+    result := group.current_quads
     return result
 }
 
@@ -634,15 +634,16 @@ push_volume_outline :: proc (group: ^RenderGroup, rec: Rectangle3, transform: Tr
 
 ////////////////////////////////////////////////
 
-store_color :: proc (color: v4) -> (result: v4) {
-    result = color
+store_color :: proc (color: v4) -> v4 {
+    result := color
     result.rgb *= result.a
     return result
 }
 
 ////////////////////////////////////////////////
 
-get_used_bitmap_dim :: proc (group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, use_alignment := true, x_axis := v2{1,0}, y_axis := v2{0,1}) -> (result: UsedBitmapDim) {
+get_used_bitmap_dim :: proc (group: ^RenderGroup, bitmap: Bitmap, transform: Transform, height: f32, offset := v3{}, use_alignment := true, x_axis := v2{1,0}, y_axis := v2{0,1}) -> UsedBitmapDim {
+    result: UsedBitmapDim
     result.size  = v2{bitmap.width_over_height, 1} * height
     result.align = use_alignment ? bitmap.align_percentage * result.size : 0
     result.p.z   = offset.z
@@ -653,12 +654,12 @@ get_used_bitmap_dim :: proc (group: ^RenderGroup, bitmap: Bitmap, transform: Tra
     return result
 }
 
-project_with_transform :: proc (transform: Transform, p: v3) -> (result: v3) {
-    result = p + transform.offset
+project_with_transform :: proc (transform: Transform, p: v3) -> v3 {
+    result := p + transform.offset
     return result
 }
 
-unproject_with_transform :: proc (group: ^RenderGroup, transform: RenderTransform, pixel_p: v2, world_z: f32) -> (result: v3) {
+unproject_with_transform :: proc (group: ^RenderGroup, transform: RenderTransform, pixel_p: v2, world_z: f32) -> v3 {
     probe := V4(transform.p - world_z * transform.z, 1)
     probe = multiply(transform.projection.forward, probe)
     clip_z := probe.z / probe.w
@@ -669,29 +670,29 @@ unproject_with_transform :: proc (group: ^RenderGroup, transform: RenderTransfor
     clip_p.xy *= 2 / group.screen_size
     clip_p.z = clip_z
     
-    result = multiply(transform.projection.backward, clip_p)
+    result := multiply(transform.projection.backward, clip_p)
     
     return result
 }
 
-get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_camera: f32) -> (result: Rectangle3) {
+get_camera_rectangle_at_distance :: proc (group: ^RenderGroup, distance_from_camera: f32) -> Rectangle3 {
     min := unproject_with_transform(group, group.game_cam, 0, distance_from_camera)
     max := unproject_with_transform(group, group.game_cam, group.screen_size, distance_from_camera)
     
-    result = rectangle_min_max(min, max)
+    result := rectangle_min_max(min, max)
     
     return result
 }
 
 // @cleanup
-get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> (result: Rectangle3) {
+get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> Rectangle3 {
     z: f32 = 8
-    result = get_camera_rectangle_at_distance(group, z)
+    result := get_camera_rectangle_at_distance(group, z)
     return result
 }
 
 
-fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meters: f32, half_dim_in_meters: $V) -> (result: V) {
-    result = focal_length * (half_dim_in_meters / monitor_half_dim_in_meters)
+fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meters: f32, half_dim_in_meters: $V) -> V {
+    result := focal_length * (half_dim_in_meters / monitor_half_dim_in_meters)
     return result
 }

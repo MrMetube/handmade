@@ -570,7 +570,8 @@ draw_tooltips :: proc (debug: ^DebugState) {
     clear(&debug.tooltips)
 }
 
-get_total_clocks :: proc (frame: ^DebugElementFrame) -> (result: i64) {
+get_total_clocks :: proc (frame: ^DebugElementFrame) -> i64 {
+    result: i64
     for event := frame.events.last; event != nil; event = event.next {
         result += event.node.duration
     }
@@ -936,21 +937,21 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
     }
 }
 
-debug_get_element_color :: proc (element: ^DebugElement) -> (result: v4) {
+debug_get_element_color :: proc (element: ^DebugElement) -> v4 {
     name := element.guid.name
     color_hash := seed_random_series_manual(len(name) + cast(int) name[0])
     for _ in 0..<len(name) do _ = next_random_u32(&color_hash)
     
     hash := next_random_u32(&color_hash)
     color_wheel := color_wheel
-    result = color_wheel[hash % len(color_wheel)]
+    result := color_wheel[hash % len(color_wheel)]
     return result
 }
 
 ///////////////////////////////////////////////
 
-begin_layout :: proc (debug: ^DebugState, p: v2, mouse_p: v2, dt: f32) -> (result: Layout) {
-    result = {
+begin_layout :: proc (debug: ^DebugState, p: v2, mouse_p: v2, dt: f32) -> Layout {
+    result := Layout {
         debug   = debug,
         mouse_p = mouse_p,
         dt      = dt,
@@ -968,7 +969,8 @@ end_layout :: proc (layout: ^Layout) {
     
 }
 
-begin_ui_element_rectangle :: proc (layout: ^Layout, size: ^v2) -> (result: LayoutElement) {
+begin_ui_element_rectangle :: proc (layout: ^Layout, size: ^v2) -> LayoutElement {
+    result: LayoutElement
     result.layout  = layout
     result.size    = size
     
@@ -1085,7 +1087,8 @@ basic_text_element :: proc (layout: ^Layout, text: string, interaction: DebugInt
 
 ////////////////////////////////////////////////
 
-set_value_interaction :: proc (id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
+set_value_interaction :: proc (id: DebugId, target: ^$T, value: T) -> DebugInteraction {
+    result: DebugInteraction
     result.id = id
     result.kind   = .SetValue
     result.target = target
@@ -1098,7 +1101,8 @@ set_value_interaction :: proc (id: DebugId, target: ^$T, value: T) -> (result: D
     return result
 }
 
-set_value_continously_interaction :: proc (id: DebugId, target: ^$T, value: T) -> (result: DebugInteraction) {
+set_value_continously_interaction :: proc (id: DebugId, target: ^$T, value: T) -> DebugInteraction {
+    result: DebugInteraction
     result.id = id
     result.kind = .SetValueContinously
     result.target = target
@@ -1107,7 +1111,8 @@ set_value_continously_interaction :: proc (id: DebugId, target: ^$T, value: T) -
     return result
 }
 
-interaction_is_hot :: proc (debug: ^DebugState, interaction: DebugInteraction) -> (result: b32) {
+interaction_is_hot :: proc (debug: ^DebugState, interaction: DebugInteraction) -> b32 {
+    result: b32
     if interaction.kind != .None {
         result = debug.hot_interaction == interaction
     }
@@ -1337,8 +1342,8 @@ end_click_interaction :: proc (debug: ^DebugState, input: Input) {
 
 ////////////////////////////////////////////////
 
-add_tree :: proc (debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: ^DebugTree) {
-    result = push(&debug.arena, DebugTree, no_clear())
+add_tree :: proc (debug: ^DebugState, root: ^DebugEventLink, p: v2) -> ^DebugTree {
+    result := push(&debug.arena, DebugTree, no_clear())
     result ^= {
         root = root,
         p = p,
@@ -1349,9 +1354,9 @@ add_tree :: proc (debug: ^DebugState, root: ^DebugEventLink, p: v2) -> (result: 
     return result
 }
 
-get_group_by_hierarchical_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: bool) -> (result: ^DebugEventLink) {
+get_group_by_hierarchical_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string, create_terminal: bool) -> ^DebugEventLink {
     assert(parent != nil)
-    result = parent
+    result := parent
 
     if create_terminal {
         result = get_or_create_group_with_name(debug, parent, name)
@@ -1361,7 +1366,8 @@ get_group_by_hierarchical_name :: proc (debug: ^DebugState, parent: ^DebugEventL
     return result
 }
 
-get_or_create_group_with_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string) -> (result: ^DebugEventLink) {
+get_or_create_group_with_name :: proc (debug: ^DebugState, parent: ^DebugEventLink, name: string) -> ^DebugEventLink {
+    result: ^DebugEventLink
     if has_children(parent) {
         for link := parent.first_child; link != sentinel(parent); link = link.next {
             if link != nil && link.name == name {
@@ -1378,8 +1384,8 @@ get_or_create_group_with_name :: proc (debug: ^DebugState, parent: ^DebugEventLi
     return result
 }
 
-create_link :: proc (debug: ^DebugState, name: string) -> (result: ^DebugEventLink) {
-    result = push(&debug.arena, DebugEventLink)
+create_link :: proc (debug: ^DebugState, name: string) -> ^DebugEventLink {
+    result := push(&debug.arena, DebugEventLink)
     result.name = copy_string(&debug.arena, name)
     
     result.last_child  = sentinel(result)
@@ -1388,8 +1394,8 @@ create_link :: proc (debug: ^DebugState, name: string) -> (result: ^DebugEventLi
     return result
 }
 
-add_element_to_group :: proc (debug: ^DebugState, parent: ^DebugEventLink, element: ^DebugElement) -> (result: ^DebugEventLink) {
-    result = create_link(debug, "")
+add_element_to_group :: proc (debug: ^DebugState, parent: ^DebugEventLink, element: ^DebugElement) -> ^DebugEventLink {
+    result := create_link(debug, "")
     
     if parent != nil {
         list_prepend(sentinel(parent), result)
@@ -1399,13 +1405,13 @@ add_element_to_group :: proc (debug: ^DebugState, parent: ^DebugEventLink, eleme
     return result
 }
 
-clone_group :: proc (debug: ^DebugState, source: ^DebugEventLink) -> (result: ^DebugEventLink) {
-    result = clone_event_link(debug, nil, source)
+clone_group :: proc (debug: ^DebugState, source: ^DebugEventLink) -> ^DebugEventLink {
+    result := clone_event_link(debug, nil, source)
     return result
 }
 
-clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^DebugEventLink) -> (result: ^DebugEventLink) {
-    result = add_element_to_group(debug, parent, source.element)
+clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^DebugEventLink) -> ^DebugEventLink {
+    result := add_element_to_group(debug, parent, source.element)
     result.name = source.name
     
     for child := source.first_child; child != sentinel(source); child = child.next {
@@ -1415,18 +1421,20 @@ clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^
     return result
 }
 
-id_from_link :: proc (tree: ^DebugTree, link: ^DebugEventLink) -> (result: DebugId) {
+id_from_link :: proc (tree: ^DebugTree, link: ^DebugEventLink) -> DebugId {
+    result: DebugId
     result.value[0] = tree
     result.value[1] = link
     return result
 }
 
-get_view_for_variable :: proc (debug: ^DebugState, id: DebugId) -> (result: ^DebugView) {
+get_view_for_variable :: proc (debug: ^DebugState, id: DebugId) -> ^DebugView {
     timed_function()
     // @todo(viktor): BETTER HASH FUNCTION
     hash_index := ((cast(umm) id.value[0] >> 2) + (cast(umm) id.value[1] >> 2)) % len(debug.view_hash)
     slot := &debug.view_hash[hash_index]
-
+    
+    result: ^DebugView
     for search := slot^; search != nil; search = search.next {
         if search.id == id {
             result = search
@@ -1440,18 +1448,18 @@ get_view_for_variable :: proc (debug: ^DebugState, id: DebugId) -> (result: ^Deb
         list_push_next(slot, result)
     }
     
-    return 
+    return result
 }
 
 ////////////////////////////////////////////////
 
-debug_get_baseline :: proc (debug: ^DebugState) -> (result: f32) {
-    result = get_baseline(debug.font_info) * debug.font_scale
+debug_get_baseline :: proc (debug: ^DebugState) -> f32 {
+    result := get_baseline(debug.font_info) * debug.font_scale
     return result
 }
 
-debug_get_line_advance :: proc (debug: ^DebugState) -> (result: f32) {
-    result = get_line_advance(debug.font_info) * debug.font_scale
+debug_get_line_advance :: proc (debug: ^DebugState) -> f32 {
+    result := get_line_advance(debug.font_info) * debug.font_scale
     return result
 }
 
@@ -1462,7 +1470,8 @@ push_text :: proc (debug: ^DebugState, text: string, p: v2, color: v4 = Jasmine,
     }
 }
 
-measure_text :: proc (debug: ^DebugState, text: string) -> (result: Rectangle2) {
+measure_text :: proc (debug: ^DebugState, text: string) -> Rectangle2 {
+    result: Rectangle2
     timed_function()
     if debug.font != nil && debug.font_info != nil {
         result = text_op(debug, .Measure, &debug.render_group, debug.font, debug.font_info, text, {0, 0}, debug.font_scale)
@@ -1471,8 +1480,8 @@ measure_text :: proc (debug: ^DebugState, text: string) -> (result: Rectangle2) 
     return result
 }
 
-text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p: v2, font_scale: f32, color: v4 = Jasmine, pz:f32= 0) -> (result: Rectangle2) {
-    result = rectangle_inverted_infinity(Rectangle2)
+text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^RenderGroup, font: ^Font, font_info: ^FontInfo, text: string, p: v2, font_scale: f32, color: v4 = Jasmine, pz:f32= 0) -> Rectangle2 {
+    result := rectangle_inverted_infinity(Rectangle2)
     // @todo(viktor): @robustness kerning and unicode test lines
     // AVA: WA ty fi ij `^?'\"
     // 贺佳樱我爱你
@@ -1516,9 +1525,9 @@ text_op :: proc(debug: ^DebugState, operation: TextRenderOperation, group: ^Rend
 ////////////////////////////////////////////////
 
 @(printlike)
-debug_print :: proc (format: string, args: ..any) -> (result: string) {
+debug_print :: proc (format: string, args: ..any) -> string {
     timed_function()
     
-    result = format_string(DebugPrintBuffer[:], format, ..args)
+    result := format_string(DebugPrintBuffer[:], format, ..args)
     return result
 }

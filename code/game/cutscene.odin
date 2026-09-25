@@ -202,7 +202,8 @@ update_and_render_cutscene :: proc (state: ^State, tran_state: ^TransientState, 
 
 ////////////////////////////////////////////////
 
-check_for_meta_input :: proc (state: ^State, tran_state: ^TransientState, input: ^Input) -> (result: bool) {
+check_for_meta_input :: proc (state: ^State, tran_state: ^TransientState, input: ^Input) -> bool {
+    result: bool
     for controller in input.controllers {
         if was_pressed(controller.buttons[.back]) {
             input.quit_requested = true
@@ -217,7 +218,8 @@ check_for_meta_input :: proc (state: ^State, tran_state: ^TransientState, input:
     return result
 }
 
-render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mode: ^Cutscene_Mode, t: f32) -> (result: bool) {
+render_cutscene_at_time :: proc (assets: ^Assets, render_group: ^RenderGroup, mode: ^Cutscene_Mode, t: f32) -> bool {
+    result: bool
     scenes := Cutscenes[mode.id]
     t_base: f32
     for scene in scenes {

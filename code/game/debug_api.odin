@@ -43,18 +43,19 @@ debug_set_mouse_p :: proc (mouse_p: v2) {
     
     GlobalDebugTable.mouse_p = mouse_p
 }
-debug_get_mouse_p :: proc () -> (result: v2) {
-    when !DebugEnabled do return
+debug_get_mouse_p :: proc () -> v2 {
+    when !DebugEnabled do return {}
     
-    result = GlobalDebugTable.mouse_p
+    result := GlobalDebugTable.mouse_p
     return result
 }
 
 debug_pointer_id :: proc { debug_pointer_id_raw, debug_pointer_id_poly }
-debug_pointer_id_poly :: proc (pointer: $P)  -> (result: DebugId) { return debug_pointer_id_raw(auto_cast pointer) }
-debug_pointer_id_raw  :: proc (pointer: pmm) -> (result: DebugId) {
-    when !DebugEnabled do return
+debug_pointer_id_poly :: proc (pointer: $P)  -> DebugId { return debug_pointer_id_raw(auto_cast pointer) }
+debug_pointer_id_raw  :: proc (pointer: pmm) -> DebugId {
+    when !DebugEnabled do return {}
     
+    result: DebugId
     result.value[0] = pointer
     return result
 }
@@ -175,16 +176,16 @@ timed_function :: proc (loc := #caller_location) {
 }
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }
-debug_record_event_loc :: proc (value: DebugValue, name: string, loc := #caller_location) -> (result: ^DebugEvent) {
+debug_record_event_loc :: proc (value: DebugValue, name: string, loc := #caller_location) -> ^DebugEvent {
     return debug_record_event_guid(value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
 }
-debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> (result: ^DebugEvent) {
-    when !DebugEnabled do return
-    if GlobalDebugTable == nil do return
+debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> ^DebugEvent {
+    when !DebugEnabled         do return nil
+    if GlobalDebugTable == nil do return nil
     
     // @volatile
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, GlobalDebugTable.record_increment)
-    result = &GlobalDebugTable.events[state.array_index][state.events_index]
+    result := &GlobalDebugTable.events[state.array_index][state.events_index]
     
     result ^= {
         guid = guid,
@@ -205,7 +206,7 @@ debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> (result:
 @(export)
 debug_set_event_recording :: proc (active: bool, table := GlobalDebugTable) {
     if !DebugEnabled do return
-    if table == nil do return
+    if table == nil  do return
     
     table.record_increment = active ? 1 : 0
 }
