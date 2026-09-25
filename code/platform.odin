@@ -186,48 +186,38 @@ main :: proc () {
     ////////////////////////////////////////////////
     // Platform Setup
     
-    renderer_dll_name  := build_exe_path("render.dll")
-    renderer_lock_name := build_exe_path("render.lock")
-    renderer_generation: u32
-    renderer_is_valid: bool
-    renderer_write_time: u64
-    renderer_memory: []u8
+    high_queue, low_queue: WorkQueue
+    init_work_queue(&high_queue, HighPriorityThreads)
+    init_work_queue(&low_queue,  LowPriorityThreads )
+    
+    ////////////////////////////////////////////////
+    //  Video Setup
+    
+    render_dll_name  := build_exe_path("render.dll")
+    render_lock_name := build_exe_path("render.lock")
+    render_is_valid: bool
+    render_write_time: u64
+    render_state: ^Render_State
     
     {
         window_dc := win.GetDC(window)
         defer win.ReleaseDC(window, window_dc)
         
-        renderer_temp_name := build_exe_path(tprint("render_temp_%.dll", renderer_generation, allocator = context.temp_allocator))
-        candidate, api_is_valid, write_time := load_renderer_lib_candidate(renderer_dll_name, renderer_temp_name, renderer_lock_name)
+        renderer_temp_name := build_exe_path("render_temp.dll")
+        api_is_valid, write_time := load_render_lib(render_dll_name, renderer_temp_name, render_lock_name)
         if api_is_valid {
-            renderer_memory = make(platform_allocator, u8, size_of(Renderer_State), align_no_clear(64))
-            renderer_is_valid = render.attach(renderer_memory, window, window_dc, Platform, cast(bool) GlobalUseVulkanRenderer)
-            if renderer_is_valid {
-                renderer_write_time = write_time
-                renderer_generation += 1
-                commit_renderer_lib(candidate)
+            render_state = make(platform_allocator, Render_State)
+            render_state.game = transmute(type_of(render_state.game)) game
+            
+            render_is_valid = render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
+            if render_is_valid {
+                render_write_time = write_time
             } else {
-                win.FreeLibrary(candidate)
-                render = render_stubs
+                render.reload_or_shutdown(.Shutdown)
+                unload_render_api()
             }
-        } else {
-            if candidate != nil do win.FreeLibrary(candidate)
-            render = render_stubs
         }
     }
-    
-    high_queue, low_queue: WorkQueue
-    init_work_queue(&high_queue, HighPriorityThreads)
-    init_work_queue(&low_queue,  LowPriorityThreads )
-    
-    // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
-    desired_scheduler_ms :: 1
-    sleep_is_granular := win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
-    
-    GlobalRunning = true
-    
-    ////////////////////////////////////////////////
-    //  Video Setup
     
     // @todo(viktor): how do we reliably query this on windows?
     game_update_hz: f32
@@ -284,12 +274,11 @@ main :: proc () {
     ////////////////////////////////////////////////
     // Memory Setup
     
-    // @todo(viktor): delete the temp_dll file on quit
     game_dll_name := build_exe_path("game.dll")
-    temp_dll_name := build_exe_path("game_temp.dll")
-    lock_name     := build_exe_path("lock.temp")
-    game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, temp_dll_name, lock_name)
-    game.debug_set_event_recording(game_lib_is_valid)
+    lock_name     := build_exe_path("game.lock")
+    game_temp_name := build_exe_path("game_temp.dll")
+    game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, game_temp_name, lock_name)
+    game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
     
     // @todo(viktor): make this like sixty seconds?
     // @todo(viktor): remove MaxPossibleOverlap
@@ -351,6 +340,12 @@ main :: proc () {
     
     ////////////////////////////////////////////////
     //  Game Loop
+    
+    // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
+    desired_scheduler_ms :: 1
+    sleep_is_granular := win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
+    
+    GlobalRunning = true
     
     expected_frames_per_update: f32 = 1
     target_seconds_per_frame: f32
@@ -525,8 +520,9 @@ main :: proc () {
             }
 
             { debug_data_block("Renderer")
-                game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-                game.debug_record_b32(&GlobalUseSoftwareRenderer)
+                // game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
+                // game.debug_record_b32(&GlobalUseSoftwareRenderer)
+                game.debug_record_b32(&GlobalUseVulkanRenderer)
             }
             
             { debug_data_block("Profile")
@@ -657,57 +653,51 @@ main :: proc () {
             game.debug_frame_end(&game_memory, new_input^, &render_commands)
             
             if executable_needs_to_be_reloaded {
-                // @todo(viktor): if this is too slow the audio and the whole game will lag
-                unload_game_lib()
-                
+                unload_game_api()
                 for _ in 0..<100 {
-                    game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, temp_dll_name, lock_name)
+                    game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, game_temp_name, lock_name)
                     if game_lib_is_valid do break
                     win.Sleep(100)
                 }
                 
                 game_memory.reloaded_executable = true
                 game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
+                
+                render_state.game = transmute(type_of(render_state.game)) game
             }
             
-            renderer_needs_to_be_reloaded := get_last_write_time(renderer_dll_name) != renderer_write_time
+            renderer_needs_to_be_reloaded := get_last_write_time(render_dll_name) != render_write_time
             if renderer_needs_to_be_reloaded {
                 // Renderer jobs contain code pointers into render.dll. Drain both
                 // queues before publishing a new renderer API table.
                 complete_all_work(&high_queue)
                 complete_all_work(&low_queue)
                 
-                old_render_api := render
+                if render_is_valid {
+                    render.reload_or_shutdown(.Reload)
+                    render_is_valid = false
+                }
+                unload_render_api()
                 for _ in 0..<100 {
-                    renderer_temp_name := build_exe_path(tprint("render_temp_%.dll", renderer_generation, allocator = context.temp_allocator))
-                    candidate, api_is_valid, write_time := load_renderer_lib_candidate(renderer_dll_name, renderer_temp_name, renderer_lock_name)
+                    renderer_temp_name := build_exe_path("render_temp.dll")
+                    api_is_valid, write_time := load_render_lib(render_dll_name, renderer_temp_name, render_lock_name)
                     if !api_is_valid {
-                        if candidate != nil do win.FreeLibrary(candidate)
-                        render = old_render_api
                         win.Sleep(100)
                         continue
                     }
                     
                     window_dc := win.GetDC(window)
-                    attached := render.attach(
-                        renderer_memory,
-                        window,
-                        window_dc,
-                        Platform,
-                        cast(bool) GlobalUseVulkanRenderer,
-                    )
+                    attached := render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
                     win.ReleaseDC(window, window_dc)
                     
-                    if attached && commit_renderer_lib(candidate) {
-                        renderer_is_valid = true
-                        renderer_write_time = write_time
-                        renderer_generation += 1
+                    if attached {
+                        render_is_valid = true
+                        render_write_time = write_time
                     } else {
-                        win.FreeLibrary(candidate)
-                        render = old_render_api
                         // A state layout/backend mismatch requires a restart.
                         // Remember this build so it is not retried every frame.
-                        renderer_write_time = write_time
+                        render_write_time = write_time
+                        unload_render_api()
                     }
                     break
                 }
@@ -740,7 +730,7 @@ main :: proc () {
         ////////////////////////////////////////////////
         { timed_block("render")
             
-            render.render(&render_commands, auto_cast &high_queue, draw_region, frame_allocator, window_dim, GlobalBackBuffer, cast(bool) GlobalUseSoftwareRenderer, cast(bool) GlobalDebugRenderSingleThreaded)
+            render.render(&render_commands, auto_cast &high_queue, draw_region, frame_allocator, window_dim, GlobalBackBuffer, cast(bool) GlobalDebugRenderSingleThreaded)
         }
         ////////////////////////////////////////////////
         { timed_block("sleep at frame end")
@@ -811,6 +801,13 @@ main :: proc () {
         game.frame_marker(measured_seconds_per_frame)
         last_counter = end_counter
     }
+    
+    ////////////////////////////////////////////////
+    // Cleanup and Shutdown
+    
+    if render_is_valid do render.reload_or_shutdown(.Shutdown)
+    unload_render_api()
+    unload_game_api()
 }
 
 ////////////////////////////////////////////////
@@ -1344,4 +1341,3 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
     
     return result
 }
-

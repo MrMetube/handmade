@@ -1,6 +1,7 @@
 package render
 
 import "core:os"
+import "core:dynlib"
 
 import gpu "./no_graphics_api"
 import game "../game"
@@ -586,6 +587,59 @@ allocate_texture_descriptor :: proc () -> (descriptor: game.pmm, index: u32) {
     descriptor = texture_descriptor(index)
     
     return descriptor, index
+}
+
+////////////////////////////////////////////////
+
+// Rebuild the DLL-local Vulkan dispatch tables for an existing device. The
+// instance, logical device, queues, swapchain, and allocations remain owned by
+// the persistent renderer state; none of them are recreated during code reload.
+vk_reload :: proc () {
+    device := vulkan.device
+    if device != nil && device.debug_messenger != 0 && device.destroy_debug_messenger != nil {
+        device.destroy_debug_messenger(device.instance, device.debug_messenger, nil)
+        device.debug_messenger = 0
+    }
+}
+
+vk_shutdown :: proc () {
+    gpu.destroy_device(vulkan.device)
+}
+
+rebind_device :: proc (device: gpu.Device) -> bool {
+    if device == nil do return false
+    
+    // @leak
+    vulkan_library, ok := dynlib.load_library("vulkan-1.dll", allocator = context.temp_allocator)
+    if !ok do return false
+    
+    address, found := dynlib.symbol_address(vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
+    if !found do return false
+    
+    GetInstanceProcAddr := cast(proc "system" (instance: game.pmm, pName: cstring) -> game.pmm) address
+    GetDeviceProcAddr   := cast(proc "system" (device:   game.pmm, pName: cstring) -> game.pmm) GetInstanceProcAddr(device.instance, "vkGetDeviceProcAddr")
+    
+    device.destroy_debug_messenger            = auto_cast GetInstanceProcAddr(device.instance, "vkDestroyDebugUtilsMessengerEXT")
+    device.fn.WriteSamplerDescriptors         = auto_cast GetDeviceProcAddr(device.device, "vkWriteSamplerDescriptorsEXT")
+    device.fn.WriteResourceDescriptors        = auto_cast GetDeviceProcAddr(device.device, "vkWriteResourceDescriptorsEXT")
+    device.fn.CmdBindSamplerHeap              = auto_cast GetDeviceProcAddr(device.device, "vkCmdBindSamplerHeapEXT")
+    device.fn.CmdBindResourceHeap             = auto_cast GetDeviceProcAddr(device.device, "vkCmdBindResourceHeapEXT")
+    device.fn.CmdPushData                     = auto_cast GetDeviceProcAddr(device.device, "vkCmdPushDataEXT")
+    device.fn.CmdBindIndexBuffer              = auto_cast GetDeviceProcAddr(device.device, "vkCmdBindIndexBuffer3KHR")
+    device.fn.CmdDrawIndirect                 = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawIndirect2KHR")
+    device.fn.CmdDrawIndexedIndirect          = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawIndexedIndirect2KHR")
+    device.fn.CmdDispatchIndirect             = auto_cast GetDeviceProcAddr(device.device, "vkCmdDispatchIndirect2KHR")
+    device.fn.CmdDrawMeshTasks                = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawMeshTasksEXT")
+    device.fn.CmdDrawMeshTasksIndirect        = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawMeshTasksIndirect2EXT")
+    device.fn.CmdCopyMemory                   = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyMemoryKHR")
+    device.fn.CmdCopyMemoryToImage            = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyMemoryToImageKHR")
+    device.fn.CmdCopyImageToMemory            = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyImageToMemoryKHR")
+    device.fn.CmdCopyQueryPoolResultsToMemory = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyQueryPoolResultsToMemoryKHR")
+    
+    return device.fn.WriteSamplerDescriptors != nil &&
+           device.fn.WriteResourceDescriptors != nil &&
+           device.fn.CmdBindResourceHeap != nil &&
+           device.fn.CmdBindSamplerHeap != nil
 }
 
 ////////////////////////////////////////////////

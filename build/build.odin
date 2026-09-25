@@ -120,7 +120,7 @@ main :: proc () {
         end_build(cmd)
     }
     
-    {
+    { // game
         if !check_printlikes(&metaprogram, game_package) do os.exit(1)
         if !generate_platform_api(&metaprogram, "./code/generated-platform_api.odin", main_package, "./code/game/generated-platform_api.odin", game_package, true) do os.exit(1)
         
@@ -159,8 +159,11 @@ main :: proc () {
         }
     }
 
-    {
+    { // render
         if !check_printlikes(&metaprogram, render_package) do os.exit(1)
+        
+        if !generate_commons(&metaprogram,  "./code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
+        if !generate_game_api(&metaprogram, "./code/render/generated-game_api.odin",     game_package,   render_package)            do os.exit(1)
         
         delete_all_like("./build", `render-\d+\.rdi`)
         delete_all_like("./build", `render-\d+\.pdb`)
@@ -194,14 +197,14 @@ main :: proc () {
         }
     }
     
-    {
+    { // platform
         if !check_printlikes(&metaprogram, main_package) do os.exit(1)
             
         // @todo(viktor): these could be run in parallel with each other and the build of the game
-        if !generate_game_api(&metaprogram, "./code/generated-game_api.odin",     game_package, main_package) do os.exit(1)
-        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin", render_package, main_package) do os.exit(1)
-        if !generate_commons(&metaprogram,  "./code/generated-commons-game.odin", main_package, game_package, "./game")   do os.exit(1)
-        if !generate_commons(&metaprogram,  "./code/generated-commons-render.odin", main_package, render_package, "./render")   do os.exit(1)
+        if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",      game_package,   main_package) do os.exit(1)
+        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",    render_package, main_package) do os.exit(1)
+        if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",  main_package,   game_package,   "./game")   do os.exit(1)
+        if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,  render_package, "./render") do os.exit(1)
         
         if begin_build(cmd, "code", "debug.exe", .Skip) {
             build_meander()

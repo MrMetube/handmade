@@ -1,176 +1,178 @@
 package render
 
+/* @todo
+    the renderer hotreload needs to be unshittified and compressed with the game hotreload
+    
+    iterate on reducing the generated file count and Api structs and game-static vs. game-dynamic differentiation
+      make sure the only game code that can be called from outside is helper code
+        check all @(common) procs
+        reduce global variables
+    
+    delete platform_api.odin from render (and game)
+        
+    reduce the api surface overall for render, game and platform between each other
+*/ 
+
 import "base:runtime"
 import win "core:sys/windows"
-import "core:dynlib"
 
-import game "../game"
 import gpu "./no_graphics_api"
 
-Renderer_State_Version :: 1
-
 @(common)
-Renderer_State :: struct {
-    version:      u32,
-    size:         u32,
+Render_State :: struct {
     initialized:  bool,
-    use_vulkan:   bool,
+    backend:      Backend,
     
     // These are CPU-side owners of persistent driver objects. The storage is
     // supplied by the platform and is deliberately not part of the DLL image.
     gl_context: win.HGLRC,
     open_gl:    OpenGL,
     vulkan:     Vulkan,
-}
-
-renderer_state: ^Renderer_State
-
-bind_renderer_state :: proc (memory: [] u8) -> bool {
-    if memory == nil || len(memory) < size_of(Renderer_State) do return false
     
-    renderer_state = cast(^Renderer_State) raw_data(memory)
-    open_gl = &renderer_state.open_gl
-    vulkan  = &renderer_state.vulkan
-    return true
+    game: GameApi, // already set by the platform
 }
+
+@(common)
+Backend :: enum {
+    Software,
+    OpenGL,
+    Vulkan,
+}
+
+@(common)
+Reload_Action :: enum {
+    Reload,
+    Shutdown,
+}
+
+////////////////////////////////////////////////
+
+render_state: ^Render_State
 
 // @todo struct for all lose params
 @(export)
-attach :: proc (memory: [] u8, window: win.HWND, window_dc: win.HDC, platform_api: game.Platform_Api, use_vulkan: bool) -> bool {
-    if !bind_renderer_state(memory) do return false
+attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, backend: Backend) -> bool {
+    render_state = state
+    open_gl = &render_state.open_gl
+    vulkan  = &render_state.vulkan
     
     // Layout changes need an explicit migration. Refuse the reload rather than
     // interpreting live driver state with a different struct definition.
-    if renderer_state.initialized &&
-       (renderer_state.version != Renderer_State_Version ||
-        renderer_state.size != size_of(Renderer_State) ||
-        renderer_state.use_vulkan != use_vulkan) {
+    // @todo handle backend changed
+    if render_state.initialized && render_state.backend != backend {
+        reload_or_shutdown(.Shutdown)
+        // @incomplete
         return false
     }
     
-    game.set_platform_api_in_the_statically_linked_game_code(platform_api)
-    
-    if !renderer_state.initialized {
-        renderer_state.version = Renderer_State_Version
-        renderer_state.size = cast(u32) size_of(Renderer_State)
-        renderer_state.use_vulkan = use_vulkan
-        
-        if use_vulkan {
-            init_vulkan(window)
-        } else {
-            renderer_state.gl_context = init_opengl(window_dc)
+    result: bool
+    if !render_state.initialized {
+        render_state.backend = backend
+        switch render_state.backend {
+        case .Vulkan:  init_vulkan(window)
+        case .OpenGL:  render_state.gl_context = init_opengl(window_dc)
+        case .Software: // nothing
         }
-        renderer_state.initialized = true
-        return true
+        
+        render_state.initialized = true
+        result = true
+    } else {
+        render_state.backend = backend
+        
+        // A DLL reload resets package-level dispatch tables, but must not replace
+        // the actual graphics context/device or any resource handles.
+        switch render_state.backend {
+        case .Vulkan:   result = rebind_device(vulkan.device)
+        case .OpenGL:   result = reattach_opengl(window_dc, render_state.gl_context)
+        case .Software: result = true
+        }
     }
     
-    // A DLL reload resets package-level dispatch tables, but must not replace
-    // the actual graphics context/device or any resource handles.
-    if use_vulkan {
-        return rebind_device(vulkan.device)
-    }
-    return reattach_opengl(window_dc, renderer_state.gl_context)
-}
-
-
-// Rebuild the DLL-local Vulkan dispatch tables for an existing device. The
-// instance, logical device, queues, swapchain, and allocations remain owned by
-// the persistent renderer state; none of them are recreated during code reload.
-rebind_device :: proc (device: gpu.Device) -> bool {
-    if device == nil do return false
-    
-    // @leak
-    vulkan_library, ok := dynlib.load_library("vulkan-1.dll", allocator = context.temp_allocator)
-    if !ok do return false
-    
-    address, found := dynlib.symbol_address(vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
-    if !found do return false
-    
-    GetInstanceProcAddr := cast(proc "system" (instance: game.pmm, pName: cstring) -> game.pmm) address
-    GetDeviceProcAddr   := cast(proc "system" (device:   game.pmm, pName: cstring) -> game.pmm) GetInstanceProcAddr(device.instance, "vkGetDeviceProcAddr")
-    
-    device.destroy_debug_messenger            = auto_cast GetInstanceProcAddr(device.instance, "vkDestroyDebugUtilsMessengerEXT")
-    device.fn.WriteSamplerDescriptors         = auto_cast GetDeviceProcAddr(device.device, "vkWriteSamplerDescriptorsEXT")
-    device.fn.WriteResourceDescriptors        = auto_cast GetDeviceProcAddr(device.device, "vkWriteResourceDescriptorsEXT")
-    device.fn.CmdBindSamplerHeap              = auto_cast GetDeviceProcAddr(device.device, "vkCmdBindSamplerHeapEXT")
-    device.fn.CmdBindResourceHeap             = auto_cast GetDeviceProcAddr(device.device, "vkCmdBindResourceHeapEXT")
-    device.fn.CmdPushData                     = auto_cast GetDeviceProcAddr(device.device, "vkCmdPushDataEXT")
-    device.fn.CmdBindIndexBuffer              = auto_cast GetDeviceProcAddr(device.device, "vkCmdBindIndexBuffer3KHR")
-    device.fn.CmdDrawIndirect                 = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawIndirect2KHR")
-    device.fn.CmdDrawIndexedIndirect          = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawIndexedIndirect2KHR")
-    device.fn.CmdDispatchIndirect             = auto_cast GetDeviceProcAddr(device.device, "vkCmdDispatchIndirect2KHR")
-    device.fn.CmdDrawMeshTasks                = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawMeshTasksEXT")
-    device.fn.CmdDrawMeshTasksIndirect        = auto_cast GetDeviceProcAddr(device.device, "vkCmdDrawMeshTasksIndirect2EXT")
-    device.fn.CmdCopyMemory                   = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyMemoryKHR")
-    device.fn.CmdCopyMemoryToImage            = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyMemoryToImageKHR")
-    device.fn.CmdCopyImageToMemory            = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyImageToMemoryKHR")
-    device.fn.CmdCopyQueryPoolResultsToMemory = auto_cast GetDeviceProcAddr(device.device, "vkCmdCopyQueryPoolResultsToMemoryKHR")
-    
-    return device.fn.WriteSamplerDescriptors != nil &&
-           device.fn.WriteResourceDescriptors != nil &&
-           device.fn.CmdBindResourceHeap != nil &&
-           device.fn.CmdBindSamplerHeap != nil
+    return result
 }
 
 @(export)
-allocate_texture :: proc (bitmap: game.Bitmap, set_as_nil_texture: bool) -> u32 {
+reload_or_shutdown :: proc (action: Reload_Action) {
+    if !render_state.initialized do return
+    
+    switch render_state.backend {
+    case .Vulkan:
+        switch action {
+        case .Reload:   vk_reload()
+        case .Shutdown: vk_shutdown()
+        }
+        
+    case .OpenGL:   gl_shutdown(render_state.gl_context, action == .Shutdown)
+    case .Software: // nothing
+    }
+    
+    if action == .Shutdown do render_state^ = {}
+}
+
+////////////////////////////////////////////////
+
+@(export)
+allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture: bool) -> u32 {
     result: u32
-    if renderer_state.use_vulkan {
-        result = vk_allocate_texture(bitmap, set_as_nil_texture)
-    } else {
-        result = gl_allocate_texture(bitmap)
+    switch render_state.backend {
+    case .Vulkan:   result = vk_allocate_texture(bitmap, set_as_nil_texture)
+    case .OpenGL:   result = gl_allocate_texture(bitmap)
+    case .Software: unimplemented()
     }
     return result
 }
 
 @(export)
-manage_textures :: proc (last: ^game.TextureOp) {
-    if renderer_state.use_vulkan {
-        vk_manage_textures(last)
-    } else {
-        gl_manage_textures(last)
-    }
-}
-
-// @todo struct for all lose params
-@(export)
-render :: proc (commands: ^game.RenderCommands, render_queue: ^game.WorkQueue, draw_region: game.Rectangle2i, frame_allocator: game.Allocator, window_dimension: game.v2i, software_target: game.Bitmap, use_software_renderer: bool, single_threaded: bool) {
-    commands.clear_color.rgb = game.square(commands.clear_color.rgb)
-    
-    if use_software_renderer {
-        game.assert(!renderer_state.use_vulkan, "the software renderer currently presents through OpenGL")
-        software_render_commands(render_queue, commands, software_target, frame_allocator, single_threaded)
-        gl_display_bitmap(software_target, draw_region, commands.clear_color)
-    } else if renderer_state.use_vulkan {
-        vk_render_commands(commands, draw_region, window_dimension)
-    } else {
-        gl_render_commands(commands, draw_region, window_dimension)
+manage_textures :: proc (last: ^TextureOp) {
+    switch render_state.backend {
+    case .Vulkan:   vk_manage_textures(last)
+    case .OpenGL:   gl_manage_textures(last)
+    case .Software: unimplemented()
     }
 }
 
 ////////////////////////////////////////////////
-// Local profiling wrappers. The imported game package is intentionally used
-// normally in this sketch; no generated @common aliases are required here.
+
+// @todo struct for all lose params
+@(export)
+render :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, frame_allocator: Allocator, window_dimension: v2i, software_target: Bitmap, single_threaded: bool) {
+    commands.clear_color.rgb = square(commands.clear_color.rgb)
+    
+    switch render_state.backend {
+    case .Software:
+        software_render_commands(auto_cast render_queue, commands, software_target, frame_allocator, single_threaded)
+        if true { unimplemented("differentiate software+opengl from software+vulkan") }
+        gl_display_bitmap(software_target, draw_region, commands.clear_color)
+        
+    case .OpenGL: gl_render_commands(commands, draw_region, window_dimension)
+    case .Vulkan: vk_render_commands(commands, draw_region, window_dimension)
+    }
+}
+
+////////////////////////////////////////////////
+
+// @hack for generated game api
+GlobalDebugTable: pmm
 
 end_timed_block :: proc () {
-    game.end_timed_block()
+    render_state.game.end_timed_block()
 }
 
 @(deferred_none=end_timed_block)
 timed_block :: proc (name: string, loc := #caller_location) {
-    game.begin_timed_block(name, loc)
+    render_state.game.begin_timed_block(name, loc)
 }
 
 @(deferred_out=end_timed_block)
 timed_function :: proc (loc := #caller_location) {
-    game.begin_timed_block(loc.procedure, loc)
+    render_state.game.begin_timed_block(loc.procedure, loc)
 }
 
 debug_end_data_block :: proc () {
-    game.debug_end_data_block()
+    render_state.game.debug_end_data_block()
 }
 
 @(deferred_out=debug_end_data_block)
 debug_data_block :: proc (name: string, loc := #caller_location) {
-    game.debug_begin_data_block(name, loc)
+    render_state.game.debug_begin_data_block(name, loc)
 }

@@ -6,81 +6,66 @@ import win "core:sys/windows"
 game_lib: win.HMODULE
 
 @(private="file")
-renderer_libs: [128] win.HMODULE
-@(private="file")
-renderer_lib_count: int
+render_lib: win.HMODULE
 
 load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: bool, last_write_time: u64) {
     if game_lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
-    } else {
-        if !win.FreeLibrary(game_lib) {
-            // @logging 
-            print("Failed to load game.dll\n")
-        }
     }
     
-    if !win.GetFileAttributesExW(lock_name, win.GetFileExInfoStandard, nil) {
-        win.CopyFileW(source_dll_name, temp_dll_name, false)
-        last_write_time = get_last_write_time(source_dll_name)
-        game_lib = win.LoadLibraryW(temp_dll_name)
-        
-        if game_lib != nil {
-            load_game_api(game_lib)
-            
-            // @todo: do we really need to depent on debug_frame_end here?
-            is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
-        } else {
-            // @logging 
-            print("Failed to initialize game api\n")
-        }
-    }
+    unload_game_api()
     
+    game_lib, last_write_time = load_dll(source_dll_name, temp_dll_name, lock_name)
+    if game_lib == nil do return false, last_write_time
+    
+    load_game_api(game_lib)
+    // @todo: do we really need to depend on debug_frame_end here?
+    is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
     if !is_valid {
-        game = game_stubs
+        unload_game_api()
     }
-    
     return is_valid, last_write_time
 }
 
-unload_game_lib :: proc () {
-    if game_lib != nil {
-        if !win.FreeLibrary(game_lib) {
-            // @logging 
-        }
-        game_lib = nil
-    }
-    game = game_stubs
-}
-
-load_renderer_lib_candidate :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (lib: win.HMODULE, is_valid: bool, last_write_time: u64) {
-    if win.GetFileAttributesW(lock_name) != win.INVALID_FILE_ATTRIBUTES {
-        return
-    }
+load_render_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: bool, last_write_time: u64) {
+    assert(render_lib == nil && render == render_stubs, "render.dll has already been initialized")
     
-    if !win.CopyFileW(source_dll_name, temp_dll_name, false) do return
-    last_write_time = get_last_write_time(source_dll_name)
-    lib = win.LoadLibraryW(temp_dll_name)
-    if lib == nil do return
+    render_lib, last_write_time = load_dll(source_dll_name, temp_dll_name, lock_name)
+    if render_lib == nil do return false, last_write_time
     
-    load_render_api(lib)
+    load_render_api(render_lib)
     is_valid = render.attach != nil &&
                render.allocate_texture != nil &&
                render.manage_textures != nil &&
-               render.render != nil
-    return
+               render.render != nil &&
+               render.reload_or_shutdown != nil
+    if !is_valid {
+        unload_render_api()
+    }
+    return is_valid, last_write_time
 }
 
-commit_renderer_lib :: proc (lib: win.HMODULE) -> bool {
-    if lib == nil || renderer_lib_count == len(renderer_libs) do return false
-    
-    // Unlike game.dll, old renderer generations are intentionally pinned.
-    // Driver callbacks and allocator procedures may still point into them. A
-    // full renderer shutdown can release the generations in reverse order.
-    renderer_libs[renderer_lib_count] = lib
-    renderer_lib_count += 1
-    return true
+////////////////////////////////////////////////
+
+unload_render_api :: proc () {
+    unload_api(&render_lib, &render, render_stubs)
 }
+
+unload_game_api :: proc () {
+    unload_api(&game_lib, &game, game_stubs)
+}
+
+unload_api :: proc (lib: ^win.HMODULE, api: ^$T, stubs: T) {
+    if lib^ != nil {
+        if !win.FreeLibrary(lib^) {
+            // @logging 
+        }
+        lib^ = nil
+    }
+    api^ = stubs
+}
+////////////////////////////////////////////////
+
 
 get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
     FILE_ATTRIBUTE_DATA :: struct {
@@ -97,6 +82,17 @@ get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
         last_write_time = (cast(u64) (file_information.ftLastWriteTime.dwHighDateTime) << 32) | cast(u64) (file_information.ftLastWriteTime.dwLowDateTime)
     }
     return last_write_time
+}
+
+load_dll :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (lib: win.HMODULE, last_write_time: u64) {
+    if win.GetFileAttributesW(lock_name) != win.INVALID_FILE_ATTRIBUTES {
+        return nil, 0
+    }
+    
+    if !win.CopyFileW(source_dll_name, temp_dll_name, false) do return nil, 0
+    last_write_time = get_last_write_time(source_dll_name)
+    lib = win.LoadLibraryW(temp_dll_name)
+    return lib, last_write_time
 }
 
 

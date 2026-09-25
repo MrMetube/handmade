@@ -163,6 +163,14 @@ reattach_opengl :: proc (dc: win.HDC, gl_context: win.HGLRC) -> bool {
     return true
 }
 
+gl_shutdown :: proc (gl_context: win.HGLRC, destroy: bool) {
+    if gl_context != nil {
+        gl.DebugMessageCallback(nil, nil)
+        win.wglMakeCurrent(nil, nil)
+        if destroy do win.wglDeleteContext(gl_context)
+    }
+}
+
 gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, length: i32, message: cstring, user_ptr: rawptr) {
     // @todo(viktor): how can we get the actual context, if we ever use the context in the platform layer
     context = runtime.default_context()
