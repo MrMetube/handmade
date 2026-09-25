@@ -2,7 +2,6 @@
 package main
 
 import "base:runtime"
-import "core:thread"
 import win "core:sys/windows"
 
 WorkQueue :: struct {
@@ -38,12 +37,10 @@ init_work_queue :: proc (queue: ^WorkQueue, count: u32) {
         info.index = next_thread_index
         next_thread_index += 1
         
-        // @note(viktor): When I use the windows call I can at most create 4 threads at once,
-        // any more calls to create thread in this call of the init function fail silently
-        // A further call for the low_priority_queue then is able to create 4 more threads.
-        //     result := win.CreateThread(nil, 0, thread_proc, info, thread_index, nil)
+        start :: proc "stdcall" (data: pmm) -> win.DWORD { worker_thread(data) }
         
-        thread.create_and_start_with_data(&info, worker_thread)
+        handle := win.CreateThread(nil, 0, start, &info, 0, nil)
+        win.CloseHandle(handle)
     }
 }
 
@@ -108,7 +105,7 @@ do_next_work_queue_entry :: proc (queue: ^WorkQueue) -> (should_sleep: bool) {
     return should_sleep
 }
 
-worker_thread :: proc (parameter: pmm) {
+worker_thread :: proc "contextless" (parameter: pmm) -> ! {
     context = runtime.default_context()
     
     info := cast(^CreateThreadInfo) parameter

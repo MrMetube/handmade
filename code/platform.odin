@@ -1152,7 +1152,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             }
         }
         
-        result = win.DefWindowProcA(window, message, w_param, l_param)
+        result = win.DefWindowProcW(window, message, w_param, l_param)
         
       case win.WM_ACTIVATEAPP:
         LWA_ALPHA    :: 0x00000002 // Use bAlpha to determine the opacity of the layered window.
@@ -1183,8 +1183,8 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         }
         
       case:
-        timed_block("win.DefWindowProcA")
-        result = win.DefWindowProcA(window, message, w_param, l_param)
+        timed_block("win.DefWindowProcW")
+        result = win.DefWindowProcW(window, message, w_param, l_param)
     }
     return result
 }
