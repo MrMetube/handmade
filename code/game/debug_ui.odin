@@ -163,7 +163,7 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     info_text := format_string(debug.root_info, 
         "% - % memory blocks, % used size / % total sizes",
         view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
-        view_magnitude(memory_stats.block_count),
+        view_amount(memory_stats.block_count),
         view_memory_size(memory_stats.total_used),
         view_memory_size(memory_stats.total_size),
     )
@@ -326,9 +326,9 @@ draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
         viewed_frame := &debug.frames[debug.viewed_frame_ordinal]
         text := debug_print("Viewed Frame: %, % events, % data blocks, % profile blocks",
             view_seconds(viewed_frame.seconds_elapsed), 
-            view_magnitude(viewed_frame.stored_event_count), 
-            view_magnitude(viewed_frame.data_block_count), 
-            view_magnitude(viewed_frame.profile_block_count), 
+            view_amount(viewed_frame.stored_event_count), 
+            view_amount(viewed_frame.data_block_count), 
+            view_amount(viewed_frame.profile_block_count), 
         )
         
         basic_text_element(layout, text)
@@ -518,9 +518,9 @@ draw_arena_occupancy :: proc (debug: ^DebugState, arena: ^Arena, mouse_p: v2, re
             if index != 0 do push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline)
             
             if contains(filled, mouse_p) {
-                add_tooltip(debug, debug_print("used % / total %", view_memory_size(block.used, expand_lower = -1), view_memory_size(block_size, expand_lower = -1)))
+                add_tooltip(debug, debug_print("used % / total %", view_memory_size(block.used, precision = 2), view_memory_size(block_size, precision = 2)))
             } else if contains(sub_rect, mouse_p) {
-                add_tooltip(debug, debug_print("free % / total %", view_memory_size(block_size - block.used, expand_lower = -1), view_memory_size(block_size, expand_lower = -1)))
+                add_tooltip(debug, debug_print("free % / total %", view_memory_size(block_size - block.used, precision = 2), view_memory_size(block_size, precision = 2)))
             }
         }
     }
@@ -742,8 +742,8 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         
         // @todo(viktor): This wants to be a tabular view of the data
         text := debug_print("% cycles / % % - % %% / % %% - %",
-            view_magnitude(cast(u32) entry.stats.sum),
-            view_magnitude(entry.stats.count),
+            view_amount(cast(u32) entry.stats.sum),
+            view_amount(entry.stats.count),
             entry.stats.count == 1 ? "hit" : "hits",
             
             view_float(entry.stats.sum * total_time_percentage, width = 2, precision = 2),
@@ -758,7 +758,7 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         region_rect = add_offset(region_rect, p)
         region_rect = get_intersection(rect, region_rect)
         if contains(region_rect, mouse_p) {
-            tooltip := debug_print("average %cy", view_magnitude_decimal(entry.stats.avg))
+            tooltip := debug_print("average %cy", view_float(entry.stats.avg, precision = 2))
             add_tooltip(debug, tooltip)
             // @copypasta with draw_profile
             // @todo(viktor): if has children
@@ -837,7 +837,7 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             push_rectangle_outline(&debug.render_group, region_rect, transform, border_color, 1)
             
             if contains(region_rect, mouse_p) {
-                text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
+                text := debug_print("% - % cycles", element.guid.name, view_amount(node.duration))
                 add_tooltip(debug, text)
                 
                 // @copypasta with draw_profile
@@ -922,7 +922,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         push_rectangle_outline(&debug.render_group, region_rect, transform, color * {.2,.2,.2, 1}, 1)
         
         if contains(region_rect, mouse_p) {
-            text := debug_print("% - % cycles", element.guid.name, view_magnitude(node.duration))
+            text := debug_print("% - % cycles", element.guid.name, view_amount(node.duration))
             add_tooltip(debug, text)
             
             if node.first_child != nil {

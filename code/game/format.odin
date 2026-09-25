@@ -50,14 +50,6 @@ aprint :: print_to_allocator
 
 ////////////////////////////////////////////////
 
-Default_Views:      map[typeid] View_Proc
-View_Proc        :: proc (value: pmm) -> View_Proc_Result
-View_Proc_Result :: union{ View, Temp_Views, any }
-
-////////////////////////////////////////////////
-
-Temp_Views :: distinct [] View
-
 View :: struct {
     value: any,
 
@@ -285,58 +277,6 @@ Format_Context :: struct {
 ////////////////////////////////////////////////
 
 
-@(private="file") temp_view_arena:     Arena
-@(private="file") temp_view_allocator: Allocator
-
-@(private="file") temp_view_buffer:       [1024] View
-@(private="file") temp_view_inside_block: bool
-@(private="file") temp_view_start_index:  u32
-@(private="file") temp_view_next_index:   u32
-
-
-begin_temp_views :: proc (width: Maybe(u16) = nil) {
-    assert(!temp_view_inside_block)
-    temp_view_inside_block = true
-    // @incomplete what about width for TempViews, handle in format_string
-    temp_view_start_index = temp_view_next_index
-    
-    if temp_view_allocator.procedure == nil {
-        // @todo(viktor): find a better place for this
-        temp_view_allocator = arena_allocator(&temp_view_arena)
-        assert(temp_view_allocator.procedure != nil)
-    }
-}
-
-append_temp_view :: proc (value: any) {
-    assert(temp_view_inside_block)
-    
-    view: View
-    switch data in value {
-      case View: view = data
-      case:      view = { value = data }
-    }
-    
-    // @note(viktor): Sadly we cannot return pointers to stack variables from a view_* proc therefore we need to make a copy of the value
-    info := type_info_of(view.value.id)
-    
-    size := info.size
-    copied := make(temp_view_allocator, u8, size)
-    copy(copied, slice_from_parts_type(u8, view.value.data, size))
-    view.value.data = raw_data(copied)
-    
-    temp_view_buffer[temp_view_next_index] = view
-    temp_view_next_index += 1
-    assert(temp_view_next_index < len(temp_view_buffer))
-}
-
-end_temp_views :: proc () -> Temp_Views {
-    assert(temp_view_inside_block)
-    temp_view_inside_block = false
-    
-    result := cast(Temp_Views) temp_view_buffer[temp_view_start_index : temp_view_next_index]
-    return result
-}
-
 ////////////////////////////////////////////////
 
 @(printlike)
@@ -381,9 +321,6 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
         format_any(&ctx, rune(0))
     }
     
-    temp_view_next_index = 0
-    // Sigh...
-    free_all(temp_view_allocator)
     return to_string(ctx.dest)
 }
 
@@ -482,8 +419,8 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
         format_any(ctx, view_float(kmag(value), positive_sign = .Plus))
         format_any(ctx, 'k')
       
-      case Temp_Views: 
-        for view in value do format_any(ctx, view)
+      case View_Magnitude:  append(&temp, fmt.tprint(value))
+      case View_Percentage: append(&temp, fmt.tprint(value))
       
       case View:
         switch info in value.info {
@@ -543,14 +480,10 @@ format_any :: proc (ctx: ^Format_Context, arg: any) {
           
           case runtime.Type_Info_Named:
             // @important @todo(viktor): If the struct is an alias like v4 :: [4]f32 we currently print both types. but we should only print the alias
-            if default, ok := Default_Views[value.id]; ok {
-                format_any(ctx, default(value.data))
-            } else {
-                // @todo(viktor): only when in debug mode
-                // append(&temp, variant.name)
-                // format_any(ctx, ' ')
-                format_any(ctx, any{data = value.data, id = variant.base.id})
-            }
+            // @todo(viktor): only when in debug mode
+            // append(&temp, variant.name)
+            // format_any(ctx, ' ')
+            format_any(ctx, any{data = value.data, id = variant.base.id})
             
           case runtime.Type_Info_Struct:
             draw_struct(ctx, transmute(RawAny) value, variant)
