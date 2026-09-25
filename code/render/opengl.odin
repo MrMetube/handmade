@@ -1,9 +1,10 @@
-package main
+package render
 
 import "base:runtime"
 
 import win "core:sys/windows"
 import gl "vendor:OpenGl"
+import game "../game"
 
 MaxMultisampleCount :: 8
 
@@ -35,7 +36,7 @@ OpenGlInfo :: struct {
 }
 
 OpenGL :: struct {
-    settings: RenderSettings,
+    settings: game.RenderSettings,
     
     max_color_attachments:   i32,
     max_samplers_per_shader: i32,
@@ -89,13 +90,12 @@ FrameBuffer :: struct {
     depth_texture: u32,
 }
 
-open_gl := OpenGL {
-    default_texture_format = gl.RGBA8,
-}
+open_gl: ^OpenGL
 
 ////////////////////////////////////////////////
 
 init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
+    open_gl.default_texture_format = gl.RGBA8
     framebuffer_supports_srgb := load_wgl_extensions()
     set_pixel_format(dc, framebuffer_supports_srgb)
     
@@ -108,7 +108,7 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
         context_is_modern = false
         gl_context = win.wglCreateContext(dc)
     }
-    assert(gl_context != nil)
+    game.assert(gl_context != nil)
     
     if win.wglMakeCurrent(dc, gl_context) {
         gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
@@ -152,6 +152,17 @@ init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
     return gl_context
 }
 
+reattach_opengl :: proc (dc: win.HDC, gl_context: win.HGLRC) -> bool {
+    // The WGL context and every object created through it outlive a renderer DLL
+    // generation. Only the DLL-local dispatch tables and callback are rebound.
+    if !win.wglMakeCurrent(dc, gl_context) do return false
+    
+    gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
+    win.wglSwapIntervalEXT = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
+    gl.DebugMessageCallback(gl_debug_callback, nil)
+    return true
+}
+
 gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, length: i32, message: cstring, user_ptr: rawptr) {
     // @todo(viktor): how can we get the actual context, if we ever use the context in the platform layer
     context = runtime.default_context()
@@ -162,11 +173,11 @@ gl_debug_callback :: proc "c" (source: u32, type: u32, id: u32, severity: u32, l
         @static seen: map[cstring] bool
         if id not_in ignored && message not_in seen {
             seen[message] = true
-            print("INFO(%:%): %\n", type, id, message)
+            game.print("INFO(%:%): %\n", type, id, message)
         }
     } else {
-        print("ERROR: %\n", message)
-        assert(false)
+        game.print("ERROR: %\n", message)
+        game.assert(false)
     }
 }
 
@@ -310,7 +321,7 @@ set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: bool) {
 
 ////////////////////////////////////////////////
 
-gl_manage_textures :: proc (last: ^TextureOp) {
+gl_manage_textures :: proc (last: ^game.TextureOp) {
     game.debug_begin_data_block("texture operations")
     defer game.debug_end_data_block()
     
@@ -320,11 +331,11 @@ gl_manage_textures :: proc (last: ^TextureOp) {
         switch &op in operation.value {
           case: unreachable()
         
-          case TextureOpAllocate:
+          case game.TextureOpAllocate:
             allocs += 1
             op.result ^= gl_allocate_texture(op.bitmap)
             
-          case TextureOpDeallocate:
+          case game.TextureOpDeallocate:
             deallocs += 1
             gl.DeleteTextures(1, &op.handle)
         }
@@ -338,7 +349,7 @@ gl_manage_textures :: proc (last: ^TextureOp) {
     game.debug_record_i32(&deallocations, "deallocations")
 }
 
-gl_allocate_texture :: proc (bitmap: Bitmap) -> (result: u32) {
+gl_allocate_texture :: proc (bitmap: game.Bitmap) -> (result: u32) {
     handle: u32
     gl.GenTextures(1, &handle)
     
@@ -363,7 +374,7 @@ gl_allocate_texture :: proc (bitmap: Bitmap) -> (result: u32) {
 
 ////////////////////////////////////////////////
 
-gl_change_to_settings :: proc (settings: RenderSettings) {
+gl_change_to_settings :: proc (settings: game.RenderSettings) {
     timed_function()
     
     delete_framebuffer(&open_gl.resolve_buffer)
@@ -376,8 +387,8 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for &buffer in open_gl.light_buffers {
         delete_lightbuffer(&buffer)
     }
-    clear(&open_gl.depth_peel_buffers)
-    clear(&open_gl.depth_peel_resolve_buffers)
+    game.clear(&open_gl.depth_peel_buffers)
+    game.clear(&open_gl.depth_peel_resolve_buffers)
     
     delete_program(&open_gl.zbias_no_depth_peel)
     delete_program(&open_gl.zbias_depth_peel)
@@ -448,7 +459,7 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     }
 }
 
-gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
+gl_render_commands :: proc (commands: ^game.RenderCommands, draw_region: game.Rectangle2i, window_dim: game.v2i) {
     timed_function()
     
     render_dim := commands.dimension
@@ -476,13 +487,13 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     ////////////////////////////////////////////////
     
-    assert(open_gl.depth_peel_count > 0)
+    game.assert(open_gl.depth_peel_count > 0)
     
     for buffer, index in open_gl.depth_peel_buffers {
         gl_bind_frame_buffer(buffer, settings.dimension)
         gl.Scissor(0, 0, settings.dimension.x, settings.dimension.y)
         
-        c: v4
+        c: game.v4
         if cast(u32) index == open_gl.depth_peel_count-1 {
             c = commands.clear_color
             c.a = 1
@@ -498,8 +509,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     peeling: bool
     peel_index: u32
     peel_header_restore: int
-    for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
-        type := read(&commands.push_buffer, RenderEntryType)
+    for game.begin_reading(&commands.push_buffer); game.can_read(&commands.push_buffer); {
+        type := game.read(&commands.push_buffer, game.RenderEntryType)
         
         switch type^ {
           case .None: unreachable()
@@ -534,7 +545,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 
                 gl_bind_frame_buffer(open_gl.depth_peel_buffers[peel_index], render_dim)
             } else {
-                assert(peel_index == open_gl.depth_peel_count-1)
+                game.assert(peel_index == open_gl.depth_peel_count-1)
                 
                 peeling = false
                 peel_index = 0
@@ -544,16 +555,16 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             }
             
           case .Textured_Quads:
-            entry := read(&commands.push_buffer, Textured_Quads)
+            entry := game.read(&commands.push_buffer, game.Textured_Quads)
             
             ////////////////////////////////////////////////
             gl_bind_frame_buffer(open_gl.depth_peel_buffers[peel_index], render_dim)
             
             setup := entry.setup
-            gl.Scissor(get_xywh(setup.clip_rect))
+            gl.Scissor(game.get_xywh(setup.clip_rect))
             
             game.begin_timed_block("gl copy buffer data")
-            gl.BufferData(gl.ARRAY_BUFFER, len(commands.vertex_buffer) * size_of(Textured_Vertex), raw_data(commands.vertex_buffer), gl.STREAM_DRAW)
+            gl.BufferData(gl.ARRAY_BUFFER, len(commands.vertex_buffer) * size_of(game.Textured_Vertex), raw_data(commands.vertex_buffer), gl.STREAM_DRAW)
             game.end_timed_block()
             
             ////////////////////////////////////////////////
@@ -609,11 +620,11 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.Viewport(0, 0, render_dim.x, render_dim.y)
     gl.Scissor(0, 0, render_dim.x, render_dim.y)
     
-    vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff},
-        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff},
-        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff},
-        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff},
+    vertex_buffer := [4] game.Textured_Vertex {
+        {{-1,  1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{0, 1}), 0xff},
+        {{-1, -1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{0, 0}), 0xff},
+        {{ 1,  1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{1, 1}), 0xff},
+        {{ 1, -1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{1, 0}), 0xff},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
@@ -645,8 +656,8 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     gl.ClearColor(0, 0, 0, 0)
     gl.Clear(gl.COLOR_BUFFER_BIT)
     
-    gl.Viewport(get_xywh(draw_region))
-    gl.Scissor(get_xywh(draw_region))
+    gl.Viewport(game.get_xywh(draw_region))
+    gl.Scissor(game.get_xywh(draw_region))
     
     begin_program(open_gl.final_stretch)
     // @metaprogram
@@ -662,7 +673,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     end_program(open_gl.final_stretch)
 }
 
-resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
+resolve_multisample :: proc (from, to: FrameBuffer, dim: game.v2i) {
     gl.DepthFunc(gl.ALWAYS)
     defer gl.DepthFunc(gl.LEQUAL)
     
@@ -672,11 +683,11 @@ resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
     gl.Viewport(0, 0, dim.x, dim.y)
     gl.Scissor(0, 0, dim.x, dim.y)
     
-    vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff},
-        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff},
-        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff},
-        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff},
+    vertex_buffer := [4] game.Textured_Vertex {
+        {{-1,  1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{0, 1}), 0xff},
+        {{-1, -1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{0, 0}), 0xff},
+        {{ 1,  1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{1, 1}), 0xff},
+        {{ 1, -1, 0, 1}, game.pack(game.v3{0, 0, 0}), game.pack(game.v2{1, 0}), 0xff},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
@@ -708,12 +719,12 @@ get_depth_peel_read_buffer :: proc (index: u32) -> (result: FrameBuffer) {
     return result
 }
 
-gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
+gl_display_bitmap :: proc (bitmap: game.Bitmap, draw_region: game.Rectangle2i, clear_color: game.v4) {
     if true do unimplemented()
     
     timed_function()
     
-    gl_bind_frame_buffer({}, get_dimension(draw_region))
+    gl_bind_frame_buffer({}, game.get_dimension(draw_region))
     
     gl.Disable(gl.SCISSOR_TEST)
     gl.Disable(gl.BLEND)
@@ -742,7 +753,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
 GlobalDepthComponent :: gl.DEPTH_COMPONENT24
 
-create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
+create_framebuffer :: proc (dim: game.v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
     gl.GenFramebuffers(1, &result.handle)
     gl.BindFramebuffer(gl.FRAMEBUFFER, result.handle)
     
@@ -762,7 +773,7 @@ create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result:
     }
     
     status := gl.CheckFramebufferStatus(gl.FRAMEBUFFER)
-    assert(status == gl.FRAMEBUFFER_COMPLETE)
+    game.assert(status == gl.FRAMEBUFFER_COMPLETE)
     
     gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
     gl.BindTexture(slot, 0)
@@ -770,7 +781,7 @@ create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result:
     return result
 }
 
-create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, dim: v2i) -> (result: u32) {
+create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, dim: game.v2i) -> (result: u32) {
     gl.GenTextures(1, auto_cast &result)
     
     gl.BindTexture(slot, result)
@@ -808,7 +819,7 @@ delete_lightbuffer :: proc (buffer: ^LightBuffer) {
     buffer ^= {}
 }
 
-gl_bind_frame_buffer :: proc (frame_buffer: FrameBuffer, render_dim: v2i) {
+gl_bind_frame_buffer :: proc (frame_buffer: FrameBuffer, render_dim: game.v2i) {
     gl.BindFramebuffer(gl.FRAMEBUFFER, frame_buffer.handle)
     gl.Viewport(0, 0, render_dim.x, render_dim.y)
 }

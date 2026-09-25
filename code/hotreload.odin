@@ -5,6 +5,11 @@ import win "core:sys/windows"
 @(private="file")
 game_lib: win.HMODULE
 
+@(private="file")
+renderer_libs: [128] win.HMODULE
+@(private="file")
+renderer_lib_count: int
+
 load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: bool, last_write_time: u64) {
     if game_lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
@@ -46,6 +51,35 @@ unload_game_lib :: proc () {
         game_lib = nil
     }
     game = game_stubs
+}
+
+load_renderer_lib_candidate :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (lib: win.HMODULE, is_valid: bool, last_write_time: u64) {
+    if win.GetFileAttributesW(lock_name) != win.INVALID_FILE_ATTRIBUTES {
+        return
+    }
+    
+    if !win.CopyFileW(source_dll_name, temp_dll_name, false) do return
+    last_write_time = get_last_write_time(source_dll_name)
+    lib = win.LoadLibraryW(temp_dll_name)
+    if lib == nil do return
+    
+    load_render_api(lib)
+    is_valid = render.attach != nil &&
+               render.allocate_texture != nil &&
+               render.manage_textures != nil &&
+               render.render != nil
+    return
+}
+
+commit_renderer_lib :: proc (lib: win.HMODULE) -> bool {
+    if lib == nil || renderer_lib_count == len(renderer_libs) do return false
+    
+    // Unlike game.dll, old renderer generations are intentionally pinned.
+    // Driver callbacks and allocator procedures may still point into them. A
+    // full renderer shutdown can release the generations in reverse order.
+    renderer_libs[renderer_lib_count] = lib
+    renderer_lib_count += 1
+    return true
 }
 
 get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {

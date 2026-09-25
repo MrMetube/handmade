@@ -51,6 +51,7 @@ GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMEN
 
 GlobalPause:               b32
 GlobalDebugShowCursor:     b32 = INTERNAL
+GlobalDebugRenderSingleThreaded: b32 = false
 GlobalUseSoftwareRenderer: b32 = false
 GlobalUseVulkanRenderer:   b32 = true
 
@@ -169,24 +170,6 @@ main :: proc () {
         }
     }
     
-    ////////////////////////////////////////////////
-    // Platform Setup
-    
-    {
-        window_dc := win.GetDC(window)
-        defer win.ReleaseDC(window, window_dc)
-        
-        if GlobalUseVulkanRenderer {
-            init_vulkan(window)
-        } else {
-            init_opengl(window_dc)
-        }
-    }
-    
-    high_queue, low_queue: WorkQueue
-    init_work_queue(&high_queue, HighPriorityThreads)
-    init_work_queue(&low_queue,  LowPriorityThreads )
-    
     {
         exe_path_buffer: [win.MAX_PATH_WIDE] u16
         size_of_filename  := win.GetModuleFileNameW(nil, &exe_path_buffer[0], win.MAX_PATH_WIDE)
@@ -199,6 +182,43 @@ main :: proc () {
         }
         GlobalPlatformState.exe_path = exe_path_and_name[:on_last_slash]
     }
+    
+    ////////////////////////////////////////////////
+    // Platform Setup
+    
+    renderer_dll_name  := build_exe_path("render.dll")
+    renderer_lock_name := build_exe_path("render.lock")
+    renderer_generation: u32
+    renderer_is_valid: bool
+    renderer_write_time: u64
+    renderer_memory: []u8
+    
+    {
+        window_dc := win.GetDC(window)
+        defer win.ReleaseDC(window, window_dc)
+        
+        renderer_temp_name := build_exe_path(tprint("render_temp_%.dll", renderer_generation, allocator = context.temp_allocator))
+        candidate, api_is_valid, write_time := load_renderer_lib_candidate(renderer_dll_name, renderer_temp_name, renderer_lock_name)
+        if api_is_valid {
+            renderer_memory = make(platform_allocator, u8, size_of(Renderer_State), align_no_clear(64))
+            renderer_is_valid = render.attach(renderer_memory, window, window_dc, Platform, cast(bool) GlobalUseVulkanRenderer)
+            if renderer_is_valid {
+                renderer_write_time = write_time
+                renderer_generation += 1
+                commit_renderer_lib(candidate)
+            } else {
+                win.FreeLibrary(candidate)
+                render = render_stubs
+            }
+        } else {
+            if candidate != nil do win.FreeLibrary(candidate)
+            render = render_stubs
+        }
+    }
+    
+    high_queue, low_queue: WorkQueue
+    init_work_queue(&high_queue, HighPriorityThreads)
+    init_work_queue(&low_queue,  LowPriorityThreads )
     
     // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
     desired_scheduler_ms :: 1
@@ -293,11 +313,7 @@ main :: proc () {
         render_commands.white_bitmap.memory[0] = 255
         render_commands.white_bitmap.dimension = 1
         render_commands.white_bitmap.width_over_height = 1
-        if GlobalUseVulkanRenderer {
-            render_commands.white_bitmap.texture_handle = vk_allocate_texture(render_commands.white_bitmap, true)
-        } else {
-            render_commands.white_bitmap.texture_handle = gl_allocate_texture(render_commands.white_bitmap)
-        }
+        render_commands.white_bitmap.texture_handle = render.allocate_texture(render_commands.white_bitmap, true)
         
         render_commands.dimension = GlobalBackBuffer.dimension
         
@@ -654,6 +670,49 @@ main :: proc () {
                 game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
             }
             
+            renderer_needs_to_be_reloaded := get_last_write_time(renderer_dll_name) != renderer_write_time
+            if renderer_needs_to_be_reloaded {
+                // Renderer jobs contain code pointers into render.dll. Drain both
+                // queues before publishing a new renderer API table.
+                complete_all_work(&high_queue)
+                complete_all_work(&low_queue)
+                
+                old_render_api := render
+                for _ in 0..<100 {
+                    renderer_temp_name := build_exe_path(tprint("render_temp_%.dll", renderer_generation, allocator = context.temp_allocator))
+                    candidate, api_is_valid, write_time := load_renderer_lib_candidate(renderer_dll_name, renderer_temp_name, renderer_lock_name)
+                    if !api_is_valid {
+                        if candidate != nil do win.FreeLibrary(candidate)
+                        render = old_render_api
+                        win.Sleep(100)
+                        continue
+                    }
+                    
+                    window_dc := win.GetDC(window)
+                    attached := render.attach(
+                        renderer_memory,
+                        window,
+                        window_dc,
+                        Platform,
+                        cast(bool) GlobalUseVulkanRenderer,
+                    )
+                    win.ReleaseDC(window, window_dc)
+                    
+                    if attached && commit_renderer_lib(candidate) {
+                        renderer_is_valid = true
+                        renderer_write_time = write_time
+                        renderer_generation += 1
+                    } else {
+                        win.FreeLibrary(candidate)
+                        render = old_render_api
+                        // A state layout/backend mismatch requires a restart.
+                        // Remember this build so it is not retried every frame.
+                        renderer_write_time = write_time
+                    }
+                    break
+                }
+            }
+            
             game.end_timed_block()
         }
         ////////////////////////////////////////////////
@@ -670,11 +729,7 @@ main :: proc () {
                 
                 if last != nil {
                     assert(first != nil)
-                    if GlobalUseVulkanRenderer {
-                        vk_manage_textures(last)
-                    } else {
-                        gl_manage_textures(last)
-                    }
+                    render.manage_textures(last)
                     
                     begin_ticket_mutex(&texture_op_queue.mutex)
                         freelist_free_list(&texture_op_queue.freelist, last, first)
@@ -685,7 +740,7 @@ main :: proc () {
         ////////////////////////////////////////////////
         { timed_block("render")
             
-            render_to_window(&render_commands, &high_queue, draw_region, frame_allocator, window_dim)
+            render.render(&render_commands, auto_cast &high_queue, draw_region, frame_allocator, window_dim, GlobalBackBuffer, cast(bool) GlobalUseSoftwareRenderer, cast(bool) GlobalDebugRenderSingleThreaded)
         }
         ////////////////////////////////////////////////
         { timed_block("sleep at frame end")
@@ -755,21 +810,6 @@ main :: proc () {
         
         game.frame_marker(measured_seconds_per_frame)
         last_counter = end_counter
-    }
-}
-
-////////////////////////////////////////////////
-
-render_to_window :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, arena: Allocator, windows_dim: v2i) {
-    commands.clear_color.rgb = square(commands.clear_color.rgb)
-    
-    if GlobalUseSoftwareRenderer {
-        software_render_commands(render_queue, commands, GlobalBackBuffer, arena)
-        gl_display_bitmap(GlobalBackBuffer, draw_region, commands.clear_color)
-    } else if GlobalUseVulkanRenderer {
-        vk_render_commands(commands, draw_region, windows_dim)
-    } else {
-        gl_render_commands(commands, draw_region, windows_dim)
     }
 }
 
@@ -1168,11 +1208,6 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         paint: win.PAINTSTRUCT
         device_context := win.BeginPaint(window, &paint)
         unused(device_context)
-        when false { 
-            // @todo(viktor): This has rotten quite a bit
-            window_width, window_height := get_window_dimension(window)
-            render_to_window(&GlobalBackBuffer, device_context, window_width, window_height)
-        }
         win.EndPaint(window, &paint)
         
       case win.WM_SETCURSOR: 
@@ -1281,3 +1316,32 @@ build_exe_path :: proc (filename: string) -> (result: cstring16) {
     result = win.utf8_to_wstring(path, context.temp_allocator)
     return result
 }
+
+////////////////////////////////////////////////
+
+clear_render_commands :: proc (commands: ^RenderCommands) {
+    clear(&commands.push_buffer)
+    clear(&commands.vertex_buffer)
+    clear(&commands.quad_bitmap_buffer)
+}
+
+aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectangle2i) {
+    if render_size.x > 0 && render_size.y > 0 && window_size.x > 0 && window_size.y > 0 {
+        optimal_window_width  := round(i32, cast(f32) window_size.y * cast(f32) render_size.x / cast(f32) render_size.y)
+        optimal_window_height := round(i32, cast(f32) window_size.x * cast(f32) render_size.y / cast(f32) render_size.x)
+        
+        window_center := window_size / 2
+        optimal_window_size: v2i
+        if optimal_window_width > window_size.x {
+            // Top and Bottom black bars
+            optimal_window_size = {window_size.x, optimal_window_height}
+        } else {
+            // Left and Right black bars
+            optimal_window_size = {optimal_window_width, window_size.y}
+        }
+        result = rectangle_center_dimension(window_center, optimal_window_size)
+    }
+    
+    return result
+}
+
