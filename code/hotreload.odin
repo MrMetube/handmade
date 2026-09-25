@@ -2,20 +2,26 @@ package main
 
 import win "core:sys/windows"
 
-@(private="file")
-game_lib: win.HMODULE
+@(private="file") game_lib:   win.HMODULE
+@(private="file") render_lib: win.HMODULE
 
-@(private="file")
-render_lib: win.HMODULE
+Dll :: struct {
+    name: cstring16,
+    lock: cstring16,
+    temp: cstring16,
+    
+    is_valid:   bool,
+    write_time: u64,
+}
 
-load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: bool, last_write_time: u64) {
+load_game_lib :: proc (dll: Dll) -> (is_valid: bool, last_write_time: u64) {
     if game_lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
     }
     
     unload_game_api()
     
-    game_lib, last_write_time = load_dll(source_dll_name, temp_dll_name, lock_name)
+    game_lib, last_write_time = load_dll(dll)
     if game_lib == nil do return false, last_write_time
     
     load_game_api(game_lib)
@@ -27,22 +33,36 @@ load_game_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> 
     return is_valid, last_write_time
 }
 
-load_render_lib :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (is_valid: bool, last_write_time: u64) {
-    assert(render_lib == nil && render == render_stubs, "render.dll has already been initialized")
+load_render_lib :: proc (dll: Dll) -> (is_valid: bool, last_write_time: u64) {
+    if render_lib == nil {
+        assert(render == render_stubs, "render.dll has already been initialized")
+    }
     
-    render_lib, last_write_time = load_dll(source_dll_name, temp_dll_name, lock_name)
+    render_lib, last_write_time = load_dll(dll)
     if render_lib == nil do return false, last_write_time
     
     load_render_api(render_lib)
-    is_valid = render.attach != nil &&
-               render.allocate_texture != nil &&
-               render.manage_textures != nil &&
-               render.render != nil &&
-               render.reload_or_shutdown != nil
+    is_valid = render.attach != nil && render.allocate_texture != nil && render.manage_textures != nil && render.render != nil && render.reload_or_shutdown != nil
     if !is_valid {
         unload_render_api()
     }
     return is_valid, last_write_time
+}
+
+load_dll :: proc (dll: Dll) -> (lib: win.HMODULE, last_write_time: u64) {
+    if win.GetFileAttributesW(dll.lock) != win.INVALID_FILE_ATTRIBUTES {
+        return nil, 0
+    }
+    
+    if !win.CopyFileW(dll.name, dll.temp, false) do return nil, 0
+    last_write_time = get_last_write_time(dll.name)
+    lib = win.LoadLibraryW(dll.temp)
+    return lib, last_write_time
+}
+
+needs_to_be_reloaded :: proc (dll: Dll) -> bool {
+    result := get_last_write_time(dll.name) != dll.write_time
+    return result
 }
 
 ////////////////////////////////////////////////
@@ -64,8 +84,8 @@ unload_api :: proc (lib: ^win.HMODULE, api: ^$T, stubs: T) {
     }
     api^ = stubs
 }
-////////////////////////////////////////////////
 
+////////////////////////////////////////////////
 
 get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
     FILE_ATTRIBUTE_DATA :: struct {
@@ -83,18 +103,6 @@ get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
     }
     return last_write_time
 }
-
-load_dll :: proc (source_dll_name, temp_dll_name, lock_name: cstring16) -> (lib: win.HMODULE, last_write_time: u64) {
-    if win.GetFileAttributesW(lock_name) != win.INVALID_FILE_ATTRIBUTES {
-        return nil, 0
-    }
-    
-    if !win.CopyFileW(source_dll_name, temp_dll_name, false) do return nil, 0
-    last_write_time = get_last_write_time(source_dll_name)
-    lib = win.LoadLibraryW(temp_dll_name)
-    return lib, last_write_time
-}
-
 
 ////////////////////////////////////////////////
 // reimplement to allow the deferred_out to work

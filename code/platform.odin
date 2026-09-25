@@ -5,9 +5,7 @@ import "base:runtime"
 import win "core:sys/windows"
 
 /*
-    @todo(viktor): THIS IS NOT A FINAL PLATFORM LAYER !!!
-    - Blit speed improvements (BitBlt)
-    
+    @todo THIS IS NOT A FINAL PLATFORM LAYER !!!
     - Saved game locations
     - Getting a handle to our own executable file
     - Raw Input (support for multiple keyboards)
@@ -29,7 +27,7 @@ GlobalBackBuffer :=  Bitmap {
     // dimension = {2560, 1440},
 }
 
-MonitorRefreshHz :: 90
+MonitorRefreshHz :: 144
 
 HighPriorityThreads :: 9
 LowPriorityThreads  :: 2
@@ -53,6 +51,7 @@ GlobalPause:               b32
 GlobalDebugShowCursor:     b32 = INTERNAL
 GlobalDebugRenderSingleThreaded: b32 = false
 GlobalUseSoftwareRenderer: b32 = false
+// :BackendSwitching:
 GlobalUseVulkanRenderer:   b32 = true
 
 GlobalDebugTable := &DebugTable{}
@@ -72,7 +71,7 @@ SoundOutput :: struct {
 PlatformState :: struct {
     exe_path: string,
     
-    // @note(viktor): to touch the memory ring you need to take the memory mutex.
+    // @note to touch the memory ring you need to take the memory mutex.
     block_mutex:    TicketMutex,
     block_sentinel: Memory_Block,
     
@@ -90,7 +89,7 @@ Memory_Block :: struct #align(64) {
 }
 
 _Memory_Block :: struct {
-    // @note(viktor): this needs to be the first member so that a ^Platform_Memory_Block can be cast to a ^Memory_Block
+    // @note this needs to be the first member so that a ^Platform_Memory_Block can be cast to a ^Memory_Block
     block: Platform_Memory_Block,
     
     prev, next: ^Memory_Block,
@@ -193,25 +192,26 @@ main :: proc () {
     ////////////////////////////////////////////////
     //  Video Setup
     
-    render_dll_name  := build_exe_path("render.dll")
-    render_lock_name := build_exe_path("render.lock")
-    render_is_valid: bool
-    render_write_time: u64
-    render_state: ^Render_State
+    render_state := make(platform_allocator, Render_State)
+    // @cleanup
+    render_state.game = transmute(type_of(render_state.game)) game
+    
+    render_dll: Dll
+    render_dll.name = build_exe_path("render.dll")
+    render_dll.lock = build_exe_path("render.lock")
+    render_dll.temp = build_exe_path("render_temp.dll")
     
     {
         window_dc := win.GetDC(window)
         defer win.ReleaseDC(window, window_dc)
         
-        renderer_temp_name := build_exe_path("render_temp.dll")
-        api_is_valid, write_time := load_render_lib(render_dll_name, renderer_temp_name, render_lock_name)
-        if api_is_valid {
-            render_state = make(platform_allocator, Render_State)
-            render_state.game = transmute(type_of(render_state.game)) game
-            
-            render_is_valid = render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
-            if render_is_valid {
-                render_write_time = write_time
+        write_time: u64
+        render_dll.is_valid, write_time = load_render_lib(render_dll)
+        
+        if render_dll.is_valid {
+            render_dll.is_valid = render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
+            if render_dll.is_valid {
+                render_dll.write_time = write_time
             } else {
                 render.reload_or_shutdown(.Shutdown)
                 unload_render_api()
@@ -219,7 +219,7 @@ main :: proc () {
         }
     }
     
-    // @todo(viktor): how do we reliably query this on windows?
+    // @todo how do we reliably query this on windows?
     game_update_hz: f32
     {
         when false {
@@ -243,7 +243,7 @@ main :: proc () {
     sound_output.num_channels       = 2
     sound_output.bytes_per_sample   = size_of(Sample)
     sound_output.buffer_size        = sound_output.samples_per_second * sound_output.bytes_per_sample
-    // @todo(viktor): actually compute this variance and set a reasonable value
+    // @todo actually compute this variance and set a reasonable value
     {
         target_seconds_per_frame := 1 / game_update_hz
         sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32) sound_output.samples_per_second * cast(f32) sound_output.bytes_per_sample)
@@ -265,7 +265,7 @@ main :: proc () {
     
     init_xInput()
     
-    // @todo(viktor): Monitor xbox controllers for being plugged in after the fact
+    // @todo Monitor xbox controllers for being plugged in after the fact
     xbox_controller_present: [XUSER_MAX_COUNT] bool = true
     
     input: [2] Input
@@ -274,14 +274,16 @@ main :: proc () {
     ////////////////////////////////////////////////
     // Memory Setup
     
-    game_dll_name := build_exe_path("game.dll")
-    lock_name     := build_exe_path("game.lock")
-    game_temp_name := build_exe_path("game_temp.dll")
-    game_lib_is_valid, game_dll_write_time := load_game_lib(game_dll_name, game_temp_name, lock_name)
-    game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
+    game_dll: Dll
+    game_dll.name = build_exe_path("game.dll")
+    game_dll.lock = build_exe_path("game.lock")
+    game_dll.temp = build_exe_path("game_temp.dll")
     
-    // @todo(viktor): make this like sixty seconds?
-    // @todo(viktor): remove MaxPossibleOverlap
+    game_dll.is_valid, game_dll.write_time = load_game_lib(game_dll)
+    game.debug_set_event_recording(game_dll.is_valid, GlobalDebugTable)
+    
+    // @todo make this like sixty seconds?
+    // @todo remove MaxPossibleOverlap
     MaxPossibleOverlap :: 8
     samples := make(platform_allocator, Sample, sound_output.samples_per_second + MaxPossibleOverlap)
     assert(samples != nil)
@@ -291,13 +293,13 @@ main :: proc () {
     
     render_commands: RenderCommands
     {
-        // @todo(viktor): decide what our sizes should be
+        // @todo decide what our sizes should be
         push_buffer := make(frame_allocator, u8, 32*Megabyte)
         render_commands.push_buffer        = make_byte_buffer(push_buffer)
         render_commands.vertex_buffer      = make_array_allocator(frame_allocator, Textured_Vertex, 1 << 20)
         render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
         
-        // @todo(viktor): Check if the software renderer handles this correctly because of the lanewidth
+        // @todo Check if the software renderer handles this correctly because of the lanewidth
         render_commands.white_bitmap.memory = make(frame_allocator, Color, 1)
         render_commands.white_bitmap.memory[0] = 255
         render_commands.white_bitmap.dimension = 1
@@ -319,7 +321,7 @@ main :: proc () {
         Platform_api = Platform,
     }
     
-    { // @note(viktor): initialize game_memory
+    { // @note initialize game_memory
         game_memory.debug_table = make(platform_allocator, DebugTable)
         
         texture_op_count := 1024
@@ -336,12 +338,11 @@ main :: proc () {
     //  Timer Setup
     
     last_counter := get_wall_clock()
-    flip_counter := get_wall_clock()
     
     ////////////////////////////////////////////////
     //  Game Loop
     
-    // @note(viktor): Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
+    // @note Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
     desired_scheduler_ms :: 1
     sleep_is_granular := win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
     
@@ -392,9 +393,9 @@ main :: proc () {
                         button.half_transition_count = 0
                     }
                     
-                    // @todo(viktor): support mouse wheel
+                    // @todo support mouse wheel
                     new_input.mouse.wheel = 0
-                    // @todo(viktor): Do we need to update the input button on every event?
+                    // @todo Do we need to update the input button on every event?
                     process_win_keyboard_message(&new_input.mouse.buttons[.left],   is_down(win.VK_LBUTTON))
                     process_win_keyboard_message(&new_input.mouse.buttons[.right],  is_down(win.VK_RBUTTON))
                     process_win_keyboard_message(&new_input.mouse.buttons[.middle], is_down(win.VK_MBUTTON))
@@ -417,11 +418,11 @@ main :: proc () {
                 }
                 
                 max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
-                // @todo(viktor): Need to not poll disconnected controllers to avoid xinput frame rate hit
+                // @todo Need to not poll disconnected controllers to avoid xinput frame rate hit
                 // on older libraries.
                 // Is this still relevant?
-                // @todo(viktor): should we poll this more frequently
-                // @todo(viktor): only check connected controllers, catch messages on connect / disconnect
+                // @todo should we poll this more frequently
+                // @todo only check connected controllers, catch messages on connect / disconnect
                 { timed_block("controller input")
                     
                     for controller_index in 0..<max_controller_count {
@@ -435,7 +436,7 @@ main :: proc () {
                         if xbox_controller_present[controller_index] && xinput.GetState(controller_index, &controller_state) == win.ERROR_SUCCESS {
                             new_controller.is_connected = true
                             new_controller.is_analog = old_controller.is_analog
-                            // @todo(viktor): see if dwPacketNumber increments too rapidly
+                            // @todo see if dwPacketNumber increments too rapidly
                             pad := controller_state.Gamepad
                             
                             process_Xinput_button :: proc (new_state: ^InputButton, old_state: InputButton, xInput_button_state: win.WORD, button_bit: win.WORD) {
@@ -463,7 +464,7 @@ main :: proc () {
                                 .thumb_left     = XINPUT_GAMEPAD_LEFT_THUMB,
                                 .thumb_right    = XINPUT_GAMEPAD_RIGHT_THUMB,
                                 
-                                // @note(viktor): stick_xx "buttons" are handled separately below
+                                // @note stick_xx "buttons" are handled separately below
                             }
                             
                             for xinput_bit, button in xx {
@@ -479,8 +480,8 @@ main :: proc () {
                                 return 0
                             }
                             
-                            // @todo(viktor): right stick, triggers
-                            // @todo(viktor): This is a square deadzone, check XInput to
+                            // @todo right stick, triggers
+                            // @todo This is a square deadzone, check XInput to
                             // verify that the deadzone is "round" and show how to do
                             // round deadzone processing.
                             new_controller.stick_average = {
@@ -489,7 +490,7 @@ main :: proc () {
                             }
                             if new_controller.stick_average != {0,0} do new_controller.is_analog = true
                             
-                            // @todo(viktor): what if we don't want to override the stick
+                            // @todo what if we don't want to override the stick
                             if (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 { new_controller.stick_average.x =  1; new_controller.is_analog = false }
                             if (pad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0  { new_controller.stick_average.x = -1; new_controller.is_analog = false }
                             if (pad.wButtons & XINPUT_GAMEPAD_DPAD_UP) != 0    { new_controller.stick_average.y =  1; new_controller.is_analog = false }
@@ -545,7 +546,7 @@ main :: proc () {
                     replay_input(state, new_input)
                 }
                 
-                if game_lib_is_valid {
+                if game_dll.is_valid {
                     game.update_and_render(&game_memory, new_input, &render_commands)
                     if new_input.quit_requested {
                         GlobalRunning = false
@@ -560,7 +561,7 @@ main :: proc () {
                 sound_is_valid = true
                 play_cursor, write_cursor: u32
                 audio_counter := get_wall_clock()
-                from_begin_to_audio := get_seconds_elapsed(flip_counter, audio_counter)
+                from_begin_to_audio := get_seconds_elapsed(last_counter, audio_counter)
                 
                 if result := GlobalSoundBuffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
                     /*
@@ -625,7 +626,7 @@ main :: proc () {
                     }
                     bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
                     
-                    if game_lib_is_valid {
+                    if game_dll.is_valid {
                         game.output_sound_samples(&game_memory, sound_buffer)
                     }
                     
@@ -640,9 +641,9 @@ main :: proc () {
             game.begin_timed_block("debug collation")
             
             game_memory.reloaded_executable = false
-            executable_needs_to_be_reloaded := get_last_write_time(game_dll_name) != game_dll_write_time
+            executable_needs_to_be_reloaded := needs_to_be_reloaded(game_dll)
             if executable_needs_to_be_reloaded {
-                // @note(viktor): clear out the queue, as they may call into unloaded game code
+                // @note clear out the queue, as they may call into unloaded game code
                 complete_all_work(&high_queue)
                 complete_all_work(&low_queue)
                 assert(high_queue.completion_count == high_queue.completion_goal)
@@ -653,34 +654,39 @@ main :: proc () {
             game.debug_frame_end(&game_memory, new_input^, &render_commands)
             
             if executable_needs_to_be_reloaded {
+                timed_block("game hotreload")
+                
+                // @todo if this is too slow the audio and the whole game will lag
                 unload_game_api()
                 for _ in 0..<100 {
-                    game_lib_is_valid, game_dll_write_time = load_game_lib(game_dll_name, game_temp_name, lock_name)
-                    if game_lib_is_valid do break
+                    game_dll.is_valid, game_dll.write_time = load_game_lib(game_dll)
+                    if game_dll.is_valid do break
                     win.Sleep(100)
                 }
                 
                 game_memory.reloaded_executable = true
-                game.debug_set_event_recording(game_lib_is_valid, GlobalDebugTable)
+                game.debug_set_event_recording(game_dll.is_valid, GlobalDebugTable)
                 
                 render_state.game = transmute(type_of(render_state.game)) game
             }
             
-            renderer_needs_to_be_reloaded := get_last_write_time(render_dll_name) != render_write_time
-            if renderer_needs_to_be_reloaded {
-                // Renderer jobs contain code pointers into render.dll. Drain both
-                // queues before publishing a new renderer API table.
+            if needs_to_be_reloaded(render_dll) {
+                timed_block("render hotreload")
+                
+                // @note clear out the queue, as they may call into unloaded game code
                 complete_all_work(&high_queue)
                 complete_all_work(&low_queue)
+                assert(high_queue.completion_count == high_queue.completion_goal)
+                assert(low_queue.completion_count  == low_queue.completion_goal)
                 
-                if render_is_valid {
+                if render_dll.is_valid {
                     render.reload_or_shutdown(.Reload)
-                    render_is_valid = false
+                    render_dll.is_valid = false
                 }
                 unload_render_api()
+                
                 for _ in 0..<100 {
-                    renderer_temp_name := build_exe_path("render_temp.dll")
-                    api_is_valid, write_time := load_render_lib(render_dll_name, renderer_temp_name, render_lock_name)
+                    api_is_valid, write_time := load_render_lib(render_dll)
                     if !api_is_valid {
                         win.Sleep(100)
                         continue
@@ -691,12 +697,12 @@ main :: proc () {
                     win.ReleaseDC(window, window_dc)
                     
                     if attached {
-                        render_is_valid = true
-                        render_write_time = write_time
+                        render_dll.is_valid = true
+                        render_dll.write_time = write_time
                     } else {
                         // A state layout/backend mismatch requires a restart.
                         // Remember this build so it is not retried every frame.
-                        render_write_time = write_time
+                        render_dll.write_time = write_time
                         unload_render_api()
                     }
                     break
@@ -741,7 +747,7 @@ main :: proc () {
             }
             
             if seconds_elapsed_for_frame < target_seconds_per_frame {
-                // @note(viktor): Sleep
+                // @note Sleep
                 if sleep_is_granular {
                     sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
                     if sleep_ms > 0 { 
@@ -760,7 +766,7 @@ main :: proc () {
                     }
                 }
                 
-                // @note(viktor): Busy Waiting
+                // @note Busy Waiting
                 for seconds_elapsed_for_frame < target_seconds_per_frame {
                     seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
                 }
@@ -776,17 +782,15 @@ main :: proc () {
             }
         }
         ////////////////////////////////////////////////
-        { timed_block("frame display")
+        if render_dll.is_valid && render_state.backend != .Vulkan {
+            timed_block("gl frame display")
             
             device_context := win.GetDC(window)
             defer win.ReleaseDC(window, device_context)
             
-            when false do print("vertex count = %\n", render_commands.vertex_buffer.count)
-            
             { timed_block("SwapBuffers")
                 win.SwapBuffers(device_context)
             }
-            flip_counter = get_wall_clock()
         }
         ////////////////////////////////////////////////
         
@@ -805,16 +809,16 @@ main :: proc () {
     ////////////////////////////////////////////////
     // Cleanup and Shutdown
     
-    if render_is_valid do render.reload_or_shutdown(.Shutdown)
+    if render_dll.is_valid do render.reload_or_shutdown(.Shutdown)
     unload_render_api()
     unload_game_api()
 }
 
 ////////////////////////////////////////////////
 // Platform Allocator
-// @todo(viktor): This could be a special allocator that then can just be passed to the game arenas
+// @todo This could be a special allocator that then can just be passed to the game arenas
 
-PageSize :: 4096 // @todo(viktor): you can get this from the OS, too!
+PageSize :: 4096 // @todo you can get this from the OS, too!
 
 @(api)
 allocate_memory_block :: proc (#any_int size: umm, allocation_flags := Platform_Allocation_Flags{}) -> (result: ^Platform_Memory_Block) {
@@ -897,7 +901,7 @@ clear_blocks_by_mask :: proc (state: ^PlatformState, mask: Memory_Block_Flags) {
     }
 }
 
-// @todo(viktor): only generate this when INTERNAL?
+// @todo only generate this when INTERNAL?
 @(api)
 debug_get_memory_stats :: proc () -> (result: Debug_Platform_Memory_Stats) {
     state := &GlobalPlatformState
@@ -1009,7 +1013,7 @@ replay_input :: proc (state: ^PlatformState, input: ^Input) {
     bytes_read: u32
     if win.ReadFile(state.replaying_handle, input, cast(u32) size_of(Input), &bytes_read, nil) {
         if bytes_read == 0 {
-            // @note(viktor): we reached the end of the stream go back to beginning
+            // @note we reached the end of the stream go back to beginning
             replay_index := state.replaying_index
             end_replaying_input(state)
             begin_replaying_input(state, replay_index)
@@ -1052,8 +1056,8 @@ fill_sound_buffer :: proc (sound_output: ^SoundOutput, byte_to_lock, bytes_to_wr
     region1_size, region2_size: u32
     
     if result := GlobalSoundBuffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-        // @todo(viktor): assert that region1/2_size is valid
-        // @todo(viktor): Collapse these two loops
+        // @todo assert that region1/2_size is valid
+        // @todo Collapse these two loops
         
         dest_samples := cast([^]Sample) region1
         region1_sample_count := region1_size / sound_output.bytes_per_sample
@@ -1083,7 +1087,7 @@ fill_sound_buffer :: proc (sound_output: ^SoundOutput, byte_to_lock, bytes_to_wr
         
         GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
-        return // @todo(viktor): @logging
+        return // @todo @logging
     }
 }
 
@@ -1092,9 +1096,9 @@ clear_sound_buffer :: proc (sound_output: ^SoundOutput) {
     region1_size, region2_size: u32
     // @copypasta
     if result := GlobalSoundBuffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
-        // @todo(viktor): assert that region1/2_size is valid
-        // @todo(viktor): Collapse these two loops
-        // @todo(viktor): Copy pasta of fill_sound_buffer
+        // @todo assert that region1/2_size is valid
+        // @todo Collapse these two loops
+        // @todo Copy pasta of fill_sound_buffer
         
         dest_samples := cast([^]u8) region1
         for index in 0..<region1_size {
@@ -1110,7 +1114,7 @@ clear_sound_buffer :: proc (sound_output: ^SoundOutput) {
         
         GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
-        return // @todo(viktor): @logging
+        return // @todo @logging
     }
 }
 
@@ -1130,7 +1134,7 @@ get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := fals
 }
 
 toggle_fullscreen :: proc (window: win.HWND) {
-    // @note(viktor): This follows Raymond Chen's prescription for fullscreen toggling, see:
+    // @note This follows Raymond Chen's prescription for fullscreen toggling, see:
     // http://blogs.msdn.com/b/oldnewthing/archive/2010/04/12/9994016.aspx
     
     style := cast(u32) win.GetWindowLongW(window, win.GWL_STYLE)
@@ -1162,10 +1166,10 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
       case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
         assert(false, "keyboard-event came in through a non-dispatched event")
         
-      case win.WM_CLOSE: // @todo(viktor): Handle this with a message to the user
+      case win.WM_CLOSE: // @todo Handle this with a message to the user
         GlobalRunning = false
         
-      case win.WM_DESTROY: // @todo(viktor): handle this as an error - recreate window?
+      case win.WM_DESTROY: // @todo handle this as an error - recreate window?
         GlobalRunning = false
         
       case win.WM_WINDOWPOSCHANGING:
@@ -1231,7 +1235,7 @@ process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: bool) {
 process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController) {
     message: win.MSG
     for {
-        // @note(viktor): We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
+        // @note We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
         first  :: min(win.WM_PAINT, win.WM_MOUSEMOVE)
         second :: max(win.WM_PAINT, win.WM_MOUSEMOVE)
         last   :: max(u32)
@@ -1298,7 +1302,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             
           case:
             timed_block("default_message_handler")
-            // @todo(viktor): on a resize or dragging of the window the whole app freezes, for a possible workaround see "Dangerous Threads Crew" https://www.youtube.com/watch?v=_HpGJeJowiY 
+            // @todo on a resize or dragging of the window the whole app freezes, for a possible workaround see "Dangerous Threads Crew" https://www.youtube.com/watch?v=_HpGJeJowiY 
             win.TranslateMessage(&message)
             win.DispatchMessageW(&message)
         }

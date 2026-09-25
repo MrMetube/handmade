@@ -1,16 +1,16 @@
 package render
 
 /* @todo
-    the renderer hotreload needs to be unshittified and compressed with the game hotreload
-    
     iterate on reducing the generated file count and Api structs and game-static vs. game-dynamic differentiation
       make sure the only game code that can be called from outside is helper code
         check all @(common) procs
         reduce global variables
     
     delete platform_api.odin from render (and game)
-        
+    
     reduce the api surface overall for render, game and platform between each other
+    
+    on reload all allocated textures are lost, we need to realloc them
 */ 
 
 import "base:runtime"
@@ -49,20 +49,23 @@ Reload_Action :: enum {
 
 render_state: ^Render_State
 
-// @todo struct for all lose params
 @(export)
 attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, backend: Backend) -> bool {
     render_state = state
     open_gl = &render_state.open_gl
     vulkan  = &render_state.vulkan
     
-    // Layout changes need an explicit migration. Refuse the reload rather than
-    // interpreting live driver state with a different struct definition.
-    // @todo handle backend changed
     if render_state.initialized && render_state.backend != backend {
         reload_or_shutdown(.Shutdown)
-        // @incomplete
-        return false
+        /* @todo :BackendSwitching:
+            - all work using the old backend must be complete
+            - the old backend must release resources that cannot survive the switch
+            - the new backend must be initialized before rendering resumes
+            - backend-owned handles stored outside the renderer must be invalidated
+            - pending texture operations and render commands must not use old handles
+            - resident textures and the white texture must have handles for the new backend
+        */
+        unimplemented("backend switching")
     }
     
     result: bool

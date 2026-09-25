@@ -33,6 +33,7 @@ Bitmap :: struct {
     align_percentage:  v2,
     width_over_height: f32,
     
+    // :BackendSwitching:
     texture_handle: u32,
 }
     
