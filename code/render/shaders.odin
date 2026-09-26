@@ -2,7 +2,6 @@ package render
 
 import "base:runtime"
 import gl "vendor:OpenGl"
-import game "../game"
 
 // @todo(viktor): maybe try this instead of gl_xxx
 sl :: struct ($T: typeid) {
@@ -10,13 +9,13 @@ sl :: struct ($T: typeid) {
     value:    T,
 }
 
-sl_m4  :: sl(^game.m4)
+sl_m4  :: sl(^m4)
 sl_u32 :: sl(u32)
 sl_i32 :: sl(i32)
 sl_f32 :: sl(f32)
-sl_v2  :: sl(game.v2)
-sl_v3  :: sl(game.v3)
-sl_v4  :: sl(game.v4)
+sl_v2  :: sl(v2)
+sl_v3  :: sl(v3)
+sl_v4  :: sl(v4)
 sl_sampler2D   :: distinct sl(i32)
 sl_sampler2DMS :: distinct sl(i32)
 
@@ -101,7 +100,7 @@ ZBiasProgram :: struct {
 ////////////////////////////////////////////////
 
 compile_zbias_program :: proc (program: ^ZBiasProgram, depth_peeling: bool) {
-    common := game.tprint(`
+    common := tprint(`
 #define DepthPeeling %
     
 smooth INOUT v4 frag_color;
@@ -435,7 +434,7 @@ begin_program_peel_composite :: proc (program: PeelCompositeProgram) {
     gl.Uniform1i(auto_cast program.peel3_sampler, 3)
 }
 
-begin_program_zbias :: proc (program: ZBiasProgram, setup: game.RenderSetup, alpha_threshold: f32) {
+begin_program_zbias :: proc (program: ZBiasProgram, setup: RenderSetup, alpha_threshold: f32) {
     begin_program_common(program)
     
     // @todo(viktor): @metaprogram here?
@@ -459,7 +458,7 @@ begin_program_zbias :: proc (program: ZBiasProgram, setup: game.RenderSetup, alp
 begin_program_common :: proc (program: OpenGLProgram) {
     gl.UseProgram(program.handle)
     
-    dummy: game.Textured_Vertex
+    dummy: Textured_Vertex
     stride := cast(i32) size_of(dummy)
     
     if program.in_uv != -1 {
@@ -487,7 +486,7 @@ begin_program_common :: proc (program: OpenGLProgram) {
 end_program :: proc { end_program_common }
 end_program_common :: proc (program: OpenGLProgram) {
     program := program
-    base := cast(game.umm) cast(game.pmm) &program.vertex_inputs
+    base := cast(umm) cast(pmm) &program.vertex_inputs
     
     struct_type :: type_of(program.vertex_inputs)
     info := type_info_of(struct_type).variant.(runtime.Type_Info_Struct)
@@ -495,8 +494,8 @@ end_program_common :: proc (program: OpenGLProgram) {
         offset := info.offsets[index]
         type   := info.types[index]
         
-        // @todo(viktor): game.make a proc for this reflection game.read from member of struct
-        game.assert(size_of(i32) == type.size)
+        // @todo(viktor): make a proc for this reflection read from member of struct
+        assert(size_of(i32) == type.size)
         value := (cast(^i32) (base + offset))^
         
         if value != -1 do gl.DisableVertexAttribArray(cast(u32) value)
@@ -511,8 +510,8 @@ compile_program_common :: proc (program: ^$Program, common: string) {
     defines: cstring = "#version 330\n"
     
     vertex_buffer, fragment_buffer: [4096] u8
-    vb : game.String_Builder = game.make_array_with_slice(vertex_buffer[:])
-    fb : game.String_Builder = game.make_array_with_slice(fragment_buffer[:])
+    vb : String_Builder = make_array_with_slice(vertex_buffer[:])
+    fb : String_Builder = make_array_with_slice(fragment_buffer[:])
     
     append(&vb, `
 #define INOUT out
@@ -531,11 +530,11 @@ compile_program_common :: proc (program: ^$Program, common: string) {
     gl_generate(&fb, type_of(program.shared_uniforms), "uniform")
     gl_generate(&fb, type_of(program.fragment_uniforms), "uniform")
     
-    game.append_string(&vb, common)
+    append_string(&vb, common)
     append(&fb, common)
     
-    vertex_code   := game.to_cstring(&vb)
-    fragment_code := game.to_cstring(&fb)
+    vertex_code   := to_cstring(&vb)
+    fragment_code := to_cstring(&fb)
     
     program.handle = create_program(defines, GlobalShaderHeaderCode, vertex_code, fragment_code)
     gl_get_locations(program.handle, &program.vertex_inputs, false)
@@ -584,11 +583,11 @@ create_program :: proc (defines, header_code, vertex_code, fragment_code: cstrin
         vertex_error   := cast(string) vertex_error_bytes[:vertex_length]
         fragment_error := cast(string) fragment_error_bytes[:fragment_length]
         program_error  := cast(string) program_error_bytes[:program_length]
-        if vertex_error   != "" do game.print("vertex error message:\n%\n", vertex_error)
-        if fragment_error != "" do game.print("fragment error message:\n%\n", fragment_error)
-        if program_error  != "" do game.print("program error message:\n%\n", program_error)
+        if vertex_error   != "" do print("vertex error message:\n%\n", vertex_error)
+        if fragment_error != "" do print("fragment error message:\n%\n", fragment_error)
+        if program_error  != "" do print("program error message:\n%\n", program_error)
         
-        game.assert(false)
+        assert(false)
     }
     
     return result
@@ -628,36 +627,36 @@ gl_type_to_string :: proc (type: typeid) -> (result: string) {
     return result
 }
 
-gl_generate :: proc (sb: ^game.String_Builder, type: typeid, prefix: string) {
+gl_generate :: proc (sb: ^String_Builder, type: typeid, prefix: string) {
     info := type_info_of(type).variant.(runtime.Type_Info_Struct)
     for index in 0 ..< info.field_count {
         id := info.types[index].id
         name := info.names[index]
         
-        game.appendf(sb, "% % %;\n", prefix, gl_type_to_string(id), name)
+        appendf(sb, "% % %;\n", prefix, gl_type_to_string(id), name)
     }
     append(sb, "\n")
 }
 
 gl_get_locations :: proc (program_handle: u32, base: ^$T, $is_uniform: bool) {
     info := type_info_of(T).variant.(runtime.Type_Info_Struct)
-    bytes := game.to_bytes(base)
+    bytes := to_bytes(base)
     
     for index in 0 ..< info.field_count {
         size := info.types[index].size
         name := info.names[index]
         offset := info.offsets[index]
         
-        cname := game.ctprint("%", name)
+        cname := ctprint("%", name)
         when is_uniform {
             value := gl.GetUniformLocation(program_handle, cname)
         } else {
             value := gl.GetAttribLocation(program_handle, cname)
         }
         
-        // @todo(viktor): game.make a proc for this reflection copy into a member of struct
+        // @todo(viktor): make a proc for this reflection copy into a member of struct
         dest := bytes[offset:][:size]    
-        source := game.to_bytes(&value)
+        source := to_bytes(&value)
         copy_slice(dest, source)
     }
 }

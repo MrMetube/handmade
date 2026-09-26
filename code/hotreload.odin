@@ -25,8 +25,7 @@ load_game_lib :: proc (dll: Dll) -> (is_valid: bool, last_write_time: u64) {
     if game_lib == nil do return false, last_write_time
     
     load_game_api(game_lib)
-    // @todo: do we really need to depend on debug_frame_end here?
-    is_valid = game.update_and_render != nil && game.output_sound_samples != nil && game.debug_frame_end != nil
+    is_valid = game_api_is_valid()
     if !is_valid {
         unload_game_api()
     }
@@ -42,7 +41,7 @@ load_render_lib :: proc (dll: Dll) -> (is_valid: bool, last_write_time: u64) {
     if render_lib == nil do return false, last_write_time
     
     load_render_api(render_lib)
-    is_valid = render.attach != nil && render.allocate_texture != nil && render.manage_textures != nil && render.render != nil && render.reload_or_shutdown != nil
+    is_valid = render_api_is_valid()
     if !is_valid {
         unload_render_api()
     }

@@ -30,6 +30,7 @@ Render_State :: struct {
     vulkan:     Vulkan,
     
     game: GameApi, // already set by the platform
+    platform: Platform_Api,
 }
 
 @(common)

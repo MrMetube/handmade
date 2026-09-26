@@ -2,28 +2,27 @@
 package render
 
 import "core:simd"
-import game "../game"
 
 TileRenderWork :: struct {
-    commands: ^game.RenderCommands,
-    targets:  [] game.Bitmap,
+    commands: ^RenderCommands,
+    targets:  [] Bitmap,
     
-    base_clip_rect: game.Rectangle2i,
+    base_clip_rect: Rectangle2i,
 }
 
 ////////////////////////////////////////////////
 
-software_render_commands :: proc (queue: ^game.WorkQueue, commands: ^game.RenderCommands, base_target: game.Bitmap, arena: game.Allocator, single_threaded: bool) {
+software_render_commands :: proc (queue: ^WorkQueue, commands: ^RenderCommands, base_target: Bitmap, arena: Allocator, single_threaded: bool) {
     timed_function()
     
     // @todo(viktor): removed from commands on day 384
     max_render_target_index := 1
     
-    targets := game.make(arena, game.Bitmap, max_render_target_index + 1)
+    targets := make(arena, Bitmap, max_render_target_index + 1)
     targets[0] = base_target
     for &target in targets[1:] {
         target = base_target
-        target.memory = game.make(arena, game.Color, target.dimension.x * target.dimension.y, game.align_no_clear(game.LaneWidth * size_of(game.Color)))
+        target.memory = make(arena, Color, target.dimension.x * target.dimension.y, align_no_clear(LaneWidth * size_of(Color)))
     }
     
     /* @todo(viktor):
@@ -31,11 +30,11 @@ software_render_commands :: proc (queue: ^game.WorkQueue, commands: ^game.Render
         - Re-test some of our instruction choices
     */
     
-    tile_count :: game.v2i{4, 4}
+    tile_count :: v2i{4, 4}
     works: [tile_count.x * tile_count.y] TileRenderWork
     
     tile_size := base_target.dimension / tile_count
-    tile_size.x = game.align(game.LaneWidth, tile_size.x)
+    tile_size.x = align(LaneWidth, tile_size.x)
     
     work_index: i32
     for y in 0..<tile_count.y {
@@ -63,34 +62,34 @@ software_render_commands :: proc (queue: ^game.WorkQueue, commands: ^game.Render
             if single_threaded {
                 do_tile_render_work(work)
             } else {
-                game.Platform.enqueue_work(queue, work, do_tile_render_work)
+                render_state.platform.enqueue_work(auto_cast queue, work, do_tile_render_work)
             }
         }
     }
     
-    game.Platform.complete_all_work(queue)
+    render_state.platform.complete_all_work(auto_cast queue)
 }
 
-do_tile_render_work :: proc (data: game.pmm) {
+do_tile_render_work :: proc (data: pmm) {
     timed_function()
     
     using work := cast(^TileRenderWork) data
-    game.assert(commands != nil)
+    assert(commands != nil)
     
     clip_rect := base_clip_rect
     
     for target, index in targets {
-        clear_color: game.v4
+        clear_color: v4
         if index == 0 {
             clear_color = commands.clear_color
         }
         clear_render_target(target, clip_rect, clear_color)
     }
     
-    target: game.Bitmap
+    target: Bitmap
     
-    for game.begin_reading(&commands.push_buffer); game.can_read(&commands.push_buffer); {
-        type := game.read(&commands.push_buffer, game.RenderEntryType)
+    for begin_reading(&commands.push_buffer); can_read(&commands.push_buffer); {
+        type := read(&commands.push_buffer, RenderEntryType)
         
         switch type^ {
           case .None: unreachable()
@@ -100,24 +99,24 @@ do_tile_render_work :: proc (data: game.pmm) {
           case .EndPeels:   unimplemented()
             
           case .Textured_Quads:
-            entry := game.read(&commands.push_buffer, game.Textured_Quads)
+            entry := read(&commands.push_buffer, Textured_Quads)
             
-            clip_rect = game.get_intersection(base_clip_rect, entry.setup.clip_rect)
+            clip_rect = get_intersection(base_clip_rect, entry.setup.clip_rect)
             
             // @todo(viktor): removed from entry.setup on day 384, it was never set
             render_target_index: int
             target = targets[render_target_index]
-            game.assert(target.memory != nil)
+            assert(target.memory != nil)
             
-            game.unused(draw_rectangle_fill_color_axis_aligned)
-            game.unused(draw_rectangle_fill_color)
-            game.unused(draw_rectangle_with_texture)
+            unused(draw_rectangle_fill_color_axis_aligned)
+            unused(draw_rectangle_fill_color)
+            unused(draw_rectangle_with_texture)
             
             // bitmap was this
             // draw_rectangle_with_texture(target, clip_rect, entry.p, entry.x_axis.xy, entry.y_axis.xy, entry.bitmap, entry.premultiplied_color)
             
             // rectangle was this
-            // rect := game.rectangle_min_dimension(entry.p, game.V3(entry.dim, 0))
+            // rect := rectangle_min_dimension(entry.p, V3(entry.dim, 0))
             // draw_rectangle_fill_color_axis_aligned(target, clip_rect, rect, entry.premultiplied_color)
             
             unimplemented("move the software renderer to 3D")
@@ -133,16 +132,16 @@ MaskFF :: 0xffffffff
 Inv255 :: 1.0 / 255
 MaxColorValue :: 255 * 255
 
-clear_render_target :: proc (dest: game.Bitmap, clip_rect: game.Rectangle2i, color: game.v4) {
+clear_render_target :: proc (dest: Bitmap, clip_rect: Rectangle2i, color: v4) {
     timed_function()
     
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, dest, clip_rect, clip_rect)
-    game.assert(ok)
+    assert(ok)
     
-    color := cast(game.lane_v4) (color * 255)
-    color = game.srgb_to_linear(color)
-    packed := game.pack_pixel(color)
+    color := cast(lane_v4) (color * 255)
+    color = srgb_to_linear(color)
+    packed := pack_pixel(color)
     
     for y := pmin.y; y < pmax.y; y += pstep.y {
         for x := pmin.x; x < pmax.x; x += pstep.x {
@@ -152,21 +151,21 @@ clear_render_target :: proc (dest: game.Bitmap, clip_rect: game.Rectangle2i, col
     }
 }
 
-draw_rectangle_fill_color_axis_aligned :: proc (buffer: game.Bitmap, clip_rect: game.Rectangle2i, rect: game.Rectangle3, color: game.v4) {
+draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Rectangle2i, rect: Rectangle3, color: v4) {
     // @todo(viktor): Move to 3D
-    rect := game.get_xy(rect)
+    rect := get_xy(rect)
     
     // @todo(viktor): is this actually necessary?
-    fill_rect := game.rectangle_min_max(game.floor(i32, rect.min), game.ceil(i32, rect.max))
+    fill_rect := rectangle_min_max(floor(i32, rect.min), ceil(i32, rect.max))
     
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, buffer, clip_rect, fill_rect)
     if !ok do return
     
-    color := cast(game.lane_v4) (color * 255)
+    color := cast(lane_v4) (color * 255)
     
-    color = game.srgb_to_linear(color)
-    color.rgb = game.clamp(color.rgb, cast(game.lane_f32) 0, cast(game.lane_f32) MaxColorValue)
+    color = srgb_to_linear(color)
+    color.rgb = clamp(color.rgb, cast(lane_f32) 0, cast(lane_f32) MaxColorValue)
     inv_color_a := (1 - (Inv255 * color.a))
     
     for y := pmin.y; y < pmax.y; y += pstep.y {
@@ -176,24 +175,24 @@ draw_rectangle_fill_color_axis_aligned :: proc (buffer: game.Bitmap, clip_rect: 
             // @note(viktor): blend with target pixel
             blended := inv_color_a * pixels + color
             
-            blended = game.linear_to_srgb(blended)
+            blended = linear_to_srgb(blended)
             
-            packed := game.pack_pixel(blended)
+            packed := pack_pixel(blended)
             
             shader_store_pixels(&ctx, packed)
         }
     }
 }
 
-draw_rectangle_fill_color :: proc (buffer: game.Bitmap, clip_rect: game.Rectangle2i, origin, x_axis, y_axis: game.v2, color: game.v4) {
+draw_rectangle_fill_color :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, color: v4) {
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx, buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return
     
-    color := cast(game.lane_v4) (color * 255)
+    color := cast(lane_v4) (color * 255)
     
-    color = game.srgb_to_linear(color)
-    color.rgb = game.clamp(color.rgb, cast(game.lane_f32) 0, cast(game.lane_f32) MaxColorValue)
+    color = srgb_to_linear(color)
+    color.rgb = clamp(color.rgb, cast(lane_f32) 0, cast(lane_f32) MaxColorValue)
     inv_color_a := (1 - (Inv255 * color.a))
     
     for y := pmin.y; y < pmax.y; y += pstep.y {
@@ -205,16 +204,16 @@ draw_rectangle_fill_color :: proc (buffer: game.Bitmap, clip_rect: game.Rectangl
             // @note(viktor): blend with target pixel
             blended := inv_color_a * pixels + color
             
-            blended = game.linear_to_srgb(blended)
+            blended = linear_to_srgb(blended)
             
-            packed := game.pack_pixel(blended)
+            packed := pack_pixel(blended)
             
             shader_store_pixels(&ctx, packed)
         }
     }
 }
 
-draw_rectangle_with_texture :: proc (buffer: game.Bitmap, clip_rect: game.Rectangle2i, origin: game.v3, x_axis, y_axis: game.v2, texture: game.Bitmap, color: game.v4) {
+draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin: v3, x_axis, y_axis: v2, texture: Bitmap, color: v4) {
     // @todo(viktor): Move to 3D
     origin := origin.xy
     
@@ -222,15 +221,15 @@ draw_rectangle_with_texture :: proc (buffer: game.Bitmap, clip_rect: game.Rectan
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx,  buffer, clip_rect, origin, x_axis, y_axis)
     if !ok do return
     
-    color := cast(game.lane_v4) color
+    color := cast(lane_v4) color
     
-    texture_size := cast(game.lane_v2) (texture.dimension - 2)
+    texture_size := cast(lane_v2) (texture.dimension - 2)
     
-    texture_width  := cast(game.lane_u32) texture.dimension.x
-    texture_memory := cast(game.lane_umm) raw_data(texture.memory)
+    texture_width  := cast(lane_u32) texture.dimension.x
+    texture_memory := cast(lane_umm) raw_data(texture.memory)
 
-    zero := cast(game.lane_u32) 0
-    mask := cast(game.lane_u32) MaskFF
+    zero := cast(lane_u32) 0
+    mask := cast(lane_u32) MaskFF
     
     for y := pmin.y; y < pmax.y; y += pstep.y {
         shader_row_with_uv(&ctx, y)
@@ -240,47 +239,47 @@ draw_rectangle_with_texture :: proc (buffer: game.Bitmap, clip_rect: game.Rectan
             
             // @note(viktor): Bias texture coordinates to start on the boundary between the 0,0 and 1,1 pixels
             t := uv * texture_size + 0.5
-            s :=     cast([2] game.lane_u32) t
-            f := t - cast(game.lane_v2) s
+            s :=     cast([2] lane_u32) t
+            f := t - cast(lane_v2) s
             
             // @note(viktor): bilinear sample
-            index_a := cast(game.lane_umm) ((s.x + 0) + (s.y + 0) * texture_width)
-            index_b := cast(game.lane_umm) ((s.x + 1) + (s.y + 0) * texture_width)
-            index_c := cast(game.lane_umm) ((s.x + 0) + (s.y + 1) * texture_width)
-            index_d := cast(game.lane_umm) ((s.x + 1) + (s.y + 1) * texture_width)
+            index_a := cast(lane_umm) ((s.x + 0) + (s.y + 0) * texture_width)
+            index_b := cast(lane_umm) ((s.x + 1) + (s.y + 0) * texture_width)
+            index_c := cast(lane_umm) ((s.x + 0) + (s.y + 1) * texture_width)
+            index_d := cast(lane_umm) ((s.x + 1) + (s.y + 1) * texture_width)
             
-            texel_a := cast(game.lane_pmm) (texture_memory + index_a * size_of(game.Color))
-            texel_b := cast(game.lane_pmm) (texture_memory + index_b * size_of(game.Color))
-            texel_c := cast(game.lane_pmm) (texture_memory + index_c * size_of(game.Color))
-            texel_d := cast(game.lane_pmm) (texture_memory + index_d * size_of(game.Color))
+            texel_a := cast(lane_pmm) (texture_memory + index_a * size_of(Color))
+            texel_b := cast(lane_pmm) (texture_memory + index_b * size_of(Color))
+            texel_c := cast(lane_pmm) (texture_memory + index_c * size_of(Color))
+            texel_d := cast(lane_pmm) (texture_memory + index_d * size_of(Color))
             
             sample_a := simd.gather(texel_a, zero, mask)
             sample_b := simd.gather(texel_b, zero, mask)
             sample_c := simd.gather(texel_c, zero, mask)
             sample_d := simd.gather(texel_d, zero, mask)
             
-            ta := game.unpack_pixel(sample_a)
-            tb := game.unpack_pixel(sample_b)
-            tc := game.unpack_pixel(sample_c)
-            td := game.unpack_pixel(sample_d)
+            ta := unpack_pixel(sample_a)
+            tb := unpack_pixel(sample_b)
+            tc := unpack_pixel(sample_c)
+            td := unpack_pixel(sample_d)
             
-            ta = game.srgb_to_linear(ta)
-            tb = game.srgb_to_linear(tb)
-            tc = game.srgb_to_linear(tc)
-            td = game.srgb_to_linear(td)
+            ta = srgb_to_linear(ta)
+            tb = srgb_to_linear(tb)
+            tc = srgb_to_linear(tc)
+            td = srgb_to_linear(td)
             
-            texel := game.bilinear_blend(ta, tb, tc, td, f)
+            texel := bilinear_blend(ta, tb, tc, td, f)
             
             texel *= color
-            texel.rgb = game.clamp(texel.rgb, cast(game.lane_f32) 0, cast(game.lane_f32) MaxColorValue)
+            texel.rgb = clamp(texel.rgb, cast(lane_f32) 0, cast(lane_f32) MaxColorValue)
             
             // @note(viktor): blend with target pixel
             inv_texel_a := (1 - (Inv255 * texel.a))
             blended := inv_texel_a * pixel + texel
             
-            blended = game.linear_to_srgb(blended)
+            blended = linear_to_srgb(blended)
             
-            packed := game.pack_pixel(blended)
+            packed := pack_pixel(blended)
             
             shader_store_pixels(&ctx, packed)
         }
@@ -297,48 +296,48 @@ draw_rectangle_with_texture :: proc (buffer: game.Bitmap, clip_rect: game.Rectan
 // 6) (Texture Aligned) - ??? to be done
 
 Shader_Context :: struct {
-    buffer:    game.Bitmap,
-    at:        ^game.Color,
+    buffer:    Bitmap,
+    at:        ^Color,
     
-    fill_rect: game.Rectangle2i,
+    fill_rect: Rectangle2i,
     
     // 
-    start_mask: game.lane_u32,
-    end_mask:   game.lane_u32,
-    mask: game.lane_u32,
+    start_mask: lane_u32,
+    end_mask:   lane_u32,
+    mask: lane_u32,
     
     // Per function
-    normal_x_axis: game.lane_v2,
-    normal_y_axis: game.lane_v2,
+    normal_x_axis: lane_v2,
+    normal_y_axis: lane_v2,
     
-    delta_u_row: game.lane_f32,
-    delta_v_row: game.lane_f32,
+    delta_u_row: lane_f32,
+    delta_v_row: lane_f32,
     
     // Per row
-    u_row: game.lane_f32,
-    v_row: game.lane_f32,
+    u_row: lane_f32,
+    v_row: lane_f32,
 }
 
 ////////////////////////////////////////////////
 
-shader_init_with_rect :: proc (ctx: ^Shader_Context, bitmap: game.Bitmap, clip_rect, fill_rect: game.Rectangle2i) -> (ok: bool, pmin, pmax, pstep: game.v2i) {
+shader_init_with_rect :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_rect, fill_rect: Rectangle2i) -> (ok: bool, pmin, pmax, pstep: v2i) {
     ctx.buffer = bitmap
-    ctx.fill_rect = game.get_intersection(fill_rect, clip_rect)
+    ctx.fill_rect = get_intersection(fill_rect, clip_rect)
     
-    ok = game.has_area(ctx.fill_rect)
+    ok = has_area(ctx.fill_rect)
     if !ok do return ok, pmin, pmax, pstep
     
     _shader_init_mask_fill_rect(ctx)
     
     pmin = ctx.fill_rect.min
     pmax = ctx.fill_rect.max
-    pstep = {game.LaneWidth, 1}
+    pstep = {LaneWidth, 1}
     
     return true, pmin, pmax, pstep
 }
 
-shader_init_with_rotation :: proc (ctx: ^Shader_Context, bitmap: game.Bitmap, clip_rect: game.Rectangle2i, origin, x_axis, y_axis: game.v2) -> (ok: bool, pmin, pmax, pstep: game.v2i) {
-    rect := game.rectangle_origin_axis(origin, x_axis, y_axis)
+shader_init_with_rotation :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2) -> (ok: bool, pmin, pmax, pstep: v2i) {
+    rect := rectangle_origin_axis(origin, x_axis, y_axis)
     
     ok, pmin, pmax, pstep = shader_init_with_rect(ctx, bitmap, clip_rect, rect)
     if !ok do return ok, pmin, pmax, pstep
@@ -349,18 +348,18 @@ shader_init_with_rotation :: proc (ctx: ^Shader_Context, bitmap: game.Bitmap, cl
     determinant := x_axis.x * y_axis.y - x_axis.y * y_axis.x
     if determinant == 0 do determinant = 1 
     
-    normal_x_axis_ := game.v2{ y_axis.y, -y_axis.x} / determinant
-    normal_y_axis_ := game.v2{-x_axis.y,  x_axis.x} / determinant
+    normal_x_axis_ := v2{ y_axis.y, -y_axis.x} / determinant
+    normal_y_axis_ := v2{-x_axis.y,  x_axis.x} / determinant
     
-    ctx.normal_x_axis = cast(game.lane_v2) normal_x_axis_
-    ctx.normal_y_axis = cast(game.lane_v2) normal_y_axis_
+    ctx.normal_x_axis = cast(lane_v2) normal_x_axis_
+    ctx.normal_y_axis = cast(lane_v2) normal_y_axis_
     
-    delta := cast(game.lane_v2) ctx.fill_rect.min - cast(game.lane_v2) origin
-    when game.LaneWidth == 4 {
+    delta := cast(lane_v2) ctx.fill_rect.min - cast(lane_v2) origin
+    when LaneWidth == 4 {
         delta.x += { 0, 1, 2, 3 }
-    } else when game.LaneWidth == 8 {
+    } else when LaneWidth == 8 {
         delta.x += { 0, 1, 2, 3, 4, 5, 6, 7 }
-    } else when game.LaneWidth == 16 {
+    } else when LaneWidth == 16 {
         delta.x += { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }
     } else {
         #panic("unhandled lane width")
@@ -379,17 +378,17 @@ _shader_init_mask_fill_rect :: proc (ctx: ^Shader_Context) {
     ctx.start_mask = MaskFF
     ctx.end_mask   = MaskFF
     
-    if !game.is_aligned(game.LaneWidth, ctx.fill_rect.min.x) {
-        ctx.start_mask = start_masks[game.align_offset(game.LaneWidth, ctx.fill_rect.min.x)]
-        ctx.fill_rect.min.x = game.align(game.LaneWidth, ctx.fill_rect.min.x) - game.LaneWidth
+    if !is_aligned(LaneWidth, ctx.fill_rect.min.x) {
+        ctx.start_mask = start_masks[align_offset(LaneWidth, ctx.fill_rect.min.x)]
+        ctx.fill_rect.min.x = align(LaneWidth, ctx.fill_rect.min.x) - LaneWidth
     }
     
-    if !game.is_aligned(game.LaneWidth, ctx.fill_rect.max.x) {
-        ctx.end_mask = end_masks[game.align_offset(game.LaneWidth, ctx.fill_rect.max.x)]
-        ctx.fill_rect.max.x = game.align(game.LaneWidth, ctx.fill_rect.max.x)
+    if !is_aligned(LaneWidth, ctx.fill_rect.max.x) {
+        ctx.end_mask = end_masks[align_offset(LaneWidth, ctx.fill_rect.max.x)]
+        ctx.fill_rect.max.x = align(LaneWidth, ctx.fill_rect.max.x)
     }
     
-    if ctx.fill_rect.max.x - ctx.fill_rect.min.x == game.LaneWidth {
+    if ctx.fill_rect.max.x - ctx.fill_rect.min.x == LaneWidth {
         ctx.start_mask &= ctx.end_mask
         ctx.end_mask = ctx.start_mask
     }
@@ -409,21 +408,21 @@ shader_row_with_uv :: proc (ctx: ^Shader_Context, y: i32) {
 shader_update_load_and_store_mask :: proc (ctx: ^Shader_Context, x: i32) {
     if x == ctx.fill_rect.min.x {
         ctx.mask = ctx.start_mask
-    } else if x + game.LaneWidth >= ctx.fill_rect.max.x {
+    } else if x + LaneWidth >= ctx.fill_rect.max.x {
         ctx.mask = ctx.end_mask
     } else {
         ctx.mask = MaskFF
     }
 }
 
-shader_load_pixels :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: game.lane_v4) {
+shader_load_pixels :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
     shader_update_load_and_store_mask(ctx, x)
     result = _shader_load_pixels(ctx, x, y)
     
     return result
 }
 
-shader_load_pixels_with_uv :: proc (ctx: ^Shader_Context, x, y: i32) -> (pixels: game.lane_v4, uv: game.lane_v2) {
+shader_load_pixels_with_uv :: proc (ctx: ^Shader_Context, x, y: i32) -> (pixels: lane_v4, uv: lane_v2) {
     shader_update_load_and_store_mask(ctx, x)
     uv = _shader_uv_and_mask(ctx, x, y)
     pixels = _shader_load_pixels(ctx, x, y)
@@ -431,57 +430,57 @@ shader_load_pixels_with_uv :: proc (ctx: ^Shader_Context, x, y: i32) -> (pixels:
     return pixels, uv
 }
 
-_shader_uv_and_mask :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: game.lane_v2) {
-    x_index := cast(f32) (x - ctx.fill_rect.min.x) / game.LaneWidth
-    u := ctx.u_row + x_index * ctx.normal_x_axis.x * game.LaneWidth
-    v := ctx.v_row + x_index * ctx.normal_y_axis.x * game.LaneWidth
+_shader_uv_and_mask :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v2) {
+    x_index := cast(f32) (x - ctx.fill_rect.min.x) / LaneWidth
+    u := ctx.u_row + x_index * ctx.normal_x_axis.x * LaneWidth
+    v := ctx.v_row + x_index * ctx.normal_y_axis.x * LaneWidth
     
     ctx.mask &= simd.lanes_ge(u, 0) & simd.lanes_le(u, 1) & simd.lanes_ge(v, 0) & simd.lanes_le(v, 1)
     
-    u = game.clamp_01(u)
-    v = game.clamp_01(v)
+    u = clamp_01(u)
+    v = clamp_01(v)
     
     return {u, v}
 }
 
-_shader_load_pixels :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: game.lane_v4) {
+_shader_load_pixels :: proc (ctx: ^Shader_Context, x, y: i32) -> (result: lane_v4) {
     ctx.at  = &ctx.buffer.memory[x + y * ctx.buffer.dimension.x]
-    pixel_ := simd.masked_load(ctx.at, cast(game.lane_u32) 0, ctx.mask)
-    result  = game.unpack_pixel(pixel_)
+    pixel_ := simd.masked_load(ctx.at, cast(lane_u32) 0, ctx.mask)
+    result  = unpack_pixel(pixel_)
     
-    result = game.srgb_to_linear(result)
+    result = srgb_to_linear(result)
     return result
 }
 
 ////////////////////////////////////////////////
 
-shader_store_pixels_at :: proc (ctx: ^Shader_Context, packed: game.lane_u32, x, y: i32) {
+shader_store_pixels_at :: proc (ctx: ^Shader_Context, packed: lane_u32, x, y: i32) {
     ctx.at = &ctx.buffer.memory[x + y * ctx.buffer.dimension.x]
     simd.masked_store(ctx.at, packed, ctx.mask)
 }
 
-shader_store_pixels :: proc (ctx: ^Shader_Context, packed: game.lane_u32) {
+shader_store_pixels :: proc (ctx: ^Shader_Context, packed: lane_u32) {
     simd.masked_store(ctx.at, packed, ctx.mask)
 }
 
 ////////////////////////////////////////////////
 
-when game.LaneWidth == 4 {
-    start_masks := [?] game.lane_u32 {
+when LaneWidth == 4 {
+    start_masks := [?] lane_u32 {
         {0..<4 = MaskFF}, // no mask
         {1..<4 = MaskFF},
         {2..<4 = MaskFF},
         {3..<4 = MaskFF},
     }
     
-    end_masks := [?] game.lane_u32 {
+    end_masks := [?] lane_u32 {
         {0..<4 = MaskFF}, // no mask
         {0..<1 = MaskFF},
         {0..<2 = MaskFF},
         {0..<3 = MaskFF},
     }
-} else when game.LaneWidth == 8 {
-    start_masks := [?] game.lane_u32 {
+} else when LaneWidth == 8 {
+    start_masks := [?] lane_u32 {
         {0..<8 = MaskFF}, // no mask
         {1..<8 = MaskFF},
         {2..<8 = MaskFF},
@@ -492,7 +491,7 @@ when game.LaneWidth == 4 {
         {7..<8 = MaskFF},
     }
     
-    end_masks := [?] game.lane_u32 {
+    end_masks := [?] lane_u32 {
         {0..<8 = MaskFF}, // no mask
         {0..<1 = MaskFF},
         {0..<2 = MaskFF},
@@ -502,8 +501,8 @@ when game.LaneWidth == 4 {
         {0..<6 = MaskFF},
         {0..<7 = MaskFF},
     }
-} else when game.LaneWidth == 16 {
-    start_masks := [?] game.lane_u32 {
+} else when LaneWidth == 16 {
+    start_masks := [?] lane_u32 {
         { 0..<16 = MaskFF}, // no mask
         { 1..<16 = MaskFF},
         { 2..<16 = MaskFF},
@@ -522,7 +521,7 @@ when game.LaneWidth == 4 {
         {15..<16 = MaskFF},
     }
     
-    end_masks := [?] game.lane_u32 {
+    end_masks := [?] lane_u32 {
         {0..<16 = MaskFF}, // no mask
         {0..< 1 = MaskFF},
         {0..< 2 = MaskFF},

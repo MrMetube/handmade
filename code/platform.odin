@@ -195,6 +195,7 @@ main :: proc () {
     render_state := make(platform_allocator, Render_State)
     // @cleanup
     render_state.game = transmute(type_of(render_state.game)) game
+    render_state.platform = Platform
     
     render_dll: Dll
     render_dll.name = build_exe_path("render.dll")

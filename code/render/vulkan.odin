@@ -5,7 +5,6 @@ import "core:dynlib"
 
 import vk "vendor:vulkan"
 import gpu "./no_graphics_api"
-import game "../game"
 
 // :VulkanRenderer: The platform should own shader loading and expose the paths
 // through the game/platform API rather than this renderer-owned config.
@@ -18,9 +17,9 @@ VulkanFinalFragmentSpirvPath     :: #config(VulkanFinalFragmentSpirvPath,     "v
 
 ////////////////////////////////////////////////
 
-frame_data_heap_size     ::  32 * game.Megabyte
-texture_upload_heap_size ::  64 * game.Megabyte
-texture_heap_size        :: 256 * game.Megabyte
+frame_data_heap_size     ::  32 * Megabyte
+texture_upload_heap_size ::  64 * Megabyte
+texture_heap_size        :: 256 * Megabyte
 VulkanFrameCount         :: 2
 
 max_vulkan_textures :: 256
@@ -28,7 +27,7 @@ max_vulkan_textures :: 256
 Debug_vulkan_depth_peel_index: i32 = -1 // -1 composites all layers
 
 Vulkan :: struct {
-    settings: game.RenderSettings,
+    settings: RenderSettings,
     
     device: gpu.Device,
     
@@ -94,19 +93,19 @@ RenderTarget :: struct {
 }
 
 VulkanFrameUploads :: struct {
-    vertices:            gpu.GpuCpuRange(game.Textured_Vertex),
+    vertices:            gpu.GpuCpuRange(Textured_Vertex),
     texture_descriptors: gpu.GpuCpuRange(u32),
 }
 
 ////////////////////////////////////////////////
 
 VulkanQuadRoot :: struct {
-    projection:                game.m4,
-    vertices:                  [^] game.Textured_Vertex,
+    projection:                m4,
+    vertices:                  [^] Textured_Vertex,
     texture_descriptors:       [^] u32,
-    camera_p:                  game.v3,
-    fog_direction:             game.v3,
-    fog_color:                 game.v3,
+    camera_p:                  v3,
+    fog_direction:             v3,
+    fog_color:                 v3,
     fog_begin:                 f32,
     fog_end:                   f32,
     clip_alpha_begin:          f32,
@@ -128,9 +127,9 @@ VulkanFinalRoot :: struct {
 
 ////////////////////////////////////////////////
 
-init_vulkan :: proc (window: game.pmm) {
+init_vulkan :: proc (window: pmm) {
     device, error := gpu.create_device(window = window, swapchain_format = .bgra8_srgb, desired_swapchain_image_count = VulkanFrameCount)
-    game.assert(error == .none && device != nil)
+    assert(error == .none && device != nil)
     
     vulkan.device = device
     
@@ -194,17 +193,17 @@ init_vulkan :: proc (window: game.pmm) {
 
 ////////////////////////////////////////////////
 
-vk_allocate_texture :: proc (bitmap: game.Bitmap, set_as_nil_texture := false) -> u32 {
+vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> u32 {
     timed_function()
     
     placed := gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
-        extent = { **cast(game.uv2) bitmap.dimension, 1 },
+        extent = { **cast(uv2) bitmap.dimension, 1 },
         format = .rgba8_srgb,
         usage  = { .sampled, .transfer_destination },
     ))
-    game.assert(placed.texture != nil)
+    assert(placed.texture != nil)
     
-    descriptor: game.pmm
+    descriptor: pmm
     descriptor_index: u32
     if set_as_nil_texture {
         descriptor_index = cast(u32) VulkanTextureDescriptor.nil_texture
@@ -214,7 +213,7 @@ vk_allocate_texture :: proc (bitmap: game.Bitmap, set_as_nil_texture := false) -
     }
     gpu.write_texture_descriptor(vulkan.device, descriptor, placed.texture, .sampled)
     
-    texture_bytes := game.slice_to_bytes(bitmap.memory)
+    texture_bytes := slice_to_bytes(bitmap.memory)
     upload := gpu.bump_allocate(&vulkan.texture_upload_allocator, len(texture_bytes))
     copy(upload.cpu, texture_bytes)
     
@@ -231,7 +230,7 @@ vk_allocate_texture :: proc (bitmap: game.Bitmap, set_as_nil_texture := false) -
     return result
 }
 
-vk_manage_textures :: proc (last: ^game.TextureOp) {
+vk_manage_textures :: proc (last: ^TextureOp) {
     timed_function()
     debug_data_block("Renderer")
     debug_data_block("texture operations")
@@ -246,16 +245,16 @@ vk_manage_textures :: proc (last: ^game.TextureOp) {
         switch &op in operation.value {
         case: unreachable()
         
-        case game.TextureOpAllocate:
+        case TextureOpAllocate:
             allocs += 1
             op.result ^= vk_allocate_texture(op.bitmap)
             
-        case game.TextureOpDeallocate:
+        case TextureOpDeallocate:
             deallocs += 1
             
-            game.assert(op.handle > cast(u32) VulkanTextureDescriptor.first_dynamic_texture)
+            assert(op.handle > cast(u32) VulkanTextureDescriptor.first_dynamic_texture)
             texture := &vulkan.textures[op.handle]
-            game.assert(texture.texture != nil)
+            assert(texture.texture != nil)
             gpu.texture_free(&vulkan.texture_allocator, texture)
             texture^ = {}
             append(&vulkan.free_texture_descriptors, op.handle - 1)
@@ -263,25 +262,25 @@ vk_manage_textures :: proc (last: ^game.TextureOp) {
     }
     
     count := cast(i32) (allocs + deallocs)
-    game.debug_record_i32(&count, "count")
+    render_state.game.debug_record_i32(&count, "count")
     allocations := cast(i32) allocs
-    game.debug_record_i32(&allocations, "allocations")
+    render_state.game.debug_record_i32(&allocations, "allocations")
     deallocations := cast(i32) deallocs
-    game.debug_record_i32(&deallocations, "deallocations")
+    render_state.game.debug_record_i32(&deallocations, "deallocations")
 }
 
 ////////////////////////////////////////////////
 
-vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: game.Rectangle2i, window_dim: game.v2i) {
+vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     if render_commands.settings != vulkan.settings {
         change_to_settings(render_commands.settings)
     }
     
-    game.begin_timed_block("acquire frame")
+    render_state.game.begin_timed_block("acquire frame")
     frame := gpu.acquire(vulkan.device)
-    game.end_timed_block()
+    render_state.game.end_timed_block()
     if frame.render_view == nil { return }
 
     frame_index := vulkan.next_frame_index
@@ -289,16 +288,16 @@ vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: 
     frame_data := &vulkan.frames[frame_index]
     if frame_data.completion.value != 0 do gpu.wait_timeline(frame_data.completion)
     
-    render_extent := cast(game.uv2) render_commands.dimension
+    render_extent := cast(uv2) render_commands.dimension
     depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
     
     uploads := upload_frame_data(render_commands, frame_data)
     
-    game.begin_timed_block("begin commands")
+    render_state.game.begin_timed_block("begin commands")
     commands := gpu.begin_commands(vulkan.device)
     gpu.set_texture_descriptor_heap(commands, gpu.gpu_range(vulkan.texture_descriptor_heap))
     gpu.set_sampler_descriptor_heap(commands, gpu.gpu_range(vulkan.sampler_descriptor_heap))
-    game.end_timed_block()
+    render_state.game.end_timed_block()
     
     ////////////////////////////////////////////////
     
@@ -306,13 +305,13 @@ vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: 
     peel_header_restore: int
     begin_depth_peel_pass(commands, peel_index, .clear, render_commands.clear_color)
     
-    for game.begin_reading(&render_commands.push_buffer); game.can_read(&render_commands.push_buffer); {
-        type := game.read(&render_commands.push_buffer, game.RenderEntryType)
+    for begin_reading(&render_commands.push_buffer); can_read(&render_commands.push_buffer); {
+        type := read(&render_commands.push_buffer, RenderEntryType)
         
         switch type^ {
         case .None: unreachable()
         case .DepthClear:
-            timed_block("depth game.clear")
+            timed_block("depth clear")
             gpu.end_render_pass(commands)
             begin_depth_peel_pass(commands, peel_index, .load)
             
@@ -336,16 +335,16 @@ vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: 
             
         case .Textured_Quads:
             timed_block("textured quads")
-            entry := game.read(&render_commands.push_buffer, game.Textured_Quads)
+            entry := read(&render_commands.push_buffer, Textured_Quads)
             if entry.quad_count == 0 do continue
             
             setup := entry.setup
-            render_rect := game.rectangle_zero_min_dimension(render_commands.dimension)
-            clip := game.get_intersection(setup.clip_rect, render_rect)
-            if !game.has_area(clip) do continue
+            render_rect := rectangle_zero_min_dimension(render_commands.dimension)
+            clip := get_intersection(setup.clip_rect, render_rect)
+            if !has_area(clip) do continue
             
             gpu.set_viewport(commands, 0, 0, cast(f32) render_extent.x, cast(f32) render_extent.y)
-            dim := game.get_dimension(clip)
+            dim := get_dimension(clip)
             scissor_y := cast(i32) render_extent.y - clip.max.y
             gpu.set_scissor(commands, clip.min.x, scissor_y, cast(u32) dim.x, cast(u32) dim.y)
             
@@ -406,7 +405,7 @@ vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: 
         
         gpu.bind_pso(commands, vulkan.final_pso)
         
-        draw_dim := game.get_dimension(draw_region)
+        draw_dim := get_dimension(draw_region)
         draw_y := window_dim.y - draw_region.max.y
         gpu.set_viewport(commands, cast(f32) draw_region.min.x, cast(f32) draw_y, cast(f32) draw_dim.x, cast(f32) draw_dim.y)
         gpu.set_scissor(commands, draw_region.min.x, draw_y, cast(u32) draw_dim.x, cast(u32) draw_dim.y)
@@ -419,11 +418,11 @@ vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: 
         gpu.end_render_pass(commands)
     }
     
-    game.begin_timed_block("submit and present")
+    render_state.game.begin_timed_block("submit and present")
     vulkan.latest_completion.value += 1
     frame_data.completion = vulkan.latest_completion
     gpu.submit_and_present(vulkan.device, { commands }, vulkan.latest_completion)
-    game.end_timed_block()
+    render_state.game.end_timed_block()
 }
 
 ////////////////////////////////////////////////
@@ -431,13 +430,13 @@ vk_render_commands :: proc (render_commands: ^game.RenderCommands, draw_region: 
 read_vulkan_spirv :: proc (path: string) -> [] u32 {
     // :VulkanRenderer: Move this through the platform API with the other file IO.
     bytes, error := os.read_entire_file(path, context.allocator)
-    game.assert(error == nil)
-    game.assert(len(bytes) % size_of(u32) == 0)
-    result := game.slice_from_parts_type(u32, raw_data(bytes), len(bytes) / size_of(u32))
+    assert(error == nil)
+    assert(len(bytes) % size_of(u32) == 0)
+    result := slice_from_parts_type(u32, raw_data(bytes), len(bytes) / size_of(u32))
     return result
 }
 
-upload_frame_data :: proc (render_commands: ^game.RenderCommands, frame: ^VulkanFrame) -> VulkanFrameUploads {
+upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame) -> VulkanFrameUploads {
     timed_function()
     
     debug_data_block("Renderer")
@@ -450,9 +449,9 @@ upload_frame_data :: proc (render_commands: ^game.RenderCommands, frame: ^Vulkan
         timed_block("copy textured vertices")
         
         count := cast(i32) len(render_commands.vertex_buffer)
-        game.debug_record_i32(&count, "vertex count")
+        render_state.game.debug_record_i32(&count, "vertex count")
         
-        result.vertices = gpu.bump_allocate(&frame.data_allocator, [] game.Textured_Vertex, len(render_commands.vertex_buffer))
+        result.vertices = gpu.bump_allocate(&frame.data_allocator, [] Textured_Vertex, len(render_commands.vertex_buffer))
         copy(result.vertices.cpu, render_commands.vertex_buffer[:])
     }
     
@@ -460,7 +459,7 @@ upload_frame_data :: proc (render_commands: ^game.RenderCommands, frame: ^Vulkan
         timed_block("copy texture descriptors")
         
         count := cast(i32) len(render_commands.quad_bitmap_buffer)
-        game.debug_record_i32(&count, "bitmap count")
+        render_state.game.debug_record_i32(&count, "bitmap count")
         
         result.texture_descriptors = gpu.bump_allocate(&frame.data_allocator, [] u32, len(render_commands.quad_bitmap_buffer))
         
@@ -477,14 +476,14 @@ destroy_render_target :: proc (target: ^RenderTarget) {
     gpu.texture_free(&vulkan.texture_allocator, &target.placed)
 }
 
-change_to_settings :: proc (settings: game.RenderSettings) {
+change_to_settings :: proc (settings: RenderSettings) {
     timed_function()
     
     // :VulkanRenderer: Multisampled depth peels remain deferred.
     if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
     
-    depth_peel_count := game.clamp(settings.depth_peel_count_hint, 1, cap(vulkan.depth_peel_buffers))
-    extent := cast(game.uv2) settings.dimension
+    depth_peel_count := clamp(settings.depth_peel_count_hint, 1, cap(vulkan.depth_peel_buffers))
+    extent := cast(uv2) settings.dimension
     
     {
         timed_block("recreate_depth_peel_targets")
@@ -495,7 +494,7 @@ change_to_settings :: proc (settings: game.RenderSettings) {
         }
         destroy_render_target(&vulkan.composite_buffer)
         
-        game.assert(depth_peel_count <= cap(vulkan.depth_peel_buffers))
+        assert(depth_peel_count <= cap(vulkan.depth_peel_buffers))
         resize(&vulkan.depth_peel_buffers, depth_peel_count)
         
         for &buffer, index in vulkan.depth_peel_buffers {
@@ -504,7 +503,7 @@ change_to_settings :: proc (settings: game.RenderSettings) {
                 format = .bgra8_srgb,
                 usage  = { .sampled, .color_attachment },
             ))
-            game.assert(buffer.color.placed.texture != nil)
+            assert(buffer.color.placed.texture != nil)
             
             buffer.color.render_view = gpu.create_render_view(buffer.color.placed.texture)
             buffer.color.descriptor_index = cast(u32) VulkanTextureDescriptor.depth_peel_0_color + cast(u32) index * 2
@@ -515,7 +514,7 @@ change_to_settings :: proc (settings: game.RenderSettings) {
                 format = .d32_float,
                 usage  = { .sampled, .depth_stencil_attachment },
             ))
-            game.assert(buffer.depth.placed.texture != nil)
+            assert(buffer.depth.placed.texture != nil)
             
             buffer.depth.render_view = gpu.create_render_view(buffer.depth.placed.texture)
             buffer.depth.descriptor_index = buffer.color.descriptor_index + 1
@@ -527,7 +526,7 @@ change_to_settings :: proc (settings: game.RenderSettings) {
             format = .bgra8_srgb,
             usage  = { .sampled, .color_attachment },
         ))
-        game.assert(vulkan.composite_buffer.placed.texture != nil)
+        assert(vulkan.composite_buffer.placed.texture != nil)
         
         vulkan.composite_buffer.render_view = gpu.create_render_view(vulkan.composite_buffer.placed.texture)
         vulkan.composite_buffer.descriptor_index = cast(u32) VulkanTextureDescriptor.composite
@@ -536,12 +535,12 @@ change_to_settings :: proc (settings: game.RenderSettings) {
     vulkan.settings = settings
 }
 
-begin_depth_peel_pass :: proc (commands: gpu.CommandBuffer, peel_index: u32, color_load: gpu.LoadOp, render_commands_clear_color: game.v4 = {}) {
+begin_depth_peel_pass :: proc (commands: gpu.CommandBuffer, peel_index: u32, color_load: gpu.LoadOp, render_commands_clear_color: v4 = {}) {
     timed_function()
     
     depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
     
-    clear_color: game.v4
+    clear_color: v4
     if color_load == .clear && peel_index == depth_peel_count - 1 {
         clear_color = render_commands_clear_color
         clear_color.a = 1
@@ -561,25 +560,25 @@ end_depth_peel_pass :: proc (commands: gpu.CommandBuffer) {
     gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
 }
 
-texture_descriptor :: proc (index: u32) -> game.pmm {
+texture_descriptor :: proc (index: u32) -> pmm {
     descriptor_size := gpu.get_device_caps(vulkan.device).texture_descriptor_size_in_bytes
     result := &vulkan.texture_descriptor_heap.range.cpu[cast(u64) index * descriptor_size]
     return result
 }
 
-sampler_descriptor :: proc (index: u32) -> game.pmm {
+sampler_descriptor :: proc (index: u32) -> pmm {
     sampler_size := gpu.get_device_caps(vulkan.device).sampler_descriptor_size_in_bytes
     result := &vulkan.sampler_descriptor_heap.range.cpu[cast(u64) index * sampler_size]
     return result
 }
 
-allocate_texture_descriptor :: proc () -> (descriptor: game.pmm, index: u32) {
+allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
     last_free := len(vulkan.free_texture_descriptors)-1
     if last_free >= 0 {
         index = vulkan.free_texture_descriptors[last_free]
         resize(&vulkan.free_texture_descriptors, last_free)
     } else {
-        game.assert(vulkan.next_texture_descriptor < cast(u32) VulkanTextureDescriptor.count)
+        assert(vulkan.next_texture_descriptor < cast(u32) VulkanTextureDescriptor.count)
         
         index = vulkan.next_texture_descriptor
         vulkan.next_texture_descriptor += 1
@@ -676,11 +675,11 @@ rebind_device :: proc (device: gpu.Device) -> bool {
 
 // :VulkanRenderer: Generate the Slang declarations from the Odin definitions.
 // Keep these in lockstep with the C-layout SPIR-V declarations in vulkan.slang.
-#assert(offset_of(game.Textured_Vertex, p)     == 0)
-#assert(offset_of(game.Textured_Vertex, n)     == 16)
-#assert(offset_of(game.Textured_Vertex, uv)    == 20)
-#assert(offset_of(game.Textured_Vertex, color) == 24)
-#assert(size_of(game.Textured_Vertex)          == 28)
+#assert(offset_of(Textured_Vertex, p)     == 0)
+#assert(offset_of(Textured_Vertex, n)     == 16)
+#assert(offset_of(Textured_Vertex, uv)    == 20)
+#assert(offset_of(Textured_Vertex, color) == 24)
+#assert(size_of(Textured_Vertex)          == 28)
 
 #assert(offset_of(VulkanQuadRoot, projection)                == 0)
 #assert(offset_of(VulkanQuadRoot, vertices)                  == 64)
