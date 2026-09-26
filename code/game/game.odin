@@ -94,7 +94,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     when DebugEnabled {
         if GlobalDebugMemory == nil {
             GlobalDebugMemory = memory
-            GlobalDebugTable = memory.debug_table
+            GlobalDebugTable  = memory.debug_table
         }
     }
     
@@ -107,7 +107,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         
         init_mixer(&state.mixer, &state.audio_arena)
         
-        when DebugEnabled do debug_set_event_recording(true)
+        when DebugEnabled do debug_set_event_recording(GlobalDebugTable, true)
     }
 
     tran_state := memory.transient_state

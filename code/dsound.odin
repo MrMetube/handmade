@@ -3,22 +3,20 @@ package main
 import win "core:sys/windows"
 import "vendor:directx/dxgi"
 
-init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) -> bool {
-    assert(GlobalSoundBuffer == nil, "DSound has already been initialized")
-    
+init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second: u32) -> ^IDirectSoundBuffer {
     dSound_lib := win.LoadLibraryW("dsound.dll")
     if dSound_lib == nil {
-        return false
+        return nil
     }
     
     DirectSoundCreate := cast(ProcDirectSoundCreate) win.GetProcAddress(dSound_lib, "DirectSoundCreate")
     if DirectSoundCreate == nil {
-        return false
+        return nil
     }
     
     direct_sound : ^IDirectSound
     if result := DirectSoundCreate(nil, &direct_sound, nil); win.FAILED(result) {
-        return false
+        return nil
     }
     
     wave_format: WAVEFORMATEX = {
@@ -30,7 +28,7 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
         nAvgBytesPerSec = samples_per_second * 2 * size_of(i16),
     }
     if result := direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY); win.FAILED(result) {
-        return false
+        return nil
     }
     
     fake_sound_buffer_description: DSBUFFERDESC = {
@@ -40,11 +38,11 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
     
     fake_sound_buffer_for_setup: ^IDirectSoundBuffer
     if result := direct_sound->CreateSoundBuffer(&fake_sound_buffer_description, &fake_sound_buffer_for_setup, nil); win.FAILED(result) {
-        return false
+        return nil
     }
     
     if result := fake_sound_buffer_for_setup->SetFormat(&wave_format); win.FAILED(result) {
-        return false
+        return nil
     }
     
     actual_sound_buffer_description := DSBUFFERDESC{
@@ -59,11 +57,12 @@ init_dSound :: proc (window: win.HWND, buffer_size_in_bytes, samples_per_second:
         actual_sound_buffer_description.dwFlags |= DSBCAPS_GLOBALFOCUS
     }
     
-    if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &GlobalSoundBuffer, nil); win.FAILED(result) {
-        return false
+    sound_buffer: ^IDirectSoundBuffer
+    if result := direct_sound->CreateSoundBuffer(&actual_sound_buffer_description, &sound_buffer, nil); win.FAILED(result) {
+        return nil
     }
     
-    return true
+    return sound_buffer
 }
 
 

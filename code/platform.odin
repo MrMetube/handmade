@@ -21,11 +21,9 @@ import win "core:sys/windows"
 ////////////////////////////////////////////////
 // Config
 
-GlobalBackBuffer :=  Bitmap {
-    // dimension = {1280, 720},
-    dimension = {1920, 1080},
-    // dimension = {2560, 1440},
-}
+// RenderDimension := v2i{1280, 720}
+RenderDimension := v2i{1920, 1080}
+// RenderDimension := v2i{2560, 1440}
 
 MonitorRefreshHz :: 144
 
@@ -35,15 +33,9 @@ LowPriorityThreads  :: 2
 ////////////////////////////////////////////////
 //  Globals
 
-GlobalPlatformState: PlatformState
-
-GlobalRunning: bool
-GlobalSoundBuffer: ^IDirectSoundBuffer
-
-GlobalPerformanceCounterFrequency: f64
-
-GlobalWindowPosition := win.WINDOWPLACEMENT{ length = size_of(win.WINDOWPLACEMENT) }
-
+GlobalPlatformState := PlatformState {
+    window_position = { length = size_of(win.WINDOWPLACEMENT) },
+}
 
 // Debug Variables
 
@@ -70,6 +62,8 @@ SoundOutput :: struct {
 
 PlatformState :: struct {
     exe_path: string,
+    performance_counter_frequency: f64,
+    window_position: win.WINDOWPLACEMENT,
     
     // @note to touch the memory ring you need to take the memory mutex.
     block_mutex:    TicketMutex,
@@ -117,10 +111,11 @@ main :: proc () {
     set_platform_api_in_the_statically_linked_game_code(Platform)
     _platform_arena: Arena
     platform_allocator := arena_allocator(&_platform_arena)
+    back_buffer := Bitmap { dimension = RenderDimension }
     {
         frequency: win.LARGE_INTEGER
         win.QueryPerformanceFrequency(&frequency)
-        GlobalPerformanceCounterFrequency = cast(f64) frequency
+        GlobalPlatformState.performance_counter_frequency = cast(f64) frequency
     }
     
     ////////////////////////////////////////////////
@@ -139,7 +134,7 @@ main :: proc () {
         }
         
         {
-            buffer := &GlobalBackBuffer
+            buffer := &back_buffer
             assert(align(16, buffer.dimension.x) == buffer.dimension.x)
             buffer.memory = make(platform_allocator, Color, buffer.dimension.x * buffer.dimension.y)
         }
@@ -155,8 +150,8 @@ main :: proc () {
             win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE,
             win.CW_USEDEFAULT,
             win.CW_USEDEFAULT,
-            GlobalBackBuffer.dimension.x  + 16, // added for the window frame
-            GlobalBackBuffer.dimension.y + 39,
+            back_buffer.dimension.x  + 16, // added for the window frame
+            back_buffer.dimension.y + 39,
             nil,
             nil,
             window_class.hInstance,
@@ -194,7 +189,7 @@ main :: proc () {
     
     render_state := make(platform_allocator, Render_State)
     // @cleanup
-    render_state.game = transmute(type_of(render_state.game)) game
+    render_state.game     = cast(type_of(render_state.game)) game
     render_state.platform = Platform
     
     render_dll: Dll
@@ -207,7 +202,7 @@ main :: proc () {
         defer win.ReleaseDC(window, window_dc)
         
         write_time: u64
-        render_dll.is_valid, write_time = load_render_lib(render_dll)
+        render_dll.is_valid, write_time = load_render_lib(&render_dll)
         
         if render_dll.is_valid {
             render_dll.is_valid = render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
@@ -215,7 +210,7 @@ main :: proc () {
                 render_dll.write_time = write_time
             } else {
                 render.reload_or_shutdown(.Shutdown)
-                unload_render_api()
+                unload_render_api(&render_dll)
             }
         }
     }
@@ -250,21 +245,22 @@ main :: proc () {
         sound_output.safety_bytes = cast(u32) (target_seconds_per_frame * cast(f32) sound_output.samples_per_second * cast(f32) sound_output.bytes_per_sample)
     }
     
-    if !init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second) {
+    direct_sound_buffer := init_dSound(window, sound_output.buffer_size, sound_output.samples_per_second)
+    if direct_sound_buffer == nil {
         print("Error: Failed to initialize DSound.") // @logging 
         runtime.exit(1)
     }
     
-    clear_sound_buffer(&sound_output)
+    clear_sound_buffer(direct_sound_buffer, &sound_output)
     
-    GlobalSoundBuffer->Play(0, 0, DSBPLAY_LOOPING)
+    direct_sound_buffer->Play(0, 0, DSBPLAY_LOOPING)
     
     sound_is_valid: bool
     
     ////////////////////////////////////////////////
     //  Input Setup
     
-    init_xInput()
+    xinput := init_xInput()
     
     // @todo Monitor xbox controllers for being plugged in after the fact
     xbox_controller_present: [XUSER_MAX_COUNT] bool = true
@@ -279,9 +275,9 @@ main :: proc () {
     game_dll.name = build_exe_path("game.dll")
     game_dll.lock = build_exe_path("game.lock")
     game_dll.temp = build_exe_path("game_temp.dll")
+    load_game_lib(&game_dll)
     
-    game_dll.is_valid, game_dll.write_time = load_game_lib(game_dll)
-    game.debug_set_event_recording(game_dll.is_valid, GlobalDebugTable)
+    game.debug_set_event_recording(GlobalDebugTable, game_dll.is_valid)
     
     // @todo make this like sixty seconds?
     // @todo remove MaxPossibleOverlap
@@ -307,7 +303,7 @@ main :: proc () {
         render_commands.white_bitmap.width_over_height = 1
         render_commands.white_bitmap.texture_handle = render.allocate_texture(render_commands.white_bitmap, true)
         
-        render_commands.dimension = GlobalBackBuffer.dimension
+        render_commands.dimension = back_buffer.dimension
         
         render_commands.multisampling_hint    = true
         render_commands.pixelation_hint       = !false
@@ -347,11 +343,11 @@ main :: proc () {
     desired_scheduler_ms :: 1
     sleep_is_granular := win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
     
-    GlobalRunning = true
+    running := true
     
     expected_frames_per_update: f32 = 1
     target_seconds_per_frame: f32
-    for GlobalRunning {
+    for running {
         check_arena_allocator(platform_allocator)  
         check_arena_allocator(frame_allocator)  
         
@@ -415,7 +411,9 @@ main :: proc () {
                         button.ended_down = old_keyboard_controller.buttons[index].ended_down
                     }
                     
-                    process_pending_messages(&GlobalPlatformState, new_keyboard_controller)
+                    if process_pending_messages(&GlobalPlatformState, new_keyboard_controller) {
+                        running = false
+                    }
                 }
                 
                 max_controller_count: u32 = min(XUSER_MAX_COUNT, len(Input{}.controllers) - 1)
@@ -505,7 +503,7 @@ main :: proc () {
                             process_Xinput_button(&new_controller.buttons[.stick_up],    old_controller.buttons[.stick_up],    1, new_controller.stick_average.y >  Threshold ? 1 : 0)
                             
                             // @cleanup This is probably vestigial and can safely be removed
-                            if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 do GlobalRunning = false
+                            if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 do running = false
                         } else {
                             new_controller.is_connected = false
                             xbox_controller_present[controller_index] = false
@@ -550,7 +548,7 @@ main :: proc () {
                 if game_dll.is_valid {
                     game.update_and_render(&game_memory, new_input, &render_commands)
                     if new_input.quit_requested {
-                        GlobalRunning = false
+                        running = false
                     }
                 }
             }
@@ -564,7 +562,7 @@ main :: proc () {
                 audio_counter := get_wall_clock()
                 from_begin_to_audio := get_seconds_elapsed(last_counter, audio_counter)
                 
-                if result := GlobalSoundBuffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
+                if result := direct_sound_buffer->GetCurrentPosition(&play_cursor, &write_cursor); win.SUCCEEDED(result) {
                     /*
                     Here is how sound output computation works.
                     
@@ -631,7 +629,7 @@ main :: proc () {
                         game.output_sound_samples(&game_memory, sound_buffer)
                     }
                     
-                    fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write, sound_buffer)
+                    fill_sound_buffer(direct_sound_buffer, &sound_output, byte_to_lock, bytes_to_write, sound_buffer)
                 } else {
                     sound_is_valid = false
                 }
@@ -649,7 +647,7 @@ main :: proc () {
                 complete_all_work(&low_queue)
                 assert(high_queue.completion_count == high_queue.completion_goal)
                 assert(low_queue.completion_count  == low_queue.completion_goal)
-                game.debug_set_event_recording(false)
+                game.debug_set_event_recording(GlobalDebugTable, false)
             }
             
             game.debug_frame_end(&game_memory, new_input^, &render_commands)
@@ -658,17 +656,17 @@ main :: proc () {
                 timed_block("game hotreload")
                 
                 // @todo if this is too slow the audio and the whole game will lag
-                unload_game_api()
+                unload_game_api(&game_dll)
                 for _ in 0..<100 {
-                    game_dll.is_valid, game_dll.write_time = load_game_lib(game_dll)
+                    load_game_lib(&game_dll)
                     if game_dll.is_valid do break
                     win.Sleep(100)
                 }
                 
                 game_memory.reloaded_executable = true
-                game.debug_set_event_recording(game_dll.is_valid, GlobalDebugTable)
+                game.debug_set_event_recording(GlobalDebugTable, game_dll.is_valid)
                 
-                render_state.game = transmute(type_of(render_state.game)) game
+                render_state.game = cast(type_of(render_state.game)) game
             }
             
             if needs_to_be_reloaded(render_dll) {
@@ -684,10 +682,10 @@ main :: proc () {
                     render.reload_or_shutdown(.Reload)
                     render_dll.is_valid = false
                 }
-                unload_render_api()
+                unload_render_api(&render_dll)
                 
                 for _ in 0..<100 {
-                    api_is_valid, write_time := load_render_lib(render_dll)
+                    api_is_valid, write_time := load_render_lib(&render_dll)
                     if !api_is_valid {
                         win.Sleep(100)
                         continue
@@ -704,7 +702,7 @@ main :: proc () {
                         // A state layout/backend mismatch requires a restart.
                         // Remember this build so it is not retried every frame.
                         render_dll.write_time = write_time
-                        unload_render_api()
+                        unload_render_api(&render_dll)
                     }
                     break
                 }
@@ -737,7 +735,14 @@ main :: proc () {
         ////////////////////////////////////////////////
         { timed_block("render")
             
-            render.render(&render_commands, auto_cast &high_queue, draw_region, frame_allocator, window_dim, GlobalBackBuffer, cast(bool) GlobalDebugRenderSingleThreaded)
+            params := Render_Params {
+                render_queue     = auto_cast &high_queue,
+                frame_allocator  = frame_allocator,
+                window_dimension = window_dim,
+                software_target  = back_buffer,
+                single_threaded  = cast(bool) GlobalDebugRenderSingleThreaded,
+            }
+            render.render(&render_commands, draw_region, params)
         }
         ////////////////////////////////////////////////
         { timed_block("sleep at frame end")
@@ -811,8 +816,8 @@ main :: proc () {
     // Cleanup and Shutdown
     
     if render_dll.is_valid do render.reload_or_shutdown(.Shutdown)
-    unload_render_api()
-    unload_game_api()
+    unload_render_api(&render_dll)
+    unload_game_api(&game_dll)
 }
 
 ////////////////////////////////////////////////
@@ -1042,7 +1047,7 @@ get_wall_clock :: proc () -> i64 {
 }
 
 get_seconds_elapsed :: proc (start, end: i64) -> f32 {
-    return cast(f32) (cast(f64) (end - start) / GlobalPerformanceCounterFrequency)
+    return cast(f32) (cast(f64) (end - start) / GlobalPlatformState.performance_counter_frequency)
 }
 get_seconds_elapsed_until_now :: proc (start: i64) -> f32 {
     end := get_wall_clock()
@@ -1052,11 +1057,11 @@ get_seconds_elapsed_until_now :: proc (start: i64) -> f32 {
 ////////////////////////////////////////////////   
 // Sound Buffer
 
-fill_sound_buffer :: proc (sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
+fill_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     region1, region2: pmm
     region1_size, region2_size: u32
     
-    if result := GlobalSoundBuffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+    if result := buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // @todo assert that region1/2_size is valid
         // @todo Collapse these two loops
         
@@ -1086,17 +1091,17 @@ fill_sound_buffer :: proc (sound_output: ^SoundOutput, byte_to_lock, bytes_to_wr
             sound_output.running_sample_index += 1
         }
         
-        GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
+        buffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
         return // @todo @logging
     }
 }
 
-clear_sound_buffer :: proc (sound_output: ^SoundOutput) {
+clear_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutput) {
     region1, region2 : pmm
     region1_size, region2_size: u32
     // @copypasta
-    if result := GlobalSoundBuffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+    if result := buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
         // @todo assert that region1/2_size is valid
         // @todo Collapse these two loops
         // @todo Copy pasta of fill_sound_buffer
@@ -1113,7 +1118,7 @@ clear_sound_buffer :: proc (sound_output: ^SoundOutput) {
         }
         sound_output.running_sample_index += region2_size
         
-        GlobalSoundBuffer->Unlock(region1, region1_size, region2, region2_size)
+        buffer->Unlock(region1, region1_size, region2, region2_size)
     } else {
         return // @todo @logging
     }
@@ -1141,7 +1146,7 @@ toggle_fullscreen :: proc (window: win.HWND) {
     style := cast(u32) win.GetWindowLongW(window, win.GWL_STYLE)
     if style & win.WS_OVERLAPPEDWINDOW != 0 {
         info := win.MONITORINFO{cbSize = size_of(win.MONITORINFO)}
-        if win.GetWindowPlacement(window, &GlobalWindowPosition) && 
+        if win.GetWindowPlacement(window, &GlobalPlatformState.window_position) && 
         win.GetMonitorInfoW(win.MonitorFromWindow(window, .MONITOR_DEFAULTTOPRIMARY), &info) {
             win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style &~ win.WS_OVERLAPPEDWINDOW))
             win.SetWindowPos(window, win.HWND_TOP, 
@@ -1153,7 +1158,7 @@ toggle_fullscreen :: proc (window: win.HWND) {
         }
     } else {
         win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style | win.WS_OVERLAPPEDWINDOW))
-        win.SetWindowPlacement(window, &GlobalWindowPosition)
+        win.SetWindowPlacement(window, &GlobalPlatformState.window_position)
         win.SetWindowPos(window, nil, 0, 0, 0, 0, win.SWP_NOMOVE | win.SWP_NOSIZE | win.SWP_NOZORDER | win.SWP_NOOWNERZORDER | win.SWP_FRAMECHANGED)
     }
 }
@@ -1168,10 +1173,10 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         assert(false, "keyboard-event came in through a non-dispatched event")
         
       case win.WM_CLOSE: // @todo Handle this with a message to the user
-        GlobalRunning = false
+        win.PostQuitMessage(0)
         
       case win.WM_DESTROY: // @todo handle this as an error - recreate window?
-        GlobalRunning = false
+        win.PostQuitMessage(0)
         
       case win.WM_WINDOWPOSCHANGING:
         new_pos := cast(^win.WINDOWPOS) cast(pmm) cast(umm) l_param
@@ -1182,7 +1187,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
             
             added := window_dim - client_dim
             
-            render_dim := GlobalBackBuffer.dimension
+            render_dim := RenderDimension
             
             new_cx := (new_pos.cy * (render_dim.x - added.x)) / render_dim.y
             new_cy := (new_pos.cx * (render_dim.y - added.y)) / render_dim.x
@@ -1233,7 +1238,8 @@ process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: bool) {
     }
 }
 
-process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController) {
+process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController) -> bool {
+    quit_requested: bool
     message: win.MSG
     for {
         // @note We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
@@ -1255,7 +1261,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
         
         switch message.message {
           case win.WM_QUIT:
-            GlobalRunning = false
+            quit_requested = true
             
           case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
             timed_block("key_message")
@@ -1297,7 +1303,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
                     }
                 }
                 
-              case win.VK_F4:     if is_down && alt_down do GlobalRunning = false
+              case win.VK_F4:     if is_down && alt_down do quit_requested = true
               case win.VK_RETURN: if is_down && alt_down do toggle_fullscreen(message.hwnd)
             }
             
@@ -1308,6 +1314,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             win.DispatchMessageW(&message)
         }
     }
+    return quit_requested
 }
 
 build_exe_path :: proc (filename: string) -> (result: cstring16) {

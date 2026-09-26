@@ -89,11 +89,9 @@ FrameBuffer :: struct {
     depth_texture: u32,
 }
 
-open_gl: ^OpenGL
-
 ////////////////////////////////////////////////
 
-init_opengl :: proc (dc: win.HDC) -> (gl_context: win.HGLRC) {
+init_opengl :: proc (open_gl: ^OpenGL, dc: win.HDC) -> (gl_context: win.HGLRC) {
     open_gl.default_texture_format = gl.RGBA8
     framebuffer_supports_srgb := load_wgl_extensions()
     set_pixel_format(dc, framebuffer_supports_srgb)
@@ -328,7 +326,7 @@ set_pixel_format :: proc (dc: win.HDC, framebuffer_supports_srgb: bool) {
 
 ////////////////////////////////////////////////
 
-gl_manage_textures :: proc (last: ^TextureOp) {
+gl_manage_textures :: proc (open_gl: ^OpenGL, last: ^TextureOp) {
     render_state.game.debug_begin_data_block("texture operations")
     defer render_state.game.debug_end_data_block()
     
@@ -340,7 +338,7 @@ gl_manage_textures :: proc (last: ^TextureOp) {
         
           case TextureOpAllocate:
             allocs += 1
-            op.result ^= gl_allocate_texture(op.bitmap)
+            op.result ^= gl_allocate_texture(open_gl, op.bitmap)
             
           case TextureOpDeallocate:
             deallocs += 1
@@ -356,7 +354,7 @@ gl_manage_textures :: proc (last: ^TextureOp) {
     render_state.game.debug_record_i32(&deallocations, "deallocations")
 }
 
-gl_allocate_texture :: proc (bitmap: Bitmap) -> (result: u32) {
+gl_allocate_texture :: proc (open_gl: ^OpenGL, bitmap: Bitmap) -> (result: u32) {
     handle: u32
     gl.GenTextures(1, &handle)
     
@@ -381,7 +379,7 @@ gl_allocate_texture :: proc (bitmap: Bitmap) -> (result: u32) {
 
 ////////////////////////////////////////////////
 
-gl_change_to_settings :: proc (settings: RenderSettings) {
+gl_change_to_settings :: proc (open_gl: ^OpenGL, settings: RenderSettings) {
     timed_function()
     
     delete_framebuffer(&open_gl.resolve_buffer)
@@ -418,7 +416,7 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
         depth_peel_flags += { .multisampled }
     }
     
-    open_gl.resolve_buffer = create_framebuffer(settings.dimension, resolve_flags)
+    open_gl.resolve_buffer = create_framebuffer(open_gl, settings.dimension, resolve_flags)
     
     compile_zbias_program(&open_gl.zbias_no_depth_peel, false)
     compile_zbias_program(&open_gl.zbias_depth_peel, true)
@@ -427,11 +425,11 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     compile_multisample_resolve(&open_gl.multisample_resolve)
     
     for _ in 0..<open_gl.depth_peel_count {
-        buffer := create_framebuffer(settings.dimension, depth_peel_flags)
+        buffer := create_framebuffer(open_gl, settings.dimension, depth_peel_flags)
         append(&open_gl.depth_peel_buffers, buffer)
         
         if open_gl.multisampling {
-            resolve_buffer := create_framebuffer(settings.dimension, depth_peel_flags - { .multisampled })
+            resolve_buffer := create_framebuffer(open_gl, settings.dimension, depth_peel_flags - { .multisampled })
             append(&open_gl.depth_peel_resolve_buffers, resolve_buffer)
         }
     }
@@ -441,10 +439,10 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     for &buffer in open_gl.light_buffers {
         filter_type: i32 = gl.LINEAR
         // @note(viktor): Drop these down to 16F once we know what's what and probably use RGB8 for surface_color? And normal_xz_and_depth could probably be encoded in RGB8?
-        buffer.front_emission      = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
-        buffer.back_emission       = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
-        buffer.surface_color       = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
-        buffer.normal_xz_and_depth = create_framebuffer_texture(gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.front_emission      = create_framebuffer_texture(open_gl, gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.back_emission       = create_framebuffer_texture(open_gl, gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.surface_color       = create_framebuffer_texture(open_gl, gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
+        buffer.normal_xz_and_depth = create_framebuffer_texture(open_gl, gl.TEXTURE_2D, filter_type, gl.RGB32F, texture_dim)
         
         // @note(viktor): up framebuffer
         gl.GenFramebuffers(1, &buffer.write_all_buffer)
@@ -466,14 +464,14 @@ gl_change_to_settings :: proc (settings: RenderSettings) {
     }
 }
 
-gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
+gl_render_commands :: proc (open_gl: ^OpenGL, commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     render_dim := commands.dimension
     settings   := commands.settings
     
     if settings != open_gl.settings {
-        gl_change_to_settings(settings)
+        gl_change_to_settings(open_gl, settings)
     }
     
     gl.DepthMask(true)
@@ -535,7 +533,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 from := open_gl.depth_peel_buffers[peel_index]
                 to   := open_gl.depth_peel_resolve_buffers[peel_index]
                 when true {
-                    resolve_multisample(from, to, render_dim)
+                    resolve_multisample(open_gl, from, to, render_dim)
                 } else {
                     gl.BindFramebuffer(gl.READ_FRAMEBUFFER, from.handle)
                     gl.BindFramebuffer(gl.DRAW_FRAMEBUFFER, to.handle)
@@ -557,7 +555,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
                 peeling = false
                 peel_index = 0
                 
-                buffer := get_depth_peel_read_buffer(0)
+                buffer := get_depth_peel_read_buffer(open_gl, 0)
                 gl_bind_frame_buffer(buffer, render_dim)
             }
             
@@ -580,7 +578,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
             alpha_threshold: f32 = 0.02
             if peeling {
                 program = open_gl.zbias_depth_peel
-                buffer := get_depth_peel_read_buffer(peel_index-1)
+                buffer := get_depth_peel_read_buffer(open_gl, peel_index-1)
                 
                 // @metaprogram
                 gl.ActiveTexture(gl.TEXTURE1)
@@ -616,7 +614,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     
     from := open_gl.depth_peel_buffers[peel_index]
     to   := open_gl.depth_peel_resolve_buffers[peel_index]
-    resolve_multisample(from, to, render_dim)
+    resolve_multisample(open_gl, from, to, render_dim)
     
     ////////////////////////////////////////////////
     
@@ -639,7 +637,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     // @metaprogram
     for index in 0 ..< open_gl.depth_peel_count {
         gl.ActiveTexture(gl.TEXTURE0 + index)
-        buffer := get_depth_peel_read_buffer(index)
+        buffer := get_depth_peel_read_buffer(open_gl, index)
         gl.BindTexture(gl.TEXTURE_2D, buffer.color_texture)
     }
     
@@ -680,7 +678,7 @@ gl_render_commands :: proc (commands: ^RenderCommands, draw_region: Rectangle2i,
     end_program(open_gl.final_stretch)
 }
 
-resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
+resolve_multisample :: proc (open_gl: ^OpenGL, from, to: FrameBuffer, dim: v2i) {
     gl.DepthFunc(gl.ALWAYS)
     defer gl.DepthFunc(gl.LEQUAL)
     
@@ -718,7 +716,7 @@ resolve_multisample :: proc (from, to: FrameBuffer, dim: v2i) {
     end_program(open_gl.multisample_resolve)
 }
 
-get_depth_peel_read_buffer :: proc (index: u32) -> (result: FrameBuffer) {
+get_depth_peel_read_buffer :: proc (open_gl: ^OpenGL, index: u32) -> (result: FrameBuffer) {
     result = open_gl.depth_peel_buffers[index]
     if open_gl.multisampling {
         result = open_gl.depth_peel_resolve_buffers[index]
@@ -726,7 +724,7 @@ get_depth_peel_read_buffer :: proc (index: u32) -> (result: FrameBuffer) {
     return result
 }
 
-gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
+gl_display_bitmap :: proc (open_gl: ^OpenGL, bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
     if true do unimplemented()
     
     timed_function()
@@ -760,7 +758,7 @@ gl_display_bitmap :: proc (bitmap: Bitmap, draw_region: Rectangle2i, clear_color
 // @todo(viktor): Check if going with a 16-bit depth buffer would be faster and have enough quality
 GlobalDepthComponent :: gl.DEPTH_COMPONENT24
 
-create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
+create_framebuffer :: proc (open_gl: ^OpenGL, dim: v2i, flags: CreateFramebufferFlags) -> (result: FrameBuffer) {
     gl.GenFramebuffers(1, &result.handle)
     gl.BindFramebuffer(gl.FRAMEBUFFER, result.handle)
     
@@ -768,13 +766,13 @@ create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result:
     filter_type: i32 = .filtered in flags ? gl.LINEAR : gl.NEAREST
     
     if .color in flags {
-        result.color_texture = create_framebuffer_texture(slot, filter_type, open_gl.default_texture_format, dim)
+        result.color_texture = create_framebuffer_texture(open_gl, slot, filter_type, open_gl.default_texture_format, dim)
         
         gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, slot, result.color_texture, 0)
     }
     
     if .depth in flags {
-        result.depth_texture = create_framebuffer_texture(slot, filter_type, GlobalDepthComponent, dim)
+        result.depth_texture = create_framebuffer_texture(open_gl, slot, filter_type, GlobalDepthComponent, dim)
         
         gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, slot, result.depth_texture, 0)
     }
@@ -788,7 +786,7 @@ create_framebuffer :: proc (dim: v2i, flags: CreateFramebufferFlags) -> (result:
     return result
 }
 
-create_framebuffer_texture :: proc (slot: u32, filter_type: i32, format: u32, dim: v2i) -> (result: u32) {
+create_framebuffer_texture :: proc (open_gl: ^OpenGL, slot: u32, filter_type: i32, format: u32, dim: v2i) -> (result: u32) {
     gl.GenTextures(1, auto_cast &result)
     
     gl.BindTexture(slot, result)

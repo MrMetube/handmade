@@ -21,6 +21,7 @@ frame_data_heap_size     ::  32 * Megabyte
 texture_upload_heap_size ::  64 * Megabyte
 texture_heap_size        :: 256 * Megabyte
 VulkanFrameCount         :: 2
+VulkanDepthPeelCount     :: 4
 
 max_vulkan_textures :: 256
 
@@ -53,11 +54,9 @@ Vulkan :: struct {
     next_texture_descriptor:  u32,
     free_texture_descriptors: [dynamic; VulkanTextureDescriptor.count] u32,
     
-    depth_peel_buffers: [dynamic; 4] VulkanDepthPeelBuffer,
+    depth_peel_buffers: [dynamic; VulkanDepthPeelCount] VulkanDepthPeelBuffer,
     composite_buffer:   RenderTarget,
 }
-
-vulkan: ^Vulkan
 
 VulkanTextureDescriptor :: enum u32 {
     nil_texture,
@@ -116,7 +115,7 @@ VulkanQuadRoot :: struct {
 }
 
 VulkanCompositeRoot :: struct {
-    texture_descriptors: [cap(vulkan.depth_peel_buffers)] u32,
+    texture_descriptors: [VulkanDepthPeelCount] u32,
     peel_count:          u32,
 }
 
@@ -127,7 +126,7 @@ VulkanFinalRoot :: struct {
 
 ////////////////////////////////////////////////
 
-init_vulkan :: proc (window: pmm) {
+init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
     device, error := gpu.create_device(window = window, swapchain_format = .bgra8_srgb, desired_swapchain_image_count = VulkanFrameCount)
     assert(error == .none && device != nil)
     
@@ -152,8 +151,8 @@ init_vulkan :: proc (window: pmm) {
     vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, cast(u32) VulkanTextureDescriptor.count)
     
     vulkan.next_texture_descriptor = cast(u32) VulkanTextureDescriptor.first_dynamic_texture
-    gpu.write_sampler_descriptor(device, sampler_descriptor(0), min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
-    gpu.write_sampler_descriptor(device, sampler_descriptor(1), min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
+    gpu.write_sampler_descriptor(device, sampler_descriptor(vulkan, 0), min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
+    gpu.write_sampler_descriptor(device, sampler_descriptor(vulkan, 1), min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     
     vertex_spirv             := read_vulkan_spirv(VulkanVertexSpirvPath)
     fragment_spirv           := read_vulkan_spirv(VulkanFragmentSpirvPath)
@@ -193,7 +192,7 @@ init_vulkan :: proc (window: pmm) {
 
 ////////////////////////////////////////////////
 
-vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> u32 {
+vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture := false) -> u32 {
     timed_function()
     
     placed := gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
@@ -207,9 +206,9 @@ vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> u32
     descriptor_index: u32
     if set_as_nil_texture {
         descriptor_index = cast(u32) VulkanTextureDescriptor.nil_texture
-        descriptor = texture_descriptor(descriptor_index)
+        descriptor = texture_descriptor(vulkan, descriptor_index)
     } else {
-        descriptor, descriptor_index = allocate_texture_descriptor()
+        descriptor, descriptor_index = allocate_texture_descriptor(vulkan)
     }
     gpu.write_texture_descriptor(vulkan.device, descriptor, placed.texture, .sampled)
     
@@ -230,7 +229,7 @@ vk_allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture := false) -> u32
     return result
 }
 
-vk_manage_textures :: proc (last: ^TextureOp) {
+vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
     timed_function()
     debug_data_block("Renderer")
     debug_data_block("texture operations")
@@ -247,7 +246,7 @@ vk_manage_textures :: proc (last: ^TextureOp) {
         
         case TextureOpAllocate:
             allocs += 1
-            op.result ^= vk_allocate_texture(op.bitmap)
+            op.result ^= vk_allocate_texture(vulkan, op.bitmap)
             
         case TextureOpDeallocate:
             deallocs += 1
@@ -271,11 +270,11 @@ vk_manage_textures :: proc (last: ^TextureOp) {
 
 ////////////////////////////////////////////////
 
-vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
+vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
     timed_function()
     
     if render_commands.settings != vulkan.settings {
-        change_to_settings(render_commands.settings)
+        change_to_settings(vulkan, render_commands.settings)
     }
     
     render_state.game.begin_timed_block("acquire frame")
@@ -303,7 +302,7 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
     
     peel_index: u32
     peel_header_restore: int
-    begin_depth_peel_pass(commands, peel_index, .clear, render_commands.clear_color)
+    begin_depth_peel_pass(vulkan, commands, peel_index, .clear, render_commands.clear_color)
     
     for begin_reading(&render_commands.push_buffer); can_read(&render_commands.push_buffer); {
         type := read(&render_commands.push_buffer, RenderEntryType)
@@ -313,7 +312,7 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
         case .DepthClear:
             timed_block("depth clear")
             gpu.end_render_pass(commands)
-            begin_depth_peel_pass(commands, peel_index, .load)
+            begin_depth_peel_pass(vulkan, commands, peel_index, .load)
             
         case .BeginPeels:
             timed_block("begin peels")
@@ -327,10 +326,10 @@ vk_render_commands :: proc (render_commands: ^RenderCommands, draw_region: Recta
                 render_commands.push_buffer.read_cursor = peel_header_restore
                 peel_index += 1
                 
-                begin_depth_peel_pass(commands, peel_index, .clear, render_commands.clear_color)
+                begin_depth_peel_pass(vulkan, commands, peel_index, .clear, render_commands.clear_color)
             } else {
                 peel_index = 0
-                begin_depth_peel_pass(commands, peel_index, .load)
+                begin_depth_peel_pass(vulkan, commands, peel_index, .load)
             }
             
         case .Textured_Quads:
@@ -471,12 +470,12 @@ upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^VulkanFrame
     return result
 }
 
-destroy_render_target :: proc (target: ^RenderTarget) {
+destroy_render_target :: proc (vulkan: ^Vulkan, target: ^RenderTarget) {
     gpu.destroy_render_view(target.render_view)
     gpu.texture_free(&vulkan.texture_allocator, &target.placed)
 }
 
-change_to_settings :: proc (settings: RenderSettings) {
+change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
     timed_function()
     
     // :VulkanRenderer: Multisampled depth peels remain deferred.
@@ -489,10 +488,10 @@ change_to_settings :: proc (settings: RenderSettings) {
         timed_block("recreate_depth_peel_targets")
         
         for &buffer in vulkan.depth_peel_buffers {
-            destroy_render_target(&buffer.color)
-            destroy_render_target(&buffer.depth)
+            destroy_render_target(vulkan, &buffer.color)
+            destroy_render_target(vulkan, &buffer.depth)
         }
-        destroy_render_target(&vulkan.composite_buffer)
+        destroy_render_target(vulkan, &vulkan.composite_buffer)
         
         assert(depth_peel_count <= cap(vulkan.depth_peel_buffers))
         resize(&vulkan.depth_peel_buffers, depth_peel_count)
@@ -507,7 +506,7 @@ change_to_settings :: proc (settings: RenderSettings) {
             
             buffer.color.render_view = gpu.create_render_view(buffer.color.placed.texture)
             buffer.color.descriptor_index = cast(u32) VulkanTextureDescriptor.depth_peel_0_color + cast(u32) index * 2
-            gpu.write_texture_descriptor(vulkan.device, texture_descriptor(buffer.color.descriptor_index), buffer.color.placed.texture, .sampled)
+            gpu.write_texture_descriptor(vulkan.device, texture_descriptor(vulkan, buffer.color.descriptor_index), buffer.color.placed.texture, .sampled)
             
             buffer.depth.placed = gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
                 extent = { extent.x, extent.y, 1 },
@@ -518,7 +517,7 @@ change_to_settings :: proc (settings: RenderSettings) {
             
             buffer.depth.render_view = gpu.create_render_view(buffer.depth.placed.texture)
             buffer.depth.descriptor_index = buffer.color.descriptor_index + 1
-            gpu.write_texture_descriptor(vulkan.device, texture_descriptor(buffer.depth.descriptor_index), buffer.depth.placed.texture, .sampled)
+            gpu.write_texture_descriptor(vulkan.device, texture_descriptor(vulkan, buffer.depth.descriptor_index), buffer.depth.placed.texture, .sampled)
         }
         
         vulkan.composite_buffer.placed = gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
@@ -530,12 +529,12 @@ change_to_settings :: proc (settings: RenderSettings) {
         
         vulkan.composite_buffer.render_view = gpu.create_render_view(vulkan.composite_buffer.placed.texture)
         vulkan.composite_buffer.descriptor_index = cast(u32) VulkanTextureDescriptor.composite
-        gpu.write_texture_descriptor(vulkan.device, texture_descriptor(vulkan.composite_buffer.descriptor_index), vulkan.composite_buffer.placed.texture, .sampled)
+        gpu.write_texture_descriptor(vulkan.device, texture_descriptor(vulkan, vulkan.composite_buffer.descriptor_index), vulkan.composite_buffer.placed.texture, .sampled)
     }
     vulkan.settings = settings
 }
 
-begin_depth_peel_pass :: proc (commands: gpu.CommandBuffer, peel_index: u32, color_load: gpu.LoadOp, render_commands_clear_color: v4 = {}) {
+begin_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_index: u32, color_load: gpu.LoadOp, render_commands_clear_color: v4 = {}) {
     timed_function()
     
     depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
@@ -560,19 +559,19 @@ end_depth_peel_pass :: proc (commands: gpu.CommandBuffer) {
     gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
 }
 
-texture_descriptor :: proc (index: u32) -> pmm {
+texture_descriptor :: proc (vulkan: ^Vulkan, index: u32) -> pmm {
     descriptor_size := gpu.get_device_caps(vulkan.device).texture_descriptor_size_in_bytes
     result := &vulkan.texture_descriptor_heap.range.cpu[cast(u64) index * descriptor_size]
     return result
 }
 
-sampler_descriptor :: proc (index: u32) -> pmm {
+sampler_descriptor :: proc (vulkan: ^Vulkan, index: u32) -> pmm {
     sampler_size := gpu.get_device_caps(vulkan.device).sampler_descriptor_size_in_bytes
     result := &vulkan.sampler_descriptor_heap.range.cpu[cast(u64) index * sampler_size]
     return result
 }
 
-allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
+allocate_texture_descriptor :: proc (vulkan: ^Vulkan) -> (descriptor: pmm, index: u32) {
     last_free := len(vulkan.free_texture_descriptors)-1
     if last_free >= 0 {
         index = vulkan.free_texture_descriptors[last_free]
@@ -584,7 +583,7 @@ allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
         vulkan.next_texture_descriptor += 1
     }
     
-    descriptor = texture_descriptor(index)
+    descriptor = texture_descriptor(vulkan, index)
     
     return descriptor, index
 }
@@ -594,7 +593,7 @@ allocate_texture_descriptor :: proc () -> (descriptor: pmm, index: u32) {
 // Rebuild the DLL-local Vulkan dispatch tables for an existing device. The
 // instance, logical device, queues, swapchain, and allocations remain owned by
 // the persistent renderer state; none of them are recreated during code reload.
-vk_reload :: proc () {
+vk_reload :: proc (vulkan: ^Vulkan) {
     device := vulkan.device
     if device != nil && device.debug_messenger != 0 && device.destroy_debug_messenger != nil {
         device.destroy_debug_messenger(device.instance, device.debug_messenger, nil)
@@ -602,17 +601,17 @@ vk_reload :: proc () {
     }
 }
 
-vk_shutdown :: proc () {
+vk_shutdown :: proc (vulkan: ^Vulkan) {
     device := vulkan.device
     if device == nil do return
     
     gpu.wait_idle(device)
     
     for &buffer in vulkan.depth_peel_buffers {
-        destroy_render_target(&buffer.color)
-        destroy_render_target(&buffer.depth)
+        destroy_render_target(vulkan, &buffer.color)
+        destroy_render_target(vulkan, &buffer.depth)
     }
-    destroy_render_target(&vulkan.composite_buffer)
+    destroy_render_target(vulkan, &vulkan.composite_buffer)
     
     for &texture in vulkan.textures[1:] {
         gpu.texture_free(&vulkan.texture_allocator, &texture)

@@ -2,48 +2,46 @@ package main
 
 import win "core:sys/windows"
 
-@(private="file") game_lib:   win.HMODULE
-@(private="file") render_lib: win.HMODULE
-
 Dll :: struct {
     name: cstring16,
     lock: cstring16,
     temp: cstring16,
     
+    lib: win.HMODULE,
     is_valid:   bool,
     write_time: u64,
 }
 
-load_game_lib :: proc (dll: Dll) -> (is_valid: bool, last_write_time: u64) {
-    if game_lib == nil {
+load_game_lib :: proc (dll: ^Dll) {
+    if dll.lib == nil {
         assert(game == game_stubs, "game.dll has already been initialized")
     }
     
-    unload_game_api()
+    unload_game_api(dll)
     
-    game_lib, last_write_time = load_dll(dll)
-    if game_lib == nil do return false, last_write_time
-    
-    load_game_api(game_lib)
-    is_valid = game_api_is_valid()
-    if !is_valid {
-        unload_game_api()
+    dll.lib, dll.write_time = load_dll(dll^)
+    if dll.lib == nil {
+        dll.is_valid = false
+        return
     }
-    return is_valid, last_write_time
+    
+    dll.is_valid = load_game_api(dll.lib)
+    if !dll.is_valid {
+        unload_game_api(dll)
+    }
 }
 
-load_render_lib :: proc (dll: Dll) -> (is_valid: bool, last_write_time: u64) {
-    if render_lib == nil {
+load_render_lib :: proc (dll: ^Dll) -> (is_valid: bool, last_write_time: u64) {
+    if dll.lib == nil {
         assert(render == render_stubs, "render.dll has already been initialized")
     }
     
-    render_lib, last_write_time = load_dll(dll)
-    if render_lib == nil do return false, last_write_time
+    dll.lib, last_write_time = load_dll(dll^)
+    if dll.lib == nil do return false, last_write_time
     
-    load_render_api(render_lib)
-    is_valid = render_api_is_valid()
+    is_valid = load_render_api(dll.lib)
     if !is_valid {
-        unload_render_api()
+        unload_render_api(dll)
     }
     return is_valid, last_write_time
 }
@@ -66,21 +64,24 @@ needs_to_be_reloaded :: proc (dll: Dll) -> bool {
 
 ////////////////////////////////////////////////
 
-unload_render_api :: proc () {
-    unload_api(&render_lib, &render, render_stubs)
+unload_render_api :: proc (dll: ^Dll) {
+    unload_api(dll, &render, render_stubs)
 }
 
-unload_game_api :: proc () {
-    unload_api(&game_lib, &game, game_stubs)
+unload_game_api :: proc (dll: ^Dll) {
+    unload_api(dll, &game, game_stubs)
 }
 
-unload_api :: proc (lib: ^win.HMODULE, api: ^$T, stubs: T) {
-    if lib^ != nil {
-        if !win.FreeLibrary(lib^) {
+unload_api :: proc (dll: ^Dll, api: ^$T, stubs: T) {
+    if dll.lib != nil {
+        if !win.FreeLibrary(dll.lib) {
             // @logging 
         }
-        lib^ = nil
+        
+        dll.lib      = nil
+        dll.is_valid = false
     }
+    
     api^ = stubs
 }
 

@@ -2,16 +2,14 @@ package main
 
 import win "core:sys/windows"
 
-// @todo(viktor): This whole process of making stubs and then trying to load a library and switching out the stubs with loaded function pointers is always the same. Can we use reflection or the metaprogram to generate this based on an API-struct?
-xinput : XInputApi = xinput_stub
-
 XInputApi :: struct {
     GetState: proc (dwUserIndex: win.DWORD, pState:     ^XINPUT_STATE)     -> win.DWORD,
     SetState: proc (dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD,
 }
 
-init_xInput :: proc () {
-    assert(xinput.GetState == xinput_stub.GetState, "xInput has already been initialized")
+// @todo(viktor): This whole process of making stubs and then trying to load a library and switching out the stubs with loaded function pointers is always the same. Can we use reflection or the metaprogram to generate this based on an API-struct?
+init_xInput :: proc () -> XInputApi {
+    xinput := xinput_stub
     
     xinput14: cstring16 = "Xinput1_4.dll"
     xinput91: cstring16 = "XInput9_1_0.dll"
@@ -34,6 +32,8 @@ init_xInput :: proc () {
         print("Failed to load %\n", xinput13)
         print("Failed to initialize XInput\n")
     }
+    
+    return xinput
 }
 
 ////////////////////////////////////////////////

@@ -21,7 +21,7 @@ debug_record_value :: proc (value: ^$Value, name: string = #caller_expression(va
     if GlobalDebugTable == nil do return
     guid := DebugGUID{ name = name }
     
-    event := debug_record_event(nil, guid)
+    event := debug_record_event(GlobalDebugTable, nil, guid)
     when Value == bool { // @cleanup
         if GlobalDebugTable.edit_event.guid == guid {
             value ^= cast(bool) GlobalDebugTable.edit_event.value.(b32)
@@ -162,7 +162,7 @@ begin_timed_block :: proc (name: string, loc := #caller_location) {
 @(export)
 end_timed_block :: proc () {
     when !DebugEnabled do return
-    debug_record_event(EndTimedBlock{}, {}, {})
+    debug_record_event(EndTimedBlock{}, "")
 }
 
 @(deferred_none=end_timed_block)
@@ -177,15 +177,15 @@ timed_function :: proc (loc := #caller_location) {
 
 debug_record_event :: proc { debug_record_event_loc, debug_record_event_guid }
 debug_record_event_loc :: proc (value: DebugValue, name: string, loc := #caller_location) -> ^DebugEvent {
-    return debug_record_event_guid(value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
+    return debug_record_event_guid(GlobalDebugTable, value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
 }
-debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> ^DebugEvent {
-    when !DebugEnabled         do return nil
-    if GlobalDebugTable == nil do return nil
+debug_record_event_guid :: proc (table: ^DebugTable, value: DebugValue, guid: DebugGUID) -> ^DebugEvent {
+    if !DebugEnabled do return nil
+    if table == nil  do return nil
     
     // @volatile
-    state := transmute(DebugEventsState) atomic_add(cast(^u64) &GlobalDebugTable.events_state, GlobalDebugTable.record_increment)
-    result := &GlobalDebugTable.events[state.array_index][state.events_index]
+    state := transmute(DebugEventsState) atomic_add(cast(^u64) &table.events_state, table.record_increment)
+    result := &table.events[state.array_index][state.events_index]
     
     result ^= {
         guid = guid,
@@ -204,7 +204,7 @@ debug_record_event_guid :: proc (value: DebugValue, guid: DebugGUID) -> ^DebugEv
 // Only used by the platform layer
 
 @(export)
-debug_set_event_recording :: proc (active: bool, table := GlobalDebugTable) {
+debug_set_event_recording :: proc (table: ^DebugTable, active: bool) {
     if !DebugEnabled do return
     if table == nil  do return
     

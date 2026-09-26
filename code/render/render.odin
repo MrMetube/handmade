@@ -46,6 +46,15 @@ Reload_Action :: enum {
     Shutdown,
 }
 
+@(common)
+Render_Params :: struct {
+    render_queue:     ^WorkQueue,
+    frame_allocator:  Allocator,
+    window_dimension: v2i,
+    software_target:  Bitmap,
+    single_threaded:  bool,
+}
+
 ////////////////////////////////////////////////
 
 render_state: ^Render_State
@@ -53,8 +62,6 @@ render_state: ^Render_State
 @(export)
 attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, backend: Backend) -> bool {
     render_state = state
-    open_gl = &render_state.open_gl
-    vulkan  = &render_state.vulkan
     
     if render_state.initialized && render_state.backend != backend {
         reload_or_shutdown(.Shutdown)
@@ -73,8 +80,8 @@ attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, back
     if !render_state.initialized {
         render_state.backend = backend
         switch render_state.backend {
-        case .Vulkan:  init_vulkan(window)
-        case .OpenGL:  render_state.gl_context = init_opengl(window_dc)
+        case .Vulkan:  init_vulkan(&render_state.vulkan, window)
+        case .OpenGL:  render_state.gl_context = init_opengl(&render_state.open_gl, window_dc)
         case .Software: // nothing
         }
         
@@ -86,7 +93,7 @@ attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, back
         // A DLL reload resets package-level dispatch tables, but must not replace
         // the actual graphics context/device or any resource handles.
         switch render_state.backend {
-        case .Vulkan:   result = rebind_device(vulkan.device)
+        case .Vulkan:   result = rebind_device(render_state.vulkan.device)
         case .OpenGL:   result = reattach_opengl(window_dc, render_state.gl_context)
         case .Software: result = true
         }
@@ -102,8 +109,8 @@ reload_or_shutdown :: proc (action: Reload_Action) {
     switch render_state.backend {
     case .Vulkan:
         switch action {
-        case .Reload:   vk_reload()
-        case .Shutdown: vk_shutdown()
+        case .Reload:   vk_reload(&render_state.vulkan)
+        case .Shutdown: vk_shutdown(&render_state.vulkan)
         }
         
     case .OpenGL:   gl_shutdown(render_state.gl_context, action == .Shutdown)
@@ -119,8 +126,8 @@ reload_or_shutdown :: proc (action: Reload_Action) {
 allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture: bool) -> u32 {
     result: u32
     switch render_state.backend {
-    case .Vulkan:   result = vk_allocate_texture(bitmap, set_as_nil_texture)
-    case .OpenGL:   result = gl_allocate_texture(bitmap)
+    case .Vulkan:   result = vk_allocate_texture(&render_state.vulkan, bitmap, set_as_nil_texture)
+    case .OpenGL:   result = gl_allocate_texture(&render_state.open_gl, bitmap)
     case .Software: unimplemented()
     }
     return result
@@ -129,34 +136,30 @@ allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture: bool) -> u32 {
 @(export)
 manage_textures :: proc (last: ^TextureOp) {
     switch render_state.backend {
-    case .Vulkan:   vk_manage_textures(last)
-    case .OpenGL:   gl_manage_textures(last)
+    case .Vulkan:   vk_manage_textures(&render_state.vulkan, last)
+    case .OpenGL:   gl_manage_textures(&render_state.open_gl, last)
     case .Software: unimplemented()
     }
 }
 
 ////////////////////////////////////////////////
 
-// @todo struct for all lose params
 @(export)
-render :: proc (commands: ^RenderCommands, render_queue: ^WorkQueue, draw_region: Rectangle2i, frame_allocator: Allocator, window_dimension: v2i, software_target: Bitmap, single_threaded: bool) {
+render :: proc (commands: ^RenderCommands, draw_region: Rectangle2i, params: Render_Params) {
     commands.clear_color.rgb = square(commands.clear_color.rgb)
     
     switch render_state.backend {
     case .Software:
-        software_render_commands(auto_cast render_queue, commands, software_target, frame_allocator, single_threaded)
+        software_render_commands(params.render_queue, commands, params.software_target, params.frame_allocator, params.single_threaded)
         if true { unimplemented("differentiate software+opengl from software+vulkan") }
-        gl_display_bitmap(software_target, draw_region, commands.clear_color)
+        gl_display_bitmap(&render_state.open_gl, params.software_target, draw_region, commands.clear_color)
         
-    case .OpenGL: gl_render_commands(commands, draw_region, window_dimension)
-    case .Vulkan: vk_render_commands(commands, draw_region, window_dimension)
+    case .OpenGL: gl_render_commands(&render_state.open_gl, commands, draw_region, params.window_dimension)
+    case .Vulkan: vk_render_commands(&render_state.vulkan, commands, draw_region, params.window_dimension)
     }
 }
 
 ////////////////////////////////////////////////
-
-// @hack for generated game api
-GlobalDebugTable: pmm
 
 end_timed_block :: proc () {
     render_state.game.end_timed_block()

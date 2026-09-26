@@ -84,6 +84,12 @@ DebugState :: struct {
     
     root_info: [] u8,
     
+    // UI animation
+    longest_frame_span:   f32,
+    d_longest_frame_span: f32,
+    total_clocks:         f32,
+    d_total_clocks:       f32,
+    
     // Per-frame storage management
     per_frame_arena:       Arena,
     stored_event_freelist: FreeList(DebugStoredEvent),

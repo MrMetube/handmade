@@ -774,8 +774,6 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
     }
 }
 
-longest_frame_span: f32
-d_longest_frame_span: f32
 draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
     timed_function()
     // @todo(viktor): zooming and panning
@@ -793,16 +791,16 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         target_longest_frame_span = max(target_longest_frame_span, frame_span)
     }
     
-    delta_p := target_longest_frame_span - longest_frame_span
-    dd_longest_frame_span := (delta_p > 0 ? 600 : 100) * (delta_p) + (delta_p > 0 ? 34 : 17) * (0 - d_longest_frame_span)
-    dd_longest_frame_span += -3 * d_longest_frame_span
-    d_longest_frame_span += dd_longest_frame_span * dt
-    longest_frame_span += d_longest_frame_span * dt + 0.5 * dd_longest_frame_span * dt * dt
+    delta_p := target_longest_frame_span - debug.longest_frame_span
+    dd_longest_frame_span := (delta_p > 0 ? 600 : 100) * (delta_p) + (delta_p > 0 ? 34 : 17) * (0 - debug.d_longest_frame_span)
+    dd_longest_frame_span += -3 * debug.d_longest_frame_span
+    debug.d_longest_frame_span += dd_longest_frame_span * dt
+    debug.longest_frame_span += debug.d_longest_frame_span * dt + 0.5 * dd_longest_frame_span * dt * dt
     
     transform := debug.ui_transform
     
     pixel_span := dim.y
-    scale := safe_ratio_0(pixel_span, longest_frame_span)
+    scale := safe_ratio_0(pixel_span, debug.longest_frame_span)
     for &frame, frame_ordinal in root_element.frames {
         if frame.events.first == nil do continue
         
@@ -852,7 +850,6 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
     }
 }
 
-d_total_clocks, total_clocks: f32
 draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement) {
     timed_function()
     
@@ -863,17 +860,17 @@ draw_profile :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, d
     
     target_total_clocks := cast(f32) get_total_clocks(frame)
     
-    delta_p := target_total_clocks - total_clocks
-    dd_total_clocks := (delta_p > 0 ? 8000 : 2000) * (delta_p) + 100 * (0 - d_total_clocks)
-    dd_total_clocks += -3 * d_total_clocks
-    d_total_clocks += dd_total_clocks * dt
-    total_clocks += d_total_clocks * dt + 0.5 * dd_total_clocks * dt * dt
+    delta_p := target_total_clocks - debug.total_clocks
+    dd_total_clocks := (delta_p > 0 ? 8000 : 2000) * (delta_p) + 100 * (0 - debug.d_total_clocks)
+    dd_total_clocks += -3 * debug.d_total_clocks
+    debug.d_total_clocks += dd_total_clocks * dt
+    debug.total_clocks += debug.d_total_clocks * dt + 0.5 * dd_total_clocks * dt * dt
     
     next_x := rect.min.x
     relative_clock: i64
     for event := frame.events.last; event != nil; event = event.next {
         relative_clock += event.node.duration
-        t := cast(f32) (cast(f64) relative_clock / cast(f64) total_clocks)
+        t := cast(f32) (cast(f64) relative_clock / cast(f64) debug.total_clocks)
         
         event_rect := rect
         event_rect.min.x = next_x
