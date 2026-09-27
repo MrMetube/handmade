@@ -98,8 +98,6 @@ to_cstring :: proc (sb: ^String_Builder) -> cstring {
 }
 
 ////////////////////////////////////////////////
-// @note(viktor): writing and reading need to be in sync or we get undefined behaviour. We could always write the type of a value in combination with that value and then on read assert that the next type to read is the same as the requested type of the parameter.
-// @todo(viktor): most of these calls are untested and need to checked and verified
 
 Byte_Buffer :: struct {
     bytes:        [] u8,
@@ -145,7 +143,7 @@ write_align :: proc (b: ^Byte_Buffer, #any_int alignment: int) {
     remainder := b.write_cursor % alignment
     if b.write_cursor % alignment != 0 {
         offset := alignment - remainder
-        assert(b.write_cursor + offset < len(b.bytes))
+        assert(b.write_cursor + offset <= len(b.bytes))
         b.write_cursor += offset
     }
 }
@@ -155,7 +153,7 @@ read_align :: proc (b: ^Byte_Buffer, #any_int alignment: int) {
     remainder := b.read_cursor % alignment
     if b.read_cursor % alignment != 0 {
         offset := alignment - remainder
-        assert(b.read_cursor + offset < len(b.bytes))
+        assert(b.read_cursor + offset <= len(b.bytes))
         b.read_cursor += offset
     }
 }

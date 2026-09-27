@@ -619,9 +619,9 @@ main :: proc () {
                         bytes_to_write = target_cursor - byte_to_lock
                     }
                     
-                    sound_buffer := GameSoundBuffer{
+                    sound_buffer := GameSoundBuffer {
                         samples_per_second = sound_output.samples_per_second,
-                        samples = samples[:align(8, bytes_to_write / sound_output.bytes_per_sample)],
+                        samples            = samples[:align(8, bytes_to_write / sound_output.bytes_per_sample)],
                     }
                     bytes_to_write = auto_cast len(sound_buffer.samples) * sound_output.bytes_per_sample
                     
@@ -1060,71 +1060,45 @@ get_seconds_elapsed_until_now :: proc (start: i64) -> f32 {
 fill_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
     timed_function()
     
-    region1, region2: pmm
-    region1_size, region2_size: u32
+    samples: [2] [^] Sample
+    counts:  [2] u32
     
-    if result := buffer->Lock(byte_to_lock, bytes_to_write, &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+    if result := buffer->Lock(byte_to_lock, bytes_to_write, cast(^pmm) &samples[0], &counts[0], cast(^pmm) &samples[1], &counts[1], 0); win.SUCCEEDED(result) {
         // @todo assert that region1/2_size is valid
-        // @todo Collapse these two loops
-        
-        dest_samples := cast([^]Sample) region1
-        region1_sample_count := region1_size / sound_output.bytes_per_sample
-        
-        source_sample_index := 0
-        
-        for dest_sample_index in 0..<region1_sample_count {
-            assert(source_sample_index < len(source.samples))
+        source_offset: u32
+        for destination, index in samples {
+            sample_count := counts[index] / sound_output.bytes_per_sample
             
-            dest_samples[dest_sample_index] = source.samples[source_sample_index]
+            copy(destination[:sample_count], source.samples[source_offset:])
+            source_offset += sample_count
             
-            source_sample_index += 1
-            sound_output.running_sample_index += 1
+            sound_output.running_sample_index += sample_count
         }
         
-        dest_samples = cast([^]Sample) region2
-        region2_sample_count := region2_size / sound_output.bytes_per_sample
-        
-        for dest_sample_index in 0..<region2_sample_count {
-            assert(source_sample_index < len(source.samples))
-            
-            dest_samples[dest_sample_index] = source.samples[source_sample_index]
-            
-            source_sample_index += 1
-            sound_output.running_sample_index += 1
-        }
-        
-        buffer->Unlock(region1, region1_size, region2, region2_size)
+        buffer->Unlock(samples[0], counts[0], samples[1], counts[1])
     } else {
-        return // @todo @logging
+        // @todo @logging
     }
 }
 
 clear_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutput) {
     timed_function()
     
-    region1, region2 : pmm
-    region1_size, region2_size: u32
-    // @copypasta
-    if result := buffer->Lock(0, sound_output.buffer_size , &region1, &region1_size, &region2, &region2_size, 0); win.SUCCEEDED(result) {
+    regions: [2] [^] Sample
+    counts:  [2] u32
+    
+    if result := buffer->Lock(0, sound_output.buffer_size, cast(^pmm) &regions[0], &counts[0], cast(^pmm) &regions[1], &counts[1], 0); win.SUCCEEDED(result) {
         // @todo assert that region1/2_size is valid
-        // @todo Collapse these two loops
-        // @todo Copy pasta of fill_sound_buffer
-        
-        dest_samples := cast([^]u8) region1
-        for index in 0..<region1_size {
-            dest_samples[index] = 0
+        for destination, index in regions {
+            sample_count := counts[index] / sound_output.bytes_per_sample
+            
+            zero(destination[:sample_count])
+            sound_output.running_sample_index += sample_count
         }
-        sound_output.running_sample_index += region1_size
         
-        dest_samples = cast([^]u8) region2
-        for index in 0..<region2_size {
-            dest_samples[index] = 0
-        }
-        sound_output.running_sample_index += region2_size
-        
-        buffer->Unlock(region1, region1_size, region2, region2_size)
+        buffer->Unlock(regions[0], counts[0], regions[1], counts[1])
     } else {
-        return // @todo @logging
+        // @todo @logging
     }
 }
 

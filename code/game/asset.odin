@@ -544,9 +544,10 @@ begin_asset_lock :: proc (assets: ^Assets) {
     }
 }
 end_asset_lock :: proc (assets: ^Assets) {
+    // The fence and atomic unlock publish the protected writes to the next successful compare exchange in begin_asset_lock.
     complete_previous_writes_before_future_writes()
     tran_state := assets.tran_state
-    volatile_store(&tran_state.memory_operation_lock, 0)
+    atomic_store_explicit(&tran_state.memory_operation_lock, 0, .Relaxed)
 }
 
 acquire_asset_memory :: proc (assets: ^Assets, asset_index: $Id/u32, div: ^Divider, #any_int alignment: u64 = 4) -> ^AssetMemoryHeader {

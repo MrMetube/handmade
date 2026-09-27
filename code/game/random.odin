@@ -42,17 +42,28 @@ next_random_u32 :: proc (series: ^RandomSeries) -> u32 {
 ////////////////////////////////////////////////
 
 // @todo(viktor): handle that this may want to be called with doubles and that those probably want to not be upcast from floats
-// @todo(viktor): make this handling of arrays with unique random values more systemic for use with integer vectors
 random_unilateral :: proc (series: ^RandomSeries, $T: typeid) -> T #no_bounds_check {
     result: T
     when intrinsics.type_is_array(T) {
         E :: intrinsics.type_elem_type(T)
-        #unroll for i in 0..<len(T) {
-            result[i] = random_unilateral(series, E)
+        when E == f32 && len(T) <= LaneWidth {
+            values := random_unilateral(series, lane_f32)
+            #unroll for i in 0..<len(T) {
+                result[i] = extract(values, i)
+            }
+        } else {
+            #unroll for i in 0..<len(T) {
+                result[i] = random_unilateral(series, E)
+            }
         }
     } else {
         value := next_random_lane_u32(series)
-        unilateral := cast(lane_f32) (shift_right(value, 1)) / cast(lane_f32) (max(u32) >> 1)
+        
+        f32_mantissa_bits :: 24 // 23 + 1 implicite bit
+        numerator := cast(lane_f32) shift_right(value, 32 - f32_mantissa_bits)
+        divisor   := cast(lane_f32) (1 << f32_mantissa_bits)
+        unilateral := numerator / divisor
+        
         when intrinsics.type_is_simd_vector(T) {
             result = cast(T) unilateral
         } else {
@@ -60,7 +71,6 @@ random_unilateral :: proc (series: ^RandomSeries, $T: typeid) -> T #no_bounds_ch
         }
     }
     
-    // @todo(viktor): why are all results less than 0.001 ?
     return result
 }
 

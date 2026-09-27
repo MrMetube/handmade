@@ -16,11 +16,13 @@ atomic_compare_exchange :: proc (destination: ^$T, old_value, new_value: T) -> (
 volatile_load      :: intrinsics.volatile_load
 volatile_store     :: intrinsics.volatile_store
 atomic_add         :: intrinsics.atomic_add
+atomic_add_explicit :: intrinsics.atomic_add_explicit
 atomic_exchange    :: intrinsics.atomic_exchange
+atomic_load_explicit  :: intrinsics.atomic_load_explicit
+atomic_store_explicit :: intrinsics.atomic_store_explicit
 
 read_cycle_counter :: intrinsics.read_cycle_counter
 
-// @todo(viktor): Is this correct? How can I validated this?
 @(enable_target_feature="sse2,sse")
 complete_previous_writes_before_future_writes :: proc () {
     intrinsics.atomic_thread_fence(.Release)
@@ -46,14 +48,14 @@ TicketMutex :: struct #align(64) {
 }
 
 begin_ticket_mutex :: proc (mutex: ^TicketMutex) {
-    ticket := atomic_add(&mutex.ticket, 1)
-    for ticket != volatile_load(&mutex.serving) {
+    ticket := atomic_add_explicit(&mutex.ticket, 1, .Relaxed)
+    for ticket != atomic_load_explicit(&mutex.serving, .Acquire) {
         spin_hint()
     }
 }
 
 end_ticket_mutex :: proc (mutex: ^TicketMutex) {
-    atomic_add(&mutex.serving, 1)
+    atomic_add_explicit(&mutex.serving, 1, .Release)
 }
 
 spin_hint :: #force_inline proc () {

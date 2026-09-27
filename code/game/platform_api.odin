@@ -3,9 +3,6 @@ package game
 ////////////////////////////////////////////////
 // Shared Definitions
 
-// @hack :WorkQueueDefinition - We should only need a pointer to the queue in the game and render dlls
-WorkQueue :: struct {}
-
 @(common) PlatformFileType   :: enum { AssetFile }
 @(common) PlatformFileHandle :: struct { no_errors:  bool, _platform: pmm }
 @(common) PlatformFileGroup  :: struct { file_count: u32,  _platform: pmm }

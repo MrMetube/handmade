@@ -69,7 +69,6 @@ DebugState :: struct {
     // Overlay rendering
     render_group: RenderGroup,
     
-    // @todo(viktor): remove all these as they are no longer necessary
     text_transform:    Transform,
     shadow_transform:  Transform,
     ui_transform:      Transform,

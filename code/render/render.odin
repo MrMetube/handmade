@@ -1,18 +1,5 @@
 package render
 
-/* @todo
-    iterate on reducing the generated file count and Api structs and game-static vs. game-dynamic differentiation
-      make sure the only game code that can be called from outside is helper code
-        check all @(common) procs
-        reduce global variables
-    
-    delete platform_api.odin from render (and game)
-    
-    reduce the api surface overall for render, game and platform between each other
-    
-    on reload all allocated textures are lost, we need to realloc them
-*/ 
-
 import win "core:sys/windows"
 
 @(common)

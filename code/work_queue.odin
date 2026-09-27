@@ -4,6 +4,7 @@ package main
 import "base:runtime"
 import win "core:sys/windows"
 
+@(api_opaque)
 WorkQueue :: struct {
     semaphore_handle: win.HANDLE,
     

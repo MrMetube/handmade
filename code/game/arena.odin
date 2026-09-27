@@ -101,6 +101,8 @@ push_struct :: proc (arena: ^Arena, $T: typeid, params := DefaultPushParams) -> 
 
 @(require_results)
 push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alignment: umm, params := DefaultPushParams) -> pmm {
+    if size_init == 0 { return nil }
+    
     params := params
     if params.alignment == DefaultAlignment {
         params.alignment = default_alignment
@@ -112,7 +114,7 @@ push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alig
     }
     size := size_init + alignment_offset
     
-    if arena.current_block == nil || arena.current_block.used + size >= auto_cast len(arena.current_block.storage) {
+    if arena.current_block == nil || arena.current_block.used + size > auto_cast len(arena.current_block.storage) {
         size = size_init // @note(viktor): the memory will allways be aligned now!
         
         if BoundsCheck & arena.allocation_flags != {} {
@@ -170,8 +172,6 @@ zero_slice :: proc (data: []$T){
 // only really something we need during testing, but who knows
 @(require_results)
 copy_string :: proc (arena: ^Arena, s: string) -> string {
-    // @todo(viktor): handle zero sized allocations better in push_size
-    if s == "" do return ""
     buffer := push_slice(arena, u8, len(s), no_clear())
     bytes  := transmute([]u8) s
     

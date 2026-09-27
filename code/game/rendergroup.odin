@@ -25,7 +25,6 @@ package game
 
 @(common) 
 Bitmap :: struct {
-    // @todo(viktor): the length of the slice and either width or height are redundant
     memory: [] Color,
     dimension: v2i,
     
@@ -63,9 +62,8 @@ RenderCommands :: struct {
 }
 
 RenderGroup :: struct {
-    assets:              ^Assets,
-    generation_id:       AssetGenerationId,
-    missing_asset_count: i32, // @cleanup this is only ever written to
+    assets:        ^Assets,
+    generation_id: AssetGenerationId,
     
     commands: ^RenderCommands,
     
@@ -90,9 +88,6 @@ RenderTransform :: struct {
 Transform :: struct {
     is_upright: bool,
     offset: v3,  
-    
-    // @cleanup scale is never read from or writen to
-    scale:  f32,
 }
     
 Camera_Flags :: bit_set[ enum {
@@ -193,8 +188,8 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
 
 ////////////////////////////////////////////////
 
-default_flat_transform    :: proc () -> Transform { return { scale = 1 } }
-default_upright_transform :: proc () -> Transform { return { scale = 1, is_upright = true } }
+default_flat_transform    :: proc () -> Transform { return { } }
+default_upright_transform :: proc () -> Transform { return { is_upright = true } }
 
 ////////////////////////////////////////////////
 
@@ -434,7 +429,6 @@ push_bitmap :: proc (group: ^RenderGroup, id: BitmapId, transform: Transform, he
         push_bitmap_raw(group, bitmap, transform, height, offset, color, use_alignment, x_axis, y_axis)
     } else {
         load_bitmap(group.assets, id, false)
-        group.missing_asset_count += 1
     }
 }
 
@@ -494,7 +488,6 @@ push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32
     // @note(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap == nil || bitmap.texture_handle == 0 {
         load_bitmap(group.assets, id, false)
-        group.missing_asset_count += 1
     } else {
         push_cube_raw(group, bitmap, p, radius, height, color)
     }

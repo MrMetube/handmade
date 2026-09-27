@@ -42,12 +42,11 @@ radix_sort :: proc (entries: []SortEntry, temp_space: []SortEntry) #no_bounds_ch
     }
 }
 
-// @todo(viktor): if we pass an empty slice we cause a stack overflow, handle this for all sorts
 merge_sort :: proc (entries: []$T, temp_space: []T, comes_before: proc (a, b: T) -> bool) #no_bounds_check {
     count := len(entries)
     
     switch count {
-      case 1: // No work to do
+      case 0, 1: // No work to do
       case 2: 
         a := &entries[0]
         b := &entries[1]

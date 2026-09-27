@@ -93,9 +93,9 @@ main :: proc () {
     if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir,   game_package)   do os.exit(1)
     if !metaprogram_collect_files_and_parse_package(&metaprogram, render_dir, render_package) do os.exit(1)
     
-    if !metaprogram_collect_plugin_data(&metaprogram, code_dir,   main_package)   do os.exit(1)
-    if !metaprogram_collect_plugin_data(&metaprogram, game_dir,   game_package)   do os.exit(1)
-    if !metaprogram_collect_plugin_data(&metaprogram, render_dir, render_package) do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, main_package)   do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, game_package)   do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, render_package) do os.exit(1)
     
     pedantic_packages: [dynamic; 4] string
     if PedanticGame     { append(&pedantic_packages, game_package)   }
@@ -115,7 +115,8 @@ main :: proc () {
     
     { // game
         if !check_printlikes(&metaprogram, game_package) do os.exit(1)
-        if !generate_platform_api(&metaprogram, "./code/generated-platform_api.odin", main_package, "./code/game/generated-platform_api.odin", game_package, true) do os.exit(1)
+        
+        if !generate_platform_api(&metaprogram, "./code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) do os.exit(1)
         
         delete_all_like("./build", `game-\d+\.rdi`)
         delete_all_like("./build", `game-\d+\.pdb`)
@@ -143,8 +144,9 @@ main :: proc () {
     { // render
         if !check_printlikes(&metaprogram, render_package) do os.exit(1)
         
-        if !generate_commons(&metaprogram,  "./code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
-        if !generate_game_api(&metaprogram, "./code/render/generated-game_api.odin",     game_package,   render_package)            do os.exit(1)
+        if !generate_platform_api(&metaprogram, "./code/render/generated-platform_api.odin", render_package, { .opaques })              do os.exit(1)
+        if !generate_commons(&metaprogram,      "./code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
+        if !generate_game_api(&metaprogram,     "./code/render/generated-game_api.odin",     game_package,   render_package)            do os.exit(1)
         
         delete_all_like("./build", `render-\d+\.rdi`)
         delete_all_like("./build", `render-\d+\.pdb`)
@@ -175,10 +177,11 @@ main :: proc () {
         if !check_printlikes(&metaprogram, main_package) do os.exit(1)
             
         // @todo(viktor): these could be run in parallel with each other and the build of the game
-        if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",       game_package,   main_package) do os.exit(1)
-        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",     render_package, main_package) do os.exit(1)
+        if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",       game_package,   main_package)               do os.exit(1)
+        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",     render_package, main_package)               do os.exit(1)
         if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",   main_package,   game_package,   "./game")   do os.exit(1)
         if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,   render_package, "./render") do os.exit(1)
+        if !generate_platform_api_bindings(&metaprogram, "./code/generated-platform_api.odin", main_package)                      do os.exit(1)
         
         target :: "debug.exe"
         build_succeeded: bool
