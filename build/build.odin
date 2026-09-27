@@ -6,13 +6,13 @@ import "core:os"
 import "core:strings"
 
 
-// "-linker:radlink"
 // "-build-diagnostics"
 
 platform_flags := [] string { "-subsystem:windows", `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 
-PedanticGame     :: false
-PedanticPlatform :: false
+PedanticGame     :: !false
+PedanticRender   :: !false
+PedanticPlatform :: !false
 
 native   :: true
 optimize :: false
@@ -56,6 +56,7 @@ render_dir     :: code_dir+"/"+render_package
 main :: proc () {
     // @todo(viktor): handle being called from ./data instead of ./
     init_build(run_from_data = true)
+    parse_run_and_debug_arguments()
     make_directory_if_not_exists("./data/build")
 
     vulkan_vertex_path   :: `build/vulkan.vertex.spirv`
@@ -84,7 +85,7 @@ main :: proc () {
         append(cmd, shader.output)
         run_command(cmd, async = procs)
     }
-    procs_flush(procs)
+    if !procs_flush(procs) do os.exit(1)
     
     // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
@@ -102,20 +103,18 @@ main :: proc () {
     fmt.sbprint(&sb, "common", "api", "printlike", sep=",")
     custom_attribute_flag := strings.to_string(sb)
     
-    sb = strings.builder_make()
-    fmt.sbprint(&sb, "-vet-packages:")
-    if PedanticGame     do fmt.sbprint(&sb, game_package, ",")
-    // if PedanticRender   do fmt.sbprint(&sb, render_package, ",")
-    if PedanticPlatform do fmt.sbprint(&sb, main_package, ",")
-    fmt.sbprint(&sb, "hha")
-    pedantic_vet_packages := strings.to_string(sb)
+    pedantic_packages: [dynamic; 4] string
+    if PedanticGame     { append(&pedantic_packages, game_package)   }
+    if PedanticRender   { append(&pedantic_packages, render_package) }
+    if PedanticPlatform { append(&pedantic_packages, main_package)   }
+    append(&pedantic_packages, "hha")
     
     if begin_build(cmd, "code/asset_builder", "asset_builder.exe") {
         build_meander()
         build_native(native)
         append(cmd, custom_attribute_flag)
-        append(cmd, pedantic_vet_packages)
         build_pedantic(true)
+        build_very_pedantic(true, ..pedantic_packages[:])
         
         end_build(cmd)
     }
@@ -141,16 +140,14 @@ main :: proc () {
         
         if begin_build(cmd, "code/game", "game.dll") {
             append(cmd, "-build-mode:dll")
-            append(cmd, fmt.tprintf(`-pdb-name:.\game-%d.pdb`, random_number()))
+            append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
             
             build_meander()
             build_optimizations(optimize)
             build_native(native)
             
-            if PedanticGame {
-                append(cmd, pedantic_vet_packages)
-                build_pedantic(PedanticGame)
-            }
+            build_pedantic(PedanticGame)
+            build_very_pedantic(PedanticGame, ..pedantic_packages[:])
             
             append(cmd, custom_attribute_flag)
             if internal { build_define("INTERNAL", "true") }
@@ -179,7 +176,7 @@ main :: proc () {
         
         if begin_build(cmd, render_dir, "render.dll") {
             append(cmd, "-build-mode:dll")
-            append(cmd, fmt.tprintf(`-pdb-name:.\render-%d.pdb`, random_number()))
+            append(cmd, fmt.tprintf(`-pdb-name:./build/render-%d.pdb`, random_number()))
             
             build_meander()
             build_optimizations(optimize)
@@ -211,10 +208,8 @@ main :: proc () {
             build_optimizations(optimize)
             build_native(native)
             
-            if PedanticPlatform {
-                append(cmd, pedantic_vet_packages)
-                build_pedantic(PedanticPlatform)
-            }
+            build_pedantic(PedanticPlatform)
+            build_very_pedantic(PedanticPlatform, ..pedantic_packages[:])
             
             append(cmd, custom_attribute_flag)
             if internal { build_define("INTERNAL", "true") }
