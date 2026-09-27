@@ -1,8 +1,6 @@
 #+vet !unused-procedures
 package game
 
-import "base:runtime"
-
 DebugEnabled :: true && INTERNAL
 
 DebugGUID :: struct {

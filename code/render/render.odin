@@ -13,10 +13,7 @@ package render
     on reload all allocated textures are lost, we need to realloc them
 */ 
 
-import "base:runtime"
 import win "core:sys/windows"
-
-import gpu "./no_graphics_api"
 
 @(common)
 Render_State :: struct {

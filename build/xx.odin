@@ -8,14 +8,14 @@ import "core:fmt"
 import "core:os"
 import "core:text/regex"
 import "core:strings"
-import win "core:sys/windows"
 
 ////////////////////////////////////////////////
 
-// @todo explain the args parsing syntax (run|debug):<target.exe in build dir>
-
-cmd   := &the_state.cmd
-procs := &the_state.procs
+// @todo explain the args syntax (run|debug)[:<target.exe in build dir>]
+_cmd:   Cmd
+_procs: Procs
+cmd   := &_cmd
+procs := &_procs
 
 ////////////////////////////////////////////////
 // Internal state
@@ -26,22 +26,8 @@ raddbg_path :: "C:/tools/raddbg/"+ raddbg
 Procs :: [dynamic] os.Process
 Cmd   :: [dynamic] string
 
-the_state := struct {
-    cmd: Cmd,
-    procs: Procs,
-    
-    // @cleanup
-    current_output: string,
-    last_output:    string,
-    outputs: map [string] bool,
-
-    wait_on_procs: bool,
-    run_from_data: bool,
-    
-    runs: [dynamic] Run,
-} {
-    // Defaults
-}
+@(private="file")
+current_output: string
 
 Handle_Running_Exe :: enum {
     Skip,
@@ -49,27 +35,15 @@ Handle_Running_Exe :: enum {
     Kill,
 }
 
-Run :: struct {
-    // @note an empty name "" means run the default output
-    name: string,
-    debug: bool,
-}
-
 ////////////////////////////////////////////////
 
 @(deferred_none=deinit_build)
-init_build :: proc (run_from_data := false, wait := false) {
+init_build :: proc () {
     gitignore_path := "./build/.gitignore"
     if !os.exists(gitignore_path) {
         data := "*\n!*.odin\n"
         _ = os.write_entire_file(gitignore_path, transmute([] u8) data)
     }
-    
-    if run_from_data {
-        make_directory_if_not_exists("./data")
-        the_state.run_from_data = true
-    }
-    the_state.wait_on_procs = wait
 }
 
 deinit_build :: proc () {
@@ -77,11 +51,7 @@ deinit_build :: proc () {
         fmt.printf("INFO: cmd was not cleared: `%v`\n", strings.join(cmd[:], " ", context.temp_allocator))
     }
     
-    if the_state.wait_on_procs {
-        procs_flush(procs)
-    } else {
-        procs_close(procs)
-    }
+    procs_close(procs)
 }
 
 ////////////////////////////////////////////////
@@ -96,8 +66,7 @@ begin_build :: proc (cmd: ^Cmd, package_directory: string, output_name: string, 
         append(cmd, fmt.tprintf("-out:./build/%v", output_name))
         result = true
         
-        the_state.outputs[output_name] = true
-        the_state.current_output = output_name
+        current_output = output_name
     }
     
     return result
@@ -139,135 +108,64 @@ build_define :: proc (name: string, value: string) {
     append(cmd, fmt.tprintf("-define:%s=%s", name, value))
 }
 
-end_build :: proc (cmd: ^Cmd) {
-    if run_command(cmd) {
-        fmt.printf("  Build successful %v.\n", the_state.current_output)
-        the_state.last_output = the_state.current_output
-    } else {
-        the_state.outputs[the_state.current_output] = false
+end_build :: proc (cmd: ^Cmd) -> bool {
+    success := run_command(cmd)
+    if success {
+        fmt.printf("  Build successful %v.\n", current_output)
     }
-    
-    the_state.current_output = ""
+    current_output = ""
+    return success
 }
 
 ////////////////////////////////////////////////
 
-parse_run_and_debug_arguments :: proc () {
-    runs := &the_state.runs
-    
-    run_prefix   := "run:"
-    debug_prefix := "debug:"
-    
-    any_debug: bool
+run :: proc (target: string) -> bool {
+    return argument_requests("run", target)
+}
+
+debug :: proc (target: string) -> bool {
+    return argument_requests("debug", target)
+}
+
+argument_requests :: proc (action, target: string) -> bool {
+    requested := fmt.tprintf("%s:%s", action, target)
     for argument in os.args[1:] {
-        if strings.starts_with(argument, "/") {
-            continue
-        }
-        
-        if argument == "debug" {
-            append(runs, Run { name = "", debug = true})
-            any_debug = true
-        }
-        
-        if strings.starts_with(argument, run_prefix) {
-            rest := argument[len(run_prefix):]
-            append(runs, Run { name = rest, debug = false })
-            
-        } else if strings.starts_with(argument, debug_prefix) {
-            rest := argument[len(debug_prefix):]
-            append(runs, Run { name = rest, debug = true })
-            any_debug = true
-        }
+        if argument == action || argument == requested do return true
     }
-    
-    if any_debug {
-        if ok, _ := is_running(raddbg); ok {
-            fmt.printf("Debugger is running, stopping it.\n")
-            append(cmd, raddbg_path)
-            append(cmd, "--ipc")
-            append(cmd, "kill_all")
-            run_command(cmd)
-        } else {
-            fmt.printf("Starting the Debugger.\n")
-            append(cmd, raddbg_path)
-            run_command(cmd, async = procs)
-        }
+    return false
+}
+
+prepare_debugger :: proc () {
+    if ok, _ := is_running(raddbg); ok {
+        fmt.printf("Debugger is running, stopping it.\n")
+        raddbg_ipc("kill_all")
+    } else {
+        fmt.printf("Starting the Debugger.\n")
+        append(cmd, raddbg_path)
+        run_command(cmd, detached = true)
     }
 }
 
-run_or_debug_according_to_args :: proc () {
-    for run in the_state.runs {
-        name := run.name
-        if name == "" { // default
-            // @note assume last output
-            name = the_state.last_output
-        }
-        
-        success, found := the_state.outputs[name]
-        if !found {
-            verb := run.debug ? "debugging" : "running"
-            fmt.printf("ERROR: Skipped %v '%v', because it was not built by this program.\n", verb, name)
-            if !run.debug {
-                fmt.printf("  Try 'run_command' to run any other program.\n")
-            }
-            continue
-        }
-        
-        if !success {
-            verb := run.debug ? "debugging" : "running"
-            fmt.printf("ERROR: Skipped %v '%v', because it failed to build.\n", verb, name)
-            continue
-        }
-        
-        if run.debug {
-            append(cmd, raddbg_path)
-            append(cmd, "--ipc")
-            append(cmd, "select_target")
-            append(cmd, name)
-            run_command(cmd)
-            
-            append(cmd, raddbg_path)
-            append(cmd, "--ipc")
-            append(cmd, "restart")
-            run_command(cmd)
-        } else {
-            path: string
-            if the_state.run_from_data {
-                os.change_directory("./data")
-                path = fmt.tprintf("../build/%v", name)
-            } else {
-                path = fmt.tprintf("./build/%v", name)
-            }
-            
-            append(cmd, path)
-            if the_state.wait_on_procs {
-                run_command(cmd, async = procs, stdout = os.stdout, stderr = os.stderr)
-            } else {
-                run_command(cmd, async = procs)
-            }
-        }
-    }
+raddbg_ipc :: proc (command: string, argument: string = "") {
+    append(cmd, raddbg_path, "--ipc")
+    append(cmd, command)
+    if argument != "" { append(cmd, argument) }
+    run_command(cmd)
 }
 
 ////////////////////////////////////////////////
 
-is_running :: proc (exe_name: string) -> (running: bool, pid: u32) {
-    snapshot := win.CreateToolhelp32Snapshot(win.TH32CS_SNAPALL, 0)
-    assert(snapshot != win.INVALID_HANDLE_VALUE, "could not take a snapshot of the running programms")
-    defer win.CloseHandle(snapshot)
+is_running :: proc (exe_name: string) -> (running: bool, pid: int) {
+    pids, err := os.process_list(context.temp_allocator)
+    if err != nil do return false, 0
+    defer delete(pids, context.temp_allocator)
     
-    process_entry := win.PROCESSENTRY32W{ dwSize = size_of(win.PROCESSENTRY32W)}
-    
-    if win.Process32FirstW(snapshot, &process_entry) {
-        for {
-            test_name, err := win.utf16_to_utf8(process_entry.szExeFile[:], context.temp_allocator)
-            assert(err == nil)
-            if exe_name == test_name {
-                return true, process_entry.th32ProcessID
-            }
-            if !win.Process32NextW(snapshot, &process_entry) {
-                break
-            }
+    for test_pid in pids {
+        info, _ := os.process_info(test_pid, {.Executable_Path}, context.temp_allocator)
+        found := .Executable_Path in info.fields && os.base(info.executable_path) == exe_name
+        os.free_process_info(info, context.temp_allocator)
+        if found {
+            return true, test_pid
         }
     }
     
@@ -292,7 +190,7 @@ handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Runnin
             if running, _ := is_running(raddbg); !running {
                 fmt.printf("  Killing running instance.\n")
                 
-                process, err := os.process_open(auto_cast pid)
+                process, err := os.process_open(pid)
                 if err != nil {
                     fmt.printf("  Failed to open '%v': %v\n", exe_name, err)
                     return false
@@ -303,6 +201,7 @@ handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Runnin
                     fmt.printf("  Failed to kill '%v': %v\n", exe_name, err)
                     return false
                 }
+                _, _ = os.process_wait(process)
             }
         }
     }
@@ -316,23 +215,26 @@ Command_Console :: union {
     ^string,
     ^os.File,
 }
-run_command :: proc (cmd: ^Cmd, or_exit := true, keep := false, stdout: Command_Console = nil, stderr: Command_Console = nil, async: ^Procs = nil) -> (success: bool) {
+run_command :: proc (cmd: ^Cmd, working_dir := "", or_exit := true, keep := false, stdout: Command_Console = nil, stderr: Command_Console = nil, async: ^Procs = nil, detached := false) -> (success: bool) {
+    assert(async == nil || !detached)
     fmt.printf("CMD: %v\n", strings.join(cmd[:], " ", context.temp_allocator))
     
-    process_description := os.Process_Desc { command = cmd[:] }
+    process_description := os.Process_Desc { command = cmd[:], working_dir = working_dir }
     process: os.Process
     state:   os.Process_State
 	output:  [] byte
 	error:   [] byte
     err2:    os.Error
     
-    if async == nil {
+    if async == nil && !detached {
         state, output, error, err2 = os.process_exec(process_description, context.allocator)
     } else {
         if err, ok := stderr.(^os.File); ok do process_description.stderr = err
         if out, ok := stdout.(^os.File); ok do process_description.stdout = out
         process, err2 = os.process_start(process_description)
-        append(async, process)
+        if err2 == nil && !detached {
+            append(async, process)
+        }
     }
     
     if err2 != nil {
@@ -340,23 +242,19 @@ run_command :: proc (cmd: ^Cmd, or_exit := true, keep := false, stdout: Command_
         return false
     }
     
-    if async == nil {
+    if async == nil && !detached {
         if output != nil {
             switch out in stdout {
-            case nil: 
-                fmt.println(cast(string) output)
-            case ^string: 
-                out^ = cast(string) output
+            case nil:      fmt.println(cast(string) output)
+            case ^string:  out^ = cast(string) output
             case ^os.File: // nothing, already passed on exec
             }
         }
         
         if error != nil {
             switch out in stderr {
-            case nil: 
-                fmt.eprintln(cast(string) error)
-            case ^string: 
-                out^ = cast(string) error
+            case nil:      fmt.eprintln(cast(string) error)
+            case ^string:  out^ = cast(string) error
             case ^os.File: // nothing, already passed on exec
             }
         }

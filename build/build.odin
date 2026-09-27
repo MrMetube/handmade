@@ -3,16 +3,15 @@ package build
 
 import "core:fmt"
 import "core:os"
-import "core:strings"
 
 
 // "-build-diagnostics"
 
 platform_flags := [] string { "-subsystem:windows", `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 
-PedanticGame     :: !false
-PedanticRender   :: !false
-PedanticPlatform :: !false
+PedanticGame     :: false
+PedanticRender   :: false
+PedanticPlatform :: false
 
 native   :: true
 optimize :: false
@@ -55,8 +54,8 @@ render_dir     :: code_dir+"/"+render_package
 
 main :: proc () {
     // @todo(viktor): handle being called from ./data instead of ./
-    init_build(run_from_data = true)
-    parse_run_and_debug_arguments()
+    init_build()
+    make_directory_if_not_exists("./data")
     make_directory_if_not_exists("./data/build")
 
     vulkan_vertex_path   :: `build/vulkan.vertex.spirv`
@@ -79,16 +78,17 @@ main :: proc () {
         if !optimize { append(cmd, "-g") }
         append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
         append(cmd, fmt.tprintf("%sMain", shader.stage))
-        append(cmd, "-stage")
-        append(cmd, shader.stage)
-        append(cmd, "-o")
-        append(cmd, shader.output)
+        append(cmd, "-stage", shader.stage)
+        append(cmd, "-o", shader.output)
         run_command(cmd, async = procs)
     }
     if !procs_flush(procs) do os.exit(1)
     
     // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
+    metaprogram_init(&metaprogram)
+    custom_attribute_flag := metaprogram_custom_attribute_flag(&metaprogram)
+    
     if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir,   main_package)   do os.exit(1)
     if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir,   game_package)   do os.exit(1)
     if !metaprogram_collect_files_and_parse_package(&metaprogram, render_dir, render_package) do os.exit(1)
@@ -96,12 +96,6 @@ main :: proc () {
     if !metaprogram_collect_plugin_data(&metaprogram, code_dir,   main_package)   do os.exit(1)
     if !metaprogram_collect_plugin_data(&metaprogram, game_dir,   game_package)   do os.exit(1)
     if !metaprogram_collect_plugin_data(&metaprogram, render_dir, render_package) do os.exit(1)
-    
-    // @todo(viktor): let the metaprogramms define these attributes at initialization
-    sb := strings.builder_make()
-    fmt.sbprint(&sb, "-custom-attribute:")
-    fmt.sbprint(&sb, "common", "api", "printlike", sep=",")
-    custom_attribute_flag := strings.to_string(sb)
     
     pedantic_packages: [dynamic; 4] string
     if PedanticGame     { append(&pedantic_packages, game_package)   }
@@ -126,17 +120,7 @@ main :: proc () {
         delete_all_like("./build", `game-\d+\.rdi`)
         delete_all_like("./build", `game-\d+\.pdb`)
         
-        // @todo(viktor): Share this definition
-        // @note(viktor): the platform checks for this lock file when hot-reloading
-        // @todo(viktor): use the new os once I know how to fprint into its handle
-        lock_path := "./game.lock"
-        lock, err := os.open(lock_path, {.Create})
-        if err != nil do fmt.printf("ERROR: %v\n", err)
-        defer {
-            os.close(lock)
-            os.remove(lock_path)
-        }
-        fmt.fprint(lock, "WAITING FOR PDB")
+        create_build_lock("./game.lock")
         
         if begin_build(cmd, "code/game", "game.dll") {
             append(cmd, "-build-mode:dll")
@@ -165,14 +149,7 @@ main :: proc () {
         delete_all_like("./build", `render-\d+\.rdi`)
         delete_all_like("./build", `render-\d+\.pdb`)
         
-        lock_path := "./render.lock"
-        lock, err := os.open(lock_path, {.Create})
-        if err != nil do fmt.printf("ERROR: %v\n", err)
-        defer {
-            os.close(lock)
-            os.remove(lock_path)
-        }
-        fmt.fprint(lock, "WAITING FOR PDB")
+        create_build_lock("./render.lock")
         
         if begin_build(cmd, render_dir, "render.dll") {
             append(cmd, "-build-mode:dll")
@@ -198,12 +175,15 @@ main :: proc () {
         if !check_printlikes(&metaprogram, main_package) do os.exit(1)
             
         // @todo(viktor): these could be run in parallel with each other and the build of the game
-        if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",      game_package,   main_package) do os.exit(1)
-        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",    render_package, main_package) do os.exit(1)
-        if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",  main_package,   game_package,   "./game")   do os.exit(1)
-        if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,  render_package, "./render") do os.exit(1)
+        if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",       game_package,   main_package) do os.exit(1)
+        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",     render_package, main_package) do os.exit(1)
+        if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",   main_package,   game_package,   "./game")   do os.exit(1)
+        if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,   render_package, "./render") do os.exit(1)
         
-        if begin_build(cmd, "code", "debug.exe", .Skip) {
+        target :: "debug.exe"
+        build_succeeded: bool
+                
+        if begin_build(cmd, "code", target, .Skip) {
             build_meander()
             build_optimizations(optimize)
             build_native(native)
@@ -214,45 +194,39 @@ main :: proc () {
             append(cmd, custom_attribute_flag)
             if internal { build_define("INTERNAL", "true") }
             append(cmd, ..platform_flags)
-            end_build(cmd)
+            build_succeeded = end_build(cmd)
         }
-    }
-    
-    /* 
-    
-    @todo(viktor): run renderdoc
-    
-    if .renderdoc in tasks {
-        fmt.println("INFO: Starting the Program with RenderDoc attached.")
-        renderdoc_cmd := `C:\Program Files\RenderDoc\renderdoccmd.exe`
-        renderdoc_gui := `C:\Program Files\RenderDoc\qrenderdoc.exe`
         
-        os.change_directory("..")
-        append(&cmd, renderdoc_cmd, `capture`, `-d`, data_dir, `-c`, `.\capture`, build_dir + debug_exe_path)
-        run_command(&cmd)
-        
-        os.change_directory(data_dir)
-        captures := all_like("capture.*")
-        // @todo(viktor): What if we had multiple captures?
-        if len(captures) == 1 {
-            append(&cmd, renderdoc_gui, captures[0])
-            run_command(&cmd)
-            // @todo(viktor): Ask if old should be deleted?
-            fmt.printfln("INFO: Cleanup old captures")
-            for capture in captures {
-                os.remove(capture)
+        if build_succeeded {
+            if run(target) {
+                append(cmd, fmt.tprintf("./build/%v", target))
+                run_command(cmd, working_dir = "./data", detached = true)
+            } else if debug(target) {
+                prepare_debugger()
+                raddbg_ipc("select_target", target)
+                raddbg_ipc("restart")
             }
-        } else if len(captures) == 0 {
-            fmt.printfln("INFO: No captures made, not starting RenderDoc.")
-        } else {
-            fmt.printfln("INFO: More than one capture made, please select for yourself.")
-            append(&cmd, "cmd", "/c", "start", ".")
-            run_command(&cmd)
         }
     }
-    
-    */
-    run_or_debug_according_to_args()
     
     fmt.printf("Done\n")
+}
+
+////////////////////////////////////////////////
+
+// @note the platform checks these lock files when hot-reloading
+@(deferred_out=delete_build_lock)
+create_build_lock :: proc (path: string) -> (^os.File, string) {
+    file, err := os.open(path, {.Create})
+    if err != nil {
+        fmt.printf("ERROR: %v\n", err)
+    } else {
+        fmt.fprint(file, "WAITING FOR PDB")
+    }
+    return file, path
+}
+
+delete_build_lock :: proc (file: ^os.File, path: string) {
+    os.close(file)
+    if os.exists(path) do os.remove(path)
 }

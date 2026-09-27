@@ -1058,6 +1058,8 @@ get_seconds_elapsed_until_now :: proc (start: i64) -> f32 {
 // Sound Buffer
 
 fill_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutput, byte_to_lock, bytes_to_write: u32, source: GameSoundBuffer) {
+    timed_function()
+    
     region1, region2: pmm
     region1_size, region2_size: u32
     
@@ -1098,6 +1100,8 @@ fill_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutp
 }
 
 clear_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOutput) {
+    timed_function()
+    
     region1, region2 : pmm
     region1_size, region2_size: u32
     // @copypasta
