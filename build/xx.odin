@@ -178,11 +178,11 @@ handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Runnin
         fmt.printf("INFO: Tried to build '%v', but the program is already running.\n", exe_name)
         switch handling {
         case .Skip:
-            fmt.printf("  Skipping build.\n", exe_name)
-            ok = false
+            fmt.printf("  Skipping build.\n")
+            return false
             
         case .Abort: 
-            fmt.printf("  Aborting build!\n", exe_name)
+            fmt.printf("  Aborting build!\n")
             os.exit(0)
             
         case .Kill:

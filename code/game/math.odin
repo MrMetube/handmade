@@ -497,10 +497,10 @@ when LaneWidth != 1 {
     }
     
     unpack_pixel :: proc (pixel: lane_u32) -> (color: lane_v4) {
-        color.r = cast(lane_f32) (0xff &          pixel      )
-        color.g = cast(lane_f32) (0xff & simd.shr(pixel,  8) )
-        color.b = cast(lane_f32) (0xff & simd.shr(pixel,  16))
-        color.a = cast(lane_f32) (0xff & simd.shr(pixel,  24))
+        color.r = cast(lane_f32) (0xff &             pixel      )
+        color.g = cast(lane_f32) (0xff & shift_right(pixel,   8))
+        color.b = cast(lane_f32) (0xff & shift_right(pixel,  16))
+        color.a = cast(lane_f32) (0xff & shift_right(pixel,  24))
         
         return color
     }
@@ -589,11 +589,7 @@ rectangle_origin_axis :: proc (origin, x_axis, y_axis: v2) -> Rectangle2i {
     return result
 }
 
-rectangle_inverted_infinity :: proc ($R: typeid) -> R {
-    T :: intrinsics.type_field_type(R, "min")
-    #assert(intrinsics.type_is_subtype_of(R, Rectangle(T)))
-    E :: intrinsics.type_elem_type(T)
-    
+rectangle_inverted_infinity :: proc ($R: typeid/ Rectangle($T / [$N]$E)) -> R {
     result: R
     result.min = max(E)
     result.max = min(E)
@@ -604,7 +600,7 @@ rectangle_inverted_infinity :: proc ($R: typeid) -> R {
 get_dimension :: proc (rect: Rectangle($T)) -> T { return rect.max - rect.min }
 get_center    :: proc (rect: Rectangle($T)) -> T { return rect.min + (rect.max - rect.min) / 2 }
 
-get_min_dimension :: proc (rect: Rectangle($T)) -> (min, dimension: T) { return rect.min, get_dimension(rect) }
+get_min_dimension    :: proc (rect: Rectangle($T)) -> (min, dimension: T) { return rect.min, get_dimension(rect) }
 get_center_dimension :: proc (rect: Rectangle($T)) -> (min, dimension: T) { return get_center(rect), get_dimension(rect) }
 
 get_xywh :: proc (rect: Rectangle($V/[2]$T)) -> (x, y, w, h: T) { return rect.min.x, rect.min.y, get_dimension(rect).x, get_dimension(rect).y }
@@ -1009,7 +1005,3 @@ ray_intersection :: proc (pa, ra, pb, rb: v2) -> (ok: bool, t: v2) {
     t = {ta, tb}
     return true, t
 }
-
-////////////////////////////////////////////////
-
-element_type :: intrinsics.type_elem_type

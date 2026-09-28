@@ -78,45 +78,32 @@ amount_magnitudes := [?]Magnitude(u64) {
     {0,    "Q"},
 }
 
-View_Magnitude_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
-    if verb != 'v' && verb != 'f' do return false
-    view := cast(^View_Magnitude)arg.data
-    
-    if !info.prec_set {
-        info.prec = view.precision
-        info.prec_set = true
-    }
-    fmt.fmt_float(info, view.value, 64, 'f')
-    fmt.fmt_string(info, view.symbol, 'v')
-    return true
-}
-
 view_magnitude :: proc (value: $T, table: []Magnitude(T), first, last: int, precision := 0) -> View_Magnitude {
     assert(0 <= first && first < last && last <= len(table))
     assert(precision >= 0)
     
-    scaled := cast(f64)value
+    scaled := cast(f64) value
     for magnitude, relative_index in table[first:last] {
         index := first + relative_index
-        if index == last-1 || abs(scaled) < cast(f64)magnitude.upper_bound {
+        if index == last-1 || abs(scaled) < cast(f64) magnitude.upper_bound {
             return { value = scaled, symbol = magnitude.symbol, precision = precision }
         }
-        scaled /= cast(f64)magnitude.upper_bound
+        scaled /= cast(f64) magnitude.upper_bound
     }
     
     unreachable()
 }
 
 view_memory_size :: proc (#any_int value: u64, first := Memory_Unit.Bytes, last := Memory_Unit.Exabytes, precision := 0) -> View_Magnitude {
-    return view_magnitude(value, memory_magnitudes[:], int(first), int(last)+1, precision)
+    return view_magnitude(value, memory_magnitudes[:], cast(int) first, cast(int) last+1, precision)
 }
 
 view_time_duration :: proc (value: time.Duration, first := Time_Unit.Nanoseconds, last := Time_Unit.Hours, precision := 0) -> View_Magnitude {
-    return view_magnitude(value, duration_magnitudes[:], int(first), int(last)+1, precision)
+    return view_magnitude(value, duration_magnitudes[:], cast(int) first, cast(int) last+1, precision)
 }
 
 view_seconds :: proc (value: f32, precision := 0) -> View_Magnitude {
-    return view_time_duration(cast(time.Duration)(value * cast(f32)time.Second), precision = precision)
+    return view_time_duration(cast(time.Duration) (value * cast(f32) time.Second), precision = precision)
 }
 
 view_amount :: proc (#any_int value: u64, precision := 0) -> View_Magnitude {
@@ -127,7 +114,7 @@ view_amount :: proc (#any_int value: u64, precision := 0) -> View_Magnitude {
 
 view_float :: proc (value: $T, width := 0, pad_right_side := false, precision: Maybe(int) = nil) -> View_Float {
     return {
-        value            = cast(f64)value,
+        value            = cast(f64) value,
         bit_size         = size_of(T) * 8,
         width            = width,
         pad_right_side   = pad_right_side,
@@ -135,9 +122,36 @@ view_float :: proc (value: $T, width := 0, pad_right_side := false, precision: M
     }
 }
 
+view_percentage :: proc { view_percentage_value, view_percentage_division }
+
+view_percentage_division :: proc (dividend: $T, denominator: T) -> View_Percentage {
+    value: f64
+    if denominator != 0 do value = cast(f64) dividend / cast(f64) denominator
+    return { value = value }
+}
+
+view_percentage_value :: proc (value: $T) -> View_Percentage {
+    return { value = cast(f64) value }
+}
+
+////////////////////////////////////////////////
+
+View_Magnitude_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
+    if verb != 'v' && verb != 'f' do return false
+    view := cast(^View_Magnitude) arg.data
+    
+    if !info.prec_set {
+        info.prec     = view.precision
+        info.prec_set = true
+    }
+    fmt.fmt_float(info, view.value, 64, 'f')
+    fmt.fmt_string(info, view.symbol, 'v')
+    return true
+}
+
 View_Float_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
     if verb != 'v' && verb != 'f' do return false
-    view := cast(^View_Float)arg.data
+    view := cast(^View_Float) arg.data
     
     if !info.width_set && view.width != 0 {
         info.width     = view.width
@@ -152,21 +166,9 @@ View_Float_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
     return true
 }
 
-view_percentage :: proc { view_percentage_value, view_percentage_division }
-
-view_percentage_division :: proc (dividend: $T, denominator: T) -> View_Percentage {
-    value: f64
-    if denominator != 0 do value = cast(f64)dividend / cast(f64)denominator
-    return { value = value }
-}
-
-view_percentage_value :: proc (value: $T) -> View_Percentage {
-    return { value = cast(f64)value }
-}
-
 View_Percentage_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
     if verb != 'v' && verb != 'f' do return false
-    view := cast(^View_Percentage)arg.data
+    view := cast(^View_Percentage) arg.data
     
     if !info.prec_set {
         info.prec = 2
@@ -189,10 +191,7 @@ view_init :: proc "contextless" () {
         fmt.set_user_formatters(user_formatters)
     }
     
-    err := fmt.register_user_formatter(View_Float, View_Float_Formatter)
-    assert(err == .None)
-    err = fmt.register_user_formatter(View_Magnitude, View_Magnitude_Formatter)
-    assert(err == .None)
-    err = fmt.register_user_formatter(View_Percentage, View_Percentage_Formatter)
-    assert(err == .None)
+    err := fmt.register_user_formatter(View_Float,      View_Float_Formatter);      assert(err == .None)
+    err  = fmt.register_user_formatter(View_Magnitude,  View_Magnitude_Formatter);  assert(err == .None)
+    err  = fmt.register_user_formatter(View_Percentage, View_Percentage_Formatter); assert(err == .None)
 }

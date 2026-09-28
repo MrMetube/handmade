@@ -13,11 +13,13 @@ atomic_compare_exchange :: proc (destination: ^$T, old_value, new_value: T) -> (
     return ok, was_value
 }
 
-volatile_load      :: intrinsics.volatile_load
-volatile_store     :: intrinsics.volatile_store
-atomic_add         :: intrinsics.atomic_add
-atomic_add_explicit :: intrinsics.atomic_add_explicit
-atomic_exchange    :: intrinsics.atomic_exchange
+volatile_load  :: intrinsics.volatile_load
+volatile_store :: intrinsics.volatile_store
+
+atomic_add      :: intrinsics.atomic_add
+atomic_exchange :: intrinsics.atomic_exchange
+
+atomic_add_explicit   :: intrinsics.atomic_add_explicit
 atomic_load_explicit  :: intrinsics.atomic_load_explicit
 atomic_store_explicit :: intrinsics.atomic_store_explicit
 

@@ -10,7 +10,7 @@ RandomSeries :: struct { state: lane_u32 }
 
 seed_random_series :: proc { seed_random_series_cycle_counter, seed_random_series_manual }
 seed_random_series_cycle_counter :: proc () -> RandomSeries {
-    return seed_random_series(intrinsics.read_cycle_counter())
+    return seed_random_series(read_cycle_counter())
 }
 seed_random_series_manual :: proc (#any_int seed: u32) -> RandomSeries {
     result := RandomSeries { state = seed }

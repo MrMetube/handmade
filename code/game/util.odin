@@ -165,7 +165,7 @@ absolute_difference :: proc (a, b: $T) -> T {
 }
 
 @(disabled=ODIN_DISABLE_ASSERT)
-assert :: proc (condition: $B, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") where intrinsics.type_is_boolean(B) {
+assert :: proc (condition: bool, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") {
     if !condition {
         print("% %", loc, prefix)
         if len(message) > 0 {
@@ -270,3 +270,10 @@ RawAny :: struct {
     data: rawptr,
 	id:   typeid,
 }
+
+////////////////////////////////////////////////
+
+element_type   :: intrinsics.type_elem_type
+is_simd_vector :: intrinsics.type_is_simd_vector
+is_array       :: intrinsics.type_is_array
+is_integer     :: intrinsics.type_is_integer

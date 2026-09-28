@@ -139,7 +139,7 @@ push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alig
     
     
     if .ClearToZero in params.flags {
-        intrinsics.mem_zero(result, size_init)
+        zero(result, size_init)
     }
     
     return result
@@ -161,11 +161,11 @@ arena_alignment_offset :: proc (arena: ^Arena, #any_int alignment: umm = Default
 }
 
 zero :: proc { zero_size, zero_slice }
-zero_size :: proc (memory: pmm, size: u64) {
+zero_size :: proc (memory: pmm, #any_int size: u64) {
     intrinsics.mem_zero(memory, size)
 }
-zero_slice :: proc (data: []$T){
-    intrinsics.mem_zero(raw_data(data), len(data) * size_of(T))
+zero_slice :: proc (data: [] $T){
+    zero(raw_data(data), len(data) * size_of(T))
 }
 
 // @note(viktor): This is generally not for production use, this is probably

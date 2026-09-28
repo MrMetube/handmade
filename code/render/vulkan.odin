@@ -6,6 +6,8 @@ import "core:dynlib"
 import vk "vendor:vulkan"
 import gpu "./no_graphics_api"
 
+// :VulkanRenderer: Multisample resolve pass is not yet implemented
+
 // :VulkanRenderer: The platform should own shader loading and expose the paths
 // through the game/platform API rather than this renderer-owned config.
 VulkanVertexSpirvPath            :: #config(VulkanVertexSpirvPath,            "vulkan.vertex.spirv")
