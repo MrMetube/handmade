@@ -8,20 +8,12 @@ import "core:fmt"
 import "base:runtime"
 import "core:time"
 
-@(init)
-view_init :: proc "contextless" () {
-    context = runtime.default_context()
-    
-    if fmt._user_formatters == nil {
-        user_formatters, err := new(map[typeid]fmt.User_Formatter, context.allocator)
-        assert(err == nil)
-        fmt.set_user_formatters(user_formatters)
-    }
-    
-    err := fmt.register_user_formatter(View_Magnitude, View_Magnitude_Formatter)
-    assert(err == .None)
-    err = fmt.register_user_formatter(View_Percentage, View_Percentage_Formatter)
-    assert(err == .None)
+View_Float :: struct {
+    value:          f64,
+    bit_size:       int,
+    width:          int,
+    pad_right_side: bool,
+    precision:      Maybe(int),
 }
 
 View_Magnitude :: struct {
@@ -86,31 +78,6 @@ amount_magnitudes := [?]Magnitude(u64) {
     {0,    "Q"},
 }
 
-view_percentage :: proc { view_percentage_value, view_percentage_division }
-
-view_percentage_division :: proc (dividend: $T, denominator: T) -> View_Percentage {
-    value: f64
-    if denominator != 0 do value = cast(f64)dividend / cast(f64)denominator
-    return { value = value }
-}
-
-view_percentage_value :: proc (value: $T) -> View_Percentage {
-    return { value = cast(f64)value }
-}
-
-View_Percentage_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
-    if verb != 'v' && verb != 'f' do return false
-    view := cast(^View_Percentage)arg.data
-    
-    if !info.prec_set {
-        info.prec = 2
-        info.prec_set = true
-    }
-    fmt.fmt_float(info, view.value * 100, 64, 'f')
-    fmt.fmt_rune(info, '%', 'v')
-    return true
-}
-
 View_Magnitude_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
     if verb != 'v' && verb != 'f' do return false
     view := cast(^View_Magnitude)arg.data
@@ -154,4 +121,78 @@ view_seconds :: proc (value: f32, precision := 0) -> View_Magnitude {
 
 view_amount :: proc (#any_int value: u64, precision := 0) -> View_Magnitude {
     return view_magnitude(value, amount_magnitudes[:], 0, len(amount_magnitudes), precision)
+}
+
+////////////////////////////////////////////////
+
+view_float :: proc (value: $T, width := 0, pad_right_side := false, precision: Maybe(int) = nil) -> View_Float {
+    return {
+        value            = cast(f64)value,
+        bit_size         = size_of(T) * 8,
+        width            = width,
+        pad_right_side   = pad_right_side,
+        precision        = precision,
+    }
+}
+
+View_Float_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
+    if verb != 'v' && verb != 'f' do return false
+    view := cast(^View_Float)arg.data
+    
+    if !info.width_set && view.width != 0 {
+        info.width     = view.width
+        info.width_set = true
+        info.minus     = view.pad_right_side
+    }
+    if precision, ok := view.precision.?; ok && !info.prec_set {
+        info.prec     = precision
+        info.prec_set = true
+    }
+    fmt.fmt_float(info, view.value, view.bit_size, info.prec_set ? 'f' : 'v')
+    return true
+}
+
+view_percentage :: proc { view_percentage_value, view_percentage_division }
+
+view_percentage_division :: proc (dividend: $T, denominator: T) -> View_Percentage {
+    value: f64
+    if denominator != 0 do value = cast(f64)dividend / cast(f64)denominator
+    return { value = value }
+}
+
+view_percentage_value :: proc (value: $T) -> View_Percentage {
+    return { value = cast(f64)value }
+}
+
+View_Percentage_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
+    if verb != 'v' && verb != 'f' do return false
+    view := cast(^View_Percentage)arg.data
+    
+    if !info.prec_set {
+        info.prec = 2
+        info.prec_set = true
+    }
+    fmt.fmt_float(info, view.value * 100, 64, 'f')
+    fmt.fmt_rune(info, '%', 'v')
+    return true
+}
+
+////////////////////////////////////////////////
+
+@(init)
+view_init :: proc "contextless" () {
+    context = runtime.default_context()
+    
+    if fmt._user_formatters == nil {
+        user_formatters, err := new(map[typeid]fmt.User_Formatter, context.allocator)
+        assert(err == nil)
+        fmt.set_user_formatters(user_formatters)
+    }
+    
+    err := fmt.register_user_formatter(View_Float, View_Float_Formatter)
+    assert(err == .None)
+    err = fmt.register_user_formatter(View_Magnitude, View_Magnitude_Formatter)
+    assert(err == .None)
+    err = fmt.register_user_formatter(View_Percentage, View_Percentage_Formatter)
+    assert(err == .None)
 }

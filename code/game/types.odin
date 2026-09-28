@@ -67,13 +67,16 @@ clear :: proc {
 
 ////////////////////////////////////////////////
 
-String_Builder :: [dynamic] u8
+String_Builder :: distinct [dynamic] u8
 
 @(printlike)
-appendf :: proc (a: ^String_Builder, format: string, args: ..any) -> string {
-    buf := rest(a^)
+appendf :: proc (builder: ^String_Builder, format: string, args: ..any) -> string {
+    array := cast(^[dynamic] u8) builder
+    buf := rest(array^)
+    
     result := format_string(buf, format, ..args)
-    set_len(a, len(a) + len(result))
+    set_len(array, len(array) + len(result))
+    
     return result
 }
 
@@ -82,10 +85,14 @@ append_string :: proc (a: ^String_Builder, value: string) -> string {
     return cast(string) a[:]
 }
 
-make_string_builder :: proc { make_string_builder_arena }
+make_string_builder :: proc { make_string_builder_arena, make_string_builder_buffer }
 make_string_builder_arena :: proc (arena: ^Arena, #any_int len: i32, params := DefaultPushParams) -> String_Builder {
     buffer := push_slice(arena, u8, len, params)
-    result := make_array_with_slice(buffer)
+    result := make_string_builder(buffer)
+    return result
+}
+make_string_builder_buffer :: proc (buffer: [] u8) -> String_Builder {
+    result := cast(String_Builder) make_array_with_slice(buffer)
     return result
 }
 
