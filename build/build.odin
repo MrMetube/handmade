@@ -17,6 +17,8 @@ native   :: true
 optimize :: false
 internal :: true
 
+// @todo speed this up, it already takes ~3.5s
+
 
 /* 
  @todo(viktor):

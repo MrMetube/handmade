@@ -498,7 +498,7 @@ end_program_common :: proc (program: OpenGLProgram) {
         assert(size_of(i32) == type.size)
         value := (cast(^i32) (base + offset))^
         
-        if value != -1 do gl.DisableVertexAttribArray(cast(u32) value)
+        if value != -1 { gl.DisableVertexAttribArray(cast(u32) value) }
     }
     
     gl.UseProgram(0)
@@ -583,9 +583,9 @@ create_program :: proc (defines, header_code, vertex_code, fragment_code: cstrin
         vertex_error   := cast(string) vertex_error_bytes[:vertex_length]
         fragment_error := cast(string) fragment_error_bytes[:fragment_length]
         program_error  := cast(string) program_error_bytes[:program_length]
-        if vertex_error   != "" do print("vertex error message:\n%\n", vertex_error)
-        if fragment_error != "" do print("fragment error message:\n%\n", fragment_error)
-        if program_error  != "" do print("program error message:\n%\n", program_error)
+        if vertex_error   != "" { print("vertex error message:\n%\n", vertex_error) }
+        if fragment_error != "" { print("fragment error message:\n%\n", fragment_error) }
+        if program_error  != "" { print("program error message:\n%\n", program_error) }
         
         assert(false)
     }

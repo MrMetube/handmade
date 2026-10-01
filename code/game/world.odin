@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 World :: struct {
@@ -78,7 +79,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         for sim_x in 0..<N {
             for sim_y in 0..<N {
                 middle :: N/2
-                if sim_x == middle && sim_y == middle do continue
+                if sim_x == middle && sim_y == middle { continue }
                 
                 work := &works[sim_x + sim_y * N]
                 work.dt = input.delta_time

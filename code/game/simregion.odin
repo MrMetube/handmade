@@ -161,7 +161,7 @@ end_world_changes :: proc (region: ^SimRegion) {
     
     for &entity in region.entities {
         assert(entity.id != 0)
-        if .MarkedForDeletion in entity.flags do continue
+        if .MarkedForDeletion in entity.flags { continue }
         
         entity_p := map_into_worldspace(region.world, region.origin, entity.p)
         chunk_p  := entity_p
@@ -241,7 +241,7 @@ get_entity_by_id :: proc (region: ^SimRegion, id: EntityId) -> ^Entity {
 
 get_closest_entity_by_brain_kind :: proc (region: ^SimRegion, from: v3, kind: BrainKind, max_radius: f32) -> (result: ^Entity, distance_squared: f32) {
     distance_squared = square(max_radius)
-    // @todo(viktor): We could return the delta and more as we already computed them but do we need that?
+    // @todo(viktor): We could return the delta and more as we already computed them but { we need that? }
         
     for &test in region.entities {
         if test.brain_kind == kind {
@@ -520,7 +520,7 @@ move_entity :: proc (region: ^SimRegion, entity: ^Entity, dt: f32) {
         hit_min, hit_max: ^Entity
         
         entity_delta_length := length(entity_delta)
-        // @todo(viktor): What do we want to do for epsilons here?
+        // @todo(viktor): What { we want to { for epsilons here? }
         if entity_delta_length > 0 {
             if entity_delta_length > distance_remaining {
                 t_min = distance_remaining / entity_delta_length
@@ -543,7 +543,7 @@ move_entity :: proc (region: ^SimRegion, entity: ^Entity, dt: f32) {
                     
                     rel := (entity.p + get_center(volume)) - (test_entity.p + get_center(test_volume))
                     
-                    // @todo(viktor): do we want an close inclusion on the max_corner?
+                    // @todo(viktor): { we want an close inclusion on the max_corner? }
                     if rel.z >= min_corner.z && rel.z < max_corner.z {
                         Wall :: struct {
                             x: f32, delta_x, delta_y, rel_x, rel_y, min_y, max_y: f32, 
@@ -633,7 +633,7 @@ can_collide :: proc (a, b: ^Entity) -> bool {
     result: bool
     if a != b {
         a, b := a, b
-        if a.id > b.id do a, b = b, a
+        if a.id > b.id { a, b = b, a }
         
         if .Collides in a.flags && .Collides in b.flags {
             if has_volume(a.collision_volume) && has_volume(b.collision_volume) {
@@ -650,7 +650,7 @@ handle_collision :: proc (a, b: ^Entity) -> bool {
     when false {
         a, b := a, b
     
-        if a.type > b.type do a, b = b, a
+        if a.type > b.type { a, b = b, a }
         
         stops_on_collision = true
     }

@@ -160,7 +160,7 @@ draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Recta
     
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rect(&ctx, buffer, clip_rect, fill_rect)
-    if !ok do return
+    if !ok { return }
     
     color := cast(lane_v4) (color * 255)
     
@@ -187,7 +187,7 @@ draw_rectangle_fill_color_axis_aligned :: proc (buffer: Bitmap, clip_rect: Recta
 draw_rectangle_fill_color :: proc (buffer: Bitmap, clip_rect: Rectangle2i, origin, x_axis, y_axis: v2, color: v4) {
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx, buffer, clip_rect, origin, x_axis, y_axis)
-    if !ok do return
+    if !ok { return }
     
     color := cast(lane_v4) (color * 255)
     
@@ -219,7 +219,7 @@ draw_rectangle_with_texture :: proc (buffer: Bitmap, clip_rect: Rectangle2i, ori
     
     ctx: Shader_Context
     ok, pmin, pmax, pstep := shader_init_with_rotation(&ctx,  buffer, clip_rect, origin, x_axis, y_axis)
-    if !ok do return
+    if !ok { return }
     
     color := cast(lane_v4) color
     
@@ -325,7 +325,7 @@ shader_init_with_rect :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_rect, 
     ctx.fill_rect = get_intersection(fill_rect, clip_rect)
     
     ok = has_area(ctx.fill_rect)
-    if !ok do return ok, pmin, pmax, pstep
+    if !ok { return ok, pmin, pmax, pstep }
     
     _shader_init_mask_fill_rect(ctx)
     
@@ -340,13 +340,13 @@ shader_init_with_rotation :: proc (ctx: ^Shader_Context, bitmap: Bitmap, clip_re
     rect := rectangle_origin_axis(origin, x_axis, y_axis)
     
     ok, pmin, pmax, pstep = shader_init_with_rect(ctx, bitmap, clip_rect, rect)
-    if !ok do return ok, pmin, pmax, pstep
+    if !ok { return ok, pmin, pmax, pstep }
     
     ////////////////////////////////////////////////
     
     // @todo(viktor): Just don't draw if the axis are not independent?
     determinant := x_axis.x * y_axis.y - x_axis.y * y_axis.x
-    if determinant == 0 do determinant = 1 
+    if determinant == 0 { determinant = 1 }
     
     normal_x_axis_ := v2{ y_axis.y, -y_axis.x} / determinant
     normal_y_axis_ := v2{-x_axis.y,  x_axis.x} / determinant

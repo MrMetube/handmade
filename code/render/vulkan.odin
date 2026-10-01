@@ -240,7 +240,7 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
 
     // :VulkanRenderer: Texture destruction is immediate in NoGraphicsAPI.
     // Wait for every submitted frame before changing shared texture allocations.
-    if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
+    if vulkan.latest_completion.value != 0 { gpu.wait_timeline(vulkan.latest_completion) }
     
     for operation := last; operation != nil; operation = operation.next {
         switch &op in operation.value {
@@ -287,7 +287,7 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
     frame_index := vulkan.next_frame_index
     vulkan.next_frame_index = (frame_index + 1) % cast(u32) VulkanFrameCount
     frame_data := &vulkan.frames[frame_index]
-    if frame_data.completion.value != 0 do gpu.wait_timeline(frame_data.completion)
+    if frame_data.completion.value != 0 { gpu.wait_timeline(frame_data.completion) }
     
     render_extent := cast(uv2) render_commands.dimension
     depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
@@ -337,12 +337,12 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
         case .Textured_Quads:
             timed_block("textured quads")
             entry := read(&render_commands.push_buffer, Textured_Quads)
-            if entry.quad_count == 0 do continue
+            if entry.quad_count == 0 { continue }
             
             setup := entry.setup
             render_rect := rectangle_zero_min_dimension(render_commands.dimension)
             clip := get_intersection(setup.clip_rect, render_rect)
-            if !has_area(clip) do continue
+            if !has_area(clip) { continue }
             
             gpu.set_viewport(commands, 0, 0, cast(f32) render_extent.x, cast(f32) render_extent.y)
             dim := get_dimension(clip)
@@ -481,7 +481,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
     timed_function()
     
     // :VulkanRenderer: Multisampled depth peels remain deferred.
-    if vulkan.latest_completion.value != 0 do gpu.wait_timeline(vulkan.latest_completion)
+    if vulkan.latest_completion.value != 0 { gpu.wait_timeline(vulkan.latest_completion) }
     
     depth_peel_count := clamp(settings.depth_peel_count_hint, 1, cap(vulkan.depth_peel_buffers))
     extent := cast(uv2) settings.dimension
@@ -605,7 +605,7 @@ vk_reload :: proc (vulkan: ^Vulkan) {
 
 vk_shutdown :: proc (vulkan: ^Vulkan) {
     device := vulkan.device
-    if device == nil do return
+    if device == nil { return }
     
     gpu.wait_idle(device)
     
@@ -636,14 +636,14 @@ vk_shutdown :: proc (vulkan: ^Vulkan) {
 }
 
 rebind_device :: proc (device: gpu.Device) -> bool {
-    if device == nil do return false
+    if device == nil { return false }
     
     // @leak
     vulkan_library, ok := dynlib.load_library("vulkan-1.dll", allocator = context.temp_allocator)
-    if !ok do return false
+    if !ok { return false }
     
     address, found := dynlib.symbol_address(vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
-    if !found do return false
+    if !found { return false }
     
     vk.load_proc_addresses_global(address)
     vk.load_proc_addresses_instance(device.instance)

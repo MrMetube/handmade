@@ -268,7 +268,7 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
             active = t_normal >= layer.param.x && t_normal < layer.param.y
         }
         
-        if !active do continue
+        if !active { continue }
         
         match_vector[.LayerIndex].match = cast(f32) layer_index + 1
         layer_image := best_match_bitmap_from(assets, scene.type, match_vector)

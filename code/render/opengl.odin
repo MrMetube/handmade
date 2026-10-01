@@ -152,7 +152,7 @@ init_opengl :: proc (open_gl: ^OpenGL, dc: win.HDC) -> (gl_context: win.HGLRC) {
 reattach_opengl :: proc (dc: win.HDC, gl_context: win.HGLRC) -> bool {
     // The WGL context and every object created through it outlive a renderer DLL
     // generation. Only the DLL-local dispatch tables and callback are rebound.
-    if !win.wglMakeCurrent(dc, gl_context) do return false
+    if !win.wglMakeCurrent(dc, gl_context) { return false }
     
     gl.load_up_to(GlMajorVersion, GlMinorVersion, win.gl_set_proc_address)
     win.wglSwapIntervalEXT = auto_cast win.wglGetProcAddress("wglSwapIntervalEXT")
@@ -164,7 +164,7 @@ gl_shutdown :: proc (gl_context: win.HGLRC, destroy: bool) {
     if gl_context != nil {
         gl.DebugMessageCallback(nil, nil)
         win.wglMakeCurrent(nil, nil)
-        if destroy do win.wglDeleteContext(gl_context)
+        if destroy { win.wglDeleteContext(gl_context) }
     }
 }
 
@@ -234,8 +234,8 @@ load_wgl_extensions :: proc () -> (framebuffer_supports_srgb: bool) {
                         part      := extensions[:len]
                         extensions = extensions[len+1:]
                         len = 0
-                        if      part == "WGL_EXT_framebuffer_sRGB" do framebuffer_supports_srgb = true
-                        else if part == "WGL_ARB_framebuffer_sRGB" do framebuffer_supports_srgb = true
+                        if      part == "WGL_EXT_framebuffer_sRGB" { framebuffer_supports_srgb = true }
+                        else if part == "WGL_ARB_framebuffer_sRGB" { framebuffer_supports_srgb = true }
                     }
                 }
             }
@@ -264,9 +264,9 @@ opengl_get_extensions :: proc (modern_context: bool) -> (result: OpenGlInfo) {
     for index in 0..<extensions_count {
         extension := gl.GetStringi(gl.EXTENSIONS, cast(u32) index)
         
-        if      "GL_EXT_texture_sRGB"     == extension do result.GL_EXT_texture_sRGB = true
-        else if "GL_EXT_framebuffer_sRGB" == extension do result.GL_EXT_framebuffer_sRGB = true
-        else if "GL_ARB_framebuffer_sRGB" == extension do result.GL_EXT_framebuffer_sRGB = true
+        if      "GL_EXT_texture_sRGB"     == extension { result.GL_EXT_texture_sRGB = true }
+        else if "GL_EXT_framebuffer_sRGB" == extension { result.GL_EXT_framebuffer_sRGB = true }
+        else if "GL_ARB_framebuffer_sRGB" == extension { result.GL_EXT_framebuffer_sRGB = true }
     }
     
     major: i32 = 1
@@ -459,8 +459,8 @@ gl_change_to_settings :: proc (open_gl: ^OpenGL, settings: RenderSettings) {
         gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, buffer.back_emission, 0)
         
         texture_dim /= 2
-        if texture_dim.x < 1 do texture_dim.x = 1
-        if texture_dim.y < 1 do texture_dim.y = 1
+        if texture_dim.x < 1 { texture_dim.x = 1 }
+        if texture_dim.y < 1 { texture_dim.y = 1 }
     }
 }
 
@@ -725,7 +725,7 @@ get_depth_peel_read_buffer :: proc (open_gl: ^OpenGL, index: u32) -> (result: Fr
 }
 
 gl_display_bitmap :: proc (open_gl: ^OpenGL, bitmap: Bitmap, draw_region: Rectangle2i, clear_color: v4) {
-    if true do unimplemented()
+    if true { unimplemented() }
     
     timed_function()
     
@@ -806,20 +806,20 @@ create_framebuffer_texture :: proc (open_gl: ^OpenGL, slot: u32, filter_type: i3
 }
 
 delete_framebuffer :: proc (buffer: ^FrameBuffer) {
-    if buffer.color_texture != 0 do gl.DeleteTextures(1, &buffer.color_texture)
-    if buffer.depth_texture != 0 do gl.DeleteTextures(1, &buffer.depth_texture)
-    if buffer.handle        != 0 do gl.DeleteFramebuffers(1, &buffer.handle)
+    if buffer.color_texture != 0 { gl.DeleteTextures(1, &buffer.color_texture) }
+    if buffer.depth_texture != 0 { gl.DeleteTextures(1, &buffer.depth_texture) }
+    if buffer.handle        != 0 { gl.DeleteFramebuffers(1, &buffer.handle) }
     
     buffer ^= {}
 }
 delete_lightbuffer :: proc (buffer: ^LightBuffer) {
-    if buffer.front_emission        != 0 do gl.DeleteTextures(1, &buffer.front_emission)
-    if buffer.back_emission         != 0 do gl.DeleteTextures(1, &buffer.back_emission)
-    if buffer.surface_color         != 0 do gl.DeleteTextures(1, &buffer.surface_color)
-    if buffer.normal_xz_and_depth   != 0 do gl.DeleteTextures(1, &buffer.normal_xz_and_depth)
+    if buffer.front_emission        != 0 { gl.DeleteTextures(1, &buffer.front_emission) }
+    if buffer.back_emission         != 0 { gl.DeleteTextures(1, &buffer.back_emission) }
+    if buffer.surface_color         != 0 { gl.DeleteTextures(1, &buffer.surface_color) }
+    if buffer.normal_xz_and_depth   != 0 { gl.DeleteTextures(1, &buffer.normal_xz_and_depth) }
     
-    if buffer.write_all_buffer      != 0 do gl.DeleteFramebuffers(1, &buffer.write_all_buffer)
-    if buffer.write_emission_buffer != 0 do gl.DeleteFramebuffers(1, &buffer.write_emission_buffer)
+    if buffer.write_all_buffer      != 0 { gl.DeleteFramebuffers(1, &buffer.write_all_buffer) }
+    if buffer.write_emission_buffer != 0 { gl.DeleteFramebuffers(1, &buffer.write_emission_buffer) }
     
     buffer ^= {}
 }

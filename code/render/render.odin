@@ -88,7 +88,7 @@ attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, back
 
 @(export)
 reload_or_shutdown :: proc (action: Reload_Action) {
-    if !render_state.initialized do return
+    if !render_state.initialized { return }
     
     switch render_state.backend {
     case .Vulkan:
@@ -101,7 +101,7 @@ reload_or_shutdown :: proc (action: Reload_Action) {
     case .Software: // nothing
     }
     
-    if action == .Shutdown do render_state^ = {}
+    if action == .Shutdown { render_state^ = {} }
 }
 
 ////////////////////////////////////////////////

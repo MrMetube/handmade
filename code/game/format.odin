@@ -78,7 +78,7 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
             case:        return 0, .Unsupported
             }
         }, 
-        data = &builder
+        data = &builder,
     }
     
     
@@ -97,7 +97,7 @@ format_string :: proc (buffer: []u8, format: string, args: ..any, flags := Forma
     }
     
     assert(arg_index == len(args))
-    if .AppendZero in flags do append(&builder, 0)
+    if .AppendZero in flags { append(&builder, 0) }
     
     result := to_string(builder)
     return result

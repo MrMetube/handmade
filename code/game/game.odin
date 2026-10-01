@@ -107,7 +107,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         
         init_mixer(&state.mixer, &state.audio_arena)
         
-        when DebugEnabled do debug_set_event_recording(GlobalDebugTable, true)
+        when DebugEnabled { debug_set_event_recording(GlobalDebugTable, true) }
     }
 
     tran_state := memory.transient_state
@@ -195,8 +195,8 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         
         delta: f32
         if was_pressed(input.mouse.buttons[.middle]) {
-            if input.mouse.p.x > 10  do delta = 0.1
-            if input.mouse.p.x < -10 do delta = -0.1
+            if input.mouse.p.x > 10  { delta = 0.1 }
+            if input.mouse.p.x < -10 { delta = -0.1 }
             change_pitch(&state.mixer, state.music, state.music.d_sample + delta)
         }
     }
@@ -229,7 +229,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
             rerun = update_and_render_world(state, tran_state, &render_group, input, mode)
         }
         
-        if !rerun do break
+        if !rerun { break }
     }
     
     // @todo(viktor): We should probably pull the generation stuff, because

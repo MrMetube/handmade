@@ -148,7 +148,7 @@ TextRenderOperation:: enum {
 overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     timed_function()
     
-    if debug.render_group.assets == nil do return
+    if debug.render_group.assets == nil { return }
     
     mouse_p := unproject_with_transform(&debug.render_group, debug.render_group.game_cam, input.mouse.p, 1).xy
     
@@ -515,7 +515,7 @@ draw_arena_occupancy :: proc (debug: ^DebugState, arena: ^Arena, mouse_p: v2, re
             
             color := index == 0 ? Green : Blue
             push_rectangle(&debug.render_group, filled, debug.ui_transform, color)
-            if index != 0 do push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline)
+            if index != 0 { push_rectangle(&debug.render_group, divider, debug.ui_transform, Isabelline) }
             
             if contains(filled, mouse_p) {
                 add_tooltip(debug, debug_print("used % / total %", view_memory_size(block.used, precision = 2), view_memory_size(block_size, precision = 2)))
@@ -626,7 +626,7 @@ draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, ro
             }
         }
         
-        if outline_color == 0 do outline_color = color * {.2, .2, .2, 1}
+        if outline_color == 0 { outline_color = color * {.2, .2, .2, 1} }
         
         if text != "" {
             id := DebugId{ value = {root_element, &frame} }
@@ -673,7 +673,7 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             link_count += 1
         }
     }
-    if link_count == 0 do return
+    if link_count == 0 { return }
     
     temp := begin_temporary_memory(&debug.arena)
     defer end_temporary_memory(temp)
@@ -701,7 +701,7 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             }
         }
         
-        if !is_child_of_root do continue
+        if !is_child_of_root { continue }
         
         element := link.element
         assert(element != nil)
@@ -784,7 +784,7 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
     at_x := rect.min.x
     target_longest_frame_span: f32
     for &frame in root_element.frames {
-        if frame.events.first == nil do continue
+        if frame.events.first == nil { continue }
         
         root_node := &frame.events.first.node
         frame_span := cast(f32) root_node.duration
@@ -802,20 +802,20 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
     pixel_span := dim.y
     scale := safe_ratio_0(pixel_span, debug.longest_frame_span)
     for &frame, frame_ordinal in root_element.frames {
-        if frame.events.first == nil do continue
+        if frame.events.first == nil { continue }
         
         root_node := &frame.events.first.node
         for event := root_node.first_child; event != nil; event = event.node.next_same_parent {
             node := &event.node
             
             element := node.element
-            if element == nil do continue
+            if element == nil { continue }
             
             y_min := rect.min.y + scale * cast(f32) node.parent_relative_clock
             y_max := y_min      + scale * cast(f32) node.duration
             
             height := y_max - y_min
-            if bar_width <= 1 || height <= 1  do continue
+            if bar_width <= 1 || height <= 1  { continue }
             
             region_rect := rectangle_min_max(
                 v2{at_x, y_min},
@@ -894,7 +894,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
         node := &event.node
         
         element := node.element
-        if element == nil do continue
+        if element == nil { continue }
         
         x_min := rect.min.x + frame_scale * cast(f32) node.parent_relative_clock
         x_max := x_min      + frame_scale * cast(f32) node.duration
@@ -908,7 +908,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
      
         color := debug_get_element_color(element)
         
-        if x_max - x_min < 1 do continue
+        if x_max - x_min < 1 { continue }
         
         transform := debug.ui_transform
         // @todo(viktor): find a better way to layer the children on top of the parent rectangles
@@ -937,7 +937,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
 debug_get_element_color :: proc (element: ^DebugElement) -> v4 {
     name := element.guid.name
     color_hash := seed_random_series_manual(len(name) + cast(int) name[0])
-    for _ in 0..<len(name) do _ = next_random_u32(&color_hash)
+    for _ in 0..<len(name) { _ = next_random_u32(&color_hash) }
     
     hash := next_random_u32(&color_hash)
     color_wheel := color_wheel
@@ -1196,7 +1196,7 @@ interact :: proc (debug: ^DebugState, input: Input, mouse_p: v2) {
             value^ += mouse_dp * {1,-1}
             value.x = max(value.x, 10)
             value.y = max(value.y, 10)
-            if event != nil do GlobalDebugTable.edit_event = event^
+            if event != nil { GlobalDebugTable.edit_event = event^ }
             
           case .Tear:
             value := interaction.value.(^v2)
@@ -1207,7 +1207,7 @@ interact :: proc (debug: ^DebugState, input: Input, mouse_p: v2) {
             value^ += mouse_dp
             
             event := cast(^DebugEvent) interaction.target
-            if event != nil do GlobalDebugTable.edit_event = event^
+            if event != nil { GlobalDebugTable.edit_event = event^ }
         }
         
         // Click interaction

@@ -16,7 +16,7 @@ DebugGUID :: struct {
 @(export) debug_record_i64 :: proc (value: ^i64, name: string = #caller_expression(value)) { debug_record_value(value, name) }
 @(export) debug_record_i32 :: proc (value: ^i32, name: string = #caller_expression(value)) { debug_record_value(value, name) }
 debug_record_value :: proc (value: ^$Value, name: string = #caller_expression(value)) { 
-    if GlobalDebugTable == nil do return
+    if GlobalDebugTable == nil { return }
     guid := DebugGUID{ name = name }
     
     event := debug_record_event(GlobalDebugTable, nil, guid)
@@ -37,12 +37,12 @@ debug_record_value :: proc (value: ^$Value, name: string = #caller_expression(va
 // Selection
 
 debug_set_mouse_p :: proc (mouse_p: v2) {
-    when !DebugEnabled do return
+    when !DebugEnabled { return }
     
     GlobalDebugTable.mouse_p = mouse_p
 }
 debug_get_mouse_p :: proc () -> v2 {
-    when !DebugEnabled do return {}
+    when !DebugEnabled { return {} }
     
     result := GlobalDebugTable.mouse_p
     return result
@@ -51,7 +51,7 @@ debug_get_mouse_p :: proc () -> v2 {
 debug_pointer_id :: proc { debug_pointer_id_raw, debug_pointer_id_poly }
 debug_pointer_id_poly :: proc (pointer: $P)  -> DebugId { return debug_pointer_id_raw(auto_cast pointer) }
 debug_pointer_id_raw  :: proc (pointer: pmm) -> DebugId {
-    when !DebugEnabled do return {}
+    when !DebugEnabled { return {} }
     
     result: DebugId
     result.value[0] = pointer
@@ -60,7 +60,7 @@ debug_pointer_id_raw  :: proc (pointer: pmm) -> DebugId {
 
 debug_hit :: proc (id: DebugId, z: f32) {
     debug := get_debug_state()
-    if debug == nil do return
+    if debug == nil { return }
     
     debug.next_hot_interaction = {
         id = id,
@@ -69,10 +69,10 @@ debug_hit :: proc (id: DebugId, z: f32) {
 }
 
 debug_highlighted :: proc (id: DebugId) -> (highlighted: bool, color: v4) {
-    when !DebugEnabled do return highlighted, color
+    when !DebugEnabled { return highlighted, color }
     
     debug := get_debug_state()
-    if debug == nil do return
+    if debug == nil { return }
     
     if debug.hot_interaction.id == id {
         highlighted = true
@@ -88,10 +88,10 @@ debug_highlighted :: proc (id: DebugId) -> (highlighted: bool, color: v4) {
 }
 
 debug_requested :: proc (id: DebugId) -> bool {
-    when !DebugEnabled do return
+    when !DebugEnabled { return }
     
     debug := get_debug_state()
-    if debug == nil do return false
+    if debug == nil { return false }
     
     result: bool
     if is_selected(debug, id) {
@@ -152,14 +152,14 @@ debug_end_data_block :: proc () {
 
 @(export)
 begin_timed_block :: proc (name: string, loc := #caller_location) {
-    when !DebugEnabled do return result 
+    when !DebugEnabled { return result  }
     
     debug_record_event(BeginTimedBlock{}, name, loc)
 }
 
 @(export)
 end_timed_block :: proc () {
-    when !DebugEnabled do return
+    when !DebugEnabled { return }
     debug_record_event(EndTimedBlock{}, "")
 }
 
@@ -178,8 +178,8 @@ debug_record_event_loc :: proc (value: DebugValue, name: string, loc := #caller_
     return debug_record_event_guid(GlobalDebugTable, value, { name, loc.file_path, loc.procedure , cast(u32) loc.line, cast(u32) loc.column})
 }
 debug_record_event_guid :: proc (table: ^DebugTable, value: DebugValue, guid: DebugGUID) -> ^DebugEvent {
-    if !DebugEnabled do return nil
-    if table == nil  do return nil
+    if !DebugEnabled { return nil }
+    if table == nil  { return nil }
     
     // @volatile
     state := transmute(DebugEventsState) atomic_add(cast(^u64) &table.events_state, table.record_increment)
@@ -203,15 +203,15 @@ debug_record_event_guid :: proc (table: ^DebugTable, value: DebugValue, guid: De
 
 @(export)
 debug_set_event_recording :: proc (table: ^DebugTable, active: bool) {
-    if !DebugEnabled do return
-    if table == nil  do return
+    if !DebugEnabled { return }
+    if table == nil  { return }
     
     table.record_increment = active ? 1 : 0
 }
 
 @(export)
 frame_marker :: proc (seconds_elapsed: f32, loc := #caller_location) {
-    if !DebugEnabled do return
+    if !DebugEnabled { return }
     
     debug_record_event(FrameMarker{seconds_elapsed}, "Frame Marker", loc)
 }

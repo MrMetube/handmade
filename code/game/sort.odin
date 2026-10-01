@@ -103,7 +103,7 @@ bubble_sort :: proc (entries: []SortEntry) {
             }
         }
         
-        if sorted do break
+        if sorted { break }
     }
 }
 

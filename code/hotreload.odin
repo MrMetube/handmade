@@ -37,7 +37,7 @@ load_render_lib :: proc (dll: ^Dll) -> (is_valid: bool, last_write_time: u64) {
     }
     
     dll.lib, last_write_time = load_dll(dll^)
-    if dll.lib == nil do return false, last_write_time
+    if dll.lib == nil { return false, last_write_time }
     
     is_valid = load_render_api(dll.lib)
     if !is_valid {
@@ -51,7 +51,7 @@ load_dll :: proc (dll: Dll) -> (lib: win.HMODULE, last_write_time: u64) {
         return nil, 0
     }
     
-    if !win.CopyFileW(dll.name, dll.temp, false) do return nil, 0
+    if !win.CopyFileW(dll.name, dll.temp, false) { return nil, 0 }
     last_write_time = get_last_write_time(dll.name)
     lib = win.LoadLibraryW(dll.temp)
     return lib, last_write_time

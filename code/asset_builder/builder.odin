@@ -192,8 +192,8 @@ write_fonts :: proc () {
     
     begin_asset_type(hha, .FontGlyph)
     for &it in fonts {
-        for c in rune(1+26)..<127 do add_character_asset(hha, it.font, c)
-        for c in "°ßöüäÖÜÄµ" do add_character_asset(hha, it.font, c)
+        for c in rune(1+26)..<127 { add_character_asset(hha, it.font, c) }
+        for c in "°ßöüäÖÜÄµ" { add_character_asset(hha, it.font, c) }
     }
     end_asset_type(hha)
     

@@ -240,7 +240,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 move_entity(sim_region, &entity, dt)
             }
             
-            if render_group == nil do continue
+            if render_group == nil { continue }
             ////////////////////////////////////////////////
             // Rendering
             
@@ -308,14 +308,14 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
 }
 
 debug_pick_entity :: proc (entity: ^Entity, transform: Transform, render_group: ^RenderGroup) {
-    when !DebugEnabled do return
+    when !DebugEnabled { return }
     
     timed_function()
     
     // @todo(viktor): we dont really have a way to unique-ify these :(
     debug_id := debug_pointer_id(cast(pmm) cast(umm) entity.id)
-    if       debug_requested(debug_id) do debug_begin_data_block("Game/Entity")
-    defer if debug_requested(debug_id) do debug_end_data_block()
+    if       debug_requested(debug_id) { debug_begin_data_block("Game/Entity") }
+    defer if debug_requested(debug_id) { debug_end_data_block() }
     
     if .active in entity.flags {
         for piece in &entity.pieces {

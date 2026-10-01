@@ -74,7 +74,7 @@ enqueue_work :: proc (queue: ^WorkQueue, data: pmm, callback: proc (data: pmm)) 
 
 @(api)
 complete_all_work :: proc (queue: ^WorkQueue) {
-    if queue == nil do return
+    if queue == nil { return }
     
     for queue.completion_count != queue.completion_goal {
         do_next_work_queue_entry(queue)

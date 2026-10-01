@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 /* @note(viktor):
@@ -278,7 +279,7 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
     }
     
     fog := fog
-    if .debug in flags do fog = false
+    if .debug in flags { fog = false }
     
     if fog {
         setup.fog_direction = -z
@@ -401,9 +402,11 @@ push_line_segment_direct :: proc (group: ^RenderGroup, bitmap: ^Bitmap, from_p, 
     perp := cross(group.debug_cam.z, to_p.xyz - from_p.xyz)
     perp_length := length(perp)
     
-    when false do if perp_length < thickness {
-        perp = group.debug_cam.y
-    } else {
+    when false { 
+        if perp_length < thickness {
+            perp = group.debug_cam.y
+        } else {
+        } 
     }
     perp /= perp_length
     

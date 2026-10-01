@@ -22,7 +22,7 @@ make_format_iterator :: proc (format: string) -> Format_Iterator {
 }
 
 iterate_format :: proc (iter: ^Format_Iterator) -> (value: Format_Iterator_Result, index: int, condition: bool) {
-    if iter.index >= len(iter.format) do return {}, len(iter.format), false
+    if iter.index >= len(iter.format) { return {}, len(iter.format), false }
     
     index = iter.index
     

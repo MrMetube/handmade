@@ -487,7 +487,7 @@ main :: proc () {
                                 process_Xinput_stick(pad.sThumbLX, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
                                 process_Xinput_stick(pad.sThumbLY, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE),
                             }
-                            if new_controller.stick_average != {0,0} do new_controller.is_analog = true
+                            if new_controller.stick_average != {0,0} { new_controller.is_analog = true }
                             
                             // @todo what if we don't want to override the stick
                             if (pad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 { new_controller.stick_average.x =  1; new_controller.is_analog = false }
@@ -503,7 +503,7 @@ main :: proc () {
                             process_Xinput_button(&new_controller.buttons[.stick_up],    old_controller.buttons[.stick_up],    1, new_controller.stick_average.y >  Threshold ? 1 : 0)
                             
                             // @cleanup This is probably vestigial and can safely be removed
-                            if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 do running = false
+                            if (pad.wButtons & XINPUT_GAMEPAD_BACK) != 0 { running = false }
                         } else {
                             new_controller.is_connected = false
                             xbox_controller_present[controller_index] = false
@@ -659,7 +659,7 @@ main :: proc () {
                 unload_game_api(&game_dll)
                 for _ in 0..<100 {
                     load_game_lib(&game_dll)
-                    if game_dll.is_valid do break
+                    if game_dll.is_valid { break }
                     win.Sleep(100)
                 }
                 
@@ -815,14 +815,13 @@ main :: proc () {
     ////////////////////////////////////////////////
     // Cleanup and Shutdown
     
-    if render_dll.is_valid do render.reload_or_shutdown(.Shutdown)
+    if render_dll.is_valid { render.reload_or_shutdown(.Shutdown) }
     unload_render_api(&render_dll)
     unload_game_api(&game_dll)
 }
 
 ////////////////////////////////////////////////
 // Platform Allocator
-// @todo This could be a special allocator that then can just be passed to the game arenas
 
 PageSize :: 4096 // @todo you can get this from the OS, too!
 
@@ -957,7 +956,7 @@ begin_recording_input :: proc (state: ^PlatformState, index: i32) {
         begin_ticket_mutex(&state.block_mutex)
         written: u32
         for source := state.block_sentinel.next; source != &state.block_sentinel; source = source.next {
-            if .not_restored in source.block.allocation_flags do continue
+            if .not_restored in source.block.allocation_flags { continue }
             
             base := raw_data(source.block.storage)
             dest := Saved_Memory_Block {
@@ -1006,7 +1005,7 @@ begin_replaying_input :: proc (state: ^PlatformState, index: i32) {
             ok: bool
             ok = cast(bool) win.ReadFile(state.replaying_handle, &block, size_of(block), &read, nil)
             assert(ok)
-            if block.base == 0 do break
+            if block.base == 0 { break }
             
             base_pointer := cast(pmm) cast(umm) block.base
             ok = cast(bool) win.ReadFile(state.replaying_handle, base_pointer, safe_truncate(u32, block.size), &read, nil)
@@ -1105,13 +1104,14 @@ clear_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOut
 ////////////////////////////////////////////////   
 //  Window Drawing
 
-get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> (dimension: v2i) {
+get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> v2i {
     client_rect: win.RECT
     if get_window_rect {
         win.GetWindowRect(window, &client_rect)
     } else {
         win.GetClientRect(window, &client_rect)
     }
+    dimension: v2i
     dimension.x = client_rect.right  - client_rect.left
     dimension.y = client_rect.bottom - client_rect.top
     return dimension
@@ -1144,7 +1144,8 @@ toggle_fullscreen :: proc (window: win.HWND) {
 ////////////////////////////////////////////////   
 //  Windows Messages
 
-main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> (result: win.LRESULT) {
+main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_param: win.WPARAM, l_param: win.LPARAM) -> win.LRESULT {
+    result: win.LRESULT
     context = runtime.default_context()
     switch message {
       case win.WM_SYSKEYUP, win.WM_SYSKEYDOWN, win.WM_KEYUP, win.WM_KEYDOWN:
@@ -1206,6 +1207,7 @@ main_window_callback :: proc "system" (window: win.HWND, message: win.UINT, w_pa
         timed_block("win.DefWindowProcW")
         result = win.DefWindowProcW(window, message, w_param, l_param)
     }
+    
     return result
 }
 
@@ -1235,7 +1237,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
         }
         game.end_timed_block()
         
-        if !has_message do break
+        if !has_message { break }
         
         switch message.message {
           case win.WM_QUIT:
@@ -1254,7 +1256,7 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             was_down := (message.lParam & WasDown) != 0
             is_down  := (message.lParam & IsUp)    == 0
             
-            if was_down == is_down do continue
+            if was_down == is_down { continue }
             switch vk_code {
               case win.VK_W:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_up],       is_down)
               case win.VK_A:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_left],     is_down)
@@ -1281,8 +1283,8 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
                     }
                 }
                 
-              case win.VK_F4:     if is_down && alt_down do quit_requested = true
-              case win.VK_RETURN: if is_down && alt_down do toggle_fullscreen(message.hwnd)
+              case win.VK_F4:     if is_down && alt_down { quit_requested = true }
+              case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
             }
             
           case:
@@ -1295,12 +1297,12 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
     return quit_requested
 }
 
-build_exe_path :: proc (filename: string) -> (result: cstring16) {
+build_exe_path :: proc (filename: string) -> cstring16 {
     assert(GlobalPlatformState.exe_path != "")
     
     buffer: [256] u8
     path := format_string(buffer[:], `%\%`, GlobalPlatformState.exe_path, filename)
-    result = win.utf8_to_wstring(path, context.temp_allocator)
+    result := win.utf8_to_wstring(path, context.temp_allocator)
     return result
 }
 
@@ -1312,7 +1314,9 @@ clear_render_commands :: proc (commands: ^RenderCommands) {
     clear(&commands.quad_bitmap_buffer)
 }
 
-aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectangle2i) {
+aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> Rectangle2i {
+    result: Rectangle2i
+    
     if render_size.x > 0 && render_size.y > 0 && window_size.x > 0 && window_size.y > 0 {
         optimal_window_width  := round(i32, cast(f32) window_size.y * cast(f32) render_size.x / cast(f32) render_size.y)
         optimal_window_height := round(i32, cast(f32) window_size.x * cast(f32) render_size.y / cast(f32) render_size.x)
@@ -1326,6 +1330,7 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> (result: Rectan
             // Left and Right black bars
             optimal_window_size = {optimal_window_width, window_size.y}
         }
+        
         result = rectangle_center_dimension(window_center, optimal_window_size)
     }
     

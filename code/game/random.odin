@@ -83,9 +83,9 @@ random_bilateral :: proc (series: ^RandomSeries, $T: typeid) -> T {
 
 random_between :: proc (series: ^RandomSeries, $T: typeid, min, max: T) -> T {
     assert(min <= max)
-         when T == i32 || T == u32 do return random_between_integer(series, T, min, max)
-    else when T == f32             do return random_between_float(series, min, max)
-    else do #assert(false)
+         when T == i32 || T == u32 { return random_between_integer(series, T, min, max) }
+    else when T == f32             { return random_between_float(series, min, max) }
+    else { #assert(false) }
 }
 
 random_between_integer :: proc (series: ^RandomSeries, $T: typeid, min, max: T) -> T 

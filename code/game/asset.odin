@@ -219,7 +219,7 @@ make_assets :: proc (memory_size: u64, tran_state: ^TransientState, texture_op_q
             
             if Platform_no_file_errors(&file.handle) {
                 for source_type in file.asset_type_array {
-                    if id == .None do continue
+                    if id == .None { continue }
                     
                     if source_type.id == id {
                         if source_type.id == .FontGlyph {

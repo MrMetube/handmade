@@ -143,13 +143,13 @@ execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State
                 
                 if !is_down(controller.buttons[.stick_left]) && !is_down(controller.buttons[.stick_right]) {
                     con_ddp.x = 0
-                    if is_down(controller.buttons[.stick_up])   do con_ddp.y =  1
-                    if is_down(controller.buttons[.stick_down]) do con_ddp.y = -1
+                    if is_down(controller.buttons[.stick_up])   { con_ddp.y =  1 }
+                    if is_down(controller.buttons[.stick_down]) { con_ddp.y = -1 }
                 }
                 if !is_down(controller.buttons[.stick_up]) && !is_down(controller.buttons[.stick_down]) {
                     con_ddp.y = 0
-                    if is_down(controller.buttons[.stick_left])  do con_ddp.x = -1
-                    if is_down(controller.buttons[.stick_right]) do con_ddp.x =  1
+                    if is_down(controller.buttons[.stick_left])  { con_ddp.x = -1 }
+                    if is_down(controller.buttons[.stick_right]) { con_ddp.x =  1 }
                 }
             }
             
@@ -354,14 +354,14 @@ execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State
       case .Snake:
         head_moved: bool
         for segment, index in brain.snake.segments {
-            if segment == nil do break
+            if segment == nil { break }
             
             target_p: v3
             if index == 0 {
                 delta := random_bilateral(entropy, v3)
                 target_p = segment.p + delta
             } else {
-                if !head_moved do break
+                if !head_moved { break }
                 prev := brain.snake.segments[index-1]
                 target_p = prev.p
             }
@@ -382,7 +382,7 @@ execute_brain :: proc (region: ^SimRegion, dt: f32, brain: ^Brain, state: ^State
                             if transactional_occupy(segment, &segment.occupying, traversable) {
                                 segment.movement_mode = .Hopping
                                 segment.t_movement = 0
-                                if index == 0 do head_moved = true
+                                if index == 0 { head_moved = true }
                             }
                         }
                     }

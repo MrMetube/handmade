@@ -146,8 +146,8 @@ push_size :: proc (arena: ^Arena, #any_int size_init: umm, #any_int default_alig
 }
 
 arena_alignment_offset :: proc (arena: ^Arena, #any_int alignment: umm = DefaultAlignment) -> umm {
-    if arena.current_block.storage == nil do return 0
-    if arena.current_block.used == auto_cast len(arena.current_block.storage) do return 0
+    if arena.current_block.storage == nil { return 0 }
+    if arena.current_block.used == auto_cast len(arena.current_block.storage) { return 0 }
     
     pointer := transmute(umm) &arena.current_block.storage[arena.current_block.used]
 

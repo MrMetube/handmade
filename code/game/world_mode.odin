@@ -1,3 +1,4 @@
+#+vet !unused-procedures
 package game
 
 World_Mode :: struct {
@@ -155,7 +156,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
         stair_up   = false
         stair_down = false
         
-        if screen_index + 1 == screen_count do break
+        if screen_index + 1 == screen_count { break }
         
         switch choice {
           case 0: room_center.x += room_radius.x + 1

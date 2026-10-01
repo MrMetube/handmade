@@ -264,10 +264,10 @@ ClockEntry :: struct {
 
 @(export)
 debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^RenderCommands) {
-    when !DebugEnabled do return
+    when !DebugEnabled { return }
     
     assets, generation_id := debug_get_game_assets_work_queue_and_generation_id(memory)
-    if assets == nil do return
+    if assets == nil { return }
     
     if memory.debug_state == nil {
         memory.debug_state = debug_init(render_commands.dimension)
@@ -307,7 +307,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     overlay_debug_info(debug, input)
     
     debug.next_hot_interaction = {}
-    if debug.hot_interaction == {} do GlobalDebugTable.edit_event = {}
+    if debug.hot_interaction == {} { GlobalDebugTable.edit_event = {} }
     debug.alt_ui = input.alt_down
     
     if !debug.paused {
@@ -400,7 +400,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
             root := collation_frame.profile_root
             if root != nil {
                 clock_basis := collation_frame.begin_clock
-                if clock_basis == 0 do clock_basis = debug.initialization_clock
+                if clock_basis == 0 { clock_basis = debug.initialization_clock }
                 root.node.duration = collation_frame.end_clock - clock_basis
             }
             
@@ -503,7 +503,7 @@ collate_events :: proc (debug: ^DebugState, events: []DebugEvent) {
 
 store_event :: proc (debug: ^DebugState, event: DebugEvent, element: ^DebugElement) -> ^DebugStoredEvent {
     result: ^DebugStoredEvent
-    if debug.root_group == nil do return result
+    if debug.root_group == nil { return result }
     
     collation_frame := &debug.frames[debug.collating_frame_ordinal]
     collation_frame.stored_event_count += 1
@@ -562,9 +562,9 @@ free_frame :: proc (debug: ^DebugState, frame_ordinal: i32) {
 get_hash_from_guid :: proc (guid: DebugGUID) -> u32 {
     // @todo(viktor): BETTER HASH FUNCTION
     result: u32 = 0
-    for i in 0..<len(guid.name)      do result = result * 65599 + cast(u32) guid.name[i]
-    for i in 0..<len(guid.file_path) do result = result * 65599 + cast(u32) guid.file_path[i]
-    for i in 0..<len(guid.procedure) do result = result * 65599 + cast(u32) guid.procedure[i]
+    for i in 0..<len(guid.name)      { result = result * 65599 + cast(u32) guid.name[i] }
+    for i in 0..<len(guid.file_path) { result = result * 65599 + cast(u32) guid.file_path[i] }
+    for i in 0..<len(guid.procedure) { result = result * 65599 + cast(u32) guid.procedure[i] }
     result = result * 65599 + guid.line
     result = result * 65599 + guid.column
     return result
@@ -588,11 +588,11 @@ get_element_from_guid_by_hash :: proc (debug: ^DebugState, guid: DebugGUID, hash
     for chain := debug.element_hash[index]; chain != nil; chain = chain.next {
         guids_are_equal := true
         
-        if guids_are_equal && chain.guid.line      != guid.line      do guids_are_equal = false
-        if guids_are_equal && chain.guid.column    != guid.column    do guids_are_equal = false
-        if guids_are_equal && chain.guid.name      != guid.name      do guids_are_equal = false
-        if guids_are_equal && chain.guid.file_path != guid.file_path do guids_are_equal = false
-        if guids_are_equal && chain.guid.procedure != guid.procedure do guids_are_equal = false
+        if guids_are_equal && chain.guid.line      != guid.line      { guids_are_equal = false }
+        if guids_are_equal && chain.guid.column    != guid.column    { guids_are_equal = false }
+        if guids_are_equal && chain.guid.name      != guid.name      { guids_are_equal = false }
+        if guids_are_equal && chain.guid.file_path != guid.file_path { guids_are_equal = false }
+        if guids_are_equal && chain.guid.procedure != guid.procedure { guids_are_equal = false }
         
         if guids_are_equal {
             result = chain
@@ -644,7 +644,7 @@ get_element_from_guid_by_parent :: proc (debug: ^DebugState, event: DebugEvent, 
             
             if .CreateHierarchy in ops {
                 parent := parent
-                if parent == nil do parent = debug.root_group
+                if parent == nil { parent = debug.root_group }
                 
                 parent = get_group_by_hierarchical_name(debug, parent, event.guid.name, false)
             }

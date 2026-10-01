@@ -195,12 +195,12 @@ modulus_f :: proc (value: f32, divisor: f32) -> f32 {
 }
 modulus_vf :: proc (value: [$N] f32, divisor: f32) -> [N]f32 where N > 1 {
     result: [N]f32
-    #unroll for i in 0..<N do result[i] = _mod(value[i], divisor) 
+    #unroll for i in 0..<N { result[i] = _mod(value[i], divisor) }
     return result
 }
 modulus_v :: proc (value: [$N] f32, divisor: [N] f32) -> [N]f32 {
     result: [N]f32
-    #unroll for i in 0..<N do result[i] = _mod(value[i], divisor[i]) 
+    #unroll for i in 0..<N { result[i] = _mod(value[i], divisor[i]) }
     return result
 }
 
@@ -213,7 +213,7 @@ where !intrinsics.type_is_array(F)
 }
 round_v :: proc ($T: typeid, v: [$N] $F) -> [N] T {
     result: [N] T
-    #unroll for i in 0..<N do result[i] = round(T, v[i]) 
+    #unroll for i in 0..<N { result[i] = round(T, v[i]) }
     return result
 }
 
@@ -255,7 +255,7 @@ acos :: proc (x: $T) -> T {
     result: T
     when intrinsics.type_is_simd_vector(T) {
         a := simd.to_array(x)
-        #unroll for i in 0..<len(T) do a[i] = acos(a[i])
+        #unroll for i in 0..<len(T) { a[i] = acos(a[i]) }
         result = simd.from_array(a)
     } else {
         result = math.acos(x)
@@ -991,7 +991,7 @@ columns_3x3 :: proc (x, y, z: v3) -> m4 {
 ray_intersection :: proc (pa, ra, pb, rb: v2) -> (ok: bool, t: v2) {
     determinant := rb.x * ra.y - rb.y * ra.x
     // @todo(viktor): use an epsilon here
-    if determinant == 0 do return false, 0
+    if determinant == 0 { return false, 0 }
     
     /*  
         pa.x + ta * ra.x = pb.x + tb * rb.x

@@ -126,7 +126,7 @@ view_percentage :: proc { view_percentage_value, view_percentage_division }
 
 view_percentage_division :: proc (dividend: $T, denominator: T) -> View_Percentage {
     value: f64
-    if denominator != 0 do value = cast(f64) dividend / cast(f64) denominator
+    if denominator != 0 { value = cast(f64) dividend / cast(f64) denominator }
     return { value = value }
 }
 
@@ -137,7 +137,7 @@ view_percentage_value :: proc (value: $T) -> View_Percentage {
 ////////////////////////////////////////////////
 
 View_Magnitude_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
-    if verb != 'v' && verb != 'f' do return false
+    if verb != 'v' && verb != 'f' { return false }
     view := cast(^View_Magnitude) arg.data
     
     if !info.prec_set {
@@ -150,7 +150,7 @@ View_Magnitude_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool
 }
 
 View_Float_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
-    if verb != 'v' && verb != 'f' do return false
+    if verb != 'v' && verb != 'f' { return false }
     view := cast(^View_Float) arg.data
     
     if !info.width_set && view.width != 0 {
@@ -167,7 +167,7 @@ View_Float_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
 }
 
 View_Percentage_Formatter :: proc (info: ^fmt.Info, arg: any, verb: rune) -> bool {
-    if verb != 'v' && verb != 'f' do return false
+    if verb != 'v' && verb != 'f' { return false }
     view := cast(^View_Percentage) arg.data
     
     if !info.prec_set {
