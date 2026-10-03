@@ -37,16 +37,7 @@ Handle_Running_Exe :: enum {
 
 ////////////////////////////////////////////////
 
-@(deferred_none=deinit_build)
-init_build :: proc () {
-    gitignore_path := "./build/.gitignore"
-    if !os.exists(gitignore_path) {
-        data := "*\n!*.odin\n"
-        _ = os.write_entire_file(gitignore_path, transmute([] u8) data)
-    }
-}
-
-deinit_build :: proc () {
+check_cmd_and_close_procs :: proc () {
     if len(cmd) != 0 {
         fmt.printf("INFO: cmd was not cleared: `%v`\n", strings.join(cmd[:], " ", context.temp_allocator))
     }
@@ -57,7 +48,8 @@ deinit_build :: proc () {
 ////////////////////////////////////////////////
 
 begin_build :: proc (cmd: ^Cmd, package_directory: string, output_name: string, handling: Handle_Running_Exe = .Skip) -> bool {
-    // @todo check that we do not nest, or make this stateless(see current_output)
+    assert(current_output == "")
+    
     result: bool
     
     if handle_running_exe_gracefully(output_name, handling) {
@@ -302,6 +294,15 @@ make_directory_if_not_exists :: proc (path: string) -> bool {
     result: bool
     if !os.exists(path) {
         os.make_directory(path)
+        result = true
+    }
+    return result
+}
+
+make_file_if_not_exists :: proc (path: string, content: string) -> bool {
+    result: bool
+    if !os.exists(path) {
+        _ = os.write_entire_file(path, content)
         result = true
     }
     return result

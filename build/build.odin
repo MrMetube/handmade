@@ -55,8 +55,7 @@ game_dir       :: code_dir+"/"+game_package
 render_dir     :: code_dir+"/"+render_package
 
 main :: proc () {
-    // @todo(viktor): handle being called from ./data instead of ./
-    init_build()
+    make_file_if_not_exists("./build/.gitgnore", "*\n!*.odin")
     make_directory_if_not_exists("./data")
     make_directory_if_not_exists("./data/build")
 
@@ -215,6 +214,8 @@ main :: proc () {
     }
     
     fmt.printf("Done\n")
+    
+    check_cmd_and_close_procs()
 }
 
 ////////////////////////////////////////////////
