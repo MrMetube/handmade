@@ -100,9 +100,9 @@ build_define :: proc (name: string, value: string) {
     append(cmd, fmt.tprintf("-define:%s=%s", name, value))
 }
 
-end_build :: proc (cmd: ^Cmd) -> bool {
-    success := run_command(cmd)
-    if success {
+end_build :: proc (cmd: ^Cmd, async: ^Procs = nil) -> bool {
+    success := run_command(cmd, async = async)
+    if async == nil && success{
         fmt.printf("  Build successful %v.\n", current_output)
     }
     current_output = ""
@@ -212,7 +212,6 @@ run_command :: proc (cmd: ^Cmd, working_dir := "", or_exit := true, keep := fals
     fmt.printf("CMD: %v\n", strings.join(cmd[:], " ", context.temp_allocator))
     
     process_description := os.Process_Desc { command = cmd[:], working_dir = working_dir }
-    process: os.Process
     state:   os.Process_State
 	output:  [] byte
 	error:   [] byte
@@ -221,6 +220,11 @@ run_command :: proc (cmd: ^Cmd, working_dir := "", or_exit := true, keep := fals
     if async == nil && !detached {
         state, output, error, err2 = os.process_exec(process_description, context.allocator)
     } else {
+        process: os.Process
+        if async != nil {
+            process_description.stdout = os.stdout
+            process_description.stderr = os.stderr
+        }
         if err, ok := stderr.(^os.File); ok do process_description.stderr = err
         if out, ok := stdout.(^os.File); ok do process_description.stdout = out
         process, err2 = os.process_start(process_description)
@@ -231,31 +235,30 @@ run_command :: proc (cmd: ^Cmd, working_dir := "", or_exit := true, keep := fals
     
     if err2 != nil {
         fmt.printf("ERROR: Failed to run command: %v\n", err2)
-        return false
-    }
-    
-    if async == nil && !detached {
-        if output != nil {
-            switch out in stdout {
-            case nil:      fmt.println(cast(string) output)
-            case ^string:  out^ = cast(string) output
-            case ^os.File: // nothing, already passed on exec
-            }
-        }
-        
-        if error != nil {
-            switch out in stderr {
-            case nil:      fmt.eprintln(cast(string) error)
-            case ^string:  out^ = cast(string) error
-            case ^os.File: // nothing, already passed on exec
-            }
-        }
-        
-        if or_exit && (!state.success || state.exit_code != 0) do os.exit(state.exit_code)
-        
-        success = state.success
     } else {
-        success = true
+        if async == nil && !detached {
+            if output != nil {
+                switch out in stdout {
+                case nil:      fmt.println(cast(string) output)
+                case ^string:  out^ = cast(string) output
+                case ^os.File: // nothing, already passed on exec
+                }
+            }
+            
+            if error != nil {
+                switch out in stderr {
+                case nil:      fmt.eprintln(cast(string) error)
+                case ^string:  out^ = cast(string) error
+                case ^os.File: // nothing, already passed on exec
+                }
+            }
+            
+            if or_exit && (!state.success || state.exit_code != 0) do os.exit(state.exit_code)
+            
+            success = state.success
+        } else {
+            success = true
+        }
     }
     
     if !keep do clear(cmd)
@@ -272,7 +275,10 @@ procs_flush :: proc (procs: ^Procs) -> bool {
             success = false
         }
         
-        if state.exit_code != 0 { success = false }
+        if !state.success || state.exit_code != 0 {
+            fmt.eprintf("ERROR: Command exited with code %v\n", state.exit_code)
+            success = false
+        }
     }
     
     clear(procs)
@@ -332,29 +338,6 @@ all_like :: proc (path, pattern: string, allocator := context.temp_allocator) ->
     }
     
     return result[:]
-}
-
-get_all_files_with_extension :: proc (files: ^[dynamic] string, directory: string, path_allocator: runtime.Allocator, extensions: ..string) {
-    infos, err := os.read_all_directory_by_path(directory, path_allocator)
-    defer os.file_info_slice_delete(infos, path_allocator)
-    
-    assert(err == nil)
-    for info in infos {
-        matches: bool
-        check: for extension in extensions {
-            if strings.ends_with(info.fullpath, extension) {
-                matches = true
-                break check
-            }
-        }
-        
-        if matches {
-            path := strings.clone(info.fullpath, context.temp_allocator)
-            working_dir, _ := os.get_working_directory(context.temp_allocator)
-            path, _ = os.get_relative_path(working_dir, path, path_allocator)
-            append(files, path)
-        }
-    }
 }
 
 ////////////////////////////////////////////////

@@ -4,7 +4,6 @@ package build
 import "core:fmt"
 import "core:os"
 
-
 // "-build-diagnostics"
 
 platform_flags := [] string { "-subsystem:windows", `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
@@ -55,10 +54,10 @@ game_dir       :: code_dir+"/"+game_package
 render_dir     :: code_dir+"/"+render_package
 
 main :: proc () {
-    make_file_if_not_exists("./build/.gitgnore", "*\n!*.odin")
+    make_file_if_not_exists("./build/.gitignore", "*\n!*.odin")
     make_directory_if_not_exists("./data")
     make_directory_if_not_exists("./data/build")
-
+    
     vulkan_vertex_path   :: `build/vulkan.vertex.spirv`
     vulkan_fragment_path :: `build/vulkan.fragment.spirv`
     vulkan_composite_vertex_path   :: `build/vulkan.composite_vertex.spirv`
@@ -83,9 +82,7 @@ main :: proc () {
         append(cmd, "-o", shader.output)
         run_command(cmd, async = procs)
     }
-    if !procs_flush(procs) do os.exit(1)
     
-    // @todo(viktor): these could also be parallelised
     metaprogram: Metaprogram
     metaprogram_init(&metaprogram)
     custom_attribute_flag := metaprogram_custom_attribute_flag(&metaprogram)
@@ -104,17 +101,17 @@ main :: proc () {
     if PedanticPlatform { append(&pedantic_packages, main_package)   }
     append(&pedantic_packages, "hha")
     
-    if begin_build(cmd, "code/asset_builder", "asset_builder.exe") {
+    if begin_build(cmd, "code/asset_builder", "asset_builder.exe") { // hha
         build_meander()
         build_native(native)
         append(cmd, custom_attribute_flag)
         build_pedantic(true)
         build_very_pedantic(true, ..pedantic_packages[:])
         
-        end_build(cmd)
+        end_build(cmd, async = procs)
     }
     
-    { // game
+    if begin_build(cmd, "code/game", "game.dll") { // game
         if !check_printlikes(&metaprogram, game_package) do os.exit(1)
         
         if !generate_platform_api(&metaprogram, "./code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) do os.exit(1)
@@ -124,25 +121,24 @@ main :: proc () {
         
         create_build_lock("./game.lock")
         
-        if begin_build(cmd, "code/game", "game.dll") {
-            append(cmd, "-build-mode:dll")
-            append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
-            
-            build_meander()
-            build_optimizations(optimize)
-            build_native(native)
-            
-            build_pedantic(PedanticGame)
-            build_very_pedantic(PedanticGame, ..pedantic_packages[:])
-            
-            append(cmd, custom_attribute_flag)
-            if internal { build_define("INTERNAL", "true") }
-            
-            end_build(cmd)
-        }
+        
+        append(cmd, "-build-mode:dll")
+        append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
+        
+        build_meander()
+        build_optimizations(optimize)
+        build_native(native)
+        
+        build_pedantic(PedanticGame)
+        build_very_pedantic(PedanticGame, ..pedantic_packages[:])
+        
+        append(cmd, custom_attribute_flag)
+        if internal { build_define("INTERNAL", "true") }
+        
+        end_build(cmd, async = procs)
     }
-
-    { // render
+    
+    if begin_build(cmd, render_dir, "render.dll") { // render
         if !check_printlikes(&metaprogram, render_package) do os.exit(1)
         
         if !generate_platform_api(&metaprogram, "./code/render/generated-platform_api.odin", render_package, { .opaques })              do os.exit(1)
@@ -153,41 +149,38 @@ main :: proc () {
         delete_all_like("./build", `render-\d+\.pdb`)
         
         create_build_lock("./render.lock")
+        append(cmd, "-build-mode:dll")
+        append(cmd, fmt.tprintf(`-pdb-name:./build/render-%d.pdb`, random_number()))
         
-        if begin_build(cmd, render_dir, "render.dll") {
-            append(cmd, "-build-mode:dll")
-            append(cmd, fmt.tprintf(`-pdb-name:./build/render-%d.pdb`, random_number()))
-            
-            build_meander()
-            build_optimizations(optimize)
-            build_native(native)
-            append(cmd, custom_attribute_flag)
-            if internal { build_define("INTERNAL", "true") }
-            build_define("VulkanVertexSpirvPath",   vulkan_vertex_path)
-            build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
-            build_define("VulkanCompositeVertexSpirvPath",   vulkan_composite_vertex_path)
-            build_define("VulkanCompositeFragmentSpirvPath", vulkan_composite_fragment_path)
-            build_define("VulkanFinalVertexSpirvPath",       vulkan_final_vertex_path)
-            build_define("VulkanFinalFragmentSpirvPath",     vulkan_final_fragment_path)
-            
-            end_build(cmd)
-        }
+        build_meander()
+        build_optimizations(optimize)
+        build_native(native)
+        append(cmd, custom_attribute_flag)
+        if internal { build_define("INTERNAL", "true") }
+        build_define("VulkanVertexSpirvPath",   vulkan_vertex_path)
+        build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
+        build_define("VulkanCompositeVertexSpirvPath",   vulkan_composite_vertex_path)
+        build_define("VulkanCompositeFragmentSpirvPath", vulkan_composite_fragment_path)
+        build_define("VulkanFinalVertexSpirvPath",       vulkan_final_vertex_path)
+        build_define("VulkanFinalFragmentSpirvPath",     vulkan_final_fragment_path)
+        
+        end_build(cmd, async = procs)
     }
     
     { // platform
-        if !check_printlikes(&metaprogram, main_package) do os.exit(1)
-            
-        // @todo(viktor): these could be run in parallel with each other and the build of the game
-        if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",       game_package,   main_package)               do os.exit(1)
-        if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",     render_package, main_package)               do os.exit(1)
-        if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",   main_package,   game_package,   "./game")   do os.exit(1)
-        if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,   render_package, "./render") do os.exit(1)
-        if !generate_platform_api_bindings(&metaprogram, "./code/generated-platform_api.odin", main_package)                      do os.exit(1)
-        
         target :: "debug.exe"
         build_succeeded: bool
-                
+        
         if begin_build(cmd, "code", target, .Skip) {
+            if !check_printlikes(&metaprogram, main_package) do os.exit(1)
+            
+            // @todo(viktor): these could be run in parallel with each other and the build of the game
+            if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",       game_package,   main_package)               do os.exit(1)
+            if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",     render_package, main_package)               do os.exit(1)
+            if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",   main_package,   game_package,   "./game")   do os.exit(1)
+            if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,   render_package, "./render") do os.exit(1)
+            if !generate_platform_api_bindings(&metaprogram, "./code/generated-platform_api.odin", main_package)                      do os.exit(1)
+            
             build_meander()
             build_optimizations(optimize)
             build_native(native)
@@ -222,17 +215,18 @@ main :: proc () {
 
 // @note the platform checks these lock files when hot-reloading
 @(deferred_out=delete_build_lock)
-create_build_lock :: proc (path: string) -> (^os.File, string) {
+create_build_lock :: proc (path: string) -> (string) {
     file, err := os.open(path, {.Create})
     if err != nil {
         fmt.printf("ERROR: %v\n", err)
     } else {
         fmt.fprint(file, "WAITING FOR PDB")
     }
-    return file, path
+    os.close(file)
+    
+    return path
 }
 
-delete_build_lock :: proc (file: ^os.File, path: string) {
-    os.close(file)
+delete_build_lock :: proc (path: string) {
     if os.exists(path) do os.remove(path)
 }

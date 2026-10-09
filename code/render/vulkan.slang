@@ -86,7 +86,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
 
     if (root.previous_depth_descriptor != 0) {
         Texture2D<float> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
-        if (input.position.z <= previous_depth.Load(int3(input.position.xy, 0))) {
+        if (input.position.z <= previous_depth.Load(int3(int2(input.position.xy), 0))) {
             discard;
         }
     }
