@@ -21,7 +21,7 @@ struct QuadRoot {
     float           alpha_threshold;
 };
 
-[[vk::push_constant]] ConstantBuffer<QuadRoot> root;
+[[vk::binding(0, 0)]] ConstantBuffer<QuadRoot> root;
 
 struct VertexOutput {
     float4 position                         : SV_Position;

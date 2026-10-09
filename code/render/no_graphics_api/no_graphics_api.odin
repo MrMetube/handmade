@@ -5,7 +5,9 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 import "core:dynlib"
+
 import win "core:sys/windows"
+
 import vk "vendor:vulkan"
 
 Validation     :: true
@@ -22,6 +24,8 @@ CommandBuffer     :: ^_CommandBuffer
 TimelineSemaphore :: ^_TimelineSemaphore
 GpuHeapOwner      :: ^_GpuHeapOwner
 TextureHeapOwner  :: ^_TextureHeapOwner
+TextureDescriptorHeap :: ^_TextureDescriptorHeap
+SamplerDescriptorHeap :: ^_SamplerDescriptorHeap
 
 ////////////////////////////////////////////////
 
@@ -36,18 +40,22 @@ MemoryType :: enum u8 {
     cpu_visible,
     gpu_only,
     readback,
-    texture_descriptor_heap,
-    sampler_descriptor_heap,
 }
 
 GpuRange :: struct {
-    gpu:           rawptr,
+    gpu:           u64,
     size_in_bytes: u64,
 }
 
 GpuCpuRange :: struct ($T: typeid) {
     cpu: []  T,
     gpu: [^] T,
+    size_in_bytes: u64,
+}
+
+GpuCpuPointer :: struct ($T: typeid) {
+    cpu: ^T,
+    gpu: ^T,
     size_in_bytes: u64,
 }
 
@@ -125,6 +133,11 @@ Format :: enum u8 {
     bc7_unorm,
 
     undefined, // Must remain last; preceding values are concrete texture formats.
+}
+
+ColorSpace :: enum u8 {
+    srgb,
+    extended_srgb_linear,
 }
 
 TextureFormatInfo :: struct {
@@ -284,9 +297,7 @@ DeviceCaps :: struct {
     device_name: string,
     max_push_data_size: u64,
     // Common element size for suballocating TextureHeap storage; every SizeAlign::align divides this value.
-    texture_heap_alignment:           u64,
-    texture_descriptor_size_in_bytes: u64,
-    sampler_descriptor_size_in_bytes: u64,
+    texture_heap_alignment:   u64,
     timestamp_period_in_ns:   f32,
     sub_texel_precision_bits: u32,  // Fractional filtering precision, for conservative sampled-field bounds.
     texture_compression_bc:   bool,
@@ -431,6 +442,7 @@ stencil_attachment :: proc (render_view: RenderView = nil, load: LoadOp = .load,
 create_device :: proc (
     window:                        rawptr = nil, 
     swapchain_format:              Format = .undefined, 
+    swapchain_color_space:         ColorSpace = .srgb,
     desired_swapchain_image_count: u32    = 2,          // 1..8 presentation contexts
     timestamp_query_count:         u32    = 256,        // Per command buffer; zero disables timestamps.
     allocator := context.allocator,
@@ -440,24 +452,35 @@ create_device :: proc (
     
     if ODIN_OS != .Windows { return nil, .unsupported }
     
+    vulkan_library: dynlib.Library
     if ODIN_OS == .Windows {
-        // @leak once all the load_proc_addresses are done we dont need the GetInstanceProcAddr anymore
-        vulkan_library, ok := dynlib.load_library("vulkan-1.dll", allocator = context.temp_allocator)
+        library, ok := dynlib.load_library("vulkan-1.dll", allocator = context.temp_allocator)
         if !ok { return nil, .unsupported }
+        vulkan_library = library
         
         address, found := dynlib.symbol_address(vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
-        assert(found)
+        if !found {
+            dynlib.unload_library(vulkan_library)
+            return nil, .unsupported
+        }
         
         vk.load_proc_addresses_global(address)
     }
     
     loader_version : u32 = vk.API_VERSION_1_0
     error := error_from_vk(vk.EnumerateInstanceVersion(&loader_version))
-    if error != .none { return nil, error }
-    if loader_version < vk.API_VERSION_1_4 { return nil, .unsupported }
+    if error != .none {
+        dynlib.unload_library(vulkan_library)
+        return nil, error
+    }
+    if loader_version < vk.API_VERSION_1_4 {
+        dynlib.unload_library(vulkan_library)
+        return nil, .unsupported
+    }
     
     device := new(_Device, allocator)
     device.allocator = allocator
+    device.vulkan_library = cast(rawptr) vulkan_library
     device.texture_heap_alignment = 16
     device.texture_memory_type = vk.MAX_MEMORY_TYPES
     device.pending_texture_initializations.next     = &device.pending_texture_initializations
@@ -477,7 +500,9 @@ create_device :: proc (
     }
     
     fail_device_creation :: proc (device: ^^_Device, error: Error) -> (Device, Error) {
-        free(device^, device^.allocator)
+        allocator := device^.allocator
+        destroy_device(device^)
+        free(device^, allocator)
         return nil, error
     }
     
@@ -532,6 +557,9 @@ create_device :: proc (
     error = _enumerate_instance_extensions(&_instance_extensions, &_instance_extensions_count)
     instance_extensions := _instance_extensions[:_instance_extensions_count]
     if error != .none { return fail_device_creation(&device, error) }
+    if presentation && swapchain_color_space != .srgb && !has_name(instance_extensions, vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) {
+        return fail_device_creation(&device, .unsupported)
+    }
     
     khr_surface_maintenance1: bool
     ext_surface_maintenance1: bool
@@ -563,7 +591,7 @@ create_device :: proc (
         
     }
     
-    enabled_instance_extensions: [dynamic; 6] cstring
+    enabled_instance_extensions: [dynamic; 7] cstring
     enabled_layers:              [dynamic; 1] cstring
     if Validation {
         if debug_utils_available { append(&enabled_instance_extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME) }
@@ -572,6 +600,7 @@ create_device :: proc (
     
     when ODIN_OS == .Windows {
         if presentation {
+            if swapchain_color_space != .srgb { append(&enabled_instance_extensions, vk.EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) }
             append(&enabled_instance_extensions, vk.KHR_SURFACE_EXTENSION_NAME)
             append(&enabled_instance_extensions, vk.KHR_WIN32_SURFACE_EXTENSION_NAME)
             append(&enabled_instance_extensions, vk.KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)
@@ -754,7 +783,7 @@ create_device :: proc (
         
         queue_family := queue_count
         for queue, index in queues {
-            if queue.queueCount == 0 || queue.timestampValidBits != 64 || (queue.queueFlags & required_queue_flags) != required_queue_flags { continue }
+            if queue.queueCount == 0 || (queue.queueFlags & required_queue_flags) != required_queue_flags { continue }
             
             presentation_supported: b32 = true
             if surface != 0 {
@@ -764,6 +793,7 @@ create_device :: proc (
             
             if presentation_supported {
                 queue_family = cast(u32) index
+                result.timestamps_supported = queue.timestampValidBits == 64 && cast(bool) features.vulkan12.hostQueryReset
                 break
             }
         }
@@ -777,6 +807,7 @@ create_device :: proc (
     Candidate :: struct {
         physical_device:           vk.PhysicalDevice,
         queue_family:              u32,
+        timestamps_supported:      bool,
         properties:                vk.PhysicalDeviceProperties,
         memory_properties:         vk.PhysicalDeviceMemoryProperties,
         unified_image_layouts:     bool,
@@ -808,6 +839,7 @@ create_device :: proc (
     
     device.physical_device               = selected.physical_device
     device.queue_family                  = selected.queue_family
+    device.timestamps_supported          = selected.timestamps_supported && timestamp_query_count != 0
     device.physical_properties           = selected.properties
     device.heap_properties               = selected.heap_properties
     device.max_timeline_value_difference = selected.vulkan12_properties.maxTimelineSemaphoreValueDifference
@@ -892,6 +924,7 @@ create_device :: proc (
     enabled_features.vulkan12.shaderFloat16                             = true
     enabled_features.vulkan12.scalarBlockLayout                         = true
     enabled_features.vulkan12.timelineSemaphore                         = true
+    enabled_features.vulkan12.hostQueryReset                            = cast(b32) selected.timestamps_supported
     enabled_features.vulkan12.bufferDeviceAddress                       = true
     enabled_features.vulkan13.synchronization2                          = true
     enabled_features.vulkan13.dynamicRendering                          = true
@@ -1121,26 +1154,6 @@ create_device :: proc (
         return fail_device_creation(&device, .unsupported)
     }
     
-    device.fn.WriteSamplerDescriptors         = auto_cast vk.GetDeviceProcAddr(device.device, "vkWriteSamplerDescriptorsEXT")
-    device.fn.WriteResourceDescriptors        = auto_cast vk.GetDeviceProcAddr(device.device, "vkWriteResourceDescriptorsEXT")
-    device.fn.CmdBindSamplerHeap              = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdBindSamplerHeapEXT")
-    device.fn.CmdBindResourceHeap             = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdBindResourceHeapEXT")
-    device.fn.CmdPushData                     = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdPushDataEXT")
-    device.fn.CmdBindIndexBuffer              = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdBindIndexBuffer3KHR")
-    device.fn.CmdDrawIndirect                 = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdDrawIndirect2KHR")
-    device.fn.CmdDrawIndexedIndirect          = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdDrawIndexedIndirect2KHR")
-    device.fn.CmdDispatchIndirect             = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdDispatchIndirect2KHR")
-    device.fn.CmdDrawMeshTasks                = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdDrawMeshTasksEXT")
-    device.fn.CmdDrawMeshTasksIndirect        = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdDrawMeshTasksIndirect2EXT")
-    device.fn.CmdCopyMemory                   = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdCopyMemoryKHR")
-    device.fn.CmdCopyMemoryToImage            = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdCopyMemoryToImageKHR")
-    device.fn.CmdCopyImageToMemory            = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdCopyImageToMemoryKHR")
-    device.fn.CmdCopyQueryPoolResultsToMemory = auto_cast vk.GetDeviceProcAddr(device.device, "vkCmdCopyQueryPoolResultsToMemoryKHR")
-    if (device.fn.WriteSamplerDescriptors == nil || device.fn.WriteResourceDescriptors == nil || device.fn.CmdBindSamplerHeap == nil || device.fn.CmdBindResourceHeap == nil || device.fn.CmdPushData == nil || device.fn.CmdBindIndexBuffer == nil || device.fn.CmdDrawIndirect == nil || device.fn.CmdDrawIndexedIndirect == nil || device.fn.CmdDispatchIndirect == nil || device.fn.CmdDrawMeshTasks == nil || device.fn.CmdDrawMeshTasksIndirect == nil || device.fn.CmdCopyMemory == nil || device.fn.CmdCopyMemoryToImage == nil || device.fn.CmdCopyImageToMemory == nil || device.fn.CmdCopyQueryPoolResultsToMemory == nil)
-    {
-        return fail_device_creation(&device, .driver_error)
-    }
-    
     error = create_command_contexts(device)
     if error != .none { return fail_device_creation(&device, error) }
     
@@ -1153,8 +1166,6 @@ create_device :: proc (
         device_name                      = strings.clone_from(cast(cstring) &device.physical_properties.deviceName[0], allocator),
         max_push_data_size               = cast(u64) device.heap_properties.maxPushDataSize,
         texture_heap_alignment           = device.texture_heap_alignment,
-        texture_descriptor_size_in_bytes = cast(u64) device.heap_properties.imageDescriptorSize,
-        sampler_descriptor_size_in_bytes = cast(u64) device.heap_properties.samplerDescriptorSize,
         timestamp_period_in_ns           = selected.properties.limits.timestampPeriod,
         sub_texel_precision_bits         = selected.properties.limits.subTexelPrecisionBits,
         texture_compression_bc           = selected.texture_compression_bc,
@@ -1167,6 +1178,7 @@ create_device :: proc (
         device.swapchain^ = {
             device          = device,
             format          = swapchain_format,
+            color_space     = swapchain_color_space == .extended_srgb_linear ? .EXTENDED_SRGB_LINEAR_EXT : .SRGB_NONLINEAR,
             transform       = { .IDENTITY },
             composite_alpha = { .OPAQUE },
         }
@@ -1195,13 +1207,6 @@ destroy_device :: proc (device: Device) {
             device.swapchain = nil
         }
         
-        // @hack the swapchain and its image views where never moved from the retired_swapchains to the swapchain_delete_queue
-        for &retired in device.retired_swapchains {
-            if retired.handle == 0 { continue }
-            
-            queue_retired_swapchain(device, &retired)
-        }
-        
         collect(&device.swapchain_delete_queue, device, device.command_retirement_value)
         assert(device.swapchain_delete_queue.count == 0)
     }
@@ -1220,6 +1225,7 @@ destroy_device :: proc (device: Device) {
         vk.DestroyInstance(device.instance, nil)
     }
     
+    if device.vulkan_library != nil { dynlib.unload_library(cast(dynlib.Library) device.vulkan_library) }
     device^ = {}
 }
 
@@ -1259,7 +1265,10 @@ destroy_timeline_semaphore :: proc (semaphore: TimelineSemaphore) {
 
 timeline_completed_value :: proc (semaphore: TimelineSemaphore) -> u64 {
     assert(semaphore != nil && semaphore.device != nil && semaphore.semaphore != 0, #procedure + " received and invalid semaphore")
-    result := query_timeline_value(semaphore)
+    
+    result: u64
+    assert_vk(vk.GetSemaphoreCounterValue(semaphore.device.device, semaphore.semaphore, &result))
+    
     return result
 }
 
@@ -1409,11 +1418,37 @@ submit_and_present :: proc (device: Device, commands: [] CommandBuffer, completi
 
 ////////////////////////////////////////////////
 
-// Every non-null returned pointer is 16-byte aligned. Descriptor heaps are exact allocations;
-// cpu_visible, gpu_only, and readback heaps are raw blocks for application-side suballocation.
-create_gpu_heap :: proc (device: Device, byte_count: u64, memory_type: MemoryType = .cpu_visible) -> GpuHeap {
+// Every non-null returned pointer is 16-byte aligned. GPU heaps are raw blocks for application-side suballocation.
+create_gpu_heap :: proc (device: Device, #any_int size: u64, memory_type: MemoryType = .cpu_visible) -> GpuHeap {
     assert(device != nil)
-    result := allocate_gpu_heap(device, byte_count, memory_type)
+    
+    required, preferred, avoided: vk.MemoryPropertyFlags
+    switch memory_type {
+    case .cpu_visible:
+        required = cpu_visible_memory_properties
+        
+    case .gpu_only:
+        required = { .DEVICE_LOCAL }
+        avoided  = { .HOST_VISIBLE }
+        
+    case .readback:
+        required = cpu_visible_memory_properties
+        preferred = { .HOST_CACHED }
+    }
+    
+    heap := new(_GpuHeapOwner, device.allocator)
+    heap.device  = device
+    heap.backing = create_backing_buffer(device, cast(vk.DeviceSize) size, universal_buffer_usage, required, preferred, avoided)
+    
+    result := GpuHeap {
+        range = {
+            cpu           = heap.backing.mapped[:size],
+            gpu           = transmute([^] u8) heap.backing.address,
+            size_in_bytes = size,
+        },
+        owner = heap,
+    }
+    
     return result
 }
 
@@ -1432,7 +1467,7 @@ destroy_gpu_heap :: proc (heap: GpuHeap) {
 }
 
 gpu_range :: proc { gpu_range_from_gpu_cpu_range, gpu_range_from_heap }
-gpu_range_from_gpu_cpu_range ::proc (range: GpuCpuRange($T)) -> GpuRange { return { gpu = range.gpu, size_in_bytes = range.size_in_bytes } }
+gpu_range_from_gpu_cpu_range ::proc (range: GpuCpuRange($T)) -> GpuRange { return { gpu = transmute(u64) range.gpu, size_in_bytes = range.size_in_bytes } }
 gpu_range_from_heap :: proc (heap: GpuHeap) -> GpuRange { return gpu_range(heap.range) }
 
 ////////////////////////////////////////////////
@@ -1569,7 +1604,33 @@ destroy_render_view :: proc (render_view: RenderView) {
     free(render_view, render_view.device.allocator)
 }
 
-write_texture_descriptor :: proc (device: Device, cpu_destination: rawptr, texture: Texture, type: TextureDescriptorType, 
+create_texture_descriptor_heap :: proc (device: Device, capacity: u32) -> TextureDescriptorHeap {
+    assert(device != nil && capacity > 0)
+    heap := new(_TextureDescriptorHeap, device.allocator)
+    heap^ = {
+        device   = device,
+        storage  = allocate_descriptor_heap(device, cast(vk.DeviceSize) capacity * device.heap_properties.imageDescriptorSize, true),
+        capacity = capacity,
+    }
+    return heap
+}
+
+destroy_texture_descriptor_heap :: proc (heap: TextureDescriptorHeap) {
+    if heap == nil { return }
+    destroy_gpu_heap(heap.storage)
+    free(heap, heap.device.allocator)
+}
+
+copy_texture_descriptors :: proc (source: TextureDescriptorHeap, source_index: u32, destination: TextureDescriptorHeap, destination_index, count: u32) {
+    assert(source != nil && destination != nil && source.device == destination.device)
+    assert(source_index <= source.capacity && count <= source.capacity - source_index)
+    assert(destination_index <= destination.capacity && count <= destination.capacity - destination_index)
+    if count == 0 { return }
+    stride := cast(u64) source.device.heap_properties.imageDescriptorSize
+    runtime.mem_copy(&destination.storage.range.cpu[cast(u64) destination_index * stride], &source.storage.range.cpu[cast(u64) source_index * stride], cast(int) (cast(u64) count * stride))
+}
+
+write_texture_descriptor :: proc (heap: TextureDescriptorHeap, index: u32, texture: Texture, type: TextureDescriptorType, 
     format:      Format        = .undefined, // Undefined inherits the texture format.
     aspect:      TextureAspect = .automatic, // Automatic selects color, or depth before stencil.
     base_mip:    u32           = 0,
@@ -1577,7 +1638,8 @@ write_texture_descriptor :: proc (device: Device, cpu_destination: rawptr, textu
     base_layer:  u32           = 0, // Vulkan array layer; cube faces are individual layers.
     layer_count: u32           = 0, // Vulkan array layers; zero selects every remaining layer.
 ) {
-    assert(device != nil && texture != nil)
+    assert(heap != nil && texture != nil && index < heap.capacity && heap.device == texture.device)
+    device := heap.device
     
     descriptor_aspect: vk.ImageAspectFlags
     switch aspect {
@@ -1620,13 +1682,39 @@ write_texture_descriptor :: proc (device: Device, cpu_destination: rawptr, textu
         } },
     }
     destination := vk.HostAddressRangeEXT {
-        address = cpu_destination,
+        address = &heap.storage.range.cpu[cast(vk.DeviceSize) index * device.heap_properties.imageDescriptorSize],
         size    = cast(int) device.heap_properties.imageDescriptorSize,
     }
-    assert_vk(device.fn.WriteResourceDescriptors(device.device, 1, &descriptor_info, &destination))
+    assert_vk(vk.WriteResourceDescriptorsEXT(device.device, 1, &descriptor_info, &destination))
 }
 
-write_sampler_descriptor :: proc (device: Device, cpu_destination: rawptr, 
+create_sampler_descriptor_heap :: proc (device: Device, capacity: u32) -> SamplerDescriptorHeap {
+    assert(device != nil && capacity > 0)
+    heap := new(_SamplerDescriptorHeap, device.allocator)
+    heap^ = {
+        device   = device,
+        storage  = allocate_descriptor_heap(device, cast(vk.DeviceSize) capacity * device.heap_properties.samplerDescriptorSize, false),
+        capacity = capacity,
+    }
+    return heap
+}
+
+destroy_sampler_descriptor_heap :: proc (heap: SamplerDescriptorHeap) {
+    if heap == nil { return }
+    destroy_gpu_heap(heap.storage)
+    free(heap, heap.device.allocator)
+}
+
+copy_sampler_descriptors :: proc (source: SamplerDescriptorHeap, source_index: u32, destination: SamplerDescriptorHeap, destination_index, count: u32) {
+    assert(source != nil && destination != nil && source.device == destination.device)
+    assert(source_index <= source.capacity && count <= source.capacity - source_index)
+    assert(destination_index <= destination.capacity && count <= destination.capacity - destination_index)
+    if count == 0 { return }
+    stride := cast(u64) source.device.heap_properties.samplerDescriptorSize
+    runtime.mem_copy(&destination.storage.range.cpu[cast(u64) destination_index * stride], &source.storage.range.cpu[cast(u64) source_index * stride], cast(int) (cast(u64) count * stride))
+}
+
+write_sampler_descriptor :: proc (heap: SamplerDescriptorHeap, index: u32, 
     min_filter:      Filter      = .linear,
     mag_filter:      Filter      = .linear,
     mip_filter:      Filter      = .linear,
@@ -1637,7 +1725,8 @@ write_sampler_descriptor :: proc (device: Device, cpu_destination: rawptr,
     compare_enabled: bool        = false,
     compare:         CompareOp   = .less_equal,
 ) {
-    assert(device != nil)
+    assert(heap != nil && index < heap.capacity)
+    device := heap.device
     
     sampler_info := vk.SamplerCreateInfo {
         sType = .SAMPLER_CREATE_INFO,
@@ -1655,38 +1744,53 @@ write_sampler_descriptor :: proc (device: Device, cpu_destination: rawptr,
     }
     
     destination := vk.HostAddressRangeEXT {
-        address = cpu_destination,
-        size    = cast(int) device.heap_properties.imageDescriptorSize,
+        address = &heap.storage.range.cpu[cast(vk.DeviceSize) index * device.heap_properties.samplerDescriptorSize],
+        size    = cast(int) device.heap_properties.samplerDescriptorSize,
     }
-    assert_vk(device.fn.WriteSamplerDescriptors(device.device, 1, &sampler_info, &destination))
+    assert_vk(vk.WriteSamplerDescriptorsEXT(device.device, 1, &sampler_info, &destination))
 }
 
 ////////////////////////////////////////////////
 
 create_graphics_pso :: proc (
     device: Device,
-    vertex_spirv:   [] u32,
-    fragment_spirv: [] u32 = nil, // Empty omits the fragment stage, for depth-only rasterization.
-    
+    vertex_spirv:         [] u8,
+    fragment_spirv:       [] u8 = nil, // Empty omits the fragment stage, for depth-only rasterization.
+    vertex_entry_point:   cstring = "vertexMain",
+    fragment_entry_point: cstring = "fragmentMain",
     color_targets:  [] ColorTargetDesc,
     depth_format:   Format             = .undefined,
     stencil_format: Format             = .undefined,
     rasterization:  RasterizationState = {},
-    ) -> PSO { return create_raster_pso(device, nil, vertex_spirv, fragment_spirv, color_targets, depth_format, stencil_format, rasterization, false) }
+    ) -> PSO { return create_raster_pso(device, nil, vertex_spirv, fragment_spirv, "", vertex_entry_point, fragment_entry_point,
+        color_targets, depth_format, stencil_format, rasterization, false) }
 
 create_mesh_pso :: proc (
     device: Device, 
-    task_spirv:     [] u32 = nil, // Empty launches mesh workgroups directly; otherwise draws launch taskMain workgroups.
-    mesh_spirv:     [] u32,
-    fragment_spirv: [] u32 = nil, // Empty omits the fragment stage, for depth-only rasterization.
+    task_spirv:           [] u8 = nil, // Empty launches mesh workgroups directly; otherwise draws launch taskMain workgroups.
+    mesh_spirv:           [] u8,
+    fragment_spirv:       [] u8 = nil, // Empty omits the fragment stage, for depth-only rasterization.
+    task_entry_point:     cstring = "taskMain",
+    mesh_entry_point:     cstring = "meshMain",
+    fragment_entry_point: cstring = "fragmentMain",
     color_targets:  [] ColorTargetDesc,
     depth_format:   Format = .undefined,
     stencil_format: Format = .undefined,
     rasterization:  RasterizationState = {},
-    ) -> PSO { return create_raster_pso(device, task_spirv, mesh_spirv, fragment_spirv, color_targets, depth_format, stencil_format, rasterization, true) }
+    ) -> PSO { return create_raster_pso(device, task_spirv, mesh_spirv, fragment_spirv, task_entry_point, mesh_entry_point, fragment_entry_point,
+        color_targets, depth_format, stencil_format, rasterization, true) }
 
-create_compute_pso :: proc (device: Device, compute_spirv: [] u32) -> PSO {
+create_compute_pso :: proc (device: Device, compute_spirv: [] u8, compute_entry_point: cstring = "computeMain") -> PSO {
     assert(device != nil, #procedure + " called with a null device")
+    check_spirv(compute_spirv)
+    
+    mapping := vk.DescriptorSetAndBindingMappingEXT {
+        sType = .DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
+        bindingCount = 1,
+        resourceMask = { .UNIFORM_BUFFER, .READ_ONLY_STORAGE_BUFFER },
+        source = .PUSH_ADDRESS,
+        sourceData = { pushAddressOffset = 0 },
+    }
     
     result := new(_PSO, device.allocator)
     result.device     = device
@@ -1700,13 +1804,18 @@ create_compute_pso :: proc (device: Device, compute_spirv: [] u32) -> PSO {
         },
         stage = vk.PipelineShaderStageCreateInfo {
             sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-            pNext = &vk.ShaderModuleCreateInfo {
-                sType = .SHADER_MODULE_CREATE_INFO,
-                codeSize = len(compute_spirv) * size_of(u32),
-                pCode    = raw_data(compute_spirv),
+            pNext = &vk.ShaderDescriptorSetAndBindingMappingInfoEXT {
+                sType = .SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
+                pNext = &vk.ShaderModuleCreateInfo {
+                    sType = .SHADER_MODULE_CREATE_INFO,
+                    codeSize = len(compute_spirv),
+                    pCode    = cast(^u32) raw_data(compute_spirv),
+                },
+                mappingCount = 1,
+                pMappings = &mapping,
             },
             stage = { .COMPUTE },
-            pName = "computeMain",
+            pName = compute_entry_point,
         },
         basePipelineIndex = -1,
     }, nil, &result.pso))
@@ -1737,9 +1846,10 @@ begin_commands :: proc (device: Device) -> CommandBuffer {
     
     result.device = device
     clear(&result.timestamp_destinations)
+    result.timestamp_retire_value = 0
     
     if result.timestamp_pool != 0 {
-        vk.CmdResetQueryPool(result.command_buffer, result.timestamp_pool, 0, device.timestamp_query_count)
+        vk.ResetQueryPool(device.device, result.timestamp_pool, 0, device.timestamp_query_count)
     }
     
     if device.pending_texture_initializations.next != &device.pending_texture_initializations {
@@ -1818,22 +1928,23 @@ submit :: proc (commands: [] CommandBuffer, completion: TimelinePoint) {
 
 ////////////////////////////////////////////////
 
-set_texture_descriptor_heap :: proc (commands: CommandBuffer, heap: GpuRange) {
-    assert(commands != nil && commands.device != nil)
+set_texture_descriptor_heap :: proc (commands: CommandBuffer, heap: TextureDescriptorHeap) {
+    assert(commands != nil && heap != nil && commands.device == heap.device)
     
     properties := commands.device.heap_properties
     
-    bind_info := make_heap_bind_info(heap, max(properties.imageDescriptorAlignment, properties.bufferDescriptorAlignment), properties.minResourceHeapReservedRange)
-    commands.device.fn.CmdBindResourceHeap(commands.command_buffer, &bind_info)
+    bind_info := make_heap_bind_info(gpu_range(heap.storage),
+        max(properties.imageDescriptorAlignment, properties.bufferDescriptorAlignment), properties.minResourceHeapReservedRange)
+    vk.CmdBindResourceHeapEXT(commands.command_buffer, &bind_info)
 }
 
-set_sampler_descriptor_heap :: proc (commands: CommandBuffer, heap: GpuRange) {
-    assert(commands != nil && commands.device != nil)
+set_sampler_descriptor_heap :: proc (commands: CommandBuffer, heap: SamplerDescriptorHeap) {
+    assert(commands != nil && heap != nil && commands.device == heap.device)
     
     properties := commands.device.heap_properties
     
-    bind_info := make_heap_bind_info(heap, properties.samplerDescriptorAlignment, properties.minSamplerHeapReservedRange)
-    commands.device.fn.CmdBindSamplerHeap(commands.command_buffer, &bind_info)
+    bind_info := make_heap_bind_info(gpu_range(heap.storage), properties.samplerDescriptorAlignment, properties.minSamplerHeapReservedRange)
+    vk.CmdBindSamplerHeapEXT(commands.command_buffer, &bind_info)
 }
 
 ////////////////////////////////////////////////
@@ -1841,7 +1952,7 @@ set_sampler_descriptor_heap :: proc (commands: CommandBuffer, heap: GpuRange) {
 copy_memory :: proc (commands: CommandBuffer, source: GpuRange, destination: GpuRange) {
     assert(commands != nil && commands.device != nil)
     
-    commands.device.fn.CmdCopyMemory(commands.command_buffer, &vk.CopyDeviceMemoryInfoKHR {
+    vk.CmdCopyMemoryKHR(commands.command_buffer, &vk.CopyDeviceMemoryInfoKHR {
         sType = .COPY_DEVICE_MEMORY_INFO_KHR,
         regionCount = 1,
         pRegions    = &vk.DeviceMemoryCopyKHR {
@@ -1859,7 +1970,7 @@ copy_memory_to_texture :: proc (commands: CommandBuffer, source: GpuRange, desti
     
     region := make_texture_copy_region(destination, copy, source)
     
-    commands.device.fn.CmdCopyMemoryToImage(commands.command_buffer, &vk.CopyDeviceMemoryImageInfoKHR {
+    vk.CmdCopyMemoryToImageKHR(commands.command_buffer, &vk.CopyDeviceMemoryImageInfoKHR {
         sType = .COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
         image       = destination.image,
         regionCount = 1,
@@ -1872,7 +1983,7 @@ copy_texture_to_memory :: proc (commands: CommandBuffer, source: Texture, destin
     
     region := make_texture_copy_region(source, copy, destination)
     
-    commands.device.fn.CmdCopyImageToMemory(commands.command_buffer, &vk.CopyDeviceMemoryImageInfoKHR {
+    vk.CmdCopyImageToMemoryKHR(commands.command_buffer, &vk.CopyDeviceMemoryImageInfoKHR {
         sType = .COPY_DEVICE_MEMORY_IMAGE_INFO_KHR,
         image       = source.image,
         regionCount = 1,
@@ -1904,14 +2015,40 @@ barrier_before_after :: proc (commands: CommandBuffer, before: Stages, before_ac
 
 ////////////////////////////////////////////////
 
-// Up to DeviceDesc::timestamp_query_count markers per command buffer. stage must map to a single GPU pipeline stage.
-// Destinations must be 8-byte aligned and distinct until submission completes.
-// Results are copied at command-buffer end; read mapped readback memory only after submission completes.
+// Up to create_device's timestamp_query_count markers per command buffer. stages must map to a single GPU pipeline stage.
+// CPU destinations must remain valid and distinct until read_timestamps retrieves them.
+// Ignored when the selected queue has no timestamp support or timestamps are disabled.
 
-write_timestamp :: proc (commands: CommandBuffer, gpu_destination: ^u64, stages: Stages) {
+write_timestamp :: proc (commands: CommandBuffer, cpu_destination: ^u64, stages: Stages) {
     assert(commands != nil && commands.device != nil)
-    append(&commands.timestamp_destinations, transmute(vk.DeviceAddress) gpu_destination)
+    if commands.timestamp_pool == 0 { return }
+    assert(cpu_destination != nil && len(commands.timestamp_destinations) < cast(int) commands.device.timestamp_query_count)
+    append(&commands.timestamp_destinations, cpu_destination)
     vk.CmdWriteTimestamp2(commands.command_buffer, to_vk(stages), commands.timestamp_pool, cast(u32) len(commands.timestamp_destinations)-1)
+}
+
+// Copies results from completed submissions into their CPU destinations without waiting.
+// Beginning another command buffer may recycle a context and discard its unread results.
+read_timestamps :: proc (device: Device) {
+    assert(device != nil)
+    poll_command_retirement(device)
+    if device.next_command_context == nil { return }
+
+    commands := device.next_command_context
+    for {
+        count := len(commands.timestamp_destinations)
+        if count != 0 && commands.timestamp_retire_value != 0 && commands.timestamp_retire_value <= device.completed_command_retirement {
+            assert_vk(vk.GetQueryPoolResults(device.device, commands.timestamp_pool, 0, cast(u32) count,
+                count * size_of(u64), raw_data(commands.timestamp_results), size_of(u64), { ._64 }))
+            for destination, index in commands.timestamp_destinations {
+                destination^ = commands.timestamp_results[index]
+            }
+            clear(&commands.timestamp_destinations)
+            commands.timestamp_retire_value = 0
+        }
+        commands = commands.next
+        if commands == device.next_command_context { break }
+    }
 }
 
 ////////////////////////////////////////////////
@@ -2027,37 +2164,23 @@ bind_pso :: proc (commands: CommandBuffer, pso: PSO) {
 
 ////////////////////////////////////////////////
 
-byte_slice :: proc { byte_slice_from_pointer, byte_slice_from_slice }
-byte_slice_from_pointer :: proc (pointer: ^$T) -> [] u8 {
-    bytes  := cast([^] u8) pointer
-    length := size_of(T)
-    
-    result := bytes[:length]
-    return result
-}
-byte_slice_from_slice :: proc (slice: [] $T) -> [] u8 {
-    bytes  := cast([^] u8) raw_data(slice)
-    length := size_of(T) * len(slice)
-    
-    result := bytes[:length]
-    return result
-}
-
-// Draw and dispatch root structures must fit 256 bytes. Larger data belongs in GPU memory referenced by root pointers.
-draw :: proc (commands: CommandBuffer, root: [] u8, vertex_count: u32, instance_count: u32 = 1, first_vertex: u32 = 0, first_instance: u32 = 0) {
+// root is a 16-byte-aligned GPU address, or nil for shaders without root data. Retain its storage through GPU completion.
+// Finish CPU writes before submission; wait for prior GPU users before overwriting. Synchronize GPU writes before consuming the root.
+// These commands push the address only; they do not copy root bytes.
+draw :: proc (commands: CommandBuffer, root: rawptr, vertex_count: u32, instance_count: u32 = 1, first_vertex: u32 = 0, first_instance: u32 = 0) {
     assert(commands != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
     vk.CmdDraw(commands.command_buffer, vertex_count, instance_count, first_vertex, first_instance)
 }
 
-draw_indexed :: proc (commands: CommandBuffer, root: [] u8, indices: GpuRange, type: IndexType, index_count: u32, instance_count: u32 = 1, first_index: u32 = 0, vertex_offset: i32 = 0, first_instance: u32 = 0) {
+draw_indexed :: proc (commands: CommandBuffer, root: rawptr, indices: GpuRange, type: IndexType, index_count: u32, instance_count: u32 = 1, first_index: u32 = 0, vertex_offset: i32 = 0, first_instance: u32 = 0) {
     assert(commands != nil && commands.device != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
-    commands.device.fn.CmdBindIndexBuffer(commands.command_buffer, &vk.BindIndexBuffer3InfoKHR {
+    vk.CmdBindIndexBuffer3KHR(commands.command_buffer, &vk.BindIndexBuffer3InfoKHR {
         sType = .BIND_INDEX_BUFFER_3_INFO_KHR,
         addressRange = to_vk(indices),
         addressFlags = address_flags,
@@ -2066,12 +2189,12 @@ draw_indexed :: proc (commands: CommandBuffer, root: [] u8, indices: GpuRange, t
     vk.CmdDrawIndexed(commands.command_buffer, index_count, instance_count, first_index, vertex_offset, first_instance)
 }
 
-draw_indirect :: proc (commands: CommandBuffer, root: [] u8, arguments: GpuRange, draw_count: u32 = 1, stride: u32 = 0) {
+draw_indirect :: proc (commands: CommandBuffer, root: rawptr, arguments: GpuRange, draw_count: u32 = 1, stride: u32 = 0) {
     assert(commands != nil && commands.device != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
-    commands.device.fn.CmdDrawIndirect(commands.command_buffer, &vk.DrawIndirect2InfoKHR {
+    vk.CmdDrawIndirect2KHR(commands.command_buffer, &vk.DrawIndirect2InfoKHR {
         sType = .DRAW_INDIRECT_2_INFO_KHR,
         addressRange = {
             address = to_vk(arguments).address,
@@ -2083,18 +2206,18 @@ draw_indirect :: proc (commands: CommandBuffer, root: [] u8, arguments: GpuRange
     })
 }
 
-draw_indexed_indirect :: proc (commands: CommandBuffer, root: [] u8, indices: GpuRange, type: IndexType, arguments: GpuRange, draw_count: u32 = 1, stride: u32 = 0) {
+draw_indexed_indirect :: proc (commands: CommandBuffer, root: rawptr, indices: GpuRange, type: IndexType, arguments: GpuRange, draw_count: u32 = 1, stride: u32 = 0) {
     assert(commands != nil && commands.device != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
-    commands.device.fn.CmdBindIndexBuffer(commands.command_buffer, &vk.BindIndexBuffer3InfoKHR {
+    vk.CmdBindIndexBuffer3KHR(commands.command_buffer, &vk.BindIndexBuffer3InfoKHR {
         sType = .BIND_INDEX_BUFFER_3_INFO_KHR,
         addressRange = to_vk(indices),
         addressFlags = address_flags,
         indexType    = to_vk(type),
     })
-    commands.device.fn.CmdDrawIndexedIndirect(commands.command_buffer, &vk.DrawIndirect2InfoKHR {
+    vk.CmdDrawIndexedIndirect2KHR(commands.command_buffer, &vk.DrawIndirect2InfoKHR {
         sType = .DRAW_INDIRECT_2_INFO_KHR,
         addressRange = {
             address = to_vk(arguments).address,
@@ -2106,41 +2229,41 @@ draw_indexed_indirect :: proc (commands: CommandBuffer, root: [] u8, indices: Gp
     })
 }
 
-dispatch :: proc (commands: CommandBuffer, root: [] u8, group_count: u32x3) {
+dispatch :: proc (commands: CommandBuffer, root: rawptr, group_count: u32x3) {
     assert(commands != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
     vk.CmdDispatch(commands.command_buffer, group_count.x, group_count.y, group_count.z)
 }
 
-dispatch_indirect :: proc (commands: CommandBuffer, root: [] u8, arguments: GpuRange) {
+dispatch_indirect :: proc (commands: CommandBuffer, root: rawptr, arguments: GpuRange) {
     assert(commands != nil && commands.device != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
-    commands.device.fn.CmdDispatchIndirect(commands.command_buffer, &vk.DispatchIndirect2InfoKHR {
+    vk.CmdDispatchIndirect2KHR(commands.command_buffer, &vk.DispatchIndirect2InfoKHR {
         sType = .DISPATCH_INDIRECT_2_INFO_KHR,
         addressRange = to_vk(arguments),
         addressFlags = address_flags,
     })
 }
 
-draw_meshlets :: proc (commands: CommandBuffer, root: [] u8, group_count: u32x3) {
+draw_meshlets :: proc (commands: CommandBuffer, root: rawptr, group_count: u32x3) {
     assert(commands != nil && commands.device != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
-    commands.device.fn.CmdDrawMeshTasks(commands.command_buffer, group_count.x, group_count.y, group_count.z)
+    vk.CmdDrawMeshTasksEXT(commands.command_buffer, group_count.x, group_count.y, group_count.z)
 }
 
 
-draw_meshlets_indexed :: proc (commands: CommandBuffer, root: [] u8, arguments: GpuRange, draw_count: u32 = 1, stride: u32 = 0) {
+draw_meshlets_indexed :: proc (commands: CommandBuffer, root: rawptr, arguments: GpuRange, draw_count: u32 = 1, stride: u32 = 0) {
     assert(commands != nil && commands.device != nil)
     
-    emit_root_data(commands, root)
+    emit_root_pointer(commands, root)
     
-    commands.device.fn.CmdDrawMeshTasksIndirect(commands.command_buffer, &vk.DrawIndirect2InfoKHR {
+    vk.CmdDrawMeshTasksIndirect2EXT(commands.command_buffer, &vk.DrawIndirect2InfoKHR {
         sType = .DRAW_INDIRECT_2_INFO_KHR,
         addressRange = {
             address = to_vk(arguments).address,

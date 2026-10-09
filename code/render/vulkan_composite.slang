@@ -3,7 +3,7 @@ struct CompositeRoot {
     uint peel_count;
 };
 
-[[vk::push_constant]] ConstantBuffer<CompositeRoot> root;
+[[vk::binding(0, 0)]] ConstantBuffer<CompositeRoot> root;
 
 struct VertexOutput {
     float4 position : SV_Position;

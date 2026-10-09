@@ -3,7 +3,7 @@ struct FinalRoot {
     uint sampler_descriptor;
 };
 
-[[vk::push_constant]] ConstantBuffer<FinalRoot> root;
+[[vk::binding(0, 0)]] ConstantBuffer<FinalRoot> root;
 
 struct VertexOutput {
     float4 position : SV_Position;
