@@ -318,6 +318,7 @@ TextureDesc :: struct {
     format:         Format,
     mutable_format: bool, // Allow format-compatible descriptor views, but could lose DCC.
     usage:          TextureUsage,
+    sample_count:   u32,
 }
 
 texture_desc :: proc (
@@ -328,7 +329,8 @@ texture_desc :: proc (
     format:         Format = .rgba8_unorm,
     mutable_format: bool = false,
     usage:          TextureUsage = { .sampled },
-) -> TextureDesc { return { type, extent, mip_levels, layer_count, format, mutable_format, usage } }
+    sample_count:   u32 = 1,
+) -> TextureDesc { return { type, extent, mip_levels, layer_count, format, mutable_format, usage, sample_count } }
 
 TextureCopyDesc :: struct {
     mip_level:         u32,
@@ -1510,13 +1512,46 @@ PreparedTexture :: struct {
 
 get_texture_size_align :: proc (device: Device, desc: TextureDesc) -> (size: u64, align: u64) {
     assert(device != nil, #procedure + " called with a null device")
-    
+    if desc.sample_count > 1 { assert(supports_texture_sample_count(device, desc)) }
     texture: PreparedTexture
     prepare_texture(device, desc, &texture)
     requirements := image_memory_requirements(device, texture.image_info)
     
     size, align = cast(u64) requirements.size, cast(u64) requirements.alignment
     return size, align
+}
+
+supports_texture_sample_count :: proc (device: Device, desc: TextureDesc) -> bool {
+    assert(device != nil)
+    if to_vk(desc.sample_count) == {} || (desc.sample_count > 1 && desc.mip_levels != 1) { return false }
+    
+    texture: PreparedTexture
+    prepare_texture(device, desc, &texture)
+    
+    properties := vk.ImageFormatProperties2 { sType = .IMAGE_FORMAT_PROPERTIES_2 }
+    result := vk.GetPhysicalDeviceImageFormatProperties2(device.physical_device, &vk.PhysicalDeviceImageFormatInfo2 {
+        sType = .PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        format = texture.image_info.format,
+        type   = texture.image_info.imageType,
+        tiling = texture.image_info.tiling,
+        usage  = texture.image_info.usage,
+        flags  = texture.image_info.flags,
+    }, &properties)
+    
+    if result == .ERROR_FORMAT_NOT_SUPPORTED { return false }
+    require_vk(result)
+    
+    supported := properties.imageFormatProperties
+    if (supported.sampleCounts & texture.image_info.samples) == {} { return false }
+    
+    if texture.image_info.extent.width  > supported.maxExtent.width  ||
+       texture.image_info.extent.height > supported.maxExtent.height ||
+       texture.image_info.extent.depth  > supported.maxExtent.depth  ||
+       texture.image_info.mipLevels     > supported.maxMipLevels     ||
+       texture.image_info.arrayLayers   > supported.maxArrayLayers { return false }
+       
+    requirements := image_memory_requirements(device, texture.image_info)
+    return requirements.memoryTypeBits & ((cast(u32) 1) << device.texture_memory_type) != 0
 }
 
 create_texture :: proc (device: Device, desc: TextureDesc, heap: TextureHeap, offset: u64) -> Texture {
@@ -1762,8 +1797,9 @@ create_graphics_pso :: proc (
     depth_format:   Format             = .undefined,
     stencil_format: Format             = .undefined,
     rasterization:  RasterizationState = {},
+    sample_count:   u32                = 1,
     ) -> PSO { return create_raster_pso(device, nil, vertex_spirv, fragment_spirv, "", vertex_entry_point, fragment_entry_point,
-        color_targets, depth_format, stencil_format, rasterization, false) }
+        color_targets, depth_format, stencil_format, rasterization, false, sample_count) }
 
 create_mesh_pso :: proc (
     device: Device, 
@@ -1777,8 +1813,9 @@ create_mesh_pso :: proc (
     depth_format:   Format = .undefined,
     stencil_format: Format = .undefined,
     rasterization:  RasterizationState = {},
+    sample_count:   u32 = 1,
     ) -> PSO { return create_raster_pso(device, task_spirv, mesh_spirv, fragment_spirv, task_entry_point, mesh_entry_point, fragment_entry_point,
-        color_targets, depth_format, stencil_format, rasterization, true) }
+        color_targets, depth_format, stencil_format, rasterization, true, sample_count) }
 
 create_compute_pso :: proc (device: Device, compute_spirv: [] u8, compute_entry_point: cstring = "computeMain") -> PSO {
     assert(device != nil, #procedure + " called with a null device")

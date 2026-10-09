@@ -826,7 +826,7 @@ reset_retired_command_contexts :: proc (device: ^_Device) {
 ////////////////////////////////////////////////
 // Conversions
 
-to_vk :: proc { blend_to_vk, blend_factor_to_vk, load_to_vk, store_to_vk, format_to_vk, compare_to_vk, stencil_to_vk, stages_to_vk, access_to_vk, color_to_vk, index_to_vk, range_to_vk, texture_type_to_vk, filter_to_vk, address_mode_to_vk }
+to_vk :: proc { blend_to_vk, blend_factor_to_vk, load_to_vk, store_to_vk, format_to_vk, compare_to_vk, stencil_to_vk, stages_to_vk, access_to_vk, color_to_vk, index_to_vk, range_to_vk, texture_type_to_vk, filter_to_vk, address_mode_to_vk, sample_count_to_vk }
 
 blend_factor_to_vk :: proc (factor: BlendFactor) -> vk.BlendFactor {
     switch factor {
@@ -998,6 +998,19 @@ view_to_vk :: proc (type: TextureType) -> vk.ImageViewType {
     unreachable()
 }
 
+sample_count_to_vk :: proc (count: u32) -> vk.SampleCountFlags {
+    switch count {
+    case 1:  return { ._1 }
+    case 2:  return { ._2 }
+    case 4:  return { ._4 }
+    case 8:  return { ._8 }
+    case 16: return { ._16 }
+    case 32: return { ._32 }
+    case 64: return { ._64 }
+    }
+    return {}
+}
+
 format_to_vk :: proc (format: Format) -> vk.Format {
     switch format {
     case .r8_srgb:           return .R8_SRGB
@@ -1059,13 +1072,14 @@ format_to_vk :: proc (format: Format) -> vk.Format {
 
 create_raster_pso :: proc (device: Device, task_spirv, first_stage_spirv, fragment_spirv: [] u8,
     task_entry_point, first_stage_entry_point, fragment_entry_point: cstring, color_targets: [] ColorTargetDesc,
-    depth_format, stencil_format: Format, rasterization_state: RasterizationState, mesh: bool) -> PSO {
+    depth_format, stencil_format: Format, rasterization_state: RasterizationState, mesh: bool, sample_count: u32) -> PSO {
     assert(device != nil, "PSO creation called with a null device")
     
     check_spirv(task_spirv)
     check_spirv(first_stage_spirv)
     check_spirv(fragment_spirv)
     
+    assert(to_vk(sample_count) != {})
     assert(color_targets != nil && len(color_targets) <= max_color_attachments, "color targets must fit the wrappers's attachment array")
     mapping := vk.DescriptorSetAndBindingMappingEXT {
         sType = .DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
@@ -1191,7 +1205,7 @@ create_raster_pso :: proc (device: Device, task_spirv, first_stage_spirv, fragme
         },
         pMultisampleState = &vk.PipelineMultisampleStateCreateInfo {
             sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            rasterizationSamples = { ._1 },
+            rasterizationSamples = to_vk(sample_count),
         },
         pDepthStencilState = &vk.PipelineDepthStencilStateCreateInfo { sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO },
         pColorBlendState = &vk.PipelineColorBlendStateCreateInfo {
@@ -1498,6 +1512,7 @@ required_format_features :: proc (usage: TextureUsage) -> vk.FormatFeatureFlags2
 }
 
 prepare_texture :: proc (device: ^_Device, desc: TextureDesc, result: ^PreparedTexture) {
+    assert(to_vk(desc.sample_count) != {})
     result^ = {}
     
     usage: vk.ImageUsageFlags
@@ -1569,7 +1584,7 @@ prepare_texture :: proc (device: ^_Device, desc: TextureDesc, result: ^PreparedT
         extent        = { ** desc.extent },
         mipLevels     = desc.mip_levels,
         arrayLayers   = desc.layer_count,
-        samples       = { ._1 },
+        samples       = to_vk(desc.sample_count),
         tiling        = .OPTIMAL,
         usage         = usage,
         sharingMode   = .EXCLUSIVE,

@@ -62,6 +62,8 @@ main :: proc () {
     vulkan_fragment_path :: `build/vulkan.fragment.spirv`
     vulkan_composite_vertex_path   :: `build/vulkan.composite_vertex.spirv`
     vulkan_composite_fragment_path :: `build/vulkan.composite_fragment.spirv`
+    vulkan_resolve_vertex_path     :: `build/vulkan.resolve_vertex.spirv`
+    vulkan_resolve_fragment_path   :: `build/vulkan.resolve_fragment.spirv`
     vulkan_final_vertex_path       :: `build/vulkan.final_vertex.spirv`
     vulkan_final_fragment_path     :: `build/vulkan.final_fragment.spirv`
     vulkan_shader_stages := [] struct { source, stage, output: string } {
@@ -69,6 +71,8 @@ main :: proc () {
         { "code/render/vulkan.slang",           "fragment", `data/build/vulkan.fragment.spirv` },
         { "code/render/vulkan_composite.slang", "vertex",   `data/build/vulkan.composite_vertex.spirv` },
         { "code/render/vulkan_composite.slang", "fragment", `data/build/vulkan.composite_fragment.spirv` },
+        { "code/render/vulkan_resolve.slang",   "vertex",   `data/build/vulkan.resolve_vertex.spirv` },
+        { "code/render/vulkan_resolve.slang",   "fragment", `data/build/vulkan.resolve_fragment.spirv` },
         { "code/render/vulkan_final.slang",     "vertex",   `data/build/vulkan.final_vertex.spirv` },
         { "code/render/vulkan_final.slang",     "fragment", `data/build/vulkan.final_fragment.spirv` },
     }
@@ -161,6 +165,8 @@ main :: proc () {
         build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
         build_define("VulkanCompositeVertexSpirvPath",   vulkan_composite_vertex_path)
         build_define("VulkanCompositeFragmentSpirvPath", vulkan_composite_fragment_path)
+        build_define("VulkanResolveVertexSpirvPath",     vulkan_resolve_vertex_path)
+        build_define("VulkanResolveFragmentSpirvPath",   vulkan_resolve_fragment_path)
         build_define("VulkanFinalVertexSpirvPath",       vulkan_final_vertex_path)
         build_define("VulkanFinalFragmentSpirvPath",     vulkan_final_fragment_path)
         
