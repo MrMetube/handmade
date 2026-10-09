@@ -356,7 +356,7 @@ get_hash_from_id :: proc (hashes: [] $T, occupancy: [] u64, id: u32) -> ^T {
 add_entity_to_hash :: proc (region: ^SimRegion, entity: ^Entity) {
     entry := get_entity_hash_from_id(region, entity.id)
     
-    // :PointerArithmetic
+    // :PointerArithmetic:
     index := cast(umm) entry - cast(umm) &region.entity_hash[0]
     index /= size_of(EntityHash)
     assert(is_empty(region.entity_hash_occupancy[:], index))
@@ -375,7 +375,7 @@ get_or_add_brain :: proc (region: ^SimRegion, id: BrainId, kind: BrainKind) -> ^
     result := entry.pointer
     
     if result == nil {
-        // :PointerArithmetic
+        // :PointerArithmetic:
         index := cast(umm) entry - cast(umm) &region.brain_hash[0]
         index /= size_of(BrainHash)
         assert(is_empty(region.brain_hash_occupancy[:], index))
@@ -398,13 +398,13 @@ get_or_add_brain :: proc (region: ^SimRegion, id: BrainId, kind: BrainKind) -> ^
 }
 
 mark_occupied_entity :: proc (region: ^SimRegion, entry: ^EntityHash) {
-    // :PointerArithmetic
+    // :PointerArithmetic:
     index := cast(umm) entry - cast(umm) &region.entity_hash[0]
     index /= size_of(EntityHash)
     mark_bit(region.entity_hash_occupancy[:], cast(u64) index)
 }
 mark_occupied_brain :: proc (region: ^SimRegion, entry: ^BrainHash) {
-    // :PointerArithmetic
+    // :PointerArithmetic:
     index := cast(umm) entry - cast(umm) &region.brain_hash[0]
     index /= size_of(BrainHash)
     mark_bit(region.brain_hash_occupancy[:], cast(u64) index)

@@ -563,7 +563,7 @@ acquire_asset_memory :: proc (assets: ^Assets, asset_index: $Id/u32, div: ^Divid
         if block != nil && block.size >= size {
             block.flags += { .Used }
             
-            { // :PointerArithmetic
+            { // :PointerArithmetic:
                 blocks := cast([^]AssetMemoryBlock) block
                 next_block := &blocks[1]
                 result = cast(^AssetMemoryHeader) next_block
@@ -581,7 +581,7 @@ acquire_asset_memory :: proc (assets: ^Assets, asset_index: $Id/u32, div: ^Divid
                 
                 if remaining_size >= BlockSplitThreshhold {
                     block.size -= remaining_size
-                    // :PointerArithmetic
+                    // :PointerArithmetic:
                     insert_block(block, (cast([^]u8)result)[size:], remaining_size)
                 }
                 break
@@ -598,7 +598,7 @@ acquire_asset_memory :: proc (assets: ^Assets, asset_index: $Id/u32, div: ^Divid
                     }
                     list_remove(it)
                     
-                    // :PointerArithmetic
+                    // :PointerArithmetic:
                     block = &(cast([^]AssetMemoryBlock) asset.header)[-1]
                     block.flags -= { .Used }
                     
@@ -664,7 +664,7 @@ merge_if_possible :: proc (assets: ^Assets, first, second: ^AssetMemoryBlock) ->
     result: bool
     if first != &assets.memory_sentinel && second != &assets.memory_sentinel && second != nil {
         if .Used not_in first.flags && .Used not_in second.flags {
-            // :PointerArithmetic
+            // :PointerArithmetic:
             expect_second_memory := &(cast([^]u8) first)[size_of(AssetMemoryBlock) + first.size] 
             if cast(pmm) second == expect_second_memory {
                 list_remove(second)
@@ -913,7 +913,7 @@ Divider :: struct {
 }
 
 divider_acquire :: proc (divider: ^Divider, header: ^AssetMemoryHeader) -> (total_memory: pmm) {
-    // :PointerArithmetic
+    // :PointerArithmetic:
     HeaderSize :: size_of(AssetMemoryHeader)
     total_memory   = ((cast([^]u8) header)[HeaderSize:])
     divider.memory = slice_from_parts(u8, total_memory, header.total_size - HeaderSize)
@@ -944,7 +944,7 @@ divider_hand_over :: proc (divider: ^Divider) {
     assert(divider.slice_count == divider.size_count)
     for entry in divider.entries[:divider.slice_count] {
         #no_bounds_check {
-            // :PointerArithmetic
+            // :PointerArithmetic:
             entry.slice^   = divider.memory[:entry.count]
             info := type_info_of(entry.element)
             divider.memory = divider.memory[cast(u64) info.size * entry.count:]

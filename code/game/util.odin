@@ -182,10 +182,10 @@ assert :: proc (condition: bool, message := #caller_expression(condition), loc :
 
 slice_from_parts :: proc { slice_from_parts_type, slice_from_parts_type_of_data_pointer }
 slice_from_parts_type :: proc ($T: typeid, data: pmm, #any_int count: i64) -> [] T {
-    return (cast([^]T) data)[:count] // :PointerArithmetic
+    return (cast([^]T) data)[:count]
 }
 slice_from_parts_type_of_data_pointer :: proc (data: ^$T, #any_int count: i64) -> [] T {
-    return (cast([^]T) data)[:count] // :PointerArithmetic
+    return (cast([^]T) data)[:count]
 }
 
 dynamic_array_from_parts :: proc ($T: typeid, data: pmm, #any_int length, capacity: int, allocator: Maybe(Allocator) = nil) -> [dynamic] T {

@@ -1,3 +1,5 @@
+#include "vulkan_shared.slang"
+
 struct CompositeRoot {
     uint texture_descriptors[4];
     uint peel_count;
@@ -23,7 +25,7 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID) {
 
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target0 {
-    SamplerState      sampler = SamplerDescriptorHeap[0];
+    SamplerState      sampler = SamplerDescriptorHeap[uint(Sampler.Nearest)];
     Texture2D<float4> texture = ResourceDescriptorHeap[root.texture_descriptors[root.peel_count - 1]];
     float4 result = texture.Sample(sampler, input.uv);
 

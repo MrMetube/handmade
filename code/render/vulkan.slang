@@ -1,3 +1,5 @@
+#include "vulkan_shared.slang"
+
 struct TexturedVertex {
     float4 p;
     uint   n;
@@ -74,7 +76,7 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID) {
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target0 {
     Texture2D<float4> texture = ResourceDescriptorHeap[input.texture_descriptor];
-    SamplerState sampler = SamplerDescriptorHeap[0];
+    SamplerState      sampler = SamplerDescriptorHeap[uint(Sampler.Linear)];
     float4 modulated = input.color * texture.Sample(sampler, input.uv);
 
     float alpha_amount = 0.0f;

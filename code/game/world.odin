@@ -529,7 +529,7 @@ use_space_in_chunk :: proc (world: ^World, pack_size: i64, chunk: ^Chunk) -> ^En
     
     block := chunk.first_block
     
-    // :PointerArithmetic
+    // :PointerArithmetic:
     count := len(block.entity_data)
     resize(&block.entity_data, count + cast(int) pack_size)
     result := cast(^Entity) &block.entity_data[count]

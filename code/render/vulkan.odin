@@ -75,6 +75,12 @@ VulkanTextureDescriptor :: enum u32 {
     count = first_dynamic_texture + max_vulkan_textures,
 }
 
+// :VulkanSamplers: Keep these slots matched with vulkan_shared.slang.
+VulkanSampler :: enum u32 {
+    Linear  = 0,
+    Nearest = 1,
+}
+
 VulkanFrame :: struct {
     data_heap:      gpu.GpuHeap,
     data_allocator: gpu.BumpAllocator,
@@ -123,7 +129,7 @@ VulkanCompositeRoot :: struct {
 
 VulkanFinalRoot :: struct {
     texture_descriptor: u32,
-    sampler_descriptor: u32,
+    sampler_descriptor: VulkanSampler,
 }
 
 ////////////////////////////////////////////////
@@ -145,14 +151,14 @@ init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
     vulkan.texture_upload_allocator = gpu.bump_allocator(vulkan.texture_upload_heap.range)
     
     vulkan.texture_descriptor_heap = gpu.create_texture_descriptor_heap(device, cast(u32) VulkanTextureDescriptor.count)
-    vulkan.sampler_descriptor_heap = gpu.create_sampler_descriptor_heap(device, 2)
+    vulkan.sampler_descriptor_heap = gpu.create_sampler_descriptor_heap(device, len(VulkanSampler))
     
     vulkan.texture_heap      = gpu.create_texture_heap(device, texture_heap_size)
     vulkan.texture_allocator = gpu.texture_allocator(device, vulkan.texture_heap, cast(u32) VulkanTextureDescriptor.count)
     
     vulkan.next_texture_descriptor = cast(u32) VulkanTextureDescriptor.first_dynamic_texture
-    gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, 0, min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
-    gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, 1, min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
+    gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, cast(u32) VulkanSampler.Linear, min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
+    gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, cast(u32) VulkanSampler.Nearest, min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     
     vertex_spirv             := read_vulkan_spirv(VulkanVertexSpirvPath)
     fragment_spirv           := read_vulkan_spirv(VulkanFragmentSpirvPath)
@@ -414,7 +420,7 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
         root := gpu.bump_allocate(&frame_data.data_allocator, VulkanFinalRoot)
         root.cpu^ = {
             texture_descriptor = vulkan.composite_buffer.descriptor_index,
-            sampler_descriptor = render_commands.pixelation_hint ? 1 : 0,
+            sampler_descriptor = render_commands.pixelation_hint ? .Nearest : .Linear,
         }
         gpu.draw(commands, root.gpu, 3)
         

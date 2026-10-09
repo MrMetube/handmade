@@ -1,4 +1,4 @@
-# @todo(viktor):
+# @todo
 
 ### Graphics Upgrade
     - fix unproject
@@ -53,8 +53,8 @@
     
 ### Other
 - Types
-    - more :PlatformArena for files
-    - less :PointerArithmetic
+    - more :PlatformArena: for files
+    - less :PointerArithmetic:
 - Debug UI
     - make better and hopefully unique colors
     - Color per unit/file, Game, Debug, Renderer, Platform

@@ -3,7 +3,7 @@ package main
 import win "core:sys/windows"
 
 FileHandle :: struct {
-    handle:    win.HANDLE,
+    handle: win.HANDLE,
 }
 
 FileGroup :: struct {
@@ -28,7 +28,7 @@ begin_processing_all_files_of_type :: proc (type: PlatformFileType) -> (result: 
         pattern[i+2] = cast(u16) r
     }
     
-    // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
+    // @todo :PlatformArena: if we want someday, make an actual arena for windows platform layer
     group := new(FileGroup)
     if group != nil {
         group.find_handle = win.FindFirstFileW(cast(cstring16) &pattern[0], &group.data)
@@ -54,7 +54,7 @@ open_next_file :: proc (group: ^PlatformFileGroup) -> (result: PlatformFileHandl
     file_group := cast(^FileGroup) group._platform
     
     if file_group.find_handle != win.INVALID_HANDLE_VALUE {
-        // @todo(viktor): :PlatformArena if we want someday, make an actual arena for windows platform layer
+        // @todo :PlatformArena: if we want someday, make an actual arena for windows platform layer
         // @leak the file handles can only be freed once the load_work, which is threaded, completes
         file_handle := new(FileHandle)
         
