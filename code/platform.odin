@@ -692,11 +692,11 @@ main :: proc () {
                     }
                     
                     window_dc := win.GetDC(window)
-                    attached := render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
+                    attached  := render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
                     win.ReleaseDC(window, window_dc)
                     
                     if attached {
-                        render_dll.is_valid = true
+                        render_dll.is_valid   = true
                         render_dll.write_time = write_time
                     } else {
                         // A state layout/backend mismatch requires a restart.
@@ -1125,7 +1125,7 @@ toggle_fullscreen :: proc (window: win.HWND) {
     if style & win.WS_OVERLAPPEDWINDOW != 0 {
         info := win.MONITORINFO{cbSize = size_of(win.MONITORINFO)}
         if win.GetWindowPlacement(window, &GlobalPlatformState.window_position) && 
-        win.GetMonitorInfoW(win.MonitorFromWindow(window, .MONITOR_DEFAULTTOPRIMARY), &info) {
+            win.GetMonitorInfoW(win.MonitorFromWindow(window, .MONITOR_DEFAULTTOPRIMARY), &info) {
             win.SetWindowLongW(window, win.GWL_STYLE, cast(i32) (style &~ win.WS_OVERLAPPEDWINDOW))
             win.SetWindowPos(window, win.HWND_TOP, 
                 info.rcMonitor.left, info.rcMonitor.top,

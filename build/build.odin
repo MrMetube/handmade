@@ -16,9 +16,6 @@ native   :: true
 optimize :: false
 internal :: true
 
-// @todo speed this up, it already takes ~3.5s
-
-
 /* 
  @todo(viktor):
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
@@ -123,8 +120,7 @@ main :: proc () {
         delete_all_like("./build", `game-\d+\.rdi`)
         delete_all_like("./build", `game-\d+\.pdb`)
         
-        create_build_lock("./game.lock")
-        
+        create_build_lock("./build/game.lock")
         
         append(cmd, "-build-mode:dll")
         append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
@@ -152,7 +148,7 @@ main :: proc () {
         delete_all_like("./build", `render-\d+\.rdi`)
         delete_all_like("./build", `render-\d+\.pdb`)
         
-        create_build_lock("./render.lock")
+        create_build_lock("./build/render.lock")
         append(cmd, "-build-mode:dll")
         append(cmd, fmt.tprintf(`-pdb-name:./build/render-%d.pdb`, random_number()))
         
@@ -172,6 +168,8 @@ main :: proc () {
         
         end_build(cmd, async = procs)
     }
+    
+    procs_flush(procs)
     
     { // platform
         target :: "debug.exe"
@@ -222,10 +220,11 @@ main :: proc () {
 // @note the platform checks these lock files when hot-reloading
 @(deferred_out=delete_build_lock)
 create_build_lock :: proc (path: string) -> (string) {
-    file, err := os.open(path, {.Create})
+    file, err := os.open(path, {.Create, .Trunc, .Write})
     if err != nil {
         fmt.printf("ERROR: %v\n", err)
     } else {
+        fmt.printf("INFO: Created lock file at %q\n", path)
         fmt.fprint(file, "WAITING FOR PDB")
     }
     os.close(file)

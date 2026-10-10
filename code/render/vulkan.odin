@@ -123,6 +123,7 @@ VulkanQuadRoot :: struct {
     vertices:                  [^] Textured_Vertex,
     texture_descriptors:       [^] u32,
     camera_p:                  v3,
+    light_p: v3,
     fog_direction:             v3,
     fog_color:                 v3,
     fog_begin:                 f32,
@@ -132,6 +133,7 @@ VulkanQuadRoot :: struct {
     vertex_base:               u32,
     previous_depth_descriptor: u32,
     alpha_threshold:           f32,
+    _padding: u32,
 }
 
 VulkanCompositeRoot :: struct {
@@ -142,7 +144,7 @@ VulkanCompositeRoot :: struct {
 VulkanResolveRoot :: struct {
     color_descriptor: u32,
     depth_descriptor: u32,
-    sample_count:      u32,
+    sample_count:     u32,
 }
 
 VulkanFinalRoot :: struct {
@@ -178,6 +180,10 @@ init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
     gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, cast(u32) VulkanSampler.Linear, min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, cast(u32) VulkanSampler.Nearest, min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     
+    create_psos(vulkan)
+}
+
+create_psos :: proc (vulkan: ^Vulkan) {
     vertex_spirv             := read_vulkan_spirv(VulkanVertexSpirvPath)
     fragment_spirv           := read_vulkan_spirv(VulkanFragmentSpirvPath)
     composite_vertex_spirv   := read_vulkan_spirv(VulkanCompositeVertexSpirvPath)
@@ -197,27 +203,32 @@ init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
         delete(final_fragment_spirv)
     }
     
-    vulkan.quad_pso = gpu.create_graphics_pso(device,
+    gpu.destroy_pso(vulkan.quad_pso)
+    gpu.destroy_pso(vulkan.composite_pso)
+    gpu.destroy_pso(vulkan.resolve_pso)
+    gpu.destroy_pso(vulkan.final_pso)
+    
+    vulkan.quad_pso = gpu.create_graphics_pso(vulkan.device,
         vertex_spirv   = vertex_spirv,
         fragment_spirv = fragment_spirv,
         color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
         depth_format   = .d32_float,
         rasterization  = { cull = .counter_clockwise },
     )
-    vulkan.composite_pso = gpu.create_graphics_pso(device,
+    vulkan.composite_pso = gpu.create_graphics_pso(vulkan.device,
         vertex_spirv   = composite_vertex_spirv,
         fragment_spirv = composite_fragment_spirv,
         color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
         rasterization  = { cull = .none },
     )
-    vulkan.resolve_pso = gpu.create_graphics_pso(device,
+    vulkan.resolve_pso = gpu.create_graphics_pso(vulkan.device,
         vertex_spirv   = resolve_vertex_spirv,
         fragment_spirv = resolve_fragment_spirv,
         color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
         depth_format   = .d32_float,
         rasterization  = { cull = .none },
     )
-    vulkan.final_pso = gpu.create_graphics_pso(device,
+    vulkan.final_pso = gpu.create_graphics_pso(vulkan.device,
         vertex_spirv   = final_vertex_spirv,
         fragment_spirv = final_fragment_spirv,
         color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
@@ -389,10 +400,11 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
             
             root := gpu.bump_allocate(&frame_data.data_allocator, VulkanQuadRoot)
             root.cpu^ = {
+                projection                = setup.projection,
                 vertices                  = uploads.vertices.gpu,
-                projection                = (setup.projection),
                 texture_descriptors       = &uploads.texture_descriptors.gpu[entry.bitmap_offset],
                 camera_p                  = setup.camera_p,
+                light_p                   = setup.debug_light_p,
                 fog_direction             = setup.fog_direction,
                 fog_color                 = setup.fog_color,
                 fog_begin                 = setup.fog_begin,
@@ -744,7 +756,8 @@ vk_shutdown :: proc (vulkan: ^Vulkan) {
     gpu.destroy_device(device)
 }
 
-rebind_device :: proc (device: gpu.Device) -> bool {
+rebind_device :: proc (vulkan: ^Vulkan) -> bool {
+    device := vulkan.device
     if device == nil { return false }
     
     address, found := dynlib.symbol_address(cast(dynlib.Library) device.vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
@@ -754,8 +767,12 @@ rebind_device :: proc (device: gpu.Device) -> bool {
     vk.load_proc_addresses_instance(device.instance)
     vk.load_proc_addresses_device(device.device)
     
+    // @todo this doesnt seem to properly reload the shaders. why?
+    create_psos(vulkan)
+    
     device.destroy_debug_messenger = auto_cast vk.GetInstanceProcAddr(device.instance, "vkDestroyDebugUtilsMessengerEXT")
-    return vk.CmdBindResourceHeapEXT != nil && vk.CmdBindSamplerHeapEXT != nil && vk.CmdPushDataEXT != nil
+    result := vk.CmdBindResourceHeapEXT != nil && vk.CmdBindSamplerHeapEXT != nil && vk.CmdPushDataEXT != nil
+    return result
 }
 
 ////////////////////////////////////////////////
@@ -772,16 +789,17 @@ rebind_device :: proc (device: gpu.Device) -> bool {
 #assert(offset_of(VulkanQuadRoot, vertices)                  == 64)
 #assert(offset_of(VulkanQuadRoot, texture_descriptors)       == 72)
 #assert(offset_of(VulkanQuadRoot, camera_p)                  == 80)
-#assert(offset_of(VulkanQuadRoot, fog_direction)             == 92)
-#assert(offset_of(VulkanQuadRoot, fog_color)                 == 104)
-#assert(offset_of(VulkanQuadRoot, fog_begin)                 == 116)
-#assert(offset_of(VulkanQuadRoot, fog_end)                   == 120)
-#assert(offset_of(VulkanQuadRoot, clip_alpha_begin)          == 124)
-#assert(offset_of(VulkanQuadRoot, clip_alpha_end)            == 128)
-#assert(offset_of(VulkanQuadRoot, vertex_base)               == 132)
-#assert(offset_of(VulkanQuadRoot, previous_depth_descriptor) == 136)
-#assert(offset_of(VulkanQuadRoot, alpha_threshold)           == 140)
-#assert(size_of(VulkanQuadRoot)                              == 144)
+#assert(offset_of(VulkanQuadRoot, light_p)                   == 92)
+#assert(offset_of(VulkanQuadRoot, fog_direction)             == 104)
+#assert(offset_of(VulkanQuadRoot, fog_color)                 == 116)
+#assert(offset_of(VulkanQuadRoot, fog_begin)                 == 128)
+#assert(offset_of(VulkanQuadRoot, fog_end)                   == 132)
+#assert(offset_of(VulkanQuadRoot, clip_alpha_begin)          == 136)
+#assert(offset_of(VulkanQuadRoot, clip_alpha_end)            == 140)
+#assert(offset_of(VulkanQuadRoot, vertex_base)               == 144)
+#assert(offset_of(VulkanQuadRoot, previous_depth_descriptor) == 148)
+#assert(offset_of(VulkanQuadRoot, alpha_threshold)           == 152)
+#assert(size_of(VulkanQuadRoot)                              == 160)
 
 #assert(offset_of(VulkanCompositeRoot, texture_descriptors) == 0)
 #assert(offset_of(VulkanCompositeRoot, peel_count)          == 16)

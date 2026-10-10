@@ -58,7 +58,8 @@ load_dll :: proc (dll: Dll) -> (lib: win.HMODULE, last_write_time: u64) {
 }
 
 needs_to_be_reloaded :: proc (dll: Dll) -> bool {
-    result := get_last_write_time(dll.name) != dll.write_time
+    last_write_time := get_last_write_time(dll.name)
+    result := last_write_time != dll.write_time
     return result
 }
 
