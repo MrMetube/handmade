@@ -58,7 +58,7 @@ OpenGL :: struct {
     zbias_depth_peel:    ZBiasProgram, // @note(viktor): passes 1 through n
     peel_composite:      PeelCompositeProgram, // @note(viktor): composite all passes
     final_stretch:       FinalStretchProgram,
-    multisample_resolve: MultisampleResolve,
+    multisample_resolve: MultisampleResolveProgram,
  
     light_buffers: [dynamic; 12] LightBuffer,
 }

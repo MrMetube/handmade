@@ -39,6 +39,7 @@ Bitmap :: struct {
     
 @(common)
 RenderSettings :: struct {
+    // @todo these should all be compilation values, i.e. the renderer recompiles the psos if these change.
     dimension:             v2i,
     depth_peel_count_hint: u32,
     multisampling_hint:    bool,

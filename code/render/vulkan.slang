@@ -1,4 +1,4 @@
-#include "vulkan_shared.slang"
+#include "shared.slang"
 
 struct TexturedVertex {
     float4 p;
@@ -82,22 +82,6 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID) {
     output.texture_descriptor = root.texture_descriptors[quad_index];
     
     return output;
-    ////////////////////////////////////////////////
-    /*
-    
-    VertexOutput output;
-    output.world_p = float4(minimum_depth_position.xy, modified_depth, minimum_depth_position.w);
-    // Adapt RenderSetup's OpenGL clip space at the Vulkan shader boundary.
-    output.world_p.y = -output.world_p.y;
-    output.world_p.z = 0.5f * (output.world_p.z + output.world_p.w);
-    
-    
-    output.fog_distance = dot(biased_position.xyz - root.camera_p, root.fog_direction);
-    output.texture_descriptor = root.texture_descriptors[quad_index];
-    
-    
-    return output;
-    */
 }
 
 [shader("fragment")]
@@ -106,10 +90,10 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
     SamplerState      sampler = SamplerDescriptorHeap[uint(Sampler.Linear)];
     
     if (root.previous_depth_descriptor != 0) {
-        Texture2D<float4> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
+        Texture2D<float> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
         
         float frag_z = input.fragment_p.z;
-        float clip_depth = previous_depth.Load(int3(int2(input.fragment_p.xy), 0)).r;
+        float clip_depth = previous_depth.Load(int3(int2(input.fragment_p.xy), 0));
         
         if (frag_z <= clip_depth) {
             discard;
@@ -131,11 +115,11 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
         float camera_distance = length(root.camera_p);
         to_camera *= 1.0/camera_distance;
         
-        float3 light_total = float3(1.0,1.0,1.0);
-        if (LIGHTING) {
-            float3 light_strength = float3(6.0,1.0,4.0);
-            float3 to_light      = root.light_p - input.world_p.xyz;
-            float light_distance = length(root.light_p);
+        float3 light_total = float3(1.0, 1.0, 1.0);
+        if (!LIGHTING) {
+            float3 light_strength = float3(6.0, 1.0, 4.0);
+            float3 to_light       = root.light_p - input.world_p.xyz;
+            float light_distance  = length(root.light_p);
             to_light *= 1/light_distance;
             
             float3 cos_light_angle = float3(
@@ -143,7 +127,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
                 dot(to_light, input.world_n),
                 dot(to_light, input.world_n), // ?
             );
-            cos_light_angle = clamp(cos_light_angle, 0., 1.);
+            cos_light_angle = clamp(cos_light_angle, 0.0, 1.0);
             
             float3 reflected_d = -to_camera + 2 * dot(input.world_n, to_camera) * input.world_n;
             float3 cos_reflected = float3(
@@ -151,7 +135,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
                 dot(to_light, reflected_d),
                 dot(to_light, reflected_d),
             );
-            cos_reflected = clamp(cos_reflected, 0., 1.);
+            cos_reflected = clamp(cos_reflected, 0.0, 1.0);
             
             cos_reflected *= cos_reflected;
             cos_reflected *= cos_reflected;
@@ -161,10 +145,10 @@ float4 fragmentMain(VertexOutput input) : SV_Target0 {
             
             float3 light_amount = light_strength / square(light_distance);
             
-            float diffuse_c = 0.5f;
+            float diffuse_c      = 0.5f;
             float3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
             
-            float spec_c = 2.0f;
+            float spec_c      = 2.0f;
             float3 spec_light = spec_c * cos_reflected * light_amount;
             
             light_total = diffuse_light + spec_light;

@@ -6,7 +6,7 @@ import "core:os"
 
 // "-build-diagnostics"
 
-platform_flags := [] string { "-subsystem:windows", `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
+platform_flags := [] string { /* "-subsystem:windows", */ `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 
 PedanticGame     :: false
 PedanticRender   :: false
@@ -55,32 +55,29 @@ main :: proc () {
     make_directory_if_not_exists("./data")
     make_directory_if_not_exists("./data/build")
     
-    vulkan_vertex_path   :: `build/vulkan.vertex.spirv`
-    vulkan_fragment_path :: `build/vulkan.fragment.spirv`
-    vulkan_composite_vertex_path   :: `build/vulkan.composite_vertex.spirv`
-    vulkan_composite_fragment_path :: `build/vulkan.composite_fragment.spirv`
-    vulkan_resolve_vertex_path     :: `build/vulkan.resolve_vertex.spirv`
-    vulkan_resolve_fragment_path   :: `build/vulkan.resolve_fragment.spirv`
-    vulkan_final_vertex_path       :: `build/vulkan.final_vertex.spirv`
-    vulkan_final_fragment_path     :: `build/vulkan.final_fragment.spirv`
-    vulkan_shader_stages := [] struct { source, stage, output: string } {
-        { "code/render/vulkan.slang",           "vertex",   `data/build/vulkan.vertex.spirv` },
-        { "code/render/vulkan.slang",           "fragment", `data/build/vulkan.fragment.spirv` },
-        { "code/render/vulkan_composite.slang", "vertex",   `data/build/vulkan.composite_vertex.spirv` },
-        { "code/render/vulkan_composite.slang", "fragment", `data/build/vulkan.composite_fragment.spirv` },
-        { "code/render/vulkan_resolve.slang",   "vertex",   `data/build/vulkan.resolve_vertex.spirv` },
-        { "code/render/vulkan_resolve.slang",   "fragment", `data/build/vulkan.resolve_fragment.spirv` },
-        { "code/render/vulkan_final.slang",     "vertex",   `data/build/vulkan.final_vertex.spirv` },
-        { "code/render/vulkan_final.slang",     "fragment", `data/build/vulkan.final_fragment.spirv` },
+    shaders := [] struct { source, stage, path, define: string } {
+        { "code/render/vulkan.slang",             "vertex",   "build/zbias_vertex.spirv",                 "Path_z_bias_vertex"},
+        { "code/render/vulkan.slang",             "fragment", "build/zbias_fragment.spirv",               "Path_z_bias_fragment"},
+        { "code/render/vulkan_composite.slang",   "vertex",   "build/peel_composite_vertex.spirv",        "Path_peel_composite_vertex"},
+        { "code/render/vulkan_composite.slang",   "fragment", "build/peel_composite_fragment.spirv",      "Path_peel_composite_fragment"},
+        { "code/render/vulkan_resolve.slang",     "vertex",   "build/multisample_resolve_vertex.spirv",   "Path_multisample_resolve_vertex"},
+        { "code/render/vulkan_resolve.slang",     "fragment", "build/multisample_resolve_fragment.spirv", "Path_multisample_resolve_fragment"},
+        { "code/render/vulkan_final.slang",       "vertex",   "build/final_stretch_vertex.spirv",         "Path_final_stretch_vertex"},
+        { "code/render/vulkan_final.slang",       "fragment", "build/final_stretch_fragment.spirv",       "Path_final_stretch_fragment"},
+        { "code/render/fake_seed_lighting.slang", "vertex",   "build/fake_seed_lighting_vertex.spirv",    "Path_fake_seed_lighting_vertex"},
+        { "code/render/fake_seed_lighting.slang", "fragment", "build/fake_seed_lighting_fragment.spirv",  "Path_fake_seed_lighting_fragment"},
+        { "code/render/multigrid_light_up.slang", "vertex",   "build/multigrid_light_up_vertex.spirv",    "Path_multigrid_light_up_vertex"},
+        { "code/render/multigrid_light_up.slang", "fragment", "build/multigrid_light_up_fragment.spirv",  "Path_multigrid_light_up_fragment"},
     }
-    for shader in vulkan_shader_stages {
+    
+    for shader in shaders {
         append(cmd, "slangc")
         append(cmd, shader.source)
         if !optimize { append(cmd, "-g") }
         append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
         append(cmd, fmt.tprintf("%sMain", shader.stage))
         append(cmd, "-stage", shader.stage)
-        append(cmd, "-o", shader.output)
+        append(cmd, "-o", fmt.tprintf("data/%s", shader.path))
         run_command(cmd, async = procs)
     }
     
@@ -126,7 +123,7 @@ main :: proc () {
         append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
         
         build_meander()
-        build_optimizations(optimize)
+        build_optimizations(optimize, unoptimized = "-o:minimal")
         build_native(native)
         
         build_pedantic(PedanticGame)
@@ -153,18 +150,14 @@ main :: proc () {
         append(cmd, fmt.tprintf(`-pdb-name:./build/render-%d.pdb`, random_number()))
         
         build_meander()
-        build_optimizations(optimize)
+        build_optimizations(optimize, unoptimized = "-o:minimal")
         build_native(native)
         append(cmd, custom_attribute_flag)
         if internal { build_define("INTERNAL", "true") }
-        build_define("VulkanVertexSpirvPath",   vulkan_vertex_path)
-        build_define("VulkanFragmentSpirvPath", vulkan_fragment_path)
-        build_define("VulkanCompositeVertexSpirvPath",   vulkan_composite_vertex_path)
-        build_define("VulkanCompositeFragmentSpirvPath", vulkan_composite_fragment_path)
-        build_define("VulkanResolveVertexSpirvPath",     vulkan_resolve_vertex_path)
-        build_define("VulkanResolveFragmentSpirvPath",   vulkan_resolve_fragment_path)
-        build_define("VulkanFinalVertexSpirvPath",       vulkan_final_vertex_path)
-        build_define("VulkanFinalFragmentSpirvPath",     vulkan_final_fragment_path)
+        
+        for shader in shaders {
+            build_define(shader.define, shader.path)
+        }
         
         end_build(cmd, async = procs)
     }
@@ -186,7 +179,7 @@ main :: proc () {
             if !generate_platform_api_bindings(&metaprogram, "./code/generated-platform_api.odin", main_package)                      do os.exit(1)
             
             build_meander()
-            build_optimizations(optimize)
+            build_optimizations(optimize, unoptimized = "-o:minimal")
             build_native(native)
             
             build_pedantic(PedanticPlatform)

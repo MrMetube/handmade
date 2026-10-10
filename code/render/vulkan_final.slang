@@ -12,12 +12,12 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertexMain(uint vertex_id : SV_VertexID) {
-    float2 positions[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };
-    float2 uvs[3]       = { float2( 0,  0), float2(2,  0), float2( 0, 2) };
+    const float2 positions[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };
+    const float2 uvs[3]       = { float2( 0,  0), float2(2,  0), float2( 0, 2) };
     
     VertexOutput result;
     result.position = float4(positions[vertex_id], 0, 1);
-    result.uv = uvs[vertex_id];
+    result.uv       = uvs[vertex_id];
     
     return result;
 }
@@ -26,5 +26,7 @@ VertexOutput vertexMain(uint vertex_id : SV_VertexID) {
 float4 fragmentMain(VertexOutput input) : SV_Target0 {
     Texture2D<float4> texture = ResourceDescriptorHeap[root.texture_descriptor];
     SamplerState      sampler = SamplerDescriptorHeap[ root.sampler_descriptor];
-    return texture.Sample(sampler, input.uv);
+    
+    float4 result = texture.Sample(sampler, input.uv);
+    return result;
 }

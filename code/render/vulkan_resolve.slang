@@ -1,10 +1,10 @@
-struct ResolveRoot {
+struct Root {
     uint color_descriptor;
     uint depth_descriptor;
     uint sample_count;
 };
 
-[[vk::binding(0, 0)]] ConstantBuffer<ResolveRoot> root;
+[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
 
 struct VertexOutput {
     float4 position : SV_Position;

@@ -82,6 +82,9 @@ change_pitch :: proc (mixer: ^Mixer, sound: ^PlayingSound, pitch: f32) {
 output_playing_sounds :: proc (mixer: ^Mixer, temporary_arena: ^Arena, assets: ^Assets, sound_buffer: GameSoundBuffer) {
     timed_function()
     
+    // @todo move the last copy loop to use regular simd intrinsics. It currently tries to read address 0xffffffff_ffffffff :(
+    if true { return }
+    
     mixer_memory := begin_temporary_memory(temporary_arena)
     defer end_temporary_memory(mixer_memory)
     

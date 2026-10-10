@@ -282,7 +282,7 @@ void main (void) {
 
 ////////////////////////////////////////////////
 
-MultisampleResolve :: struct {
+MultisampleResolveProgram :: struct {
     using base: OpenGLProgram,
     
     using shared_uniforms : struct {},
@@ -294,7 +294,7 @@ MultisampleResolve :: struct {
     },
 }
 
-compile_multisample_resolve :: proc (program: ^MultisampleResolve) {
+compile_multisample_resolve :: proc (program: ^MultisampleResolveProgram) {
     common := `
 // @todo(viktor): depth is non-linear - can we do something here that is based on ratio?
 #define DepthThreshold 0.001f
@@ -416,7 +416,7 @@ begin_program_final_stretch :: proc (program: FinalStretchProgram) {
     // @todo(viktor): @metaprogram here?
     gl.Uniform1i(auto_cast program.image, 0)
 }
-begin_program_multisample_resolve :: proc (program: MultisampleResolve) {
+begin_program_multisample_resolve :: proc (program: MultisampleResolveProgram) {
     begin_program_common(program)
     
     // @todo(viktor): @metaprogram here?

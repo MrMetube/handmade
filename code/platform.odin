@@ -25,7 +25,7 @@ import win "core:sys/windows"
 RenderDimension := v2i{1920, 1080}
 // RenderDimension := v2i{2560, 1440}
 
-MonitorRefreshHz :: 144
+MonitorRefreshHz :: 90
 
 HighPriorityThreads :: 9
 LowPriorityThreads  :: 2
@@ -411,7 +411,7 @@ main :: proc () {
                         button.ended_down = old_keyboard_controller.buttons[index].ended_down
                     }
                     
-                    if process_pending_messages(&GlobalPlatformState, new_keyboard_controller) {
+                    if process_pending_messages(&GlobalPlatformState, new_keyboard_controller, render_state) {
                         running = false
                     }
                 }
@@ -1218,7 +1218,7 @@ process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: bool) {
     }
 }
 
-process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController) -> bool {
+process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController, render_state: ^Render_State) -> bool {
     quit_requested: bool
     message: win.MSG
     for {
@@ -1248,43 +1248,67 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             
             vk_code := message.wParam
             
-            AltDown :: 1 << 29
-            WasDown :: 1 << 30
-            IsUp    :: 1 << 31
-            
-            alt_down := (message.lParam & AltDown) != 0
-            was_down := (message.lParam & WasDown) != 0
-            is_down  := (message.lParam & IsUp)    == 0
+            AltDown   :: 1 << 29
+            WasDown   :: 1 << 30
+            IsUp      :: 1 << 31
+            ShiftDown :: 1 << 15
+            alt_down   := (message.lParam & AltDown) != 0
+            was_down   := (message.lParam & WasDown) != 0
+            is_down    := (message.lParam & IsUp)    == 0
+            shift_down := (cast(u16) win.GetKeyState(win.VK_SHIFT) & ShiftDown) != 0
             
             if was_down == is_down { continue }
+            
             switch vk_code {
-              case win.VK_W:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_up],       is_down)
-              case win.VK_A:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_left],     is_down)
-              case win.VK_S:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_down],     is_down)
-              case win.VK_D:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_right],    is_down)
-              case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_left],  is_down)
-              case win.VK_E:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_right], is_down)
-              case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.buttons[.button_up],      is_down)
-              case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.buttons[.button_down],    is_down)
-              case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.buttons[.button_left],    is_down)
-              case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.buttons[.button_right],   is_down)
-              case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.buttons[.start],          is_down)
-              case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.buttons[.back],           is_down)
-              case win.VK_L:
-                if is_down {
-                    if state.replaying_index != 0 {
-                        end_replaying_input(state)
-                    } else if state.recording_index == 0 {
-                        assert(state.replaying_index == 0)
-                        begin_recording_input(state, 1) 
-                    } else {
-                        end_recording_input(state)
-                        begin_replaying_input(state, 1)
-                    }
+            case win.VK_W:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_up],       is_down)
+            case win.VK_A:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_left],     is_down)
+            case win.VK_S:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_down],     is_down)
+            case win.VK_D:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_right],    is_down)
+            case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_left],  is_down)
+            case win.VK_E:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_right], is_down)
+            case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.buttons[.button_up],      is_down)
+            case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.buttons[.button_down],    is_down)
+            case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.buttons[.button_left],    is_down)
+            case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.buttons[.button_right],   is_down)
+            case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.buttons[.start],          is_down)
+            case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.buttons[.back],           is_down)
+            case win.VK_L:
+            if is_down {
+                if state.replaying_index != 0 {
+                    end_replaying_input(state)
+                } else if state.recording_index == 0 {
+                    assert(state.replaying_index == 0)
+                    begin_recording_input(state, 1) 
+                } else {
+                    end_recording_input(state)
+                    begin_replaying_input(state, 1)
                 }
-                
-              case win.VK_F4:     if is_down && alt_down { quit_requested = true }
-              case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
+            }
+            
+            // @note debug keys
+            case win.VK_OEM_PLUS:
+                if is_down && render_state != nil {
+                    if shift_down {
+                        render_state.vulkan.debug_light_buffer_texture += 1
+                    } else {
+                        render_state.vulkan.debug_light_buffer_index   += 1
+                    }
+                    print("lightbuffer texture %\n", render_state.vulkan.debug_light_buffer_texture) 
+                    print("lightbuffer index %\n", render_state.vulkan.debug_light_buffer_index)
+                }
+            case win.VK_OEM_MINUS: 
+                if is_down && render_state != nil {
+                    if shift_down {
+                        render_state.vulkan.debug_light_buffer_texture -= 1
+                    } else {
+                        render_state.vulkan.debug_light_buffer_index   -= 1
+                    }
+                    print("lightbuffer texture %\n", render_state.vulkan.debug_light_buffer_texture) 
+                    print("lightbuffer index %\n", render_state.vulkan.debug_light_buffer_index)
+                }
+            
+            case win.VK_F4:     if is_down && alt_down { quit_requested = true }
+            case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
             }
             
           case:
