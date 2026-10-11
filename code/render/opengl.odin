@@ -149,7 +149,7 @@ init_opengl :: proc (open_gl: ^OpenGL, dc: win.HDC) -> (gl_context: win.HGLRC) {
     return gl_context
 }
 
-reattach_opengl :: proc (dc: win.HDC, gl_context: win.HGLRC) -> bool {
+gl_reattach :: proc (dc: win.HDC, gl_context: win.HGLRC) -> bool {
     // The WGL context and every object created through it outlive a renderer DLL
     // generation. Only the DLL-local dispatch tables and callback are rebound.
     if !win.wglMakeCurrent(dc, gl_context) { return false }
@@ -555,7 +555,7 @@ gl_render_commands :: proc (open_gl: ^OpenGL, commands: ^RenderCommands, draw_re
                 peeling = false
                 peel_index = 0
                 
-                buffer := get_depth_peel_read_buffer(open_gl, 0)
+                buffer := gl_get_depth_peel_read_buffer(open_gl, 0)
                 gl_bind_frame_buffer(buffer, render_dim)
             }
             
@@ -578,7 +578,7 @@ gl_render_commands :: proc (open_gl: ^OpenGL, commands: ^RenderCommands, draw_re
             alpha_threshold: f32 = 0.02
             if peeling {
                 program = open_gl.zbias_depth_peel
-                buffer := get_depth_peel_read_buffer(open_gl, peel_index-1)
+                buffer := gl_get_depth_peel_read_buffer(open_gl, peel_index-1)
                 
                 // @metaprogram
                 gl.ActiveTexture(gl.TEXTURE1)
@@ -637,7 +637,7 @@ gl_render_commands :: proc (open_gl: ^OpenGL, commands: ^RenderCommands, draw_re
     // @metaprogram
     for index in 0 ..< open_gl.depth_peel_count {
         gl.ActiveTexture(gl.TEXTURE0 + index)
-        buffer := get_depth_peel_read_buffer(open_gl, index)
+        buffer := gl_get_depth_peel_read_buffer(open_gl, index)
         gl.BindTexture(gl.TEXTURE_2D, buffer.color_texture)
     }
     
@@ -716,7 +716,7 @@ resolve_multisample :: proc (open_gl: ^OpenGL, from, to: FrameBuffer, dim: v2i) 
     end_program(open_gl.multisample_resolve)
 }
 
-get_depth_peel_read_buffer :: proc (open_gl: ^OpenGL, index: u32) -> (result: FrameBuffer) {
+gl_get_depth_peel_read_buffer :: proc (open_gl: ^OpenGL, index: u32) -> (result: FrameBuffer) {
     result = open_gl.depth_peel_buffers[index]
     if open_gl.multisampling {
         result = open_gl.depth_peel_resolve_buffers[index]

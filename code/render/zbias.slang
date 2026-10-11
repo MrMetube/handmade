@@ -20,7 +20,7 @@ struct QuadRoot {
     f32             clip_alpha_begin;
     f32             clip_alpha_end;
     u32             vertex_base;
-    u32             previous_depth_descriptor;
+    u32             previous_depth;
     f32             alpha_threshold;
     
     u32 __padding;
@@ -30,10 +30,10 @@ struct QuadRoot {
 
 struct VertexOutput {
     v4  fragment_p : SV_Position;
-    v3  world_p;
-    v3  world_n;
     v2  uv         : TEXCOORD0;
     v4  color      : COLOR0;
+    v3  world_p;
+    v3  world_n;
     f32 fog_distance;
     nointerpolation u32 texture;
 };
@@ -84,18 +84,24 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
     return output;
 }
 
+
+struct FragmentOutput {
+    v4 surface_reflect : SV_Target0;
+    v4 emission        : SV_Target1;
+    v4 normal          : SV_Target2;
+};
+
+
 [shader("fragment")]
-v4 fragmentMain(VertexOutput input) : SV_Target0 {
+FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
     Texture2D<v4> texture = ResourceDescriptorHeap[input.texture];
     SamplerState  sampler = SamplerDescriptorHeap[u32(Sampler.Linear)];
     
-    if (root.previous_depth_descriptor != 0) {
-        Texture2D<f32> previous_depth = ResourceDescriptorHeap[root.previous_depth_descriptor];
+    if (root.previous_depth != 0) {
+        Texture2D<f32> previous_depth = ResourceDescriptorHeap[root.previous_depth];
         
-        f32 frag_z = input.fragment_p.z;
         f32 clip_depth = previous_depth.Load(int3(int2(input.fragment_p.xy), 0));
-        
-        if (frag_z <= clip_depth) {
+        if (input.fragment_p.z <= clip_depth) {
             discard;
         }
     }
@@ -107,60 +113,29 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
     v4 modulated = input.color * texture_sample;
     modulated *= alpha_amount;
     
-    const bool LIGHTING = true;
-    
-    v4 result_color = 0;
-    if (modulated.a > root.alpha_threshold) {
-        v3 to_camera      = root.camera_p - input.world_p.xyz;
-        f32 camera_distance = length(root.camera_p);
-        to_camera *= 1.0/camera_distance;
-        
-        v3 light_total = v3(1.0, 1.0, 1.0);
-        if (!LIGHTING) {
-            v3 light_strength = v3(6.0, 1.0, 4.0);
-            v3 to_light       = root.light_p - input.world_p.xyz;
-            f32 light_distance  = length(root.light_p);
-            to_light *= 1/light_distance;
-            
-            v3 cos_light_angle = v3(
-                dot(to_light, input.world_n),
-                dot(to_light, input.world_n),
-                dot(to_light, input.world_n), // ?
-            );
-            cos_light_angle = clamp(cos_light_angle, 0.0, 1.0);
-            
-            v3 reflected_d = -to_camera + 2 * dot(input.world_n, to_camera) * input.world_n;
-            v3 cos_reflected = v3(
-                dot(to_light, reflected_d),
-                dot(to_light, reflected_d),
-                dot(to_light, reflected_d),
-            );
-            cos_reflected = clamp(cos_reflected, 0.0, 1.0);
-            
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            
-            v3 light_amount = light_strength / square(light_distance);
-            
-            f32 diffuse_c    = 0.5f;
-            v3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
-            
-            f32 spec_c    = 2.0f;
-            v3 spec_light = spec_c * cos_reflected * light_amount;
-            
-            light_total = diffuse_light + spec_light;
-        }
-        
-        result_color.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
-        result_color.rgb *= light_total;
-        
-        result_color.a = modulated.a;
-    } else {
+    if (modulated.a < root.alpha_threshold) {
         discard;
     }
     
-    return result_color;
+    FragmentOutput output;
+    v4 surface_reflect = 0;
+    surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
+    surface_reflect.a = modulated.a;
+    
+    v3 world_n = normalize(input.world_n);
+    f32 nx = 0.5 + 0.5 * world_n.x;
+    f32 ny = 0.5 + 0.5 * world_n.y;
+    
+    v3 emission = v3(0);
+    if (length(root.light_p - input.world_p) < 3) {
+        emission = v3(1, 0, 0);
+    }
+    // @todo Some way of specifying the emission spread.
+    f32 emission_spread = 1.0;
+    
+    output.surface_reflect = surface_reflect;
+    output.emission = v4(emission, emission_spread);
+    output.normal   = v4(nx, ny, 0, 0);
+    
+    return output;
 }

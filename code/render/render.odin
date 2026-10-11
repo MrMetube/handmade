@@ -77,8 +77,8 @@ attach :: proc (state: ^Render_State, window: win.HWND, window_dc: win.HDC, back
         // A DLL reload resets package-level dispatch tables, but must not replace
         // the actual graphics context/device or any resource handles.
         switch render_state.backend {
-        case .Vulkan:   result = rebind_device(&render_state.vulkan)
-        case .OpenGL:   result = reattach_opengl(window_dc, render_state.gl_context)
+        case .Vulkan:   result = vk_reattach(&render_state.vulkan)
+        case .OpenGL:   result = gl_reattach(window_dc, render_state.gl_context)
         case .Software: result = true
         }
     }
