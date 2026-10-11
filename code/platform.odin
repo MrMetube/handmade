@@ -1293,8 +1293,6 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
                     } else {
                         render_state.vulkan.debug_light_buffer_index   += 1
                     }
-                    print("lightbuffer texture %\n", render_state.vulkan.debug_light_buffer_texture) 
-                    print("lightbuffer index %\n", render_state.vulkan.debug_light_buffer_index)
                 }
             case win.VK_OEM_MINUS: 
                 if is_down && render_state != nil {
@@ -1303,8 +1301,6 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
                     } else {
                         render_state.vulkan.debug_light_buffer_index   -= 1
                     }
-                    print("lightbuffer texture %\n", render_state.vulkan.debug_light_buffer_texture) 
-                    print("lightbuffer index %\n", render_state.vulkan.debug_light_buffer_index)
                 }
             
             case win.VK_F4:     if is_down && alt_down { quit_requested = true }

@@ -1,10 +1,18 @@
+// @todo in multiple shaders, we just want a fullscreen-rectangle vertex shader. unify that usage.
+
 #define square(value) (value*value)
 
-float clamp_01_map_to_range(float min, float max, float t) {
-    float range  = max - min;
-    float result = 0;
+typedef uint   u32;
+typedef float  f32;
+typedef float2 v2;
+typedef float3 v3;
+typedef float4 v4;
+
+f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
+    f32 range  = max - min;
+    f32 result = 0;
     if (range != 0) {
-        float absolute = (t - min) / range;
+        f32 absolute = (t - min) / range;
         result = clamp(absolute, 0, 1);
     }
     return result;
@@ -15,8 +23,3 @@ enum Sampler {
     Linear  = 0,
     Nearest = 1,
 };
-
-#define f32 float
-#define v2 float2
-#define v3 float3
-#define v4 float4
