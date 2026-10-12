@@ -128,7 +128,7 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
     
     v3 emission = v3(0);
     if (length(root.light_p - input.world_p) < 3) {
-        emission = v3(1, 0, 0);
+        emission = v3(1, 1, 1);
     }
     // @todo Some way of specifying the emission spread.
     f32 emission_spread = 1.0;

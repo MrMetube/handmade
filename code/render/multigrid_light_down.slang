@@ -1,54 +1,4 @@
-
-/* 
-
-if (LIGHTING) {
-            v3 to_camera        = root.camera_p - input.world_p.xyz;
-            f32 camera_distance = length(root.camera_p);
-            to_camera *= 1.0/camera_distance;
-            
-            v3 light_p = root.light_p;
-            
-            v3 light_strength  = v3(1, 1, 1);
-            v3 to_light        = light_p - input.world_p.xyz;
-            f32 light_distance = length(light_p);
-            to_light *= 1.0/light_distance;
-            
-            v3 cos_light_angle = v3(
-                dot(to_light, input.world_n),
-                dot(to_light, input.world_n),
-                dot(to_light, input.world_n),
-            );
-            cos_light_angle = clamp(cos_light_angle, 0.0, 1.0);
-            
-            v3 reflected_d = -to_camera + 2 * dot(input.world_n, to_camera) * input.world_n;
-            v3 cos_reflected = v3(
-                dot(to_light, reflected_d),
-                dot(to_light, reflected_d),
-                dot(to_light, reflected_d),
-            );
-            cos_reflected = clamp(cos_reflected, 0.0, 1.0);
-            
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            
-            v3 light_amount = light_strength / square(light_distance);
-            
-            f32 diffuse_c    = 1.0f;
-            v3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
-            
-            f32 spec_c    = 0.0f;
-            v3 spec_light = spec_c * cos_reflected * light_amount;
-            
-            light_total = diffuse_light + spec_light;
-        }
-*/#include "shared.slang"
+#include "shared.slang"
 
 struct Root {
     u32 parent_front_emission;
@@ -77,15 +27,9 @@ struct VertexOutput {
 // @copypasta multiple times a simple fullscreen rectangle
 [shader("vertex")]
 VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
-    const v2  positions[4] = { v2(-1, -1), v2(1, -1), v2(-1, 1), v2(1, 1) };
-    const v2  uvs[4]       = { v2( 0,  0), v2(1,  0), v2( 0, 1), v2(1, 1) };
-    const u32 indices[6]   = { 0, 1, 3, 0, 3, 2 };
-    
-    u32 vertex_index = indices[vertex_id];
-    
     VertexOutput result;
-    result.position = v4(positions[vertex_index], 0, 1);
-    result.uv       = uvs[vertex_index]; 
+    result.position = fullscreen_positions[vertex_id];
+    result.uv       = fullscreen_uvs[vertex_id]; 
     return result;
 }
 
@@ -121,13 +65,13 @@ FragmentOutput fragmentMain(VertexOutput input) {
     v3 ref_p = reconstruct_position(our_normal_xy_depth, input.uv);
     
     FragmentOutput output;
-    output.front_emission = 0.25 * (
+    output.front_emission = (
         transfer_light(left.p,  left.n,  left.front_emission,  ref_p, ref_n, ref_color) +
         transfer_light(right.p, right.n, right.front_emission, ref_p, ref_n, ref_color) +
         transfer_light(up.p,    up.n,    up.front_emission,    ref_p, ref_n, ref_color) +
         transfer_light(down.p,  down.n,  down.front_emission,  ref_p, ref_n, ref_color)
     );
-    output.back_emission = 0.25 * (
+    output.back_emission = (
         transfer_light(left.p,  left.n,  left.back_emission,  ref_p, ref_n, ref_color) +
         transfer_light(right.p, right.n, right.back_emission, ref_p, ref_n, ref_color) +
         transfer_light(up.p,    up.n,    up.back_emission,    ref_p, ref_n, ref_color) +
@@ -139,7 +83,7 @@ FragmentOutput fragmentMain(VertexOutput input) {
 
 v3 reconstruct_position(v3 normal_xy_depth, v2 uv) {
    // @todo Calculate the correct world position from the fragment coordinate.
-    v3 result = v3(0, 0, normal_xy_depth.z);
+    v3 result = v3(uv.x, uv.y, normal_xy_depth.z);
     return result;
 }
 
@@ -154,7 +98,58 @@ v3 reconstruct_normal(v3 normal_xy_depth) {
 }
 
 v3 transfer_light(v3 light_p, v3 light_n, v3 light_emission, v3 ref_p, v3 ref_n, v3 ref_color) {
-    v3 result = 0.5 * ref_color * light_emission;
+    /* 
+    v3 to_camera        = root.camera_p - input.world_p.xyz;
+    f32 camera_distance = length(root.camera_p);
+    to_camera *= 1.0/camera_distance;
+    
+    v3 light_p = root.light_p;
+    
+    v3 light_strength  = v3(1, 1, 1);
+    v3 to_light        = light_p - input.world_p.xyz;
+    f32 light_distance = length(light_p);
+    to_light *= 1.0/light_distance;
+    
+    v3 cos_light_angle = v3(
+        dot(to_light, input.world_n),
+        dot(to_light, input.world_n),
+        dot(to_light, input.world_n),
+    );
+    cos_light_angle = clamp(cos_light_angle, 0.0, 1.0);
+    
+    v3 reflected_d = -to_camera + 2 * dot(input.world_n, to_camera) * input.world_n;
+    v3 cos_reflected = v3(
+        dot(to_light, reflected_d),
+        dot(to_light, reflected_d),
+        dot(to_light, reflected_d),
+    );
+    cos_reflected = clamp(cos_reflected, 0.0, 1.0);
+    
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    cos_reflected *= cos_reflected;
+    
+    v3 light_amount = light_strength / square(light_distance);
+    
+    f32 diffuse_c    = 1.0f;
+    v3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
+    
+    f32 spec_c    = 0.0f;
+    v3 spec_light = spec_c * cos_reflected * light_amount;
+    
+    light_total = diffuse_light + spec_light;
+*/
+    f32 facing           = clamp01(-dot(light_n, ref_n));
+    f32 distance_squared = length_squared(light_p - ref_p);
+    f32 falloff = 1.0 / (1 + 100*distance_squared);
+    
+    v3 result = facing * falloff * ref_color * light_emission;
     return result;
 }
 
@@ -179,53 +174,3 @@ Texture2D<v4> get_texture(u32 descriptor) {
     Texture2D<v4> result = ResourceDescriptorHeap[descriptor];
     return result;
 }
-/* 
-
-if (LIGHTING) {
-            v3 to_camera        = root.camera_p - input.world_p.xyz;
-            f32 camera_distance = length(root.camera_p);
-            to_camera *= 1.0/camera_distance;
-            
-            v3 light_p = root.light_p;
-            
-            v3 light_strength  = v3(1, 1, 1);
-            v3 to_light        = light_p - input.world_p.xyz;
-            f32 light_distance = length(light_p);
-            to_light *= 1.0/light_distance;
-            
-            v3 cos_light_angle = v3(
-                dot(to_light, input.world_n),
-                dot(to_light, input.world_n),
-                dot(to_light, input.world_n),
-            );
-            cos_light_angle = clamp(cos_light_angle, 0.0, 1.0);
-            
-            v3 reflected_d = -to_camera + 2 * dot(input.world_n, to_camera) * input.world_n;
-            v3 cos_reflected = v3(
-                dot(to_light, reflected_d),
-                dot(to_light, reflected_d),
-                dot(to_light, reflected_d),
-            );
-            cos_reflected = clamp(cos_reflected, 0.0, 1.0);
-            
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            cos_reflected *= cos_reflected;
-            
-            v3 light_amount = light_strength / square(light_distance);
-            
-            f32 diffuse_c    = 1.0f;
-            v3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
-            
-            f32 spec_c    = 0.0f;
-            v3 spec_light = spec_c * cos_reflected * light_amount;
-            
-            light_total = diffuse_light + spec_light;
-        }
-*/

@@ -56,20 +56,22 @@ main :: proc () {
     make_directory_if_not_exists("./data/build")
     
     shaders := [] struct { source, stage, path, define: string } {
-        { "code/render/zbias.slang",                "vertex",   "build/zbias_vertex.spirv",                  "Path_z_bias_vertex"},
-        { "code/render/zbias.slang",                "fragment", "build/zbias_fragment.spirv",                "Path_z_bias_fragment"},
-        { "code/render/peel_composite.slang",       "vertex",   "build/peel_composite_vertex.spirv",         "Path_peel_composite_vertex"},
-        { "code/render/peel_composite.slang",       "fragment", "build/peel_composite_fragment.spirv",       "Path_peel_composite_fragment"},
-        { "code/render/multisample_resolve.slang",  "vertex",   "build/multisample_resolve_vertex.spirv",    "Path_multisample_resolve_vertex"},
-        { "code/render/multisample_resolve.slang",  "fragment", "build/multisample_resolve_fragment.spirv",  "Path_multisample_resolve_fragment"},
-        { "code/render/final_stretch.slang",        "vertex",   "build/final_stretch_vertex.spirv",          "Path_final_stretch_vertex"},
-        { "code/render/final_stretch.slang",        "fragment", "build/final_stretch_fragment.spirv",        "Path_final_stretch_fragment"},
-        { "code/render/fake_seed_lighting.slang",   "vertex",   "build/fake_seed_lighting_vertex.spirv",     "Path_fake_seed_lighting_vertex"},
-        { "code/render/fake_seed_lighting.slang",   "fragment", "build/fake_seed_lighting_fragment.spirv",   "Path_fake_seed_lighting_fragment"},
-        { "code/render/multigrid_light_up.slang",   "vertex",   "build/multigrid_light_up_vertex.spirv",     "Path_multigrid_light_up_vertex"},
-        { "code/render/multigrid_light_up.slang",   "fragment", "build/multigrid_light_up_fragment.spirv",   "Path_multigrid_light_up_fragment"},
-        { "code/render/multigrid_light_down.slang", "vertex",   "build/multigrid_light_down_vertex.spirv",   "Path_multigrid_light_down_vertex"},
-        { "code/render/multigrid_light_down.slang", "fragment", "build/multigrid_light_down_fragment.spirv", "Path_multigrid_light_down_fragment"},
+        { "code/render/zbias.slang",                  "vertex",   "build/zbias_vertex.spirv",                    "Path_z_bias_vertex"},
+        { "code/render/zbias.slang",                  "fragment", "build/zbias_fragment.spirv",                  "Path_z_bias_fragment"},
+        { "code/render/peel_composite.slang",         "vertex",   "build/peel_composite_vertex.spirv",           "Path_peel_composite_vertex"},
+        { "code/render/peel_composite.slang",         "fragment", "build/peel_composite_fragment.spirv",         "Path_peel_composite_fragment"},
+        { "code/render/multisample_resolve.slang",    "vertex",   "build/multisample_resolve_vertex.spirv",      "Path_multisample_resolve_vertex"},
+        { "code/render/multisample_resolve.slang",    "fragment", "build/multisample_resolve_fragment.spirv",    "Path_multisample_resolve_fragment"},
+        { "code/render/final_stretch.slang",          "vertex",   "build/final_stretch_vertex.spirv",            "Path_final_stretch_vertex"},
+        { "code/render/final_stretch.slang",          "fragment", "build/final_stretch_fragment.spirv",          "Path_final_stretch_fragment"},
+        { "code/render/fake_seed_lighting.slang",     "vertex",   "build/fake_seed_lighting_vertex.spirv",       "Path_fake_seed_lighting_vertex"},
+        { "code/render/fake_seed_lighting.slang",     "fragment", "build/fake_seed_lighting_fragment.spirv",     "Path_fake_seed_lighting_fragment"},
+        { "code/render/multigrid_light_up.slang",     "vertex",   "build/multigrid_light_up_vertex.spirv",       "Path_multigrid_light_up_vertex"},
+        { "code/render/multigrid_light_up.slang",     "fragment", "build/multigrid_light_up_fragment.spirv",     "Path_multigrid_light_up_fragment"},
+        { "code/render/multigrid_light_down.slang",   "vertex",   "build/multigrid_light_down_vertex.spirv",     "Path_multigrid_light_down_vertex"},
+        { "code/render/multigrid_light_down.slang",   "fragment", "build/multigrid_light_down_fragment.spirv",   "Path_multigrid_light_down_fragment"},
+        { "code/render/depth_peel_to_lighting.slang", "vertex",   "build/depth_peel_to_lighting_vertex.spirv",   "Path_depth_peel_to_lighting_vertex"},
+        { "code/render/depth_peel_to_lighting.slang", "fragment", "build/depth_peel_to_lighting_fragment.spirv", "Path_depth_peel_to_lighting_fragment"},
     }
     
     for shader in shaders {

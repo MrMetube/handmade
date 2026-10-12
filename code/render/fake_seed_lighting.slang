@@ -12,11 +12,8 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
-    const v2  positions[4] = { v2(-1, -1), v2(1, -1), v2(-1, 1), v2(1, 1) };
-    const u32 indices[6]   = { 0, 1, 3, 0, 3, 2 };
-    
     VertexOutput result;
-    result.position = v4(positions[indices[vertex_id]], 0, 1);
+    result.position = fullscreen_positions[vertex_id];
     return result;
 }
 

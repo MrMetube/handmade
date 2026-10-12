@@ -14,12 +14,9 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
-    v2 positions[3] = { v2(-1, -1), v2(3, -1), v2(-1, 3) };
-    v2 uvs[3]       = { v2( 0,  0), v2(2,  0), v2( 0, 2) };
-    
     VertexOutput output;
-    output.position = v4(positions[vertex_id], 0, 1);
-    output.uv = uvs[vertex_id];
+    output.position = fullscreen_positions[vertex_id];
+    output.uv       = fullscreen_uvs[vertex_id];
     return output;
 }
 
@@ -27,6 +24,7 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
 v4 fragmentMain(VertexOutput input) : SV_Target0 {
     SamplerState  sampler = SamplerDescriptorHeap[u32(Sampler.Nearest)];
     Texture2D<v4> texture = ResourceDescriptorHeap[root.textures[root.peel_count - 1]];
+    
     v4 result = texture.Sample(sampler, input.uv);
     
     for (int peel_index = int(root.peel_count) - 2; peel_index >= 0; --peel_index) {
