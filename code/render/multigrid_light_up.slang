@@ -1,10 +1,7 @@
 #include "shared.slang"
 
 struct Root {
-    u32 front_emission;
-    u32 back_emission;
-    u32 surface_color;
-    u32 normal_xy_depth;
+    u32 source_index;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Root> root;
@@ -33,15 +30,10 @@ struct FragmentOutput {
 FragmentOutput fragmentMain(VertexOutput input) {
     SamplerState sampler = SamplerDescriptorHeap[u32(Sampler.Linear)];
     
-    Texture2D<v4> front_emission_texture  = ResourceDescriptorHeap[root.front_emission];
-    Texture2D<v4> back_emission_texture   = ResourceDescriptorHeap[root.back_emission];
-    Texture2D<v4> surface_color_texture   = ResourceDescriptorHeap[root.surface_color];
-    Texture2D<v4> normal_xy_depth_texture = ResourceDescriptorHeap[root.normal_xy_depth];
-    
-    v3 source_front_emission  = manual_sample(front_emission_texture,  sampler, input.uv);
-    v3 source_back_emission   = manual_sample(back_emission_texture,   sampler, input.uv);
-    v3 source_surface_color   = manual_sample(surface_color_texture,   sampler, input.uv);
-    v3 source_normal_xy_depth = manual_sample(normal_xy_depth_texture, sampler, input.uv);
+    v3 source_front_emission  = manual_sample(get_light_buffer(root.source_index, light_buffer.front_emission),  sampler, input.uv);
+    v3 source_back_emission   = manual_sample(get_light_buffer(root.source_index, light_buffer.back_emission),   sampler, input.uv);
+    v3 source_surface_color   = manual_sample(get_light_buffer(root.source_index, light_buffer.surface_color),   sampler, input.uv);
+    v3 source_normal_xy_depth = manual_sample(get_light_buffer(root.source_index, light_buffer.normal_xy_depth), sampler, input.uv);
     
     FragmentOutput output;
     

@@ -1,10 +1,7 @@
 #include "shared.slang"
 
 struct Root {
-    u32 reflect;
-    u32 emission;
-    u32 normal_lp;
-    u32 depth;
+    u32 peel_index;
     u32 sample_count;
 };
 
@@ -30,10 +27,10 @@ struct FragmentOutput {
 
 [shader("fragment")]
 FragmentOutput fragmentMain(VertexOutput input) {
-    Texture2DMS<v4>  reflect   = ResourceDescriptorHeap[root.reflect];
-    Texture2DMS<v4>  emission  = ResourceDescriptorHeap[root.emission];
-    Texture2DMS<v4>  normal_lp = ResourceDescriptorHeap[root.normal_lp];
-    Texture2DMS<f32> depth     = ResourceDescriptorHeap[root.depth];
+    Texture2DMS<v4>  reflect   = get_peel_color_buffer(root.peel_index, depth_peel.surface_reflect);
+    Texture2DMS<v4>  emission  = get_peel_color_buffer(root.peel_index, depth_peel.emission);
+    Texture2DMS<v4>  normal_lp = get_peel_color_buffer(root.peel_index, depth_peel.normal_lp);
+    Texture2DMS<f32> depth     = get_peel_depth_buffer(root.peel_index);
     
     int2 pixel = int2(input.position.xy);
     

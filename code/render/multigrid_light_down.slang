@@ -1,12 +1,8 @@
 #include "shared.slang"
 
 struct Root {
-    u32 parent_front_emission;
-    u32 parent_back_emission;
-    u32 parent_normal_xy_depth;
-    
-    u32 our_surface_color;
-    u32 our_normal_xy_depth;
+    u32 parent_index;
+    u32 our_index;
 };
 
 struct LightValue {
@@ -44,7 +40,7 @@ FragmentOutput fragmentMain(VertexOutput input) {
     {
         // @note All textures are of the same size
         u32 width, height;
-        get_texture(root.parent_front_emission).GetDimensions(width, height);
+        get_light_buffer(root.parent_index, light_buffer.front_emission).GetDimensions(width, height);
         uv_step = 1.0 / v2(width, height);
     }
     
@@ -55,11 +51,8 @@ FragmentOutput fragmentMain(VertexOutput input) {
     LightValue up    = parent_sample(sampler, input.uv + v2( 0, -uv_step.y)); 
     LightValue down  = parent_sample(sampler, input.uv + v2( 0, +uv_step.y)); 
     
-    Texture2D<v4> our_surface_color_texture   = ResourceDescriptorHeap[root.our_surface_color];
-    Texture2D<v4> our_normal_xy_depth_texture = ResourceDescriptorHeap[root.our_normal_xy_depth];
-    
-    v3 ref_color           = our_surface_color_texture.Sample(sampler,   input.uv).rgb;
-    v3 our_normal_xy_depth = our_normal_xy_depth_texture.Sample(sampler, input.uv).rgb;
+    v3 ref_color           = get_light_buffer(root.our_index, light_buffer.surface_color).Sample(sampler,   input.uv).rgb;
+    v3 our_normal_xy_depth = get_light_buffer(root.our_index, light_buffer.normal_xy_depth).Sample(sampler, input.uv).rgb;
     
     v3 ref_n = reconstruct_normal(our_normal_xy_depth);
     v3 ref_p = reconstruct_position(our_normal_xy_depth, input.uv);
@@ -98,53 +91,6 @@ v3 reconstruct_normal(v3 normal_xy_depth) {
 }
 
 v3 transfer_light(v3 light_p, v3 light_n, v3 light_emission, v3 ref_p, v3 ref_n, v3 ref_color) {
-    /* 
-    v3 to_camera        = root.camera_p - input.world_p.xyz;
-    f32 camera_distance = length(root.camera_p);
-    to_camera *= 1.0/camera_distance;
-    
-    v3 light_p = root.light_p;
-    
-    v3 light_strength  = v3(1, 1, 1);
-    v3 to_light        = light_p - input.world_p.xyz;
-    f32 light_distance = length(light_p);
-    to_light *= 1.0/light_distance;
-    
-    v3 cos_light_angle = v3(
-        dot(to_light, input.world_n),
-        dot(to_light, input.world_n),
-        dot(to_light, input.world_n),
-    );
-    cos_light_angle = clamp(cos_light_angle, 0.0, 1.0);
-    
-    v3 reflected_d = -to_camera + 2 * dot(input.world_n, to_camera) * input.world_n;
-    v3 cos_reflected = v3(
-        dot(to_light, reflected_d),
-        dot(to_light, reflected_d),
-        dot(to_light, reflected_d),
-    );
-    cos_reflected = clamp(cos_reflected, 0.0, 1.0);
-    
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    cos_reflected *= cos_reflected;
-    
-    v3 light_amount = light_strength / square(light_distance);
-    
-    f32 diffuse_c    = 1.0f;
-    v3 diffuse_light = diffuse_c * cos_light_angle * light_amount;
-    
-    f32 spec_c    = 0.0f;
-    v3 spec_light = spec_c * cos_reflected * light_amount;
-    
-    light_total = diffuse_light + spec_light;
-*/
     f32 facing           = clamp01(-dot(light_n, ref_n));
     f32 distance_squared = length_squared(light_p - ref_p);
     f32 falloff = 1.0 / (1 + 100*distance_squared);
@@ -155,9 +101,9 @@ v3 transfer_light(v3 light_p, v3 light_n, v3 light_emission, v3 ref_p, v3 ref_n,
 
 LightValue parent_sample(SamplerState sampler, v2 uv) {
     LightValue result;
-    result.front_emission = manual_sample(get_texture(root.parent_front_emission),  sampler, uv);
-    result.back_emission  = manual_sample(get_texture(root.parent_back_emission),   sampler, uv);
-    v3 normal_xy_depth    = manual_sample(get_texture(root.parent_normal_xy_depth), sampler, uv);
+    result.front_emission = manual_sample(get_light_buffer(root.parent_index, light_buffer.front_emission),  sampler, uv);
+    result.back_emission  = manual_sample(get_light_buffer(root.parent_index, light_buffer.back_emission),   sampler, uv);
+    v3 normal_xy_depth    = manual_sample(get_light_buffer(root.parent_index, light_buffer.normal_xy_depth), sampler, uv);
     
     result.n = reconstruct_normal(normal_xy_depth);
     result.p = reconstruct_position(normal_xy_depth, uv);
@@ -167,10 +113,5 @@ LightValue parent_sample(SamplerState sampler, v2 uv) {
 
 v3 manual_sample(Texture2D<v4> texture, SamplerState sampler, v2 uv) {
     v3 result = texture.Sample(sampler, uv).rgb;
-    return result;
-}
-
-Texture2D<v4> get_texture(u32 descriptor) {
-    Texture2D<v4> result = ResourceDescriptorHeap[descriptor];
     return result;
 }

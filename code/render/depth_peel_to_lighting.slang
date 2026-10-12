@@ -3,10 +3,7 @@
 static const f32 max_light_power = 10.0;
 
 struct Root {
-    u32 surface_reflect;
-    u32 emission;
-    u32 normal_lp;
-    u32 depth;
+    u32 source_resolve_buffer;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Root> root;
@@ -31,20 +28,20 @@ struct FragmentOutput {
 
 [shader("fragment")]
 FragmentOutput fragmentMain(VertexOutput input) {
-    Texture2DMS<f32> depth_texture           = ResourceDescriptorHeap[root.depth];
-    Texture2DMS<v4>  surface_reflect_texture = ResourceDescriptorHeap[root.surface_reflect];
-    Texture2DMS<v4>  emission_texture        = ResourceDescriptorHeap[root.emission];
-    Texture2DMS<v4>  normal_lp_texture       = ResourceDescriptorHeap[root.normal_lp];
+    Texture2DMS<f32> depth_texture           = get_resolve_depth_buffer(root.source_resolve_buffer);
+    Texture2DMS<v4>  surface_reflect_texture = get_resolve_color_buffer(root.source_resolve_buffer, depth_peel.surface_reflect);
+    Texture2DMS<v4>  emission_texture        = get_resolve_color_buffer(root.source_resolve_buffer, depth_peel.emission);
+    Texture2DMS<v4>  normal_lp_texture       = get_resolve_color_buffer(root.source_resolve_buffer, depth_peel.normal_lp);
     
     int2 texel = int2(input.position.xy);
     
     f32 depth = depth_texture.Load(texel, 0);
     
-    v4  surface_reflect = surface_reflect_texture.Load(texel, 0);
+    v4  surface_reflect     = surface_reflect_texture.Load(texel, 0);
     v3  surface_reflect_rgb = surface_reflect.rgb;
     f32 coverage            = surface_reflect.a;
     
-    v4  emission = emission_texture.Load(texel, 0);
+    v4  emission        = emission_texture.Load(texel, 0);
     v3  emission_rgb    = emission.rgb;
     f32 emission_spread = emission.a; // @todo Use this to seed back emitters?
     

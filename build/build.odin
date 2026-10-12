@@ -4,8 +4,7 @@ package build
 import "core:fmt"
 import "core:os"
 
-// "-build-diagnostics"
-
+// @study does radlink also accept this linker flag?
 platform_flags := [] string { /* "-subsystem:windows", */ `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 
 PedanticGame     :: false
