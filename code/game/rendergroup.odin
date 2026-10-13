@@ -376,6 +376,23 @@ pack_uv :: proc (uv: v2) -> Packed_UV {
     }
     return result
 }
+@(common)
+unpack :: proc { unpack_normal, unpack_uv }
+unpack_normal :: proc (normal: Packed_Normal) -> v3 {
+    result := v3 {
+        cast(f32) normal.x / 511.0,
+        cast(f32) normal.y / 511.0,
+        cast(f32) normal.z / 511.0,
+    }
+    return result
+}
+unpack_uv :: proc (uv: Packed_UV) -> v2 {
+    result := v2 {
+        cast(f32) uv.x / cast(f32) max(u16),
+        cast(f32) uv.y / cast(f32) max(u16),
+    }
+    return result
+}
 
 get_current_quads :: proc (group: ^RenderGroup) -> ^Textured_Quads {
     if group.current_quads == nil {
@@ -473,6 +490,7 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     
     ////////////////////////////////////////////////
     
+    // :QuadWinding:
     p0 := min
     p1 := v4{max.x, min.y, min.z, min.w}
     p2 := max
@@ -536,6 +554,7 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     t2 := v2{1, 1}
     t3 := v2{0, 1}
     
+    // :QuadWinding:
     push_quad(group, bitmap, p0, p1, p3, p2, t0, t1, t2, t3, cb, ct, ct, cb)
     push_quad(group, bitmap, p0, p2, p6, p4, t0, t1, t2, t3, bo, bo, bo, bo)
     push_quad(group, bitmap, p0, p4, p5, p1, t0, t1, t2, t3, cb, cb, ct, ct)
@@ -693,4 +712,176 @@ get_camera_rectangle_at_target :: proc (group: ^RenderGroup) -> Rectangle3 {
 fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meters: f32, half_dim_in_meters: $V) -> V {
     result := focal_length * (half_dim_in_meters / monitor_half_dim_in_meters)
     return result
+}
+
+////////////////////////////////////////////////
+
+LightingElement :: struct {
+    p: v3,
+    n: v3,
+    front_emission_c: v3,
+    back_emission_c: v3,
+    accumulator_c: v3,
+    reflect_c: v3,
+    transparency: f32,
+    r: f32,
+}
+
+lighting_test :: proc (group: ^RenderGroup) {
+    quads := group.current_quads
+    assert(quads != nil)
+    
+    debug_light_p := group.last_setup.debug_light_p
+    camera_p      := group.last_setup.camera_p
+    
+    @(static) light_elements: [dynamic; 8192*2] LightingElement
+    clear(&light_elements)
+    
+    commands := group.commands
+    
+    { // @note Copy lighting in.
+        vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
+        
+        for bitmap_index in 0..<quads.quad_count {
+            // :QuadWinding:
+            ve0 := &vertices[bitmap_index*4 + 0]
+            ve1 := &vertices[bitmap_index*4 + 1]
+            ve2 := &vertices[bitmap_index*4 + 3]
+            ve3 := &vertices[bitmap_index*4 + 2]
+            
+            ve0p := ve0.p.xyz + {0, 0, ve0.p.w}
+            ve1p := ve1.p.xyz + {0, 0, ve1.p.w}
+            ve2p := ve2.p.xyz + {0, 0, ve2.p.w}
+            ve3p := ve3.p.xyz + {0, 0, ve3.p.w}
+            
+            span10 := ve1p - ve0p
+            span20 := ve2p - ve0p
+            span30 := ve3p - ve0p
+            
+            element := append_into(&light_elements)
+            
+            element.p = ve0p + 0.5 * span20
+            element.r = 0.5 * min(length(span30), length(span10))
+            
+            element.n = unpack_normal(ve0.n)
+            element.front_emission_c = 0
+            element.back_emission_c = 0
+            color := rgba_to_v4(ve0.color)
+            element.reflect_c = color.rgb
+            element.transparency = color.a
+            
+            element.front_emission_c = element.reflect_c
+            // if length_squared(element.p - debug_light_p) < square(cast(f32) 4.0) {
+            // }
+        }
+    }
+    
+    // @note Compute lighting
+    for _ in 0..<3 {
+        for &destination in light_elements {
+            light_c   := destination.front_emission_c
+            to_camera := camera_p - destination.p
+            to_camera = normalize_or_zero(to_camera)
+            
+            for &source in light_elements {
+                if &destination == &source { continue }
+                
+                to_light := source.p - destination.p
+                light_distance := length(to_light)
+                if light_distance > 0 {
+                    to_light *= 1.0 / light_distance
+                    
+                    ref_n := destination.n
+                    diffuse_c  := cast(f32) 1
+                    specular_c := 1.0 - diffuse_c
+                    specular_power := 1 + (15 * cast(f32) 1)
+                    distance_falloff := 1 / square(light_distance)
+                    
+                    diffuse_dot := clamp_01(dot(to_light, ref_n))
+                    cos_angle   := cast(v3) diffuse_dot
+                    diffuse_light := distance_falloff * diffuse_c * cos_angle * light_c
+                    
+                    reflected := reflect(to_camera, ref_n)
+                    spec_dot  := clamp_01(dot(to_light, reflected))
+                    spec_dot   = power(spec_dot, specular_power)
+                    cos_reflected_angle := cast(v3) spec_dot
+                    specular_light := specular_c * cos_reflected_angle * light_c
+                    
+                    total_light := diffuse_light + specular_light
+                    
+                    result := destination.reflect_c * total_light
+                    
+                    destination.accumulator_c += result
+                }
+            }
+        }
+        
+        for &destination in light_elements {
+            destination.front_emission_c = destination.accumulator_c
+        }
+    }
+    
+    { // @note Copy lighting out.
+        bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset  :][:quads.quad_count]
+        vertices := commands.vertex_buffer     [quads.bitmap_offset*4:][:quads.quad_count*4]
+        
+        for &bitmap, bitmap_index in bitmaps {
+            bitmap = &commands.white_bitmap
+            
+            ve0 := &vertices[bitmap_index*4 + 0]
+            ve1 := &vertices[bitmap_index*4 + 1]
+            ve2 := &vertices[bitmap_index*4 + 2]
+            ve3 := &vertices[bitmap_index*4 + 3]
+            
+            element := light_elements[bitmap_index]
+
+            min: u32
+            abs_n := abs_vec(element.n)
+            if abs_n.x < abs_n.y {
+                if abs_n.x < abs_n.z {
+                    min = 0
+                } else {
+                    min = 2
+                }
+            } else {
+                if abs_n.y < abs_n.z {
+                    min = 1
+                } else {
+                    min = 2
+                }
+            }
+            
+            axis: v3
+            axis[min] = 1
+            
+            ex := cross(axis, element.n)
+            ey := -cross(ex, element.n)
+            
+            ex = normalize_or_zero(ex) * element.r
+            ey = normalize_or_zero(ey) * element.r
+            
+            // :QuadWinding:
+            ve0.p.xyz = element.p - ey
+            ve1.p.xyz = element.p + ex
+            ve2.p.xyz = element.p - ex
+            ve3.p.xyz = element.p + ey
+            ve0.p.w = 0
+            ve1.p.w = 0
+            ve2.p.w = 0
+            ve3.p.w = 0
+            
+            n := pack_normal(element.n)
+            ve0.n = n
+            ve1.n = n
+            ve2.n = n
+            ve3.n = n            
+                        
+            c := v4_to_rgba(V4(clamp_01(element.accumulator_c), element.transparency))
+            ve0.color = c
+            ve1.color = c
+            ve2.color = c
+            ve3.color = c
+
+        }
+    }
 }

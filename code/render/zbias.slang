@@ -43,6 +43,8 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
     // The command stream stores quads as triangle strips, but NoGraphicsAPI's
     // current graphics PSO uses triangle lists. Flip the two triangles to
     // match the Vulkan rasterizer winding after the Y coordinate conversion.
+    
+    // :QuadWinding:
     u32 quad_vertex_indices[6] = { 0u, 2u, 1u, 2u, 3u, 1u };
     u32 quad_index             = vertex_id / 6u;
     u32 quad_vertex_index = quad_vertex_indices[vertex_id % 6u];

@@ -193,7 +193,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     }
     
     frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
-    update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
+    // @todo undo this
+    // update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
     
     if ShowSimulationBounds {
         world_transform := default_flat_transform()
@@ -246,6 +247,10 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     }
     
     end_sim(&simulation)
+    
+    ////////////////////////////////////////////////
+    
+    lighting_test(render_group)
     
     push_end_depth_peel(render_group)
     

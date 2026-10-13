@@ -58,7 +58,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     mode.tile_size_in_meters = 1.4
     mode.typical_floor_height = 5
     
-    // :RoomSize
+    // :RoomSize:
     chunk_dim_meters := v3{17 * mode.tile_size_in_meters, 9 * mode.tile_size_in_meters, mode.typical_floor_height}
     mode.world = create_world(chunk_dim_meters, &state.mode_arena)
     mode.standard_room_dimension = chunk_dim_meters
@@ -75,9 +75,11 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     
     room_center: v3i
     choice: u32
-    screen_count :: 10
+    // @todo undo this
+    screen_count :: 1 // 10
     for screen_index in 0 ..< screen_count {
-        room_radius := v2i {7, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize
+        // @todo undo this
+        room_radius := /* v2i {7, 4} */ iv2{ 5, 3 } + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
         room_size := room_radius * 2 + 1
         
         switch choice {
@@ -138,15 +140,18 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
             }
         }
         
-        add_monster(mode,  room.p[3][4], room.ground[3][4])
+        // @todo undo this
+        if false do add_monster(mode,  room.p[3][4], room.ground[3][4])
         // add_familiar(mode, room.p[2][5], room.ground[2][5])
         
+        // @todo undo this
+        if false {
         snake_brain := add_brain(mode)
         for piece_index in u32(0)..<len(BrainSnake{}.segments) {
             x := 1+piece_index
             add_snake_piece(mode, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
         }
-        
+        }
         
         door_left   = door_right
         door_bottom = door_top

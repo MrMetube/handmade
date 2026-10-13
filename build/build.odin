@@ -11,8 +11,8 @@ PedanticGame     :: false
 PedanticRender   :: false
 PedanticPlatform :: false
 
+optimize :: !false
 native   :: true
-optimize :: false
 internal :: true
 
 /* 
