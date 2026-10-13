@@ -7,7 +7,7 @@ struct TexturedVertex {
     u32 color;
 };
 
-struct QuadRoot {
+struct Root {
     float4x4        projection;
     TexturedVertex* vertices;
     u32*            textures;
@@ -26,7 +26,7 @@ struct QuadRoot {
     u32 __padding;
 };
 
-[[vk::binding(0, 0)]] ConstantBuffer<QuadRoot> root;
+[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
 
 struct VertexOutput {
     v4  fragment_p : SV_Position;
@@ -118,13 +118,12 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
     }
     
     FragmentOutput output;
-    v4 surface_reflect = 0;
+    v4 surface_reflect  = 0;
     surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
-    surface_reflect.a = modulated.a;
+    surface_reflect.a   = modulated.a;
     
     v3 world_n = normalize(input.world_n);
-    f32 nx = 0.5 + 0.5 * world_n.x;
-    f32 ny = 0.5 + 0.5 * world_n.y;
+    v2 n       = pack_normal2(world_n.xy);
     
     v3 emission = v3(0);
     if (length(root.light_p - input.world_p) < 3) {
@@ -134,8 +133,8 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
     f32 emission_spread = 1.0;
     
     output.surface_reflect = surface_reflect;
-    output.emission = v4(emission, emission_spread);
-    output.normal   = v4(nx, ny, 0, 0);
+    output.emission        = v4(emission, emission_spread);
+    output.normal          = v4(n, 0, 0);
     
     return output;
 }

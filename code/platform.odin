@@ -1289,17 +1289,17 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             case win.VK_OEM_PLUS:
                 if is_down && render_state != nil {
                     if shift_down {
-                        render_state.vulkan.debug_light_buffer_texture += 1
-                    } else {
                         render_state.vulkan.debug_light_buffer_index   += 1
+                    } else {
+                        render_state.vulkan.debug_light_buffer_texture += 1
                     }
                 }
             case win.VK_OEM_MINUS: 
                 if is_down && render_state != nil {
                     if shift_down {
-                        render_state.vulkan.debug_light_buffer_texture -= 1
-                    } else {
                         render_state.vulkan.debug_light_buffer_index   -= 1
+                    } else {
+                        render_state.vulkan.debug_light_buffer_texture -= 1
                     }
                 }
             

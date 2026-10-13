@@ -63,8 +63,6 @@ main :: proc () {
         { "code/render/multisample_resolve.slang",    "fragment", "build/multisample_resolve_fragment.spirv",    "Path_multisample_resolve_fragment"},
         { "code/render/final_stretch.slang",          "vertex",   "build/final_stretch_vertex.spirv",            "Path_final_stretch_vertex"},
         { "code/render/final_stretch.slang",          "fragment", "build/final_stretch_fragment.spirv",          "Path_final_stretch_fragment"},
-        { "code/render/fake_seed_lighting.slang",     "vertex",   "build/fake_seed_lighting_vertex.spirv",       "Path_fake_seed_lighting_vertex"},
-        { "code/render/fake_seed_lighting.slang",     "fragment", "build/fake_seed_lighting_fragment.spirv",     "Path_fake_seed_lighting_fragment"},
         { "code/render/multigrid_light_up.slang",     "vertex",   "build/multigrid_light_up_vertex.spirv",       "Path_multigrid_light_up_vertex"},
         { "code/render/multigrid_light_up.slang",     "fragment", "build/multigrid_light_up_fragment.spirv",     "Path_multigrid_light_up_fragment"},
         { "code/render/multigrid_light_down.slang",   "vertex",   "build/multigrid_light_down_vertex.spirv",     "Path_multigrid_light_down_vertex"},

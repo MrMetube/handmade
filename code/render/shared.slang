@@ -1,3 +1,5 @@
+static const f32 max_light_intensity = 10.0;
+
 #define square(value) (value*value)
 #define clamp01(value) (clamp(value, 0, 1))
 #define length_squared(value) (dot(value, value))
@@ -100,5 +102,28 @@ inline Texture2DMS<f32> get_resolve_depth_buffer(u32 index) {
 inline Texture2DMS<v4> get_resolve_color_buffer(u32 index, depth_peel texture) {
     u32 descriptor = TextureDescriptor.resolve_begin + index * depth_peel_and_resolve_target_stride + texture;
     Texture2DMS<v4> result = ResourceDescriptorHeap[descriptor];
+    return result;
+}
+
+////////////////////////////////////////////////
+
+v2 pack_normal2(v2 n) {
+    v2 result = 0.5 + 0.5 * n;
+    return result;
+}
+v2 unpack_normal2(v2 n) {
+    v2 result = -1 + 2 * n;
+    return result;
+}
+
+v3 unpack_normal3(v2 n) {
+    v2  n2     = unpack_normal2(n);
+    v3  result = extend_normal3(n2);
+    return result;
+}  
+
+v3 extend_normal3(v2 n2) {
+    f32 nz     = sqrt(1 - square(n2.x) -square(n2.y));
+    v3  result = v3(n2, nz);
     return result;
 }

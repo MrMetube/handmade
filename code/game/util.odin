@@ -256,6 +256,13 @@ make_by_pointer_soa_dynamic_array_len_cap :: proc (pointer: ^$T/#soa [dynamic] $
 
 ////////////////////////////////////////////////
 
+find_most_significant_bit :: proc (value: $T) -> T {
+    result := (size_of(T) * 8) - intrinsics.count_leading_zeros(value)
+    return result
+}
+
+////////////////////////////////////////////////
+
 Raw_Dynamic_Array :: struct {
     data: rawptr,
     len:  int,

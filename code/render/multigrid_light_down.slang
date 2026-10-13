@@ -81,12 +81,7 @@ v3 reconstruct_position(v3 normal_xy_depth, v2 uv) {
 }
 
 v3 reconstruct_normal(v3 normal_xy_depth) {
-    f32 nx = normal_xy_depth.x;
-    f32 ny = normal_xy_depth.y;
-    f32 nz = sqrt(1.0 - square(nx) - square(ny));
-    
-    v3 result = v3(nx, ny, nz);
-    
+    v3 result = extend_normal3(normal_xy_depth.xy);
     return result;
 }
 
@@ -94,7 +89,7 @@ v3 transfer_light(v3 light_p, v3 light_n, v3 light_emission, v3 ref_p, v3 ref_n,
     f32 facing           = clamp01(-dot(light_n, ref_n));
     f32 distance_squared = length_squared(light_p - ref_p);
     f32 falloff = 1.0 / (1 + 100*distance_squared);
-    
+    facing = 1;
     v3 result = facing * falloff * ref_color * light_emission;
     return result;
 }
