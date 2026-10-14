@@ -12,9 +12,11 @@ SoundPitchingWithMouse:   b32 = false
 ShowSimulationBounds:     b32 = false
 ShowRenderFrustum:        b32 = false
 TimestepPercentage:       f32 = 100
-ShowReflectors:           b32 = !false
-ShowVisibility:           b32 = !false
+
+ShowReflectors:           b32 = false
+ShowVisibility:           b32 = false
 LightingIterationCount:   i32 = 3
+OcclusionIterationCount:  i32 = 2
 
 ////////////////////////////////////////////////
 
@@ -164,9 +166,16 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
             debug_record_value(&ShowVisibility, "Show Visibility")
             debug_record_value(&ShowReflectors, "Show Reflectors")
             
-            count := cast(f32) LightingIterationCount
-            debug_record_value(&count, "Lighting Iterations")
-            LightingIterationCount = cast(i32) count
+            { // @todo just add a dragging handling to i32s already
+                count := cast(f32) LightingIterationCount
+                debug_record_value(&count, "Lighting Iterations")
+                LightingIterationCount = cast(i32) count
+            }
+            {
+                count := cast(f32) OcclusionIterationCount
+                debug_record_value(&count, "Occlusion Iterations")
+                OcclusionIterationCount = cast(i32) count
+            }
         }
     }
     

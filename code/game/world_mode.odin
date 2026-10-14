@@ -411,9 +411,12 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             index_x := offset_x+radius.x
             index_y := offset_y+radius.y
             
+            // color := srgb_to_linear(Green)
+            color := srgb_to_linear(White) // @todo undo this
             wall_height := floor_tile_height
             if offset_x >= -2 && offset_x <= 1 && offset_y == 2 {
                 wall_height = 3
+                color = srgb_to_linear(v4{0.8, 0.2, 0.1, 1})
             }
             
             jitter_top: v3
@@ -442,7 +445,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
                 append(&entity.pieces, VisiblePiece {
                     asset     = .Tuft,
                     dimension = {.75, wall_height},
-                    color     = srgb_to_linear(Green),
+                    color     = color,
                     flags     = {.cube},
                 })
                 end_entity(mode, entity, p)

@@ -723,17 +723,21 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 ////////////////////////////////////////////////
 
 LightingElement :: struct {
+    // @note Static information.
     p: v3,
     n: v3,
-    front_emission_c: v3,
-    back_emission_c: v3,
-    accumulator_c: v3,
-    reflect_c: v3,
-    transparency: f32,
     r: f32,
+    reflect_c:    v3,
+    transparency: f32,
     
+    // @note Ambient occlusion.
     visibility: f32,
-    shadow:     f32,
+    shadow:     f32, // @note transient
+    
+    // @note Lighting
+    front_emission_c: v3,
+    back_emission_c:  v3,
+    accumulated_c:    v3, // @note transient
 }
 
 lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
@@ -774,14 +778,16 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
             
             element.n = unpack_normal(ve0.n)
             color := rgba_to_v4(ve0.color)
-            element.reflect_c = color.rgb
-            element.transparency = color.a
-            element.front_emission_c = ve0.emission * element.reflect_c
-            element.visibility = 1
+            element.reflect_c        = 0.95 * color.rgb
+            element.transparency     = color.a
+            element.front_emission_c = ve0.emission * color.rgb
+            element.visibility       = 1
         }
     }
     
-    for _ in 0..<2 {
+    // @note Compute ambient occlusion
+    OcclusionIterationCount = clamp(OcclusionIterationCount, 0, 5)
+    for _ in 0..<OcclusionIterationCount {
         for &destination in light_elements {
             shadow: f32 = 1
             
@@ -811,14 +817,14 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
         }
     }
     
-    LightingIterationCount = clamp(LightingIterationCount, 1, 5)
+    LightingIterationCount = clamp(LightingIterationCount, 1, 16)
     // @note Compute lighting
     for _ in 0..<LightingIterationCount {
         for &destination in light_elements {
             to_camera := camera_p - destination.p
             to_camera = normalize_or_zero(to_camera)
             
-            accumulator: v3
+            accumulated: v3
             
             for &source in light_elements {
                 light_c  := source.front_emission_c
@@ -831,31 +837,33 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
                     diffuse_c  := cast(f32) 1
                     specular_c := 1.0 - diffuse_c
                     specular_power := 1 + (15 * cast(f32) 1)
-                    distance_falloff := 1 / square(light_distance)
+                    distance_falloff := 1 / (1 + square(light_distance))
                     
-                    diffuse_dot := clamp_01(dot(to_light, ref_n))
-                    cos_angle   := cast(v3) diffuse_dot
-                    diffuse_light := distance_falloff * diffuse_c * cos_angle * light_c
+                    cos_angle            := clamp_01(dot(to_light, ref_n))
+                    diffuse_contribution := distance_falloff * diffuse_c * cos_angle
                     
-                    reflected := -to_camera + 2 * dot(to_camera, ref_n) * ref_n
-                    spec_dot  := clamp_01(dot(to_light, reflected))
-                    // spec_dot   = power(spec_dot, specular_power)
-                    cos_reflected_angle := cast(v3) spec_dot
-                    specular_light := specular_c * cos_reflected_angle * light_c
+                    reflected             := -to_camera + 2 * dot(to_camera, ref_n) * ref_n
+                    cos_reflected_angle   := clamp_01(dot(to_light, reflected))
+                    // cos_reflected_angle   = power(cos_reflected_angle, specular_power)
+                    specular_contribution := specular_c * cos_reflected_angle
+                    
+                    diffuse_light  := diffuse_contribution  * light_c
+                    specular_light := specular_contribution * light_c
                     
                     total_light := diffuse_light + specular_light
+                    result      := destination.reflect_c * total_light
                     
-                    result := destination.reflect_c * total_light
-                    
-                    accumulator += result
+                    accumulated += result
                 }
             }
             
-            destination.accumulator_c = destination.visibility * accumulator
+            destination.accumulated_c    = destination.visibility * accumulated
         }
         
+        correction := 1 / cast(f32) LightingIterationCount
+        
         for &destination in light_elements {
-            destination.front_emission_c += destination.accumulator_c
+            destination.front_emission_c += correction * destination.accumulated_c
         }
     }
     
