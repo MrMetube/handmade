@@ -741,25 +741,32 @@ LightingElement :: struct {
 }
 
 lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
-    quads := group.current_quads
-    assert(quads != nil)
+    timed_function()
     
+    quads    := group.current_quads
     camera_p := group.last_setup.camera_p
+    commands := group.commands
+    assert(quads != nil)
     
     @(static) light_elements: [dynamic; 8192*2] LightingElement
     clear(&light_elements)
     
-    commands := group.commands
+    reflector_pick := v3{0, 4.5, 1.6}
     
+    max_emission_value :: 10
+    
+    pick_index: u32
     { // @note Copy lighting in.
+        close_pick_squared := +Infinity
+        
         vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
         
-        for bitmap_index in 0..<quads.quad_count {
+        for quad_index in 0..<quads.quad_count {
             // :QuadWinding:
-            ve0 := &vertices[bitmap_index*4 + 0]
-            ve1 := &vertices[bitmap_index*4 + 1]
-            ve2 := &vertices[bitmap_index*4 + 3]
-            ve3 := &vertices[bitmap_index*4 + 2]
+            ve0 := &vertices[quad_index*4 + 0]
+            ve1 := &vertices[quad_index*4 + 1]
+            ve2 := &vertices[quad_index*4 + 3]
+            ve3 := &vertices[quad_index*4 + 2]
             
             ve0p := ve0.p.xyz + {0, 0, ve0.p.w}
             ve1p := ve1.p.xyz + {0, 0, ve1.p.w}
@@ -774,14 +781,20 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
             element^ = {}
             
             element.p = ve0p + 0.5 * span20
-            element.r = 0.5 * min(length(span30), length(span10))
+            element.r = 0.75 * min(length(span30), length(span10))
             
             element.n = unpack_normal(ve0.n)
             color := rgba_to_v4(ve0.color)
             element.reflect_c        = 0.95 * color.rgb
             element.transparency     = color.a
-            element.front_emission_c = ve0.emission * color.rgb
+            element.front_emission_c = max_emission_value * ve0.emission * color.rgb
             element.visibility       = 1
+            
+            this_pick_squared := length_squared(element.p - reflector_pick)
+            if close_pick_squared > this_pick_squared {
+                close_pick_squared = this_pick_squared
+                pick_index   = quad_index
+            }
         }
     }
     
@@ -817,14 +830,21 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
         }
     }
     
+    
     LightingIterationCount = clamp(LightingIterationCount, 1, 16)
     // @note Compute lighting
     for _ in 0..<LightingIterationCount {
-        for &destination in light_elements {
+        for &destination, destination_index in light_elements {
             to_camera := camera_p - destination.p
             to_camera = normalize_or_zero(to_camera)
             
             accumulated: v3
+            series := seed_random_series(1234)
+            rays: [16] v3
+            for &ray in rays {
+                ray = normalize_or_zero(destination.n + random_bilateral(&series, v3))
+            }
+            closest_hit: [len(rays)] f32 = +Infinity
             
             for &source in light_elements {
                 light_c  := source.front_emission_c
@@ -839,7 +859,7 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
                     specular_power := 1 + (15 * cast(f32) 1)
                     distance_falloff := 1 / (1 + square(light_distance))
                     
-                    cos_angle            := clamp_01(dot(to_light, ref_n))
+                    cos_angle            := clamp_01(dot(to_light, ref_n)) 
                     diffuse_contribution := distance_falloff * diffuse_c * cos_angle
                     
                     reflected             := -to_camera + 2 * dot(to_camera, ref_n) * ref_n
@@ -853,11 +873,34 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
                     total_light := diffuse_light + specular_light
                     result      := destination.reflect_c * total_light
                     
-                    accumulated += result
+                    if true {
+                        for ray, ray_index in rays {
+                            ray_source_n := dot(ray, source.n)
+                            if ray_source_n < -0.001 {
+                                point_on_plane_from_destination := source.p - destination.p
+                                d              := -dot(source.n, point_on_plane_from_destination)
+                                t_ray          := -d / ray_source_n
+                                
+                                if t_ray > 0 && closest_hit[ray_index] > t_ray {
+                                    ray_point_on_plane := t_ray * ray
+                                    distance_squared   := length_squared(ray_point_on_plane - point_on_plane_from_destination)
+                                    
+                                    cone_r := 0.25 * t_ray
+                                    
+                                    if distance_squared < square(source.r + cone_r) {
+                                        closest_hit[ray_index] = t_ray
+                                        accumulated += result
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        accumulated += result
+                    }
                 }
             }
             
-            destination.accumulated_c    = destination.visibility * accumulated
+            destination.accumulated_c = destination.visibility * accumulated
         }
         
         correction := 1 / cast(f32) LightingIterationCount
@@ -871,13 +914,13 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
         bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset  :][:quads.quad_count]
         vertices := commands.vertex_buffer     [quads.bitmap_offset*4:][:quads.quad_count*4]
         
-        for &bitmap, bitmap_index in bitmaps {
-            ve0 := &vertices[bitmap_index*4 + 0]
-            ve1 := &vertices[bitmap_index*4 + 1]
-            ve2 := &vertices[bitmap_index*4 + 2]
-            ve3 := &vertices[bitmap_index*4 + 3]
+        for &bitmap, quad_index in bitmaps {
+            ve0 := &vertices[quad_index*4 + 0]
+            ve1 := &vertices[quad_index*4 + 1]
+            ve2 := &vertices[quad_index*4 + 2]
+            ve3 := &vertices[quad_index*4 + 3]
             
-            element := light_elements[bitmap_index]
+            element := light_elements[quad_index]
             
             front_emission := clamp_01(element.front_emission_c)
             

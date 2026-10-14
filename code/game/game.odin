@@ -15,8 +15,8 @@ TimestepPercentage:       f32 = 100
 
 ShowReflectors:           b32 = false
 ShowVisibility:           b32 = false
-LightingIterationCount:   i32 = 3
-OcclusionIterationCount:  i32 = 2
+LightingIterationCount:   i32 = 2
+OcclusionIterationCount:  i32 = 0
 
 ////////////////////////////////////////////////
 

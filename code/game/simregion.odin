@@ -130,6 +130,8 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
                                 
                                 if entity_overlaps_rectangle(region.updatable_bounds, dest.p, dest.collision_volume) {
                                     dest.flags += { .active }
+                                } else {
+                                    dest.flags -= { .active }
                                 }
                                 
                                 if dest.brain_id != 0 {

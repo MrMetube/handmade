@@ -11,7 +11,7 @@ PedanticGame     :: false
 PedanticRender   :: false
 PedanticPlatform :: false
 
-optimize :: !false
+optimize :: false
 native   :: true
 internal :: true
 
@@ -124,7 +124,7 @@ main :: proc () {
         append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
         
         build_meander()
-        build_optimizations(optimize)
+        build_optimizations(true || optimize)
         build_native(native)
         
         build_pedantic(PedanticGame)

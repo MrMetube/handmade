@@ -144,13 +144,10 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
         if false do add_monster(mode,  room.p[3][4], room.ground[3][4])
         // add_familiar(mode, room.p[2][5], room.ground[2][5])
         
-        // @todo undo this
-        if false {
         snake_brain := add_brain(mode)
         for piece_index in u32(0)..<len(BrainSnake{}.segments) {
             x := 1+piece_index
             add_snake_piece(mode, room.p[x][7], room.ground[x][7], snake_brain, piece_index)
-        }
         }
         
         door_left   = door_right
@@ -249,24 +246,24 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         // @todo(viktor): We will probably need a creation-time system for guaranteeing no overlapping occupation.
         body.occupying = occupying
         
-        append(&body.pieces, VisiblePiece{
-            asset     = .Shadow,
-            dimension = {0, hero_height*1},
-            color     = {1,1,1,0.5},
-        }) 
-        append(&body.pieces, VisiblePiece{
-            asset     = .Cape,
-            dimension = {0, hero_height*1.2},
-            color     = 1,
-            flags     = { .SquishAxis, .BobUpAndDown },
-        })
-        append(&body.pieces, VisiblePiece{
-            asset     = .Torso,
-            dimension = {0, hero_height*1.2},
-            offset    = {0, -0.1, 0},
-            color     = 1,
-            flags     = { .SquishAxis },
-        })
+        // append(&body.pieces, VisiblePiece{
+        //     asset     = .Shadow,
+        //     dimension = {0, hero_height*1},
+        //     color     = {1,1,1,0.5},
+        // }) 
+        // append(&body.pieces, VisiblePiece{
+        //     asset     = .Cape,
+        //     dimension = {0, hero_height*1.2},
+        //     color     = 1,
+        //     flags     = { .SquishAxis, .BobUpAndDown },
+        // })
+        // append(&body.pieces, VisiblePiece{
+        //     asset     = .Torso,
+        //     dimension = {0, hero_height*1.2},
+        //     offset    = {0, -0.1, 0},
+        //     color     = 1,
+        //     flags     = { .SquishAxis },
+        // })
         
     end_entity(mode, body, p)
     
@@ -280,14 +277,14 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         
         hero_height :: 3
         // @todo(viktor): should render above the body
-        append(&head.pieces, VisiblePiece{
-            asset     = .Head,
-            dimension = {0, hero_height*1.2},
-            offset    = {0, -0.7, 0},
-            color     = 1,
-        })
-        
-        init_hitpoints(head, 3)
+        // append(&head.pieces, VisiblePiece{
+        //     asset     = .Head,
+        //     dimension = {0, hero_height*1.2},
+        //     offset    = {0, -0.7, 0},
+        //     color     = 1,
+        // })
+        // 
+        // init_hitpoints(head, 3)
         
         if mode.camera.following_id == 0 {
             mode.camera.following_id = head.id
@@ -308,12 +305,12 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         glove.angle_swipe_offset = 1
         glove.angle_current_offset = 0.3
         
-        append(&head.pieces, VisiblePiece{
-            asset     = .Sword,
-            dimension = {0, 0.25*hero_height},
-            offset    = 0,
-            color     = 1,
-        })
+        // append(&head.pieces, VisiblePiece{
+        //     asset     = .Sword,
+        //     dimension = {0, 0.25*hero_height},
+        //     offset    = 0,
+        //     color     = 1,
+        // })
         
     end_entity(mode, glove, p)
 }
@@ -328,20 +325,31 @@ add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Travers
     entity.occupying = occupying
     
     height :: 1.5
-    append(&entity.pieces, VisiblePiece{
+    append(&entity.pieces, {
         asset     = .Shadow,
         dimension = {0, height},
         offset    = {0, 0, 0},
         color     = {1,1,1,0.5},
     })
     
-    append(&entity.pieces, VisiblePiece{
-        asset  = segment_index == 0 ? .Head : .Torso,
+    append(&entity.pieces, {
+        asset     = segment_index == 0 ? .Head : .Torso,
         dimension = {0, height},
-        color  = 1,
+        color     = 1,
     })
     
+    add_piece_light(entity, {0, 0, 0.1}, .1, {1, 1, 0}, .3)
+    
     init_hitpoints(entity, 3)
+}
+
+add_piece_light :: proc (entity: ^Entity, offset: v3, radius: f32, color: v3, emission: f32) {
+    append(&entity.pieces, {
+        offset    = offset,
+        dimension = { radius, emission },
+        color     = V4(color, 1),
+        flags     = { .light},
+    })
 }
 
 add_monster :: proc (mode: ^World_Mode, p: WorldPosition, occupying: TraversableReference) {
@@ -414,9 +422,13 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             // color := srgb_to_linear(Green)
             color := srgb_to_linear(White) // @todo undo this
             wall_height := floor_tile_height
-            if offset_x >= -2 && offset_x <= 1 && offset_y == 2 {
+            if offset_x >= -2 && offset_x <= 1 && (offset_y == 2 || offset_y == -1) {
                 wall_height = 3
-                color = srgb_to_linear(v4{0.8, 0.2, 0.1, 1})
+                if offset_y == 2 {
+                    color = srgb_to_linear(v4{0.2, 0.1, 0.8, 1})
+                } else {
+                    color = srgb_to_linear(v4{0.8, 0.2, 0.1, 1})
+                }
             }
             
             jitter_top: v3

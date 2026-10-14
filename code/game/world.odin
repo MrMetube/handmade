@@ -192,7 +192,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
     }
     
-    push_light(render_group, mode.debug_light_p, .1, 1, 1)
+    push_light(render_group, mode.debug_light_p, .5, 1, 1)
     
     frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
     // @todo undo this

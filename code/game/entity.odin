@@ -76,6 +76,7 @@ VisiblePiece :: struct {
         SquishAxis,
         BobUpAndDown,
         cube,
+        light,
     }],
 }
 
@@ -279,6 +280,10 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                     y_axis *= 0.4
                 }
                 
+                if .light in piece.flags {
+                    p := transform.offset + offset
+                    push_light(render_group, p, piece.dimension.x, color.rgb, piece.dimension.y)
+                }
                 if .cube in piece.flags {
                     p := transform.offset + offset
                     push_cube_raw(render_group, &render_group.commands.white_bitmap, p, piece.dimension.x, piece.dimension.y, color)
