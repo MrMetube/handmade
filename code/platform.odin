@@ -21,10 +21,11 @@ import win "core:sys/windows"
 ////////////////////////////////////////////////
 // Config
 
-// RenderDimension := v2i{1280, 720}
+// RenderDimension := v2i{960, 540}
 RenderDimension := v2i{1920, 1080}
 // RenderDimension := v2i{2560, 1440}
 
+// @todo make this target fps configurable
 MonitorRefreshHz :: 90
 
 HighPriorityThreads :: 9

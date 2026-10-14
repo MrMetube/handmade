@@ -128,7 +128,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     x := get_column(camera_object, 0)
     y := get_column(camera_object, 1)
     z := get_column(camera_object, 2)
-    near_clip_plane :: 3
+    near_clip_plane :: 0.1
     push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true, near_clip_plane = near_clip_plane, debug_light_p = mode.debug_light_p)
     
     ////////////////////////////////////////////////
@@ -191,6 +191,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         mode.debug_light_p = camera_entity.p + {0,0,1}
         update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
     }
+    
+    push_light(render_group, mode.debug_light_p, .1, 1, 1)
     
     frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
     // @todo undo this

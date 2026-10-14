@@ -2,6 +2,7 @@
 
 - the render targets are not correctly cleared in the cutscene mode
 - remove the old opengl and software renderer backends
+- remove :BackendSwitching: related code
 
 ### Graphics Upgrade
     - fix unproject

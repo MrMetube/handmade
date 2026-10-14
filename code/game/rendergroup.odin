@@ -145,6 +145,7 @@ Textured_Vertex :: struct {
     n:     Packed_Normal,
     uv:    Packed_UV,
     color: Color,
+    emission: f32,
 }
 
 Packed_Normal :: bit_field u32 {
@@ -333,7 +334,7 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 
 ////////////////////////////////////////////////
 
-push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color) {
+push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0) {
     entry := get_current_quads(group)
     entry.quad_count += 1
     
@@ -351,11 +352,12 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     
     append(&group.commands.quad_bitmap_buffer,  bitmap)
     // @note(viktor): reorder from quad ordering to triangle strip ordering
+    // :QuadWinding:
     append(&group.commands.vertex_buffer, 
-        Textured_Vertex {p3, pack(n3), pack(t3), c3},
-        Textured_Vertex {p0, pack(n0), pack(t0), c0},
-        Textured_Vertex {p2, pack(n2), pack(t2), c2},
-        Textured_Vertex {p1, pack(n1), pack(t1), c1},
+        Textured_Vertex {p3, pack(n3), pack(t3), c3, emission},
+        Textured_Vertex {p0, pack(n0), pack(t0), c0, emission},
+        Textured_Vertex {p2, pack(n2), pack(t2), c2, emission},
+        Textured_Vertex {p1, pack(n1), pack(t1), c1, emission},
     )
 }
 
@@ -504,6 +506,10 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     push_quad(group, bitmap, p0, p1, p2, p3, t0, t1, t2, t3, c, c, c, c)
 }
 
+push_light :: proc (group: ^RenderGroup, p: v3, radius: f32, color := v3{1, 1, 1}, emission: f32) {
+    push_cube_raw(group, &group.commands.white_bitmap, p + {0, 0, 0.5*radius}, radius, radius, V4(color, 1), emission) 
+}
+
 push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     
@@ -515,7 +521,7 @@ push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32
     }
 }
 
-push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
+push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, emission: f32 = 0) {
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle != 0)
     
@@ -547,7 +553,7 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     ct = v4_to_rgba(store_color(color))
     cb = ct
     bo = ct
-    op = ct
+    op = ct 
     
     t0 := v2{0, 0}
     t1 := v2{1, 0}
@@ -555,12 +561,12 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     t3 := v2{0, 1}
     
     // :QuadWinding:
-    push_quad(group, bitmap, p0, p1, p3, p2, t0, t1, t2, t3, cb, ct, ct, cb)
-    push_quad(group, bitmap, p0, p2, p6, p4, t0, t1, t2, t3, bo, bo, bo, bo)
-    push_quad(group, bitmap, p0, p4, p5, p1, t0, t1, t2, t3, cb, cb, ct, ct)
-    push_quad(group, bitmap, p7, p5, p4, p6, t0, t1, t2, t3, ct, ct, cb, cb)
-    push_quad(group, bitmap, p7, p6, p2, p3, t0, t1, t2, t3, ct, cb, cb, ct)
-    push_quad(group, bitmap, p7, p3, p1, p5, t0, t1, t2, t3, op, op, op, op)
+    push_quad(group, bitmap, p0, p1, p3, p2, t0, t1, t2, t3, cb, ct, ct, cb, emission)
+    push_quad(group, bitmap, p0, p2, p6, p4, t0, t1, t2, t3, bo, bo, bo, bo, emission)
+    push_quad(group, bitmap, p0, p4, p5, p1, t0, t1, t2, t3, cb, cb, ct, ct, emission)
+    push_quad(group, bitmap, p7, p5, p4, p6, t0, t1, t2, t3, ct, ct, cb, cb, emission)
+    push_quad(group, bitmap, p7, p6, p2, p3, t0, t1, t2, t3, ct, cb, cb, ct, emission)
+    push_quad(group, bitmap, p7, p3, p1, p5, t0, t1, t2, t3, op, op, op, op, emission)
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -725,14 +731,16 @@ LightingElement :: struct {
     reflect_c: v3,
     transparency: f32,
     r: f32,
+    
+    visibility: f32,
+    shadow:     f32,
 }
 
-lighting_test :: proc (group: ^RenderGroup) {
+lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
     quads := group.current_quads
     assert(quads != nil)
     
-    debug_light_p := group.last_setup.debug_light_p
-    camera_p      := group.last_setup.camera_p
+    camera_p := group.last_setup.camera_p
     
     @(static) light_elements: [dynamic; 8192*2] LightingElement
     clear(&light_elements)
@@ -759,33 +767,61 @@ lighting_test :: proc (group: ^RenderGroup) {
             span30 := ve3p - ve0p
             
             element := append_into(&light_elements)
+            element^ = {}
             
             element.p = ve0p + 0.5 * span20
             element.r = 0.5 * min(length(span30), length(span10))
             
             element.n = unpack_normal(ve0.n)
-            element.front_emission_c = 0
-            element.back_emission_c = 0
             color := rgba_to_v4(ve0.color)
             element.reflect_c = color.rgb
             element.transparency = color.a
-            
-            element.front_emission_c = element.reflect_c
-            // if length_squared(element.p - debug_light_p) < square(cast(f32) 4.0) {
-            // }
+            element.front_emission_c = ve0.emission * element.reflect_c
+            element.visibility = 1
         }
     }
     
-    // @note Compute lighting
-    for _ in 0..<3 {
+    for _ in 0..<2 {
         for &destination in light_elements {
-            light_c   := destination.front_emission_c
+            shadow: f32 = 1
+            
+            for &source in light_elements {
+                v := source.p - destination.p
+                v_len_squared := length_squared(v)
+                v_len := square_root(v_len_squared)
+                
+                if v_len < 0.0001 { continue }
+                v *= 1 / v_len
+                
+                apparent_source_amount      := abs(dot(source.n, v))
+                apparent_destination_amount := clamp_01(4 * dot(destination.n, v))
+                emitter_area                := Pi * square(source.r)
+                apparent_source_area        := emitter_area / v_len_squared
+                
+                s := (1.0 - reciprocal_square_root(apparent_source_area + 1)) * apparent_source_amount * apparent_destination_amount
+                
+                shadow += source.visibility * s
+            }
+            
+            destination.shadow = clamp_01(shadow)
+        }
+        
+        for &destination in light_elements {
+            destination.visibility = 1 - destination.shadow
+        }
+    }
+    
+    LightingIterationCount = clamp(LightingIterationCount, 1, 5)
+    // @note Compute lighting
+    for _ in 0..<LightingIterationCount {
+        for &destination in light_elements {
             to_camera := camera_p - destination.p
             to_camera = normalize_or_zero(to_camera)
             
+            accumulator: v3
+            
             for &source in light_elements {
-                if &destination == &source { continue }
-                
+                light_c  := source.front_emission_c
                 to_light := source.p - destination.p
                 light_distance := length(to_light)
                 if light_distance > 0 {
@@ -801,9 +837,9 @@ lighting_test :: proc (group: ^RenderGroup) {
                     cos_angle   := cast(v3) diffuse_dot
                     diffuse_light := distance_falloff * diffuse_c * cos_angle * light_c
                     
-                    reflected := reflect(to_camera, ref_n)
+                    reflected := -to_camera + 2 * dot(to_camera, ref_n) * ref_n
                     spec_dot  := clamp_01(dot(to_light, reflected))
-                    spec_dot   = power(spec_dot, specular_power)
+                    // spec_dot   = power(spec_dot, specular_power)
                     cos_reflected_angle := cast(v3) spec_dot
                     specular_light := specular_c * cos_reflected_angle * light_c
                     
@@ -811,13 +847,15 @@ lighting_test :: proc (group: ^RenderGroup) {
                     
                     result := destination.reflect_c * total_light
                     
-                    destination.accumulator_c += result
+                    accumulator += result
                 }
             }
+            
+            destination.accumulator_c = destination.visibility * accumulator
         }
         
         for &destination in light_elements {
-            destination.front_emission_c = destination.accumulator_c
+            destination.front_emission_c += destination.accumulator_c
         }
     }
     
@@ -826,62 +864,74 @@ lighting_test :: proc (group: ^RenderGroup) {
         vertices := commands.vertex_buffer     [quads.bitmap_offset*4:][:quads.quad_count*4]
         
         for &bitmap, bitmap_index in bitmaps {
-            bitmap = &commands.white_bitmap
-            
             ve0 := &vertices[bitmap_index*4 + 0]
             ve1 := &vertices[bitmap_index*4 + 1]
             ve2 := &vertices[bitmap_index*4 + 2]
             ve3 := &vertices[bitmap_index*4 + 3]
             
             element := light_elements[bitmap_index]
-
-            min: u32
-            abs_n := abs_vec(element.n)
-            if abs_n.x < abs_n.y {
-                if abs_n.x < abs_n.z {
-                    min = 0
-                } else {
-                    min = 2
-                }
-            } else {
-                if abs_n.y < abs_n.z {
-                    min = 1
-                } else {
-                    min = 2
-                }
+            
+            front_emission := clamp_01(element.front_emission_c)
+            
+            if ShowVisibility {
+                front_emission = element.visibility
             }
             
-            axis: v3
-            axis[min] = 1
-            
-            ex := cross(axis, element.n)
-            ey := -cross(ex, element.n)
-            
-            ex = normalize_or_zero(ex) * element.r
-            ey = normalize_or_zero(ey) * element.r
-            
-            // :QuadWinding:
-            ve0.p.xyz = element.p - ey
-            ve1.p.xyz = element.p + ex
-            ve2.p.xyz = element.p - ex
-            ve3.p.xyz = element.p + ey
-            ve0.p.w = 0
-            ve1.p.w = 0
-            ve2.p.w = 0
-            ve3.p.w = 0
-            
-            n := pack_normal(element.n)
-            ve0.n = n
-            ve1.n = n
-            ve2.n = n
-            ve3.n = n            
-                        
-            c := v4_to_rgba(V4(clamp_01(element.accumulator_c), element.transparency))
-            ve0.color = c
-            ve1.color = c
-            ve2.color = c
-            ve3.color = c
-
+            if ShowReflectors {
+                bitmap = &commands.white_bitmap
+                
+                min: u32
+                abs_n := abs_vec(element.n)
+                if abs_n.x < abs_n.y {
+                    if abs_n.x < abs_n.z {
+                        min = 0
+                    } else {
+                        min = 2
+                    }
+                } else {
+                    if abs_n.y < abs_n.z {
+                        min = 1
+                    } else {
+                        min = 2
+                    }
+                }
+                
+                axis: v3
+                axis[min] = 1
+                
+                ex := cross(axis, element.n)
+                ey := -cross(ex, element.n)
+                
+                ex = normalize_or_zero(ex) * element.r
+                ey = normalize_or_zero(ey) * element.r
+                
+                // :QuadWinding:
+                ve0.p.xyz = element.p - ey
+                ve1.p.xyz = element.p + ex
+                ve2.p.xyz = element.p - ex
+                ve3.p.xyz = element.p + ey
+                ve0.p.w = 0
+                ve1.p.w = 0
+                ve2.p.w = 0
+                ve3.p.w = 0
+                
+                n := pack_normal(element.n)
+                ve0.n = n
+                ve1.n = n
+                ve2.n = n
+                ve3.n = n            
+                
+                c := v4_to_rgba(V4(front_emission, element.transparency))
+                ve0.color = c
+                ve1.color = c
+                ve2.color = c
+                ve3.color = c
+            } else {
+                ve0.color = v4_to_rgba(V4(front_emission * rgba_to_v4(ve0.color).rgb, rgba_to_v4(ve0.color).a))
+                ve1.color = v4_to_rgba(V4(front_emission * rgba_to_v4(ve1.color).rgb, rgba_to_v4(ve1.color).a))
+                ve2.color = v4_to_rgba(V4(front_emission * rgba_to_v4(ve2.color).rgb, rgba_to_v4(ve2.color).a))
+                ve3.color = v4_to_rgba(V4(front_emission * rgba_to_v4(ve3.color).rgb, rgba_to_v4(ve3.color).a))
+            }
         }
     }
 }

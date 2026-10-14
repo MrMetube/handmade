@@ -626,10 +626,10 @@ gl_render_commands :: proc (open_gl: ^OpenGL, commands: ^RenderCommands, draw_re
     gl.Scissor(0, 0, render_dim.x, render_dim.y)
     
     vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff},
-        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff},
-        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff},
-        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff},
+        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff, 0},
+        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff, 0},
+        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff, 0},
+        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff, 0},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     
@@ -689,10 +689,10 @@ resolve_multisample :: proc (open_gl: ^OpenGL, from, to: FrameBuffer, dim: v2i) 
     gl.Scissor(0, 0, dim.x, dim.y)
     
     vertex_buffer := [4] Textured_Vertex {
-        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff},
-        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff},
-        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff},
-        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff},
+        {{-1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 1}), 0xff, 0},
+        {{-1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{0, 0}), 0xff, 0},
+        {{ 1,  1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 1}), 0xff, 0},
+        {{ 1, -1, 0, 1}, pack(v3{0, 0, 0}), pack(v2{1, 0}), 0xff, 0},
     }
     gl.BufferData(gl.ARRAY_BUFFER, size_of(vertex_buffer), &vertex_buffer[0], gl.STREAM_DRAW)
     

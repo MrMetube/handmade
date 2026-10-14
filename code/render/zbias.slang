@@ -5,6 +5,7 @@ struct TexturedVertex {
     u32 n;
     u32 uv;
     u32 color;
+    f32 emission;
 };
 
 struct Root {

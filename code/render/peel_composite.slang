@@ -68,10 +68,10 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
         
         v3 to_camera = v3(0, 0, 1); // @todo actually compute this!
         
-        peel0.rgb = light_peel(peel0.rgb, normal_lp0, light_n, light_c, to_camera);
-        peel1.rgb = light_peel(peel1.rgb, normal_lp1, light_n, light_c, to_camera);
-        peel2.rgb = light_peel(peel2.rgb, normal_lp2, light_n, light_c, to_camera);
-        peel3.rgb = light_peel(peel3.rgb, normal_lp3, light_n, light_c, to_camera);
+        // peel0.rgb = light_peel(peel0.rgb, normal_lp0, light_n, light_c, to_camera);
+        // peel1.rgb = light_peel(peel1.rgb, normal_lp1, light_n, light_c, to_camera);
+        // peel2.rgb = light_peel(peel2.rgb, normal_lp2, light_n, light_c, to_camera);
+        // peel3.rgb = light_peel(peel3.rgb, normal_lp3, light_n, light_c, to_camera);
         
         result = peel3.rgb;
         result = peel2.rgb + (1 - peel2.a) * result;

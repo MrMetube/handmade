@@ -12,6 +12,9 @@ SoundPitchingWithMouse:   b32 = false
 ShowSimulationBounds:     b32 = false
 ShowRenderFrustum:        b32 = false
 TimestepPercentage:       f32 = 100
+ShowReflectors:           b32 = !false
+ShowVisibility:           b32 = !false
+LightingIterationCount:   i32 = 3
 
 ////////////////////////////////////////////////
 
@@ -142,16 +145,29 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
     
     { debug_data_block("Renderer")
         // @todo(viktor): tell the debug ui to move back into the screen area
-        dim := cast(v2) render_commands.dimension
-        debug_record_value(&dim.x, "Render Width")
-        debug_record_value(&dim.y, "Render Height")
-        render_commands.dimension = cast(iv2) dim
+        {
+            dim := cast(v2) render_commands.dimension
+            debug_record_value(&dim.x, "Render Width")
+            debug_record_value(&dim.y, "Render Height")
+            render_commands.dimension = cast(iv2) dim
+        }
         
         debug_record_value(&render_commands.multisampling_hint, "Multisampling")
         debug_record_value(&render_commands.pixelation_hint, "Pixelation")
-        count := cast(f32) render_commands.depth_peel_count_hint
-        debug_record_value(&count, "Depth Peel Count")
-        render_commands.depth_peel_count_hint = cast(u32) count
+        {
+            count := cast(f32) render_commands.depth_peel_count_hint
+            debug_record_value(&count, "Depth Peel Count")
+            render_commands.depth_peel_count_hint = cast(u32) count
+        }
+        
+        { debug_data_block("Lighting")
+            debug_record_value(&ShowVisibility, "Show Visibility")
+            debug_record_value(&ShowReflectors, "Show Reflectors")
+            
+            count := cast(f32) LightingIterationCount
+            debug_record_value(&count, "Lighting Iterations")
+            LightingIterationCount = cast(i32) count
+        }
     }
     
     { debug_data_block("Game")

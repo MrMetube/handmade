@@ -557,9 +557,9 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
     
     ////////////////////////////////////////////////
     
-    compute_light_transport(vulkan, commands, frame)
+    // compute_light_transport(vulkan, commands, frame)
     
-    gpu.barrier(commands, { .color_output }, { .color_write }, { .fragment }, { .shader_read }) // @todo real barrier
+    // gpu.barrier(commands, { .color_output }, { .color_write }, { .fragment }, { .shader_read }) // @todo real barrier
     
     ////////////////////////////////////////////////
     

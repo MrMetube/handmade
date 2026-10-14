@@ -402,7 +402,7 @@ StandartRoom :: struct {
 
 add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> StandartRoom {
     result: StandartRoom
-    floor_tile_height :: 0.5
+    floor_tile_height: f32 : 0.5
     
     for offset_y in -radius.y ..= radius.y {
         for offset_x in -radius.x ..= radius.x {
@@ -411,16 +411,22 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
             index_x := offset_x+radius.x
             index_y := offset_y+radius.y
             
+            wall_height := floor_tile_height
+            if offset_x >= -2 && offset_x <= 1 && offset_y == 2 {
+                wall_height = 3
+            }
+            
             jitter_top: v3
             jitter_left: v3
             jitter_left.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_left.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
             jitter_left.z += random_unilateral(&mode.world.game_entropy, f32) * 0.2
-            jitter_top.x += random_bilateral(&mode.world.game_entropy, f32) * 0.2
-            jitter_top.y += random_bilateral(&mode.world.game_entropy, f32) * 0.2
-            jitter_top.z += random_unilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_top.x  += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_top.y  += random_bilateral(&mode.world.game_entropy, f32) * 0.2
+            jitter_top.z  += random_unilateral(&mode.world.game_entropy, f32) * 0.2
             
             jitter_now := linear_blend(jitter_left, jitter_top, 0.5)
+            jitter_now.z += wall_height
             p.offset += jitter_now + {0, 0, floor_tile_height}
             
             result.p[index_x][index_y] = p
@@ -435,7 +441,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole
                 append(&entity.traversables, TraversablePoint{})
                 append(&entity.pieces, VisiblePiece {
                     asset     = .Tuft,
-                    dimension = {.75, floor_tile_height},
+                    dimension = {.75, wall_height},
                     color     = srgb_to_linear(Green),
                     flags     = {.cube},
                 })

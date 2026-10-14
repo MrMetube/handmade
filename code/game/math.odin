@@ -111,6 +111,11 @@ square_root :: proc (x: $T) -> T {
     return result
 }
 
+reciprocal_square_root :: proc (x: $T) -> T {
+    result := 1.0 / square_root(x)
+    return result
+}
+
 linear_blend  :: proc { linear_blend_v_e, linear_blend_e }
 linear_blend_v_e :: proc (from: $V/[$N]$E, to: V, t: E) -> V {
     result := (1-t) * from + t * to
