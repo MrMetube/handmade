@@ -11,8 +11,8 @@ import gpu "./no_graphics_api"
 Shader_Path :: struct { vertex: string, fragment: string }
 
 ZBias := Shader_Path {
-    #config(Path_z_bias_vertex,            "unset"),
-    #config(Path_z_bias_fragment,          "unset"),
+    #config(Path_z_bias_vertex,   "unset"),
+    #config(Path_z_bias_fragment, "unset"),
 }
 PeelComposite := Shader_Path {
     #config(Path_peel_composite_vertex,   "unset"),
@@ -44,6 +44,8 @@ DepthPeelToLighting := Shader_Path {
 }
 
 ////////////////////////////////////////////////
+
+MaxMultisampleCount :: 8
 
 frame_data_heap_size     :: 32 * Megabyte
 texture_upload_heap_size :: 64 * Megabyte
@@ -264,103 +266,61 @@ init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
     create_psos(vulkan)
 }
 
-create_psos :: proc (vulkan: ^Vulkan) {
-    cleanup: [dynamic; 128] [] u8
-    read_path :: proc (path: Shader_Path, cleanup: ^[dynamic; 128] [] u8) -> ([] u8, [] u8) {
-        vertex   := read_vulkan_spirv(path.vertex)
-        fragment := read_vulkan_spirv(path.fragment)
-        
-        append(cleanup, vertex, fragment)
-        
-        return vertex, fragment
+unload_vulkan :: proc (vulkan: ^Vulkan) {
+    device := vulkan.device
+    if device != nil && device.debug_messenger != 0 && device.destroy_debug_messenger != nil {
+        device.destroy_debug_messenger(device.instance, device.debug_messenger, nil)
+        device.debug_messenger = 0
     }
+}
+
+hotreload_vulkan :: proc (vulkan: ^Vulkan) {
+    device := vulkan.device
+    assert(device != nil)
     
-    zbias_vertex,                  zbias_fragment                  := read_path(ZBias,              &cleanup)
-    peel_composite_vertex,         peel_composite_fragment         := read_path(PeelComposite,      &cleanup)
-    multisample_resolve_vertex,    multisample_resolve_fragment    := read_path(MultisampleResolve, &cleanup)
-    final_stretch_vertex,          final_stretch_fragment          := read_path(FinalStretch,       &cleanup)
-    multigrid_light_up_vertex,     multigrid_light_up_fragment     := read_path(MultigridLightUp,   &cleanup)
-    multigrid_light_down_vertex,   multigrid_light_down_fragment   := read_path(MultigridLightDown, &cleanup)
-    depth_peel_to_lighting_vertex, depth_peel_to_lighting_fragment := read_path(DepthPeelToLighting, &cleanup)
+    address, found := dynlib.symbol_address(cast(dynlib.Library) device.vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
+    assert(found)
     
-    defer for slice in cleanup {
-        delete(slice)
+    vk.load_proc_addresses_global(address)
+    vk.load_proc_addresses_instance(device.instance)
+    vk.load_proc_addresses_device(device.device)
+    
+    gpu.wait_idle(vulkan.device)
+    
+    create_psos(vulkan)
+    
+    device.destroy_debug_messenger = auto_cast vk.GetInstanceProcAddr(device.instance, "vkDestroyDebugUtilsMessengerEXT")
+    assert(vk.CmdBindResourceHeapEXT != nil && vk.CmdBindSamplerHeapEXT != nil && vk.CmdPushDataEXT != nil)
+}
+
+deinit_vulkan :: proc (vulkan: ^Vulkan) {
+    device := vulkan.device
+    if device == nil { return }
+    
+    gpu.wait_idle(device)
+    
+    destroy_all_render_targets(vulkan)
+    
+    for &texture in vulkan.textures[1:] {
+        gpu.texture_free(&vulkan.texture_allocator, &texture)
     }
     
     gpu.destroy_pso(vulkan.zbias_pso)
-    gpu.destroy_pso(vulkan.peel_composite_pso)
+    gpu.destroy_pso(vulkan.multisampled_zbias_pso)
     gpu.destroy_pso(vulkan.multisample_resolve_pso)
+    gpu.destroy_pso(vulkan.peel_composite_pso)
     gpu.destroy_pso(vulkan.final_stretch_pso)
-    gpu.destroy_pso(vulkan.multigrid_light_up_pso)
-    gpu.destroy_pso(vulkan.multigrid_light_down_pso)
-    gpu.destroy_pso(vulkan.depth_peel_to_lighting_pso)
+    gpu.destroy_timeline_semaphore(vulkan.latest_completion.semaphore)
     
-    vulkan.zbias_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = zbias_vertex,
-        fragment_spirv = zbias_fragment,
-        color_targets  = { 
-            gpu.color_target_desc(format = .bgra8_srgb),
-            gpu.color_target_desc(format = .rgba8_unorm),
-            gpu.color_target_desc(format = .rgba8_unorm),
-        },
-        depth_format   = .d32_float,
-        rasterization  = { cull = .counter_clockwise },
-    )
+    for &frame in vulkan.frames {
+        gpu.destroy_gpu_heap(frame.heap)
+    }
+    gpu.destroy_gpu_heap(vulkan.texture_upload_heap)
+    gpu.destroy_texture_descriptor_heap(vulkan.texture_descriptor_heap)
+    gpu.destroy_sampler_descriptor_heap(vulkan.sampler_descriptor_heap)
+    gpu.destroy_texture_heap(vulkan.texture_heap)
     
-    vulkan.peel_composite_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = peel_composite_vertex,
-        fragment_spirv = peel_composite_fragment,
-        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
-    )
-    
-    vulkan.multisample_resolve_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = multisample_resolve_vertex,
-        fragment_spirv = multisample_resolve_fragment,
-        color_targets  = { 
-            gpu.color_target_desc(format = .bgra8_srgb),
-            gpu.color_target_desc(format = .rgba8_unorm),
-            gpu.color_target_desc(format = .rgba8_unorm),
-        },
-        depth_format   = .d32_float,
-    )
-    
-    vulkan.final_stretch_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = final_stretch_vertex,
-        fragment_spirv = final_stretch_fragment,
-        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
-    )
-    
-    vulkan.multigrid_light_up_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = multigrid_light_up_vertex,
-        fragment_spirv = multigrid_light_up_fragment,
-        color_targets  = { 
-            gpu.color_target_desc(format = .rgba32_float),
-            gpu.color_target_desc(format = .rgba32_float),
-            gpu.color_target_desc(format = .rgba32_float),
-            gpu.color_target_desc(format = .rgba32_float),
-        },
-    )
-        
-    vulkan.multigrid_light_down_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = multigrid_light_down_vertex,
-        fragment_spirv = multigrid_light_down_fragment,
-        color_targets  = {
-            gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
-            gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
-        },
-    )
-    
-    // @todo I already had bugs, where the declaration and usage in begin_rendering did not match, i.e. formats and target count. how can this kind of bug be prevented.
-    vulkan.depth_peel_to_lighting_pso = gpu.create_graphics_pso(vulkan.device,
-        vertex_spirv   = depth_peel_to_lighting_vertex,
-        fragment_spirv = depth_peel_to_lighting_fragment,
-        color_targets  = { 
-            gpu.color_target_desc(format = .rgba32_float),
-            gpu.color_target_desc(format = .rgba32_float),
-            gpu.color_target_desc(format = .rgba32_float),
-            gpu.color_target_desc(format = .rgba32_float),
-        },
-    )
+    gpu.destroy_device(device)
 }
 
 ////////////////////////////////////////////////
@@ -438,25 +398,140 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
     }
     
     count := allocs + deallocs
-    render_state.game.debug_record_i32(&count, "count")
-    render_state.game.debug_record_i32(&allocs, "allocations")
-    render_state.game.debug_record_i32(&deallocs, "deallocations")
+    debug_record_i32(&count, "count")
+    debug_record_i32(&allocs, "allocations")
+    debug_record_i32(&deallocs, "deallocations")
 }
 
 ////////////////////////////////////////////////
 
-vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: v2i) {
+create_psos :: proc (vulkan: ^Vulkan) {
+    cleanup: [dynamic; 128] [] u8
+    read_path :: proc (path: Shader_Path, cleanup: ^[dynamic; 128] [] u8) -> ([] u8, [] u8) {
+        vertex   := read_vulkan_spirv(path.vertex)
+        fragment := read_vulkan_spirv(path.fragment)
+        
+        append(cleanup, vertex, fragment)
+        
+        return vertex, fragment
+    }
+    
+    zbias_vertex,                  zbias_fragment                  := read_path(ZBias,              &cleanup)
+    peel_composite_vertex,         peel_composite_fragment         := read_path(PeelComposite,      &cleanup)
+    multisample_resolve_vertex,    multisample_resolve_fragment    := read_path(MultisampleResolve, &cleanup)
+    final_stretch_vertex,          final_stretch_fragment          := read_path(FinalStretch,       &cleanup)
+    multigrid_light_up_vertex,     multigrid_light_up_fragment     := read_path(MultigridLightUp,   &cleanup)
+    multigrid_light_down_vertex,   multigrid_light_down_fragment   := read_path(MultigridLightDown, &cleanup)
+    depth_peel_to_lighting_vertex, depth_peel_to_lighting_fragment := read_path(DepthPeelToLighting, &cleanup)
+    
+    defer for slice in cleanup {
+        delete(slice)
+    }
+    
+    gpu.destroy_pso(vulkan.zbias_pso)
+    gpu.destroy_pso(vulkan.peel_composite_pso)
+    gpu.destroy_pso(vulkan.multisample_resolve_pso)
+    gpu.destroy_pso(vulkan.final_stretch_pso)
+    gpu.destroy_pso(vulkan.multigrid_light_up_pso)
+    gpu.destroy_pso(vulkan.multigrid_light_down_pso)
+    gpu.destroy_pso(vulkan.depth_peel_to_lighting_pso)
+    
+    vulkan.zbias_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = zbias_vertex,
+        fragment_spirv = zbias_fragment,
+        color_targets  = { 
+            gpu.color_target_desc(format = .bgra8_srgb),
+            gpu.color_target_desc(format = .rgba8_unorm),
+            gpu.color_target_desc(format = .rgba8_unorm),
+        },
+        depth_format   = .d32_float,
+        rasterization  = { cull = .counter_clockwise },
+    )
+    
+    vulkan.peel_composite_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = peel_composite_vertex,
+        fragment_spirv = peel_composite_fragment,
+        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
+    )
+    
+    vulkan.multisample_resolve_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = multisample_resolve_vertex,
+        fragment_spirv = multisample_resolve_fragment,
+        color_targets  = { 
+            gpu.color_target_desc(format = .bgra8_srgb),
+            gpu.color_target_desc(format = .rgba8_unorm),
+            gpu.color_target_desc(format = .rgba8_unorm),
+        },
+        depth_format   = .d32_float,
+    )
+    
+    vulkan.final_stretch_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = final_stretch_vertex,
+        fragment_spirv = final_stretch_fragment,
+        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
+    )
+    
+    vulkan.multigrid_light_up_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = multigrid_light_up_vertex,
+        fragment_spirv = multigrid_light_up_fragment,
+        color_targets  = { 
+            gpu.color_target_desc(format = .rgba32_float),
+            gpu.color_target_desc(format = .rgba32_float),
+            gpu.color_target_desc(format = .rgba32_float),
+            gpu.color_target_desc(format = .rgba32_float),
+        },
+    )
+        
+    vulkan.multigrid_light_down_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = multigrid_light_down_vertex,
+        fragment_spirv = multigrid_light_down_fragment,
+        color_targets  = {
+            gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
+            gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
+        },
+    )
+    
+    // @todo I already had bugs, where the declaration and usage in begin_rendering did not match, i.e. formats and target count. how can this kind of bug be prevented.
+    vulkan.depth_peel_to_lighting_pso = create_graphics_pso(vulkan.device,
+        vertex_spirv   = depth_peel_to_lighting_vertex,
+        fragment_spirv = depth_peel_to_lighting_fragment,
+        color_targets  = { 
+            gpu.color_target_desc(format = .rgba32_float),
+            gpu.color_target_desc(format = .rgba32_float),
+            gpu.color_target_desc(format = .rgba32_float),
+            gpu.color_target_desc(format = .rgba32_float),
+        },
+    )
+    
+    // @note Bake my default arguments.
+    create_graphics_pso :: proc (
+        device: gpu.Device,
+        vertex_spirv:   [] u8,
+        fragment_spirv: [] u8,
+        color_targets:  [] gpu.ColorTargetDesc,
+        depth_format:   gpu.Format             = .undefined,
+        stencil_format: gpu.Format             = .undefined,
+        rasterization:  gpu.RasterizationState = {},
+        sample_count:   u32                    = 1,
+        ) -> gpu.PSO {
+        return gpu.create_graphics_pso(device, vertex_spirv, fragment_spirv, "main", "main", color_targets, depth_format, stencil_format, rasterization, sample_count)
+    }
+}
+
+////////////////////////////////////////////////
+
+render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw_region: Rectangle2i, window_dim: iv2) {
     timed_function()
     
     if render_commands.settings != vulkan.settings {
         change_to_settings(vulkan, render_commands.settings)
     }
     
-    render_state.game.begin_timed_block("acquire frame")
+    begin_timed_block("acquire frame")
     render_frame := gpu.acquire(vulkan.device)
-    render_state.game.end_timed_block()
+    end_timed_block()
     if render_frame.render_view == nil { return }
-
+    
     frame_index := vulkan.next_frame_index
     vulkan.next_frame_index = (frame_index + 1) % cast(u32) frames_in_flight
     frame := &vulkan.frames[frame_index]
@@ -465,16 +540,47 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
         gpu.wait_timeline(frame.completion)
     }
     
-    render_extent := cast(uv2) render_commands.dimension
+    render_extent    := cast(uv2) render_commands.dimension
     depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
     
-    uploads := upload_frame_data(render_commands, frame)
+    uploads: FrameUploads
+    {
+        timed_block("upload per-frame data")
+        
+        debug_data_block("Renderer")
+        debug_data_block("frame uploads")
+        
+        gpu.bump_reset(&frame.allocator)
+        
+        {
+            timed_block("copy textured vertices")
+            
+            count := cast(i32) len(render_commands.vertex_buffer)
+            debug_record_i32(&count, "vertex count")
+            
+            uploads.vertices = gpu.bump_allocate(&frame.allocator, [] Textured_Vertex, len(render_commands.vertex_buffer))
+            copy(uploads.vertices.cpu, render_commands.vertex_buffer[:])
+        }
+        
+        {
+            timed_block("copy texture descriptors")
+            
+            count := cast(i32) len(render_commands.quad_bitmap_buffer)
+            debug_record_i32(&count, "bitmap count")
+            
+            uploads.textures = gpu.bump_allocate(&frame.allocator, [] u32, len(render_commands.quad_bitmap_buffer))
+            for bitmap, index in render_commands.quad_bitmap_buffer {
+                texture_handle := max(0, bitmap.texture_handle-1)
+                uploads.textures.cpu[index] = texture_handle
+            }
+        }
+    }
     
-    render_state.game.begin_timed_block("begin commands")
+    begin_timed_block("begin commands")
     commands := gpu.begin_commands(vulkan.device)
     gpu.set_texture_descriptor_heap(commands, vulkan.texture_descriptor_heap)
     gpu.set_sampler_descriptor_heap(commands, vulkan.sampler_descriptor_heap)
-    render_state.game.end_timed_block()
+    end_timed_block()
     
     ////////////////////////////////////////////////
     
@@ -646,11 +752,11 @@ vk_render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, d
         gpu.end_render_pass(commands)
     }
     
-    render_state.game.begin_timed_block("submit and present")
+    begin_timed_block("submit and present")
     vulkan.latest_completion.value += 1
     frame.completion = vulkan.latest_completion
     gpu.submit_and_present(vulkan.device, { commands }, vulkan.latest_completion)
-    render_state.game.end_timed_block()
+    end_timed_block()
 }
 
 ////////////////////////////////////////////////
@@ -740,40 +846,6 @@ compute_light_transport :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, f
 }
 
 ////////////////////////////////////////////////
-
-upload_frame_data :: proc (render_commands: ^RenderCommands, frame: ^Frame) -> FrameUploads {
-    timed_function()
-    
-    debug_data_block("Renderer")
-    debug_data_block("frame uploads")
-    
-    gpu.bump_reset(&frame.allocator)
-    
-    result: FrameUploads
-    {
-        timed_block("copy textured vertices")
-        
-        count := cast(i32) len(render_commands.vertex_buffer)
-        render_state.game.debug_record_i32(&count, "vertex count")
-        
-        result.vertices = gpu.bump_allocate(&frame.allocator, [] Textured_Vertex, len(render_commands.vertex_buffer))
-        copy(result.vertices.cpu, render_commands.vertex_buffer[:])
-    }
-    
-    {
-        timed_block("copy texture descriptors")
-        
-        count := cast(i32) len(render_commands.quad_bitmap_buffer)
-        render_state.game.debug_record_i32(&count, "bitmap count")
-        
-        result.textures = gpu.bump_allocate(&frame.allocator, [] u32, len(render_commands.quad_bitmap_buffer))
-        for bitmap, index in render_commands.quad_bitmap_buffer {
-            texture_handle := max(0, bitmap.texture_handle-1)
-            result.textures.cpu[index] = texture_handle
-        }
-    }
-    return result
-}
 
 change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
     timed_function()
@@ -876,6 +948,8 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
             vulkan.multisampled_zbias_pso = gpu.create_graphics_pso(vulkan.device,
                 vertex_spirv   = vertex,
                 fragment_spirv = fragment,
+                vertex_entry_point   = "main",
+                fragment_entry_point = "main",
                 color_targets  = { 
                     gpu.color_target_desc(format = .bgra8_srgb),
                     gpu.color_target_desc(format = .rgba8_unorm),
@@ -1054,64 +1128,4 @@ destroy_all_render_targets :: proc (vulkan: ^Vulkan) {
     }
     
     destroy_render_target(vulkan, &vulkan.composite_buffer)
-}
-
-////////////////////////////////////////////////
-
-vk_reload :: proc (vulkan: ^Vulkan) {
-    device := vulkan.device
-    if device != nil && device.debug_messenger != 0 && device.destroy_debug_messenger != nil {
-        device.destroy_debug_messenger(device.instance, device.debug_messenger, nil)
-        device.debug_messenger = 0
-    }
-}
-
-vk_shutdown :: proc (vulkan: ^Vulkan) {
-    device := vulkan.device
-    if device == nil { return }
-    
-    gpu.wait_idle(device)
-    
-    destroy_all_render_targets(vulkan)
-    
-    for &texture in vulkan.textures[1:] {
-        gpu.texture_free(&vulkan.texture_allocator, &texture)
-    }
-    
-    gpu.destroy_pso(vulkan.zbias_pso)
-    gpu.destroy_pso(vulkan.multisampled_zbias_pso)
-    gpu.destroy_pso(vulkan.multisample_resolve_pso)
-    gpu.destroy_pso(vulkan.peel_composite_pso)
-    gpu.destroy_pso(vulkan.final_stretch_pso)
-    gpu.destroy_timeline_semaphore(vulkan.latest_completion.semaphore)
-    
-    for &frame in vulkan.frames {
-        gpu.destroy_gpu_heap(frame.heap)
-    }
-    gpu.destroy_gpu_heap(vulkan.texture_upload_heap)
-    gpu.destroy_texture_descriptor_heap(vulkan.texture_descriptor_heap)
-    gpu.destroy_sampler_descriptor_heap(vulkan.sampler_descriptor_heap)
-    gpu.destroy_texture_heap(vulkan.texture_heap)
-    
-    gpu.destroy_device(device)
-}
-
-vk_reattach :: proc (vulkan: ^Vulkan) -> bool {
-    device := vulkan.device
-    if device == nil { return false }
-    
-    address, found := dynlib.symbol_address(cast(dynlib.Library) device.vulkan_library, "vkGetInstanceProcAddr", allocator = context.temp_allocator)
-    if !found { return false }
-    
-    vk.load_proc_addresses_global(address)
-    vk.load_proc_addresses_instance(device.instance)
-    vk.load_proc_addresses_device(device.device)
-    
-    gpu.wait_idle(vulkan.device)
-    
-    create_psos(vulkan)
-    
-    device.destroy_debug_messenger = auto_cast vk.GetInstanceProcAddr(device.instance, "vkDestroyDebugUtilsMessengerEXT")
-    result := vk.CmdBindResourceHeapEXT != nil && vk.CmdBindSamplerHeapEXT != nil && vk.CmdPushDataEXT != nil
-    return result
 }

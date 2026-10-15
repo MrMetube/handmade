@@ -74,11 +74,12 @@ main :: proc () {
     for shader in shaders {
         append(cmd, "slangc")
         append(cmd, shader.source)
+        append(cmd, "-target", "spirv")
+        append(cmd, "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT")
         if !optimize { append(cmd, "-g") }
-        append(cmd, "-target", "spirv", "-profile", "spirv_1_5", "-emit-spirv-directly", "-fvk-use-entrypoint-name", "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT", "-entry")
-        append(cmd, fmt.tprintf("%sMain", shader.stage))
-        append(cmd, "-stage", shader.stage)
-        append(cmd, "-o", fmt.tprintf("data/%s", shader.path))
+        append(cmd, "-entry", fmt.tprintf("%sMain", shader.stage))
+        append(cmd, "-o",     fmt.tprintf("data/%s", shader.path))
+        
         run_command(cmd, async = procs)
     }
     
@@ -141,7 +142,7 @@ main :: proc () {
         
         if !generate_platform_api(&metaprogram, "./code/render/generated-platform_api.odin", render_package, { .opaques })              do os.exit(1)
         if !generate_commons(&metaprogram,      "./code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
-        if !generate_game_api(&metaprogram,     "./code/render/generated-game_api.odin",     game_package,   render_package)            do os.exit(1)
+        if !generate_game_and_render_api(&metaprogram, "./code/render/generated-api.odin", game_package, "", render_package)            do os.exit(1)
         
         delete_all_like("./build", `render-\d+\.rdi`)
         delete_all_like("./build", `render-\d+\.pdb`)
@@ -173,8 +174,7 @@ main :: proc () {
             if !check_printlikes(&metaprogram, main_package) do os.exit(1)
             
             // @todo(viktor): these could be run in parallel with each other and the build of the game
-            if !generate_game_api(&metaprogram,   "./code/generated-game_api.odin",       game_package,   main_package)               do os.exit(1)
-            if !generate_render_api(&metaprogram, "./code/generated-render_api.odin",     render_package, main_package)               do os.exit(1)
+            if !generate_game_and_render_api(&metaprogram, "./code/generated-api.odin", game_package, render_package, main_package) do os.exit(1)
             if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",   main_package,   game_package,   "./game")   do os.exit(1)
             if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,   render_package, "./render") do os.exit(1)
             if !generate_platform_api_bindings(&metaprogram, "./code/generated-platform_api.odin", main_package)                      do os.exit(1)

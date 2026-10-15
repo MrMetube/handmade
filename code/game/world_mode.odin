@@ -73,13 +73,13 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     door_top, door_bottom: bool
     stair_up, stair_down:  bool
     
-    room_center: v3i
+    room_center: iv3
     choice: u32
     // @todo undo this
     screen_count :: 1 // 10
     for screen_index in 0 ..< screen_count {
         // @todo undo this
-        room_radius := /* v2i {7, 4} */ iv2{ 5, 3 } + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
+        room_radius := /* iv2 {7, 4} */ iv2{ 5, 3 } + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
         room_size := room_radius * 2 + 1
         
         switch choice {
@@ -408,7 +408,7 @@ StandartRoom :: struct {
     ground: [64][64] TraversableReference,
 }
 
-add_standart_room :: proc (mode: ^World_Mode, tile_p: v3i, left_hole, right_hole: bool, radius: v2i) -> StandartRoom {
+add_standart_room :: proc (mode: ^World_Mode, tile_p: iv3, left_hole, right_hole: bool, radius: iv2) -> StandartRoom {
     result: StandartRoom
     floor_tile_height: f32 : 0.5
     

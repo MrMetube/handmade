@@ -21,9 +21,9 @@ import win "core:sys/windows"
 ////////////////////////////////////////////////
 // Config
 
-// RenderDimension := v2i{960, 540}
-RenderDimension := v2i{1920, 1080}
-// RenderDimension := v2i{2560, 1440}
+// RenderDimension := iv2{960, 540}
+RenderDimension := iv2{1920, 1080}
+// RenderDimension := iv2{2560, 1440}
 
 // @todo make this target fps configurable
 MonitorRefreshHz :: 90
@@ -40,12 +40,8 @@ GlobalPlatformState := PlatformState {
 
 // Debug Variables
 
-GlobalPause:               b32
-GlobalDebugShowCursor:     b32 = INTERNAL
-GlobalDebugRenderSingleThreaded: b32 = false
-GlobalUseSoftwareRenderer: b32 = false
-// :BackendSwitching:
-GlobalUseVulkanRenderer:   b32 = true
+GlobalPause:           b32
+GlobalDebugShowCursor: b32 = INTERNAL
 
 GlobalDebugTable := &DebugTable{}
 
@@ -199,20 +195,11 @@ main :: proc () {
     render_dll.temp = build_exe_path("render_temp.dll")
     
     {
-        window_dc := win.GetDC(window)
-        defer win.ReleaseDC(window, window_dc)
-        
         write_time: u64
         render_dll.is_valid, write_time = load_render_lib(&render_dll)
-        
         if render_dll.is_valid {
-            render_dll.is_valid = render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
-            if render_dll.is_valid {
-                render_dll.write_time = write_time
-            } else {
-                render.reload_or_shutdown(.Shutdown)
-                unload_render_api(&render_dll)
-            }
+            render_dll.write_time = write_time
+            render.init(render_state, window)
         }
     }
     
@@ -520,12 +507,6 @@ main :: proc () {
                 game.debug_record_f32(&expected_frames_per_update)
             }
 
-            { debug_data_block("Renderer")
-                // game.debug_record_b32(&GlobalDebugRenderSingleThreaded)
-                // game.debug_record_b32(&GlobalUseSoftwareRenderer)
-                game.debug_record_b32(&GlobalUseVulkanRenderer)
-            }
-            
             { debug_data_block("Profile")
                 { debug_data_block("Memory")
                     game.debug_ui_element(ArenaOccupancy{ &_platform_arena }, "Platform Arena")
@@ -651,6 +632,7 @@ main :: proc () {
                 game.debug_set_event_recording(GlobalDebugTable, false)
             }
             
+            assert(game.debug_frame_end != nil)
             game.debug_frame_end(&game_memory, new_input^, &render_commands)
             
             if executable_needs_to_be_reloaded {
@@ -680,32 +662,21 @@ main :: proc () {
                 assert(low_queue.completion_count  == low_queue.completion_goal)
                 
                 if render_dll.is_valid {
-                    render.reload_or_shutdown(.Reload)
-                    render_dll.is_valid = false
+                    render.unload()
                 }
+                
                 unload_render_api(&render_dll)
                 
                 for _ in 0..<100 {
                     api_is_valid, write_time := load_render_lib(&render_dll)
-                    if !api_is_valid {
-                        win.Sleep(100)
-                        continue
-                    }
-                    
-                    window_dc := win.GetDC(window)
-                    attached  := render.attach(render_state, window, window_dc, GlobalUseVulkanRenderer ? .Vulkan : .OpenGL)
-                    win.ReleaseDC(window, window_dc)
-                    
-                    if attached {
+                    if api_is_valid {
+                        render.hotreload(render_state)
                         render_dll.is_valid   = true
                         render_dll.write_time = write_time
-                    } else {
-                        // A state layout/backend mismatch requires a restart.
-                        // Remember this build so it is not retried every frame.
-                        render_dll.write_time = write_time
-                        unload_render_api(&render_dll)
+                        break
                     }
-                    break
+                    
+                    win.Sleep(100)
                 }
             }
             
@@ -735,15 +706,7 @@ main :: proc () {
         }
         ////////////////////////////////////////////////
         { timed_block("render")
-            
-            params := Render_Params {
-                render_queue     = auto_cast &high_queue,
-                frame_allocator  = frame_allocator,
-                window_dimension = window_dim,
-                software_target  = back_buffer,
-                single_threaded  = cast(bool) GlobalDebugRenderSingleThreaded,
-            }
-            render.render(&render_commands, draw_region, params)
+            render.render(&render_commands, draw_region, window_dim)
         }
         ////////////////////////////////////////////////
         { timed_block("sleep at frame end")
@@ -789,17 +752,6 @@ main :: proc () {
             }
         }
         ////////////////////////////////////////////////
-        if render_dll.is_valid && render_state.backend != .Vulkan {
-            timed_block("gl frame display")
-            
-            device_context := win.GetDC(window)
-            defer win.ReleaseDC(window, device_context)
-            
-            { timed_block("SwapBuffers")
-                win.SwapBuffers(device_context)
-            }
-        }
-        ////////////////////////////////////////////////
         
         end_counter := get_wall_clock()
         measured_seconds_per_frame := get_seconds_elapsed(last_counter, end_counter)
@@ -816,7 +768,7 @@ main :: proc () {
     ////////////////////////////////////////////////
     // Cleanup and Shutdown
     
-    if render_dll.is_valid { render.reload_or_shutdown(.Shutdown) }
+    render.deinit()
     unload_render_api(&render_dll)
     unload_game_api(&game_dll)
 }
@@ -1105,14 +1057,14 @@ clear_sound_buffer :: proc (buffer: ^IDirectSoundBuffer, sound_output: ^SoundOut
 ////////////////////////////////////////////////   
 //  Window Drawing
 
-get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> v2i {
+get_window_dimension :: proc "system" (window: win.HWND, get_window_rect := false) -> iv2 {
     client_rect: win.RECT
     if get_window_rect {
         win.GetWindowRect(window, &client_rect)
     } else {
         win.GetClientRect(window, &client_rect)
     }
-    dimension: v2i
+    dimension: iv2
     dimension.x = client_rect.right  - client_rect.left
     dimension.y = client_rect.bottom - client_rect.top
     return dimension
@@ -1335,7 +1287,7 @@ clear_render_commands :: proc (commands: ^RenderCommands) {
     clear(&commands.quad_bitmap_buffer)
 }
 
-aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> Rectangle2i {
+aspect_ratio_fit :: proc (render_size: iv2, window_size: iv2) -> Rectangle2i {
     result: Rectangle2i
     
     if render_size.x > 0 && render_size.y > 0 && window_size.x > 0 && window_size.y > 0 {
@@ -1343,7 +1295,7 @@ aspect_ratio_fit :: proc (render_size: v2i, window_size: v2i) -> Rectangle2i {
         optimal_window_height := round(i32, cast(f32) window_size.x * cast(f32) render_size.y / cast(f32) render_size.x)
         
         window_center := window_size / 2
-        optimal_window_size: v2i
+        optimal_window_size: iv2
         if optimal_window_width > window_size.x {
             // Top and Bottom black bars
             optimal_window_size = {window_size.x, optimal_window_height}

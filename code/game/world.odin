@@ -19,7 +19,7 @@ World :: struct {
 
 Chunk :: struct {
     next: ^Chunk,
-    chunk: v3i,
+    chunk: iv3,
     
     first_block: ^WorldEntityBlock,
 }
@@ -34,7 +34,7 @@ WorldEntityBlock :: struct {
 
 WorldPosition :: struct {
     // @todo(viktor): It seems like we have to store ChunkX/Y/Z with each entity because even though the sim region gather doesn't need it at first, and we could get by without it, but entity references pull in entities WITHOUT going through their world_chunk, and thus still need to know the ChunkX/Y/Z
-    chunk:  v3i,
+    chunk:  iv3,
     offset: v3,
 }
 
@@ -52,7 +52,7 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> ^World {
     return result
 }
 
-chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: v3i, additional_offset: v3 = {}) -> WorldPosition {
+chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: iv3, additional_offset: v3 = {}) -> WorldPosition {
     world := mode.world
     tile_size_in_meters  := mode.tile_size_in_meters
     
@@ -413,7 +413,7 @@ map_into_worldspace :: proc (world: ^World, center: WorldPosition, offset: v3 = 
     return result
 }
 
-get_chunk_bounds :: proc (world: ^World, chunk_p: v3i) -> Rectangle3 {
+get_chunk_bounds :: proc (world: ^World, chunk_p: iv3) -> Rectangle3 {
     chunk_center := cast(v3) chunk_p * world.chunk_dim_meters
     result := rectangle_center_dimension(chunk_center, world.chunk_dim_meters)
     return result
@@ -456,7 +456,7 @@ get_chunk :: proc (arena: ^Arena, world: ^World, point: WorldPosition) -> ^Chunk
     return result
 }
 
-get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> ^^Chunk {
+get_chunk_internal :: proc (world: ^World, chunk_p: iv3) -> ^^Chunk {
     ChunkSafeMargin :: 256
     
     assert(chunk_p.x > min(i32) + ChunkSafeMargin)
@@ -482,7 +482,7 @@ get_chunk_internal :: proc (world: ^World, chunk_p: v3i) -> ^^Chunk {
 
 ////////////////////////////////////////////////
 
-extract_chunk :: proc (world: ^World, chunk_p: v3i) -> ^Chunk {
+extract_chunk :: proc (world: ^World, chunk_p: iv3) -> ^Chunk {
     begin_ticket_mutex(&world.change_ticket)
     
     next_pointer_of_the_chunks_previous_chunk := get_chunk_internal(world, chunk_p)

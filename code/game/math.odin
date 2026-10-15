@@ -14,12 +14,6 @@ import "core:simd"
 v2  :: [2] f32
 v3  :: [3] f32
 v4  :: [4] f32
-v2i :: [2] i32
-v3i :: [3] i32
-v4i :: [4] i32
-v2u :: [2] u32
-v3u :: [3] u32
-v4u :: [4] u32
 iv2 :: [2] i32
 iv3 :: [3] i32
 iv4 :: [4] i32
@@ -37,7 +31,7 @@ m4_inv :: struct {
 Rectangle   :: struct ($T: typeid) { min, max: T }
 Rectangle2  :: Rectangle(v2)
 Rectangle3  :: Rectangle(v3)
-Rectangle2i :: Rectangle(v2i)
+Rectangle2i :: Rectangle(iv2)
 
 f32x4 :: #simd [4] f32
 i32x4 :: #simd [4] i32

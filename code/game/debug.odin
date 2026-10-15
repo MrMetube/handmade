@@ -315,7 +315,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     }
 }
 
-debug_init :: proc (dimension: v2i) -> (debug: ^DebugState) {
+debug_init :: proc (dimension: iv2) -> (debug: ^DebugState) {
     debug = bootstrap_arena(DebugState, "arena")
     
     debug.initialization_clock = read_cycle_counter()

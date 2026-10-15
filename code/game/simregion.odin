@@ -98,7 +98,7 @@ begin_world_changes :: proc (sim_arena: ^Arena, world: ^World, origin: WorldPosi
     for chunk_z in min_p.chunk.z ..= max_p.chunk.z {
         for chunk_y in min_p.chunk.y ..= max_p.chunk.y {
             for chunk_x in min_p.chunk.x ..= max_p.chunk.x {
-                chunk_p := v3i{chunk_x, chunk_y, chunk_z}
+                chunk_p := iv3 {chunk_x, chunk_y, chunk_z}
                 
                 chunk := extract_chunk(region.world, chunk_p)
                 

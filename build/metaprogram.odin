@@ -374,84 +374,103 @@ generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string,
     return true
 }
 
-generate_game_api :: proc (mp: ^Metaprogram, output_file, exports_package, output_package: string) -> bool {
-    no_stubs: map[string] bool
-    no_stubs["output_sound_samples"] = true
-    no_stubs["update_and_render"] = true
-    no_stubs["debug_frame_end"] = true
+generate_game_and_render_api :: proc (mp: ^Metaprogram, output_file, game_package, render_package, destination: string) -> bool {
+    game_no_stubs: map[string] bool
+    game_no_stubs["update_and_render"]    = true
+    game_no_stubs["output_sound_samples"] = true
+    game_no_stubs["debug_frame_end"]      = true
     
-    required: map[string] bool
-    required["output_sound_samples"] = true
-    required["update_and_render"] = true
-    required["debug_frame_end"] = true
+    game_required: map[string] bool
+    game_required["output_sound_samples"] = true
+    game_required["update_and_render"]    = true
     
-    return generate_dll_api(mp, output_file, exports_package, output_package, "game", "GameApi", no_stubs, required)
-}
-
-generate_render_api :: proc (mp: ^Metaprogram, output_file, exports_package, output_package: string) -> bool {
-    required: map[string] bool
-    required["attach"] = true
-    required["allocate_texture"] = true
-    required["manage_textures"] = true
-    required["render"] = true
-    required["reload_or_shutdown"] = true
+    render_required: map[string] bool
+    render_required["init"]             = true
+    render_required["unload"]           = true
+    render_required["hotreload"]        = true
+    render_required["deinit"]           = true
+    render_required["render"]           = true
+    render_required["allocate_texture"] = true
+    render_required["manage_textures"]  = true
     
-    return generate_dll_api(mp, output_file, exports_package, output_package, "render", "RenderApi", nil, required)
-}
-
-generate_dll_api :: proc (mp: ^Metaprogram, output_file, exports_package, output_package, api_name, api_type: string, no_stubs, required: map[string] bool) -> bool {
-    exports, eok := mp.exports[exports_package]
-    assert(eok)
-    
-    out, ok := open_generated_file_and_write_header(output_file, output_package)
+    out, ok := open_generated_file_and_write_header(output_file, destination)
     if !ok {
-        fmt.printfln("ERROR: Could not generate %v api", api_name)
+        fmt.printf("ERROR: Could not generate api\n")
         return false
     }
     defer os.close(out)
     
-    width: int
-    for it in exports {
-        width = max(width, len(it.name))
+    Source :: struct {
+        name: string,
+        no_stubs: map[string] bool,
+        required: map[string] bool,
+    }
+    
+    sources: [dynamic; 2] Source
+    append(&sources, { game_package, game_no_stubs, game_required })
+     
+    if render_package != "" {
+        append(&sources, { render_package, nil, render_required })
     }
     
     fmt.fprint(out, "import win \"core:sys/windows\"\n\n")
     
-    generated_fprintf(out, "%s := %s_stubs", api_name, api_name)
-    fmt.fprint(out, "\n")
-    
-    generated_fprintf(out, "%s_stubs :: %s {{", api_name, api_type)
-    for it in exports {
-        if it.name in no_stubs do continue
-        if it.return_count > 0 {
-            fmt.fprintf(out, "    %-*s = %s {{ return {{}} }},\n", width, it.name, it.type)
-        } else {
-            fmt.fprintf(out, "    %-*s = %s {{}},\n", width, it.name, it.type)
+    for source in sources {
+        type_name := strings.to_pascal_case(fmt.tprintf("%s_api", source.name), context.temp_allocator)
+        
+        exports, eok := mp.exports[source.name]
+        assert(eok)
+        
+        width: int
+        for it in exports {
+            width = max(width, len(it.name))
         }
-    }
-    fmt.fprint(out, "}\n\n")
+        
+        generated_fprintf(out, "%s := %s_stubs", source.name, source.name)
+        fmt.fprint(out, "\n")
+        
+        generated_fprintf(out, "%s_stubs :: %s {{", source.name, type_name)
+        for it in exports {
+            if it.name in source.no_stubs do continue
+            if it.return_count > 0 {
+                fmt.fprintf(out, "    %-*s = %s {{ return {{}} }},\n", width, it.name, it.type)
+            } else {
+                fmt.fprintf(out, "    %-*s = %s {{}},\n", width, it.name, it.type)
+            }
+        }
+        fmt.fprint(out, "}\n\n")
 
-    generated_fprintf(out, "%s :: struct {{", api_type)
-    for it in exports {
-        fmt.fprintf(out, "    %v:%*v %s,\n", space_after(it.name, width), it.type)
+        generated_fprintf(out, "%s :: struct {{", type_name)
+        for it in exports {
+            fmt.fprintf(out, "    %v:%*v %s,\n", space_after(it.name, width), it.type)
+        }
+        fmt.fprint(out, "}\n\n")
+        
+        generated_fprintf(out, "load_%s_api :: proc (lib: win.HMODULE) -> bool {{", source.name)
+        for it in exports {
+            fmt.fprintf(out, "    %s.%-*s = auto_cast win.GetProcAddress(lib, \"%s\")\n", source.name, width, it.name, it.name)
+        }
+        fmt.fprint(out, "    \n")
+        
+        for it in exports {
+            if it.name in source.required { continue }
+            fmt.fprintf(out, "    if %s.%-*s == nil {{ %s.%-*s = %s_stubs.%s }}\n", source.name, width, it.name, source.name, width, it.name, source.name, it.name)
+        }
+        fmt.fprint(out, "    \n")
+        
+        fmt.fprint(out, "    return ")
+        first := true
+        for it in exports {
+            if it.name not_in source.required { continue }
+            if !first do fmt.fprint(out, " &&\n           ")
+            fmt.fprintf(out, "%s.%s != nil", source.name, it.name)
+            first = false
+        }
+        fmt.fprint(out, "\n}\n")
+        
+        fmt.printfln("INFO: generated %v api for %v", source.name, destination)
     }
-    fmt.fprint(out, "}\n\n")
     
-    generated_fprintf(out, "load_%s_api :: proc (lib: win.HMODULE) -> bool {{", api_name)
-    for it in exports {
-        fmt.fprintf(out, "    %s.%-*s = auto_cast win.GetProcAddress(lib, \"%s\")\n", api_name, width, it.name, it.name)
-    }
-    fmt.fprint(out, "    return ")
-    first := true
-    for it in exports {
-        if it.name not_in required do continue
-        if !first do fmt.fprint(out, " &&\n           ")
-        fmt.fprintf(out, "%s.%s != nil", api_name, it.name)
-        first = false
-    }
-    fmt.fprint(out, "\n}\n")
-    
-    fmt.printfln("INFO: generated %v api for %v", api_name, output_package)
     return true
 }
 

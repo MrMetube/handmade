@@ -27,20 +27,19 @@ package game
 @(common) 
 Bitmap :: struct {
     memory: [] Color,
-    dimension: v2i,
+    dimension: iv2,
     
     // @cleanup with the next asset pack
     align_percentage:  v2,
     width_over_height: f32,
     
-    // :BackendSwitching:
     texture_handle: u32,
 }
     
 @(common)
 RenderSettings :: struct {
     // @todo these should all be compilation values, i.e. the renderer recompiles the psos if these change.
-    dimension:             v2i,
+    dimension:             iv2,
     depth_peel_count_hint: u32,
     multisampling_hint:    bool,
     pixelation_hint:       bool,
@@ -878,8 +877,8 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup) {
                             ray_source_n := dot(ray, source.n)
                             if ray_source_n < -0.001 {
                                 point_on_plane_from_destination := source.p - destination.p
-                                d              := -dot(source.n, point_on_plane_from_destination)
-                                t_ray          := -d / ray_source_n
+                                d     := -dot(source.n, point_on_plane_from_destination)
+                                t_ray := -d / ray_source_n
                                 
                                 if t_ray > 0 && closest_hit[ray_index] > t_ray {
                                     ray_point_on_plane := t_ray * ray
