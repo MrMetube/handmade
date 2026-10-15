@@ -45,8 +45,6 @@ DepthPeelToLighting := Shader_Path {
 
 ////////////////////////////////////////////////
 
-MaxMultisampleCount :: 8
-
 frame_data_heap_size     :: 32 * Megabyte
 texture_upload_heap_size :: 64 * Megabyte
 texture_heap_size        ::  2 * Gigabyte
@@ -70,6 +68,7 @@ Vulkan :: struct {
     
     texture_heap:      gpu.TextureHeap,
     texture_allocator: gpu.TextureAllocator,
+    supported_sample_count: u32,
     sample_count: u32,
     
     texture_descriptor_heap: gpu.TextureDescriptorHeap,
@@ -92,7 +91,7 @@ Vulkan :: struct {
     
     depth_peel_buffers:         [dynamic; max_depth_peels] DepthPeelBuffer,
     depth_peel_resolve_buffers: [dynamic; max_depth_peels] DepthPeelBuffer,
-    composite_buffer:           RenderTarget,
+    peel_composite_buffer:           RenderTarget,
     
     light_buffers: [dynamic; 10] VulkanLightBuffer,
     debug_light_buffer_index:   i32,
@@ -106,9 +105,9 @@ Frame :: struct {
 }
 
 RenderTarget :: struct {
-    placed:      gpu.PlacedTexture,
-    render_view: gpu.RenderView,
-    descriptor:  u32,
+    texture_index: u32,
+    render_view:  gpu.RenderView,
+    descriptor:   u32,
 }
 
 // @todo if we really only want to specify textured oriented quads there should be a compacter way then sending the vertices like this right?
@@ -138,7 +137,7 @@ TextureDescriptor :: enum u32 {
     resolve_begin,
     resolve_end = resolve_begin + depth_peel_and_resolve_target_count,
     
-    composite,
+    peel_composite,
     
     light_buffer_begin,
     light_buffer_end = light_buffer_begin + light_buffer_count,
@@ -263,6 +262,37 @@ init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
     gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, cast(u32) Sampler.Linear, min_filter = .linear, mag_filter = .linear, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     gpu.write_sampler_descriptor(vulkan.sampler_descriptor_heap, cast(u32) Sampler.Nearest, min_filter = .nearest, mag_filter = .nearest, address_u = .clamp_to_edge, address_v = .clamp_to_edge)
     
+    { // @note Find the maximum supported multisample count.
+        test_dimension := uv3 { 1920, 1080, 1 }
+        
+        peel_color_desc := gpu.texture_desc(
+            extent = test_dimension,
+            format = .bgra8_srgb,
+            usage  = { .sampled, .color_attachment },
+        )
+        
+        peel_depth_desc := gpu.texture_desc(
+            extent = test_dimension,
+            format = .d32_float,
+            usage  = { .sampled, .depth_stencil_attachment },
+        )
+        
+        sample_counts := [?] u32 { 8, 4, 2 }
+        for candidate in sample_counts {
+            peel_color_desc.sample_count = candidate
+            peel_depth_desc.sample_count = candidate
+        
+            if gpu.supports_texture_sample_count(vulkan.device, peel_color_desc) && gpu.supports_texture_sample_count(vulkan.device, peel_depth_desc) {
+                vulkan.supported_sample_count = candidate
+                break
+            }
+        }
+        
+        if vulkan.supported_sample_count == 0 {
+            vulkan.supported_sample_count = 1
+        }
+    }
+    
     create_psos(vulkan)
 }
 
@@ -301,9 +331,10 @@ deinit_vulkan :: proc (vulkan: ^Vulkan) {
     
     destroy_all_render_targets(vulkan)
     
-    for &texture in vulkan.textures[1:] {
+    for &texture in vulkan.textures {
         gpu.texture_free(&vulkan.texture_allocator, &texture)
     }
+    clear(&vulkan.free_texture)
     
     gpu.destroy_pso(vulkan.zbias_pso)
     gpu.destroy_pso(vulkan.multisampled_zbias_pso)
@@ -339,6 +370,21 @@ vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture
     if set_as_nil_texture {
         descriptor_index = cast(u32) TextureDescriptor.nil_texture
     } else {
+        // @todo inline
+        allocate_texture_descriptor :: proc (vulkan: ^Vulkan) -> u32 {
+            index: u32
+            if len(vulkan.free_texture) > 0 {
+                index = pop(&vulkan.free_texture)
+            } else {
+                assert(vulkan.next_texture < cast(u32) TextureDescriptor.count)
+                
+                index = vulkan.next_texture
+                vulkan.next_texture += 1
+            }
+            
+            return index
+        }
+
         descriptor_index = allocate_texture_descriptor(vulkan)
     }
     gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, descriptor_index, placed.texture, .sampled)
@@ -356,6 +402,22 @@ vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture
     vulkan.latest_completion.value += 1
     gpu.submit({ commands }, vulkan.latest_completion)
     
+    // :TextureHandleOffset:
+    //
+    // Handles passed to the game and platform are offset by 1, so that a 0 always means
+    // an invalid handle. 
+    // @todo Get rid of "set_as_nil_texture" which is used to set the "white pixel" texture.
+    // This requires that the game always provides a valid bitmap+handle for any renderer
+    // geometry instead of assuming anything about the handle of the white pixel, but I presume
+    // that that is already the case. But check anyways!
+    // That should remove all the offsetting and also simplify the TextureDescriptor meanings.
+    // TextureDescriptor could also keep a slot just for the white pixels, if that is not too
+    // game specific, but I feel like its fine. Then the platform has to pass the now 
+    // @(common) TextureDescriptor.white_pixel on the allocation, which must also ensure its
+    // slot is free. This code is then the same as the one that the fixed render_target from
+    // all the buffers want to use. They can then reuse it and explicitely pass an enum value
+    // instead of a raw u32.
+    //
     result := 1 + descriptor_index
     vulkan.textures[result] = placed
     
@@ -393,6 +455,7 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
             assert(texture.texture != nil)
             gpu.texture_free(&vulkan.texture_allocator, texture)
             texture^ = {}
+            // :TextureHandleOffset:
             append(&vulkan.free_texture, op.handle - 1)
         }
     }
@@ -406,28 +469,6 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
 ////////////////////////////////////////////////
 
 create_psos :: proc (vulkan: ^Vulkan) {
-    cleanup: [dynamic; 128] [] u8
-    read_path :: proc (path: Shader_Path, cleanup: ^[dynamic; 128] [] u8) -> ([] u8, [] u8) {
-        vertex   := read_vulkan_spirv(path.vertex)
-        fragment := read_vulkan_spirv(path.fragment)
-        
-        append(cleanup, vertex, fragment)
-        
-        return vertex, fragment
-    }
-    
-    zbias_vertex,                  zbias_fragment                  := read_path(ZBias,              &cleanup)
-    peel_composite_vertex,         peel_composite_fragment         := read_path(PeelComposite,      &cleanup)
-    multisample_resolve_vertex,    multisample_resolve_fragment    := read_path(MultisampleResolve, &cleanup)
-    final_stretch_vertex,          final_stretch_fragment          := read_path(FinalStretch,       &cleanup)
-    multigrid_light_up_vertex,     multigrid_light_up_fragment     := read_path(MultigridLightUp,   &cleanup)
-    multigrid_light_down_vertex,   multigrid_light_down_fragment   := read_path(MultigridLightDown, &cleanup)
-    depth_peel_to_lighting_vertex, depth_peel_to_lighting_fragment := read_path(DepthPeelToLighting, &cleanup)
-    
-    defer for slice in cleanup {
-        delete(slice)
-    }
-    
     gpu.destroy_pso(vulkan.zbias_pso)
     gpu.destroy_pso(vulkan.peel_composite_pso)
     gpu.destroy_pso(vulkan.multisample_resolve_pso)
@@ -437,9 +478,8 @@ create_psos :: proc (vulkan: ^Vulkan) {
     gpu.destroy_pso(vulkan.depth_peel_to_lighting_pso)
     
     vulkan.zbias_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = zbias_vertex,
-        fragment_spirv = zbias_fragment,
-        color_targets  = { 
+        shaders       = ZBias,
+        color_targets = {
             gpu.color_target_desc(format = .bgra8_srgb),
             gpu.color_target_desc(format = .rgba8_unorm),
             gpu.color_target_desc(format = .rgba8_unorm),
@@ -449,15 +489,13 @@ create_psos :: proc (vulkan: ^Vulkan) {
     )
     
     vulkan.peel_composite_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = peel_composite_vertex,
-        fragment_spirv = peel_composite_fragment,
-        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
+        shaders       = PeelComposite,
+        color_targets = { gpu.color_target_desc(format = .bgra8_srgb) },
     )
     
     vulkan.multisample_resolve_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = multisample_resolve_vertex,
-        fragment_spirv = multisample_resolve_fragment,
-        color_targets  = { 
+        shaders       = MultisampleResolve,
+        color_targets = {
             gpu.color_target_desc(format = .bgra8_srgb),
             gpu.color_target_desc(format = .rgba8_unorm),
             gpu.color_target_desc(format = .rgba8_unorm),
@@ -466,15 +504,13 @@ create_psos :: proc (vulkan: ^Vulkan) {
     )
     
     vulkan.final_stretch_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = final_stretch_vertex,
-        fragment_spirv = final_stretch_fragment,
-        color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
+        shaders       = FinalStretch,
+        color_targets = { gpu.color_target_desc(format = .bgra8_srgb) },
     )
     
     vulkan.multigrid_light_up_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = multigrid_light_up_vertex,
-        fragment_spirv = multigrid_light_up_fragment,
-        color_targets  = { 
+        shaders       = MultigridLightUp,
+        color_targets = {
             gpu.color_target_desc(format = .rgba32_float),
             gpu.color_target_desc(format = .rgba32_float),
             gpu.color_target_desc(format = .rgba32_float),
@@ -483,9 +519,8 @@ create_psos :: proc (vulkan: ^Vulkan) {
     )
         
     vulkan.multigrid_light_down_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = multigrid_light_down_vertex,
-        fragment_spirv = multigrid_light_down_fragment,
-        color_targets  = {
+        shaders       = MultigridLightDown,
+        color_targets = {
             gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
             gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
         },
@@ -493,9 +528,8 @@ create_psos :: proc (vulkan: ^Vulkan) {
     
     // @todo I already had bugs, where the declaration and usage in begin_rendering did not match, i.e. formats and target count. how can this kind of bug be prevented.
     vulkan.depth_peel_to_lighting_pso = create_graphics_pso(vulkan.device,
-        vertex_spirv   = depth_peel_to_lighting_vertex,
-        fragment_spirv = depth_peel_to_lighting_fragment,
-        color_targets  = { 
+        shaders       = DepthPeelToLighting,
+        color_targets = {
             gpu.color_target_desc(format = .rgba32_float),
             gpu.color_target_desc(format = .rgba32_float),
             gpu.color_target_desc(format = .rgba32_float),
@@ -503,19 +537,47 @@ create_psos :: proc (vulkan: ^Vulkan) {
         },
     )
     
-    // @note Bake my default arguments.
-    create_graphics_pso :: proc (
-        device: gpu.Device,
-        vertex_spirv:   [] u8,
-        fragment_spirv: [] u8,
-        color_targets:  [] gpu.ColorTargetDesc,
-        depth_format:   gpu.Format             = .undefined,
-        stencil_format: gpu.Format             = .undefined,
-        rasterization:  gpu.RasterizationState = {},
-        sample_count:   u32                    = 1,
-        ) -> gpu.PSO {
-        return gpu.create_graphics_pso(device, vertex_spirv, fragment_spirv, "main", "main", color_targets, depth_format, stencil_format, rasterization, sample_count)
+    if vulkan.supported_sample_count > 1 {
+        vulkan.multisampled_zbias_pso = create_graphics_pso(vulkan.device,
+            shaders = ZBias,
+            color_targets  = { 
+                gpu.color_target_desc(format = .bgra8_srgb),
+                gpu.color_target_desc(format = .rgba8_unorm),
+                gpu.color_target_desc(format = .rgba8_unorm),
+            },
+            depth_format   = .d32_float,
+            rasterization  = { cull = .counter_clockwise },
+            sample_count   = vulkan.supported_sample_count,
+        )
     }
+}
+    
+// @note Bake my default arguments.
+create_graphics_pso :: proc (
+    device: gpu.Device,
+    shaders: Shader_Path,
+    color_targets:  [] gpu.ColorTargetDesc,
+    depth_format:   gpu.Format             = .undefined,
+    stencil_format: gpu.Format             = .undefined,
+    rasterization:  gpu.RasterizationState = {},
+    sample_count:   u32                    = 1,
+    ) -> gpu.PSO {
+    
+    read_vulkan_spirv :: proc (path: string) -> [] u8 {
+        // :VulkanRenderer: Move this through the platform API with the other file IO.
+        bytes, error := os.read_entire_file(path, context.allocator)
+        assert(error == nil)
+        assert(len(bytes) % size_of(u32) == 0)
+        return bytes
+    }
+
+    vertex_spirv   := read_vulkan_spirv(shaders.vertex)
+    fragment_spirv := read_vulkan_spirv(shaders.fragment)
+    defer delete(vertex_spirv)
+    defer delete(fragment_spirv)
+    
+    result := gpu.create_graphics_pso(device, vertex_spirv, fragment_spirv, "main", "main", color_targets, depth_format, stencil_format, rasterization, sample_count)
+    return result
 }
 
 ////////////////////////////////////////////////
@@ -672,7 +734,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
     {
         timed_block("peel composite")
         
-        gpu.begin_render_pass(commands, colors = { gpu.color_attachment(render_view = vulkan.composite_buffer.render_view, load = .clear, clear = render_commands.clear_color) })
+        gpu.begin_render_pass(commands, colors = { gpu.color_attachment(render_view = vulkan.peel_composite_buffer.render_view, load = .clear, clear = render_commands.clear_color) })
         
         gpu.bind_pso(commands, vulkan.peel_composite_pso)
         root := gpu.bump_allocate(&frame.allocator, RootPeelComposite)
@@ -719,7 +781,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
         
         root := gpu.bump_allocate(&frame.allocator, RootFinalStretch)
         root.cpu^ = {
-            texture = vulkan.composite_buffer.descriptor,
+            texture = vulkan.peel_composite_buffer.descriptor,
             sampler = render_commands.pixelation_hint ? .Nearest : .Linear,
         }
         gpu.draw(commands, root.gpu, 3)
@@ -861,165 +923,119 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
         
         destroy_all_render_targets(vulkan)
         
-        gpu.destroy_pso(vulkan.multisampled_zbias_pso)
-        vulkan.multisampled_zbias_pso = nil
         vulkan.sample_count = 1
-        
         if settings.multisampling_hint {
-            peel_color_desc := gpu.texture_desc(
-                extent = render_dim,
-                format = .bgra8_srgb,
-                usage  = { .sampled, .color_attachment },
-            )
-            
-            peel_depth_desc := gpu.texture_desc(
-                extent = render_dim,
-                format = .d32_float,
-                usage  = { .sampled, .depth_stencil_attachment },
-            )
-            
-            sample_counts := [?] u32 { 8, 4, 2 }
-            for candidate in sample_counts {
-                if candidate > MaxMultisampleCount { continue }
-                peel_color_desc.sample_count = candidate
-                peel_depth_desc.sample_count = candidate
-                if gpu.supports_texture_sample_count(vulkan.device, peel_color_desc) && gpu.supports_texture_sample_count(vulkan.device, peel_depth_desc) {
-                    vulkan.sample_count = candidate
-                    break
-                }
-            }
+            vulkan.sample_count = vulkan.supported_sample_count
         }
         
         resize(&vulkan.depth_peel_buffers,         depth_peel_count)
-        resize(&vulkan.depth_peel_resolve_buffers, vulkan.sample_count > 1 ? depth_peel_count : 0)
-        for &buffer, index in vulkan.depth_peel_buffers {
-            descriptor := cast(u32) TextureDescriptor.depth_peel_begin + cast(u32) index * depth_peel_and_resolve_target_stride
-            
-            buffer.depth = create_render_target(vulkan, gpu.texture_desc(
-                extent = render_dim,
-                format = .d32_float,
-                usage  = { .sampled, .depth_stencil_attachment },
-                sample_count = vulkan.sample_count,
-            ), descriptor + 0)
-            
-            for &target, target_index in buffer.color {
-                target = create_render_target(vulkan, gpu.texture_desc(
+        resize(&vulkan.depth_peel_resolve_buffers, vulkan.sample_count != 1 ? depth_peel_count : 0)
+        
+        {
+            descriptor := cast(u32) TextureDescriptor.depth_peel_begin
+            for &buffer, index in vulkan.depth_peel_buffers {
+                buffer.depth = create_render_target(vulkan, descriptor, gpu.texture_desc(
+                    extent = render_dim,
+                    format = .d32_float,
+                    usage  = { .sampled, .depth_stencil_attachment },
+                    sample_count = vulkan.sample_count,
+                ))
+                descriptor += 1
+                
+                for &target, target_index in buffer.color {
+                    target = create_render_target(vulkan, descriptor, gpu.texture_desc(
                         extent = render_dim,
                         format = (target_index == .surface_reflect) ? .bgra8_srgb : .rgba8_unorm,
                         usage  = { .sampled, .color_attachment },
                         sample_count = vulkan.sample_count,
-                    ), descriptor + 1 + cast(u32) target_index)
-            }
-        }
-        
-        if vulkan.sample_count > 1 {
-            for &buffer, index in vulkan.depth_peel_resolve_buffers {
-                descriptor := cast(u32) TextureDescriptor.resolve_begin + cast(u32) index * depth_peel_and_resolve_target_stride
-                
-                buffer.depth = create_render_target(vulkan, gpu.texture_desc(
-                    extent = render_dim,
-                    format = .d32_float,
-                    usage  = { .sampled, .depth_stencil_attachment },
-                    sample_count = 1,
-                ), descriptor + 0)
-                
-                for &target, target_index in buffer.color {
-                    target = create_render_target(vulkan, gpu.texture_desc(
-                        extent = render_dim,
-                        format = (target_index == .surface_reflect) ? .bgra8_srgb : .rgba8_unorm,
-                        usage  = { .sampled, .color_attachment },
-                        sample_count = 1,
-                    ), descriptor + 1 + cast(u32) target_index)
+                    ))
+                    descriptor += 1
                 }
             }
         }
         
-        vulkan.composite_buffer = create_render_target(vulkan, gpu.texture_desc(
-                extent = render_dim,
-                format = .bgra8_srgb,
-                usage  = { .sampled, .color_attachment },
-                sample_count = 1,
-            ), cast(u32) TextureDescriptor.composite)
-            
-        if vulkan.sample_count > 1 {
-            // @cleanup
-            vertex   := read_vulkan_spirv(ZBias.vertex)
-            fragment := read_vulkan_spirv(ZBias.fragment)
-            vulkan.multisampled_zbias_pso = gpu.create_graphics_pso(vulkan.device,
-                vertex_spirv   = vertex,
-                fragment_spirv = fragment,
-                vertex_entry_point   = "main",
-                fragment_entry_point = "main",
-                color_targets  = { 
-                    gpu.color_target_desc(format = .bgra8_srgb),
-                    gpu.color_target_desc(format = .rgba8_unorm),
-                    gpu.color_target_desc(format = .rgba8_unorm),
-                },
-                depth_format   = .d32_float,
-                rasterization  = { cull = .counter_clockwise },
-                sample_count   = vulkan.sample_count,
-            )
-            delete(vertex)
-            delete(fragment)
-        }
-        
-        light_buffer_dim : uv2
-        light_buffer_dim.x = 1 << find_most_significant_bit(render_dim.x)
-        light_buffer_dim.y = 1 << find_most_significant_bit(render_dim.y)
-        
-        light_buffer_descriptor := cast(u32) TextureDescriptor.light_buffer_begin
-        for light_buffer_dim.x > 1 && light_buffer_dim.y > 1 && len(vulkan.light_buffers) < cap(vulkan.light_buffers) {
-            buffer := append_into(&vulkan.light_buffers)
-            
-            // @note Drop these down to f16 once we know what's what and probably use rgb8 for surface_color? And normal_xy_and_depth could probably be encoded in rgb8?
-            desc := gpu.texture_desc(
-                extent = { light_buffer_dim.x, light_buffer_dim.y, 1 },
-                format = .rgba32_float,
-                usage  = { .sampled, .color_attachment },
-            )
-            
-            before := light_buffer_descriptor
-            for &target in buffer {
-                target = create_render_target(vulkan, desc, light_buffer_descriptor)
-                light_buffer_descriptor += 1
+        if vulkan.sample_count != 1 {
+            descriptor := cast(u32) TextureDescriptor.resolve_begin
+            for &buffer, index in vulkan.depth_peel_resolve_buffers {
+                buffer.depth = create_render_target(vulkan, descriptor, gpu.texture_desc(
+                    extent = render_dim,
+                    format = .d32_float,
+                    usage  = { .sampled, .depth_stencil_attachment },
+                ))
+                descriptor += 1
+                
+                for &target, target_index in buffer.color {
+                    target = create_render_target(vulkan, descriptor, gpu.texture_desc(
+                        extent = render_dim,
+                        format = (target_index == .surface_reflect) ? .bgra8_srgb : .rgba8_unorm,
+                        usage  = { .sampled, .color_attachment },
+                    ))
+                    descriptor += 1
+                }
             }
-            assert(light_buffer_descriptor == before + 4)
-            
-            light_buffer_dim.xy = (light_buffer_dim.xy + 1) / 2
-            if light_buffer_dim.x < 1 { light_buffer_dim.x = 1 }
-            if light_buffer_dim.y < 1 { light_buffer_dim.y = 1 }
         }
-        assert(len(vulkan.light_buffers) <= 10)
+        
+        vulkan.peel_composite_buffer = create_render_target(vulkan, TextureDescriptor.peel_composite, gpu.texture_desc(
+            extent = render_dim,
+            format = .bgra8_srgb,
+            usage  = { .sampled, .color_attachment },
+        ))
+        
+        {
+            light_buffer_dim: uv2
+            light_buffer_dim.x = 1 << find_most_significant_bit(render_dim.x)
+            light_buffer_dim.y = 1 << find_most_significant_bit(render_dim.y)
+            
+            descriptor := cast(u32) TextureDescriptor.light_buffer_begin
+            for light_buffer_dim.x > 1 && light_buffer_dim.y > 1 && len(vulkan.light_buffers) < cap(vulkan.light_buffers) {
+                buffer := append_into(&vulkan.light_buffers)
+                
+                // @note Drop these down to f16 once we know what's what and probably use rgb8 for surface_color? And normal_xy_and_depth could probably be encoded in rgb8?
+                desc := gpu.texture_desc(
+                    extent = { light_buffer_dim.x, light_buffer_dim.y, 1 },
+                    format = .rgba32_float,
+                    usage  = { .sampled, .color_attachment },
+                )
+                
+                for &target in buffer {
+                    target = create_render_target(vulkan, descriptor, desc)
+                    descriptor += 1
+                }
+                
+                light_buffer_dim.xy = (light_buffer_dim.xy + 1) / 2
+                if light_buffer_dim.x < 1 { light_buffer_dim.x = 1 }
+                if light_buffer_dim.y < 1 { light_buffer_dim.y = 1 }
+            }
+        }
     }
     vulkan.settings = settings
 }
 
 ////////////////////////////////////////////////
 
-read_vulkan_spirv :: proc (path: string) -> [] u8 {
-    // :VulkanRenderer: Move this through the platform API with the other file IO.
-    bytes, error := os.read_entire_file(path, context.allocator)
-    assert(error == nil)
-    assert(len(bytes) % size_of(u32) == 0)
-    return bytes
-}
-
-create_render_target :: proc (vulkan: ^Vulkan, desc: gpu.TextureDesc, index: u32) -> RenderTarget {
-    result := RenderTarget {
-        placed     = gpu.texture_allocate(&vulkan.texture_allocator, desc),
-        descriptor = index,
-    }
-    assert(result.placed.texture != nil)
+create_render_target :: proc (vulkan: ^Vulkan, #any_int index: u32, desc: gpu.TextureDesc) -> RenderTarget {
+    placed := gpu.texture_allocate(&vulkan.texture_allocator, desc)
+    assert(placed.texture != nil)
     
-    result.render_view = gpu.create_render_view(result.placed.texture)
-    gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, index, result.placed.texture, .sampled)
+    // :TextureHandleOffset:
+    texture_index := index + 1
+    assert(vulkan.textures[texture_index].texture == nil)
+    vulkan.textures[texture_index] = placed
+        
+    result := RenderTarget {
+        texture_index = texture_index,
+        descriptor    = index,
+    }
+    
+    result.render_view = gpu.create_render_view(placed.texture)
+    gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, index, placed.texture, .sampled)
     
     return result
 }
 
 destroy_render_target :: proc (vulkan: ^Vulkan, target: ^RenderTarget) {
     gpu.destroy_render_view(target.render_view)
-    gpu.texture_free(&vulkan.texture_allocator, &target.placed)
+    gpu.texture_free(&vulkan.texture_allocator, &vulkan.textures[target.texture_index])
     target^ = {}
 }
 
@@ -1088,25 +1104,15 @@ end_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_
     gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
 }
 
-allocate_texture_descriptor :: proc (vulkan: ^Vulkan) -> u32 {
-    last_free := len(vulkan.free_texture)-1
-    index: u32
-    if last_free >= 0 {
-        index = vulkan.free_texture[last_free]
-        resize(&vulkan.free_texture, last_free)
-    } else {
-        assert(vulkan.next_texture < cast(u32) TextureDescriptor.count)
-        
-        index = vulkan.next_texture
-        vulkan.next_texture += 1
-    }
-    
-    return index
-}
-
 ////////////////////////////////////////////////
 
 destroy_all_render_targets :: proc (vulkan: ^Vulkan) {
+    // @todo We want to just write this:
+    // for &texture in vulkan.textures[cast(u32) TextureDescriptor.nil_texture + 1 : TextureDescriptor.first_dynamic_texture] {
+    // 
+    // }
+    // But we also need to destoy the render_views in the buffers...
+    
     for &buffer in vulkan.depth_peel_buffers {
         for &target in buffer.color {
             destroy_render_target(vulkan, &target)
@@ -1127,5 +1133,5 @@ destroy_all_render_targets :: proc (vulkan: ^Vulkan) {
         }
     }
     
-    destroy_render_target(vulkan, &vulkan.composite_buffer)
+    destroy_render_target(vulkan, &vulkan.peel_composite_buffer)
 }
