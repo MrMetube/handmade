@@ -50,38 +50,12 @@ game_dir       :: code_dir+"/"+game_package
 render_dir     :: code_dir+"/"+render_package
 
 main :: proc () {
-    make_file_if_not_exists("./build/.gitignore", "*\n!*.odin")
-    make_directory_if_not_exists("./data")
-    make_directory_if_not_exists("./data/build")
+    make_file_if_not_exists("build/.gitignore", "*\n!*.odin")
+    make_directory_if_not_exists("data")
+    make_directory_if_not_exists("data/build")
     
-    shaders := [] struct { source, stage, path, define: string } {
-        { "code/render/zbias.slang",                  "vertex",   "build/zbias_vertex.spirv",                    "Path_z_bias_vertex"},
-        { "code/render/zbias.slang",                  "fragment", "build/zbias_fragment.spirv",                  "Path_z_bias_fragment"},
-        { "code/render/peel_composite.slang",         "vertex",   "build/peel_composite_vertex.spirv",           "Path_peel_composite_vertex"},
-        { "code/render/peel_composite.slang",         "fragment", "build/peel_composite_fragment.spirv",         "Path_peel_composite_fragment"},
-        { "code/render/multisample_resolve.slang",    "vertex",   "build/multisample_resolve_vertex.spirv",      "Path_multisample_resolve_vertex"},
-        { "code/render/multisample_resolve.slang",    "fragment", "build/multisample_resolve_fragment.spirv",    "Path_multisample_resolve_fragment"},
-        { "code/render/final_stretch.slang",          "vertex",   "build/final_stretch_vertex.spirv",            "Path_final_stretch_vertex"},
-        { "code/render/final_stretch.slang",          "fragment", "build/final_stretch_fragment.spirv",          "Path_final_stretch_fragment"},
-        { "code/render/multigrid_light_up.slang",     "vertex",   "build/multigrid_light_up_vertex.spirv",       "Path_multigrid_light_up_vertex"},
-        { "code/render/multigrid_light_up.slang",     "fragment", "build/multigrid_light_up_fragment.spirv",     "Path_multigrid_light_up_fragment"},
-        { "code/render/multigrid_light_down.slang",   "vertex",   "build/multigrid_light_down_vertex.spirv",     "Path_multigrid_light_down_vertex"},
-        { "code/render/multigrid_light_down.slang",   "fragment", "build/multigrid_light_down_fragment.spirv",   "Path_multigrid_light_down_fragment"},
-        { "code/render/depth_peel_to_lighting.slang", "vertex",   "build/depth_peel_to_lighting_vertex.spirv",   "Path_depth_peel_to_lighting_vertex"},
-        { "code/render/depth_peel_to_lighting.slang", "fragment", "build/depth_peel_to_lighting_fragment.spirv", "Path_depth_peel_to_lighting_fragment"},
-    }
-    
-    for shader in shaders {
-        append(cmd, "slangc")
-        append(cmd, shader.source)
-        append(cmd, "-target", "spirv")
-        append(cmd, "-fvk-use-c-layout", "-capability", "spvDescriptorHeapEXT")
-        if !optimize { append(cmd, "-g") }
-        append(cmd, "-entry", fmt.tprintf("%sMain", shader.stage))
-        append(cmd, "-o",     fmt.tprintf("data/%s", shader.path))
-        
-        run_command(cmd, async = procs)
-    }
+    shader_pack_path := "build/shaders.data"
+    create_shader_pack_file(shader_pack_path)
     
     metaprogram: Metaprogram
     metaprogram_init(&metaprogram)
@@ -114,15 +88,15 @@ main :: proc () {
     if begin_build(cmd, "code/game", "game.dll") { // game
         if !check_printlikes(&metaprogram, game_package) do os.exit(1)
         
-        if !generate_platform_api(&metaprogram, "./code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) do os.exit(1)
+        if !generate_platform_api(&metaprogram, "code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) do os.exit(1)
         
-        delete_all_like("./build", `game-\d+\.rdi`)
-        delete_all_like("./build", `game-\d+\.pdb`)
+        delete_all_like("build", `game-\d+\.rdi`)
+        delete_all_like("build", `game-\d+\.pdb`)
         
-        create_build_lock("./build/game.lock")
+        create_build_lock("build/game.lock")
         
         append(cmd, "-build-mode:dll")
-        append(cmd, fmt.tprintf(`-pdb-name:./build/game-%d.pdb`, random_number()))
+        append(cmd, fmt.tprintf(`-pdb-name:build/game-%d.pdb`, random_number()))
         
         build_meander()
         build_optimizations(true || optimize)
@@ -140,16 +114,16 @@ main :: proc () {
     if begin_build(cmd, render_dir, "render.dll") { // render
         if !check_printlikes(&metaprogram, render_package) do os.exit(1)
         
-        if !generate_platform_api(&metaprogram, "./code/render/generated-platform_api.odin", render_package, { .opaques })              do os.exit(1)
-        if !generate_commons(&metaprogram,      "./code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
-        if !generate_game_and_render_api(&metaprogram, "./code/render/generated-api.odin", game_package, "", render_package)            do os.exit(1)
+        if !generate_platform_api(&metaprogram, "code/render/generated-platform_api.odin", render_package, { .opaques })              do os.exit(1)
+        if !generate_commons(&metaprogram,      "code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
+        if !generate_game_and_render_api(&metaprogram, "code/render/generated-api.odin", game_package, "", render_package)            do os.exit(1)
         
-        delete_all_like("./build", `render-\d+\.rdi`)
-        delete_all_like("./build", `render-\d+\.pdb`)
+        delete_all_like("build", `render-\d+\.rdi`)
+        delete_all_like("build", `render-\d+\.pdb`)
         
-        create_build_lock("./build/render.lock")
+        create_build_lock("build/render.lock")
         append(cmd, "-build-mode:dll")
-        append(cmd, fmt.tprintf(`-pdb-name:./build/render-%d.pdb`, random_number()))
+        append(cmd, fmt.tprintf(`-pdb-name:build/render-%d.pdb`, random_number()))
         
         build_meander()
         build_optimizations(optimize)
@@ -157,9 +131,7 @@ main :: proc () {
         append(cmd, custom_attribute_flag)
         if internal { build_define("INTERNAL", "true") }
         
-        for shader in shaders {
-            build_define(shader.define, shader.path)
-        }
+        build_define("shader_pack_path", shader_pack_path)
         
         end_build(cmd, async = procs)
     }
@@ -174,10 +146,10 @@ main :: proc () {
             if !check_printlikes(&metaprogram, main_package) do os.exit(1)
             
             // @todo(viktor): these could be run in parallel with each other and the build of the game
-            if !generate_game_and_render_api(&metaprogram, "./code/generated-api.odin", game_package, render_package, main_package) do os.exit(1)
-            if !generate_commons(&metaprogram,    "./code/generated-commons-game.odin",   main_package,   game_package,   "./game")   do os.exit(1)
-            if !generate_commons(&metaprogram,    "./code/generated-commons-render.odin", main_package,   render_package, "./render") do os.exit(1)
-            if !generate_platform_api_bindings(&metaprogram, "./code/generated-platform_api.odin", main_package)                      do os.exit(1)
+            if !generate_game_and_render_api(&metaprogram, "code/generated-api.odin", game_package, render_package, main_package) do os.exit(1)
+            if !generate_commons(&metaprogram,    "code/generated-commons-game.odin",   main_package,   game_package,   "game")   do os.exit(1)
+            if !generate_commons(&metaprogram,    "code/generated-commons-render.odin", main_package,   render_package, "render") do os.exit(1)
+            if !generate_platform_api_bindings(&metaprogram, "code/generated-platform_api.odin", main_package)                      do os.exit(1)
             
             build_meander()
             build_optimizations(optimize)
@@ -194,8 +166,8 @@ main :: proc () {
         
         if build_succeeded {
             if run(target) {
-                append(cmd, fmt.tprintf("./build/%v", target))
-                run_command(cmd, working_dir = "./data", detached = true)
+                append(cmd, fmt.tprintf("build/%v", target))
+                run_command(cmd, working_dir = "data", detached = true)
             } else if debug(target) {
                 prepare_debugger()
                 raddbg_ipc("select_target", target)

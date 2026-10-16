@@ -39,7 +39,7 @@ Handle_Running_Exe :: enum {
 
 check_cmd_and_close_procs :: proc () {
     if len(cmd) != 0 {
-        fmt.printf("INFO: cmd was not cleared: `%v`\n", strings.join(cmd[:], " ", context.temp_allocator))
+        fmt.printf("INFO: cmd was not cleared: %q\n", strings.join(cmd[:], " ", context.temp_allocator))
     }
     
     procs_close(procs)
@@ -54,8 +54,8 @@ begin_build :: proc (cmd: ^Cmd, package_directory: string, output_name: string, 
     
     if handle_running_exe_gracefully(output_name, handling) {
         append(cmd, "odin", "build")
-        append(cmd, fmt.tprintf("./%v", package_directory))
-        append(cmd, fmt.tprintf("-out:./build/%v", output_name))
+        append(cmd, package_directory)
+        append(cmd, fmt.tprintf("-out:build/%v", output_name))
         result = true
         
         current_output = output_name
@@ -167,7 +167,7 @@ is_running :: proc (exe_name: string) -> (running: bool, pid: int) {
 handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Running_Exe) -> bool {
     ok, pid := is_running(exe_name)
     if ok {
-        fmt.printf("INFO: Tried to build '%v', but the program is already running.\n", exe_name)
+        fmt.printf("INFO: Tried to build %q, but the program is already running.\n", exe_name)
         switch handling {
         case .Skip:
             fmt.printf("  Skipping build.\n")
@@ -184,13 +184,13 @@ handle_running_exe_gracefully :: proc (exe_name: string, handling: Handle_Runnin
                 
                 process, err := os.process_open(pid)
                 if err != nil {
-                    fmt.printf("  Failed to open '%v': %v\n", exe_name, err)
+                    fmt.printf("  Failed to open %q: %v\n", exe_name, err)
                     return false
                 }
                 
                 err = os.process_kill(process)
                 if err != nil {
-                    fmt.printf("  Failed to kill '%v': %v\n", exe_name, err)
+                    fmt.printf("  Failed to kill %q: %v\n", exe_name, err)
                     return false
                 }
                 _, _ = os.process_wait(process)
