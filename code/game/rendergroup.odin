@@ -51,11 +51,7 @@ RenderCommands :: struct {
     
     clear_color: v4,
     
-    // @note(viktor): Packed array of disjoint elements.
-    // Filled with pairs of [RenderEntryHeader + SomeRenderEntry]
-    // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
-    // @todo check how many entries we actually push per frame, and if that means that we could just make a tagged union Entry instead of a raw bytebuffer
-    push_buffer: Byte_Buffer,
+    entries: [dynamic] RenderEntry,
     
     vertex_buffer:      [dynamic] Textured_Vertex,
     quad_bitmap_buffer: [dynamic] ^Bitmap,
@@ -99,9 +95,7 @@ Camera_Flags :: bit_set[ enum {
 
 ////////////////////////////////////////////////
 
-// @todo tagged union
-@(common)
-RenderEntryType :: enum u8 {
+RenderEntryKind :: enum u8 {
     None,
     Textured_Quads,
     DepthClear,
@@ -111,6 +105,13 @@ RenderEntryType :: enum u8 {
 }
 
 @(common)
+RenderEntry :: struct {
+    kind: RenderEntryKind,
+    
+    textured_quads: Textured_Quads,
+    lighting:       Lighting,
+}
+
 RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centric
     next: ^RenderSetup,
     
@@ -129,17 +130,12 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     debug_light_p: v3,
 }
 
-@(common)
 Textured_Quads :: struct {
     setup: RenderSetup,
     
     quad_count:    u32,
     bitmap_offset: u32,
 }
-
-DepthClear :: struct {}
-BeginPeels :: struct {}
-EndPeels   :: struct {}
 
 @(common)
 Lighting :: struct {
@@ -208,22 +204,16 @@ default_upright_transform :: proc () -> Transform { return { is_upright = true }
 
 ////////////////////////////////////////////////
 
-push_render_entry :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
+push_render_entry :: proc (group: ^RenderGroup, kind: RenderEntryKind) -> ^RenderEntry {
     reset_quads := true
-    type: RenderEntryType
-    switch typeid_of(T) {
-    case Textured_Quads:     type = .Textured_Quads; reset_quads = false
-    case DepthClear:         type = .DepthClear
-    case BeginPeels:         type = .BeginPeels
-    case EndPeels:           type = .EndPeels
-    case Lighting:           type = .Lighting
-    case:                    unreachable()
-    }
-    assert(type != .None)
     
-    header := render_group_push_size(group, RenderEntryType)
-    header ^= type
-    result := render_group_push_size(group, T)
+    assert(kind != .None)
+    if kind == .Textured_Quads {
+        reset_quads = false
+    }
+    
+    result := append_into(&group.commands.entries)
+    result.kind = kind
     
     if reset_quads {
         group.current_quads = nil
@@ -276,19 +266,19 @@ end_transient_clip_rect :: proc (group: ^RenderGroup, _: Rectangle2i, previous_s
     push_setup(group, previous_setup)
 }
 
-push_depth_clear      :: proc (group: ^RenderGroup) { push_render_entry(group, DepthClear) }
-push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_entry(group, BeginPeels) }
-push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_entry(group, EndPeels)   }
+push_depth_clear      :: proc (group: ^RenderGroup) { push_render_entry(group, .DepthClear) }
+push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_entry(group, .BeginPeels) }
+push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_entry(group, .EndPeels)   }
 
 push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures, voxel_min_corner: v3, voxel_inverse_cell_dimension: v3) {
-    entry := push_render_entry(group, Lighting)
+    entry := push_render_entry(group, .Lighting)
     
-    entry.pnext  = &source.pnext
-    entry.c      = &source.c
-    entry.lookup = &source.lookup
+    entry.lighting.pnext  = &source.pnext
+    entry.lighting.c      = &source.c
+    entry.lighting.lookup = &source.lookup
     
-    entry.voxel_min_corner             = voxel_min_corner
-    entry.voxel_inverse_cell_dimension = voxel_inverse_cell_dimension
+    entry.lighting.voxel_min_corner             = voxel_min_corner
+    entry.lighting.voxel_inverse_cell_dimension = voxel_inverse_cell_dimension
 }
 
 push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true, debug_light_p: v3 = 0) {
@@ -422,7 +412,8 @@ unpack_uv :: proc (uv: Packed_UV) -> v2 {
 
 get_current_quads :: proc (group: ^RenderGroup) -> ^Textured_Quads {
     if group.current_quads == nil {
-        group.current_quads = push_render_entry(group, Textured_Quads)
+        entry := push_render_entry(group, .Textured_Quads)
+        group.current_quads = &entry.textured_quads
         group.current_quads ^= {
             bitmap_offset = cast(u32) len(group.commands.quad_bitmap_buffer),
             setup         = group.last_setup,

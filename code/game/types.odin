@@ -106,6 +106,7 @@ to_cstring :: proc (sb: ^String_Builder) -> cstring {
 
 ////////////////////////////////////////////////
 
+// @todo not used by anyone anymore
 Byte_Buffer :: struct {
     bytes:        [] u8,
     read_cursor:  int,

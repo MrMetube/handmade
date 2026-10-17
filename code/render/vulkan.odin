@@ -653,17 +653,16 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
     
     ////////////////////////////////////////////////
     
-    // @cleanup
-    debug_setup: ^RenderSetup
-    
     peel_index: u32
     peel_header_restore: int
     begin_depth_peel_pass(vulkan, commands, peel_index, .clear, render_commands.clear_color)
     
-    for begin_reading(&render_commands.push_buffer); can_read(&render_commands.push_buffer); {
-        type := read(&render_commands.push_buffer, RenderEntryType)
+    for cursor: int; cursor < len(render_commands.entries); {
+        entry := render_commands.entries[cursor]
         
-        switch type^ {
+        advance := true
+        
+        switch entry.kind {
         case .None: unreachable()
         case .DepthClear:
             timed_block("depth clear")
@@ -672,14 +671,16 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             
         case .BeginPeels:
             timed_block("begin peels")
-            peel_header_restore = render_commands.push_buffer.read_cursor
+            peel_header_restore = cursor
             
         case .EndPeels:
             timed_block("end peels")
             end_depth_peel_pass(vulkan, commands, peel_index, &frame.allocator)
             
             if peel_index < depth_peel_count - 1 {
-                render_commands.push_buffer.read_cursor = peel_header_restore
+                cursor  = peel_header_restore
+                advance = false
+                
                 peel_index += 1
                 
                 begin_depth_peel_pass(vulkan, commands, peel_index, .clear, render_commands.clear_color)
@@ -690,7 +691,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             
         case .Textured_Quads:
             timed_block("textured quads")
-            entry := read(&render_commands.push_buffer, Textured_Quads)
+            entry := entry.textured_quads
             if entry.quad_count == 0 { continue }
             
             setup := &entry.setup
@@ -702,10 +703,6 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             dim := get_dimension(clip)
             scissor_y := cast(i32) render_extent.y - clip.max.y
             gpu.set_scissor(commands, clip.min.x, scissor_y, cast(u32) dim.x, cast(u32) dim.y)
-            
-            if debug_setup == nil {
-                debug_setup = setup
-            }
             
             root := gpu.bump_allocate(&frame.allocator, RootZBias)
             root.cpu^ = {
@@ -732,7 +729,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
         
         case .Lighting:
             timed_block("lighting transfer")
-            entry := read(&render_commands.push_buffer, Lighting)
+            entry := entry.lighting
             
             vulkan.voxel_min_corner             = entry.voxel_min_corner
             vulkan.voxel_inverse_cell_dimension = entry.voxel_inverse_cell_dimension
@@ -762,6 +759,10 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             gpu.copy_memory_to_texture(commands, gpu.gpu_range(lookup_buffer), lookup_texture.texture)
             
             gpu.barrier(commands, { .transfer }, { .transfer_write }, { .fragment }, { .shader_read })
+        }
+        
+        if advance {
+            cursor += 1
         }
     }
     

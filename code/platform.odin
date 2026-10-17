@@ -280,7 +280,7 @@ main :: proc () {
     {
         // @todo decide what our sizes should be
         push_buffer := make(frame_allocator, u8, 32*Megabyte)
-        render_commands.push_buffer        = make_byte_buffer(push_buffer)
+        render_commands.entries            = make_array_allocator(frame_allocator, RenderEntry, 1024)
         render_commands.vertex_buffer      = make_array_allocator(frame_allocator, Textured_Vertex, 1 << 20)
         render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
         
@@ -1290,7 +1290,7 @@ build_exe_path :: proc (filename: string) -> cstring16 {
 ////////////////////////////////////////////////
 
 clear_render_commands :: proc (commands: ^RenderCommands) {
-    clear(&commands.push_buffer)
+    clear(&commands.entries)
     clear(&commands.vertex_buffer)
     clear(&commands.quad_bitmap_buffer)
 }
