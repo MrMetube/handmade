@@ -34,6 +34,7 @@ unload :: proc () {
 hotreload :: proc (state: ^Render_State) {
     render_state = state
     hotreload_vulkan(&render_state.vulkan)
+    print("Finished hotreloading renderer\n")
 }
 
 @(export)

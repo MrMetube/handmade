@@ -24,7 +24,7 @@ package game
 
 @(common) Color :: [4] u8
 
-@(common) 
+@(common)
 Bitmap :: struct {
     memory: [] Color,
     dimension: iv2,
@@ -35,7 +35,7 @@ Bitmap :: struct {
     
     texture_handle: u32,
 }
-    
+
 @(common)
 RenderSettings :: struct {
     // @todo these should all be compilation values, i.e. the renderer recompiles the psos if these change.
@@ -54,6 +54,7 @@ RenderCommands :: struct {
     // @note(viktor): Packed array of disjoint elements.
     // Filled with pairs of [RenderEntryHeader + SomeRenderEntry]
     // In between the entries is a linked list of [RenderEntryHeader + RenderEntryCips]. See '.rects'.
+    // @todo check how many entries we actually push per frame, and if that means that we could just make a tagged union Entry instead of a raw bytebuffer
     push_buffer: Byte_Buffer,
     
     vertex_buffer:      [dynamic] Textured_Vertex,
@@ -98,6 +99,7 @@ Camera_Flags :: bit_set[ enum {
 
 ////////////////////////////////////////////////
 
+// @todo tagged union
 @(common)
 RenderEntryType :: enum u8 {
     None,
@@ -105,6 +107,7 @@ RenderEntryType :: enum u8 {
     DepthClear,
     BeginPeels,
     EndPeels,
+    Lighting,
 }
 
 @(common)
@@ -137,6 +140,16 @@ Textured_Quads :: struct {
 DepthClear :: struct {}
 BeginPeels :: struct {}
 EndPeels   :: struct {}
+
+@(common)
+Lighting :: struct {
+    voxel_min_corner:             v3,
+    voxel_inverse_cell_dimension: v3,
+    
+    pnext:  ^type_of(LightingTextures{}.pnext),
+    c:      ^type_of(LightingTextures{}.c),
+    lookup: ^type_of(LightingTextures{}.lookup),
+}
 
 @(common)
 Textured_Vertex :: struct {
@@ -195,15 +208,16 @@ default_upright_transform :: proc () -> Transform { return { is_upright = true }
 
 ////////////////////////////////////////////////
 
-push_render_element :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
+push_render_entry :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
     reset_quads := true
     type: RenderEntryType
     switch typeid_of(T) {
-      case Textured_Quads:     type = .Textured_Quads; reset_quads = false
-      case DepthClear:         type = .DepthClear
-      case BeginPeels:         type = .BeginPeels
-      case EndPeels:           type = .EndPeels
-      case:                    unreachable()
+    case Textured_Quads:     type = .Textured_Quads; reset_quads = false
+    case DepthClear:         type = .DepthClear
+    case BeginPeels:         type = .BeginPeels
+    case EndPeels:           type = .EndPeels
+    case Lighting:           type = .Lighting
+    case:                    unreachable()
     }
     assert(type != .None)
     
@@ -262,9 +276,20 @@ end_transient_clip_rect :: proc (group: ^RenderGroup, _: Rectangle2i, previous_s
     push_setup(group, previous_setup)
 }
 
-push_depth_clear :: proc (group: ^RenderGroup) { push_render_element(group, DepthClear) }
-push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_element(group, BeginPeels) }
-push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_element(group, EndPeels)   }
+push_depth_clear      :: proc (group: ^RenderGroup) { push_render_entry(group, DepthClear) }
+push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_entry(group, BeginPeels) }
+push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_entry(group, EndPeels)   }
+
+push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures, voxel_min_corner: v3, voxel_inverse_cell_dimension: v3) {
+    entry := push_render_entry(group, Lighting)
+    
+    entry.pnext  = &source.pnext
+    entry.c      = &source.c
+    entry.lookup = &source.lookup
+    
+    entry.voxel_min_corner             = voxel_min_corner
+    entry.voxel_inverse_cell_dimension = voxel_inverse_cell_dimension
+}
 
 push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true, debug_light_p: v3 = 0) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.dimension.x, cast(f32) group.commands.dimension.y)
@@ -397,7 +422,7 @@ unpack_uv :: proc (uv: Packed_UV) -> v2 {
 
 get_current_quads :: proc (group: ^RenderGroup) -> ^Textured_Quads {
     if group.current_quads == nil {
-        group.current_quads = push_render_element(group, Textured_Quads)
+        group.current_quads = push_render_entry(group, Textured_Quads)
         group.current_quads ^= {
             bitmap_offset = cast(u32) len(group.commands.quad_bitmap_buffer),
             setup         = group.last_setup,
@@ -736,13 +761,15 @@ LightingElement :: struct {
 }
 
 LightingSolution :: struct {
-    elements: [dynamic; 16384] LightingElement,
+    elements: [dynamic; 8192] LightingElement,
     textures: LightingTextures,
 }
 
+/// 1024 * 8
+
 LightingTextures :: struct {
-    pnext:  [16384] LightingTexel,       /// p = 16384 * (3 * 4 + 4)
-    c:      [16384] Color, // a is unsed /// c = 16384 * 4
+    pnext:  [8192] v4,       /// p = 8192 * (3 * 4 + 4)
+    c:      [8192] Color, // a is unsed /// c = 8192 * 4
     //       z     y     x
     lookup: [32] [256] [256] u16,        /// l = 256 * 256 * 32 * 2
     
@@ -751,6 +778,8 @@ LightingTextures :: struct {
     /// l / 1024
     /// (p + c + l) / 1024
 }
+@(common)
+lookup_dimensions :: uv3 { len(LightingTextures{}.lookup[0][0]), len(LightingTextures{}.lookup[0]), len(LightingTextures{}.lookup) }
 
 LightingTexel :: struct {
     p:    v3,
@@ -955,7 +984,8 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
 
 output_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     if textures != nil {
-        output_texture_debug(group, solution, textures)
+        // output_texture_debug(group, solution, textures)
+        output_lighting_textures(group, solution, textures)
     } else {
         if ShowReflectors {
             output_lighting_quads(group, solution)
@@ -1027,16 +1057,15 @@ output_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution)
 output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     timed_function()
     
-    lookup_dimensions := uv3 { len(textures.lookup[0][0]), len(textures.lookup[0]), len(textures.lookup) }
     for z in 0..<lookup_dimensions.z {
         for y in 0..<lookup_dimensions.y {
             for x in 0..<lookup_dimensions.x {
                 index := textures.lookup[z][y][x]
                 for index != 0 {
                     pnext := textures.pnext[index]
-                    defer index = cast(u16) pnext.next
+                    defer index = cast(u16) pnext.w
                     
-                    p := pnext.p
+                    p := pnext.xyz
                     c := rgba_to_v4(textures.c[index])
                     
                     push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
@@ -1079,7 +1108,7 @@ output_lighting_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution)
     }
 }
 
-output_lighting_textures :: proc (solution: ^LightingSolution, textures: ^LightingTextures) {
+output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     timed_function()
     
     textures.lookup = 0
@@ -1109,10 +1138,12 @@ output_lighting_textures :: proc (solution: ^LightingSolution, textures: ^Lighti
         pack_index += 1
         
         pnext := &textures.pnext[pack_index]
-        pnext.p    = element.p
-        pnext.next = cast(u32) lookup_at^
+        pnext.xyz  = element.p
+        pnext.w    = cast(f32) lookup_at^
         lookup_at^ = cast(u16) pack_index
         
         textures.c[pack_index] = c
     }
+    
+    push_lighting(group, textures, bounds.min, inv_cell_dimension)
 }

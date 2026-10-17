@@ -32,7 +32,7 @@ FragmentOutput fragmentMain(VertexOutput input) {
     Texture2DMS<v4>  normal_lp = get_peel_color_buffer(root.peel_index, depth_peel.normal_lp);
     Texture2DMS<f32> depth     = get_peel_depth_buffer(root.peel_index);
     
-    int2 pixel = int2(input.position.xy);
+    iv2 pixel = iv2(input.position.xy);
     
     f32 depth_min = 1;
     f32 depth_max = 0;

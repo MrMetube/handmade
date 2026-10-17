@@ -341,6 +341,7 @@ package %v
 
 ////////////////////////////////////////////////
 
+// @todo just like api, allow for concatting multiple into one file instead
 generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string, source_package, source_path_from_output_path: string) -> bool {
     out, ok := open_generated_file_and_write_header(output_path, output_package)
     if !ok {

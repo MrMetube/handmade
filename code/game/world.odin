@@ -262,7 +262,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         if input.fkey_pressed[1] {
             lighting_test(render_group, &mode.test_lighting)
-            output_lighting_textures(&mode.test_lighting, &mode.test_textures)
+            output_lighting(render_group, &mode.test_lighting, &mode.test_textures)
             mode.show_lighting = true
         }
     }

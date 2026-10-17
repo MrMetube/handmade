@@ -4,11 +4,19 @@ static const f32 max_light_intensity = 10.0;
 #define clamp01(value) (clamp(value, 0, 1))
 #define length_squared(value) (dot(value, value))
 
-typedef uint   u32;
-typedef float  f32;
-typedef float2 v2;
-typedef float3 v3;
-typedef float4 v4;
+typedef uint16_t u16;
+typedef uint     u32;
+typedef int      i32;
+typedef float    f32;
+typedef float2   v2;
+typedef float3   v3;
+typedef float4   v4;
+typedef uint2    uv2;
+typedef uint3    uv3;
+typedef uint4    uv4;
+typedef int2     iv2;
+typedef int3     iv3;
+typedef int4     iv4;
 
 f32 clamp_01_map_to_range(f32 min, f32 max, f32 t) {
     f32 range  = max - min;
@@ -52,6 +60,10 @@ enum TextureDescriptor : u32 {
     
     light_buffer_begin,
     light_buffer_end = light_buffer_begin+light_buffer_count, // @cleanup
+    
+    lighting_pnext,
+    lighting_c,
+    lighting_lookup,
     
     first_dynamic_texture,
     // count = first_dynamic_texture + max_vulkan_textures,

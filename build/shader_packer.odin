@@ -6,7 +6,7 @@ import "core:os"
 
 import "../code/render/shared"
 
-create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) {
+create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) -> bool {
     Shaders :: shared.Shaders
     Stage :: enum { vertex, fragment }
     
@@ -66,7 +66,7 @@ create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) {
             }
         }
         
-        procs_flush(&procs)
+        if !procs_flush(&procs) { return false }
     }
     
     full_path := fmt.tprintf("data/%v", shader_pack_path)
@@ -111,4 +111,5 @@ create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) {
     }
     
     fmt.printf("INFO: generated packed shader data at %q\n", full_path)
+    return true
 }

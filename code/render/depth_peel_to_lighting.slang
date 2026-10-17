@@ -39,7 +39,7 @@ FragmentOutput fragmentMain(VertexOutput input) {
     depth_texture.GetDimensions(width, height, sample_count);
     
     // @todo better sampling
-    int2 texel = clamp(int2(input.uv * v2(width, height)), 0, int2(width, height)-1);
+    iv2 texel = clamp(iv2(input.uv * v2(width, height)), 0, iv2(width, height)-1);
     
     f32 depth           =           depth_texture.Load(texel, 0);
     v4  surface_reflect = surface_reflect_texture.Load(texel, 0);

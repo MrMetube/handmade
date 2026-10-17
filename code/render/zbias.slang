@@ -13,7 +13,6 @@ struct Root {
     TexturedVertex* vertices;
     u32*            textures;
     v3              camera_p;
-    v3              light_p;
     v3              fog_direction;
     v3              fog_color;
     f32             fog_begin;
@@ -24,7 +23,10 @@ struct Root {
     u32             previous_depth;
     f32             alpha_threshold;
     
-    u32 __padding;
+    v3 voxel_min_corner;
+    v3 voxel_inverse_cell_dimension;
+    
+    u32 __padding2[5];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Root> root;
@@ -79,7 +81,7 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
     
     output.world_p = z_vertex.xyz;
     
-    v3 normal = v3(int3(int(vertex.n << 22u) >> 22, int(vertex.n << 12u) >> 22, int(vertex.n << 2u) >> 22));
+    v3 normal = v3(iv3(i32(vertex.n << 22u) >> 22, i32(vertex.n << 12u) >> 22, i32(vertex.n << 2u) >> 22));
     output.world_n = v3(normal) / 511.0f;
     
     output.texture = root.textures[quad_index];
@@ -90,20 +92,21 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
 
 struct FragmentOutput {
     v4 surface_reflect : SV_Target0;
-    v4 emission        : SV_Target1;
-    v4 normal          : SV_Target2;
 };
-
 
 [shader("fragment")]
 FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
-    Texture2D<v4> texture = ResourceDescriptorHeap[input.texture];
     SamplerState  sampler = SamplerDescriptorHeap[u32(Sampler.Linear)];
+    Texture2D<v4> texture = ResourceDescriptorHeap[input.texture];
+    
+    Texture1D<v4>  texture_pnext  = ResourceDescriptorHeap[TextureDescriptor.lighting_pnext];
+    Texture1D<v4>  texture_c      = ResourceDescriptorHeap[TextureDescriptor.lighting_c];
+    Texture3D<u16> texture_lookup = ResourceDescriptorHeap[TextureDescriptor.lighting_lookup];
     
     if (root.previous_depth != 0) {
         Texture2D<f32> previous_depth = ResourceDescriptorHeap[root.previous_depth];
         
-        f32 clip_depth = previous_depth.Load(int3(int2(input.fragment_p.xy), 0));
+        f32 clip_depth = previous_depth.Load(iv3(iv2(input.fragment_p.xy), 0));
         if (input.fragment_p.z <= clip_depth) {
             discard;
         }
@@ -120,24 +123,38 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
         discard;
     }
     
+    v3 voxel_p = root.voxel_inverse_cell_dimension * (input.world_p - root.voxel_min_corner);
+    iv3 voxel_index = iv3(floor(voxel_p));
+    voxel_index = iv3(190, 154, 3);
+    
+    u16 light_index = texture_lookup.Load(iv4(voxel_index, 0));
+    v3 average_light = v3(0,0,0);
+    f32 light_count = 0;
+    while (light_index != 0) {
+        v4  pnext = texture_pnext.Load(iv2(light_index, 0));
+        v4 color  = texture_c.Load(iv2(light_index, 0));
+        
+        v3 p = pnext.xyz;
+        
+        average_light += color.rgb;
+        light_count   += 1;
+        average_light = v3(0, 1, 0);
+        
+        light_index = u16(pnext.a);
+        break;
+    }
+    if (light_count != 0) {
+        average_light *= 1.0 / light_count;
+    }
+    
     FragmentOutput output;
     v4 surface_reflect  = 0;
     surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
     surface_reflect.a   = modulated.a;
     
-    v3 world_n = normalize(input.world_n);
-    v2 n       = pack_normal2(world_n.xy);
-    
-    v3 emission = v3(0);
-    if (length(root.light_p - input.world_p) < 3) {
-        emission = v3(1, 1, 1);
-    }
-    // @todo Some way of specifying the emission spread.
-    f32 emission_spread = 1.0;
+    surface_reflect.rgb *= average_light;
     
     output.surface_reflect = surface_reflect;
-    output.emission        = v4(emission, emission_spread);
-    output.normal          = v4(n, 0, 0);
     
     return output;
 }

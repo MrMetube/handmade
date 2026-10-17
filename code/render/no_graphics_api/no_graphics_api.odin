@@ -1468,9 +1468,10 @@ destroy_gpu_heap :: proc (heap: GpuHeap) {
     free(heap.owner, device.allocator)
 }
 
-gpu_range :: proc { gpu_range_from_gpu_cpu_range, gpu_range_from_heap }
-gpu_range_from_gpu_cpu_range ::proc (range: GpuCpuRange($T)) -> GpuRange { return { gpu = transmute(u64) range.gpu, size_in_bytes = range.size_in_bytes } }
-gpu_range_from_heap :: proc (heap: GpuHeap) -> GpuRange { return gpu_range(heap.range) }
+gpu_range :: proc { gpu_range_from_gpu_cpu_range, gpu_range_from_gpu_cpu_pointer, gpu_range_from_heap }
+gpu_range_from_gpu_cpu_range   :: proc (range: GpuCpuRange($T))   -> GpuRange { return { gpu = transmute(u64) range.gpu, size_in_bytes = range.size_in_bytes } }
+gpu_range_from_gpu_cpu_pointer :: proc (range: GpuCpuPointer($T)) -> GpuRange { return { gpu = transmute(u64) range.gpu, size_in_bytes = range.size_in_bytes } }
+gpu_range_from_heap            :: proc (heap: GpuHeap) -> GpuRange { return gpu_range(heap.range) }
 
 ////////////////////////////////////////////////
 

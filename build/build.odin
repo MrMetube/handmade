@@ -1,6 +1,8 @@
 #+vet unused shadowing cast unused-imports style unused-procedures unused-variables
 package build
 
+import "base:runtime"
+
 import "core:fmt"
 import "core:os"
 
@@ -11,7 +13,7 @@ PedanticGame     :: false
 PedanticRender   :: false
 PedanticPlatform :: false
 
-optimize :: false
+optimize :: !false
 native   :: true
 internal :: true
 
@@ -55,19 +57,19 @@ main :: proc () {
     make_directory_if_not_exists("data/build")
     
     shader_pack_path := "build/shaders.data"
-    create_shader_pack_file(shader_pack_path, optimize)
+    if !create_shader_pack_file(shader_pack_path, optimize) { exit(1) }
     
     metaprogram: Metaprogram
     metaprogram_init(&metaprogram)
     custom_attribute_flag := metaprogram_custom_attribute_flag(&metaprogram)
     
-    if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir,   main_package)   do os.exit(1)
-    if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir,   game_package)   do os.exit(1)
-    if !metaprogram_collect_files_and_parse_package(&metaprogram, render_dir, render_package) do os.exit(1)
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, code_dir,   main_package)   { exit(1) }
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, game_dir,   game_package)   { exit(1) }
+    if !metaprogram_collect_files_and_parse_package(&metaprogram, render_dir, render_package) { exit(1) }
     
-    if !metaprogram_collect_plugin_data(&metaprogram, main_package)   do os.exit(1)
-    if !metaprogram_collect_plugin_data(&metaprogram, game_package)   do os.exit(1)
-    if !metaprogram_collect_plugin_data(&metaprogram, render_package) do os.exit(1)
+    if !metaprogram_collect_plugin_data(&metaprogram, main_package)   { exit(1) }
+    if !metaprogram_collect_plugin_data(&metaprogram, game_package)   { exit(1) }
+    if !metaprogram_collect_plugin_data(&metaprogram, render_package) { exit(1) }
     
     pedantic_packages: [dynamic; 4] string
     if PedanticGame     { append(&pedantic_packages, game_package)   }
@@ -86,9 +88,9 @@ main :: proc () {
     }
     
     if begin_build(cmd, "code/game", "game.dll") { // game
-        if !check_printlikes(&metaprogram, game_package) do os.exit(1)
+        if !check_printlikes(&metaprogram, game_package) { exit(1) }
         
-        if !generate_platform_api(&metaprogram, "code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) do os.exit(1)
+        if !generate_platform_api(&metaprogram, "code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) { exit(1) }
         
         delete_all_like("build", `game-\d+\.rdi`)
         delete_all_like("build", `game-\d+\.pdb`)
@@ -112,11 +114,11 @@ main :: proc () {
     }
     
     if begin_build(cmd, render_dir, "render.dll") { // render
-        if !check_printlikes(&metaprogram, render_package) do os.exit(1)
+        if !check_printlikes(&metaprogram, render_package) { exit(1) }
         
-        if !generate_platform_api(&metaprogram, "code/render/generated-platform_api.odin", render_package, { .opaques })              do os.exit(1)
-        if !generate_commons(&metaprogram,      "code/render/generated-commons-game.odin", render_package, game_package,   "../game") do os.exit(1)
-        if !generate_game_and_render_api(&metaprogram, "code/render/generated-api.odin", game_package, "", render_package)            do os.exit(1)
+        if !generate_platform_api(&metaprogram, "code/render/generated-platform_api.odin", render_package, { .opaques })              { exit(1) }
+        if !generate_commons(&metaprogram,      "code/render/generated-commons-game.odin", render_package, game_package,   "../game") { exit(1) }
+        if !generate_game_and_render_api(&metaprogram, "code/render/generated-api.odin", game_package, "", render_package)            { exit(1) }
         
         delete_all_like("build", `render-\d+\.rdi`)
         delete_all_like("build", `render-\d+\.pdb`)
@@ -143,13 +145,13 @@ main :: proc () {
         build_succeeded: bool
         
         if begin_build(cmd, "code", target, .Skip) {
-            if !check_printlikes(&metaprogram, main_package) do os.exit(1)
+            if !check_printlikes(&metaprogram, main_package) { exit(1) }
             
             // @todo(viktor): these could be run in parallel with each other and the build of the game
-            if !generate_game_and_render_api(&metaprogram, "code/generated-api.odin", game_package, render_package, main_package) do os.exit(1)
-            if !generate_commons(&metaprogram,    "code/generated-commons-game.odin",   main_package,   game_package,   "game")   do os.exit(1)
-            if !generate_commons(&metaprogram,    "code/generated-commons-render.odin", main_package,   render_package, "render") do os.exit(1)
-            if !generate_platform_api_bindings(&metaprogram, "code/generated-platform_api.odin", main_package)                      do os.exit(1)
+            if !generate_game_and_render_api(&metaprogram, "code/generated-api.odin", game_package, render_package, main_package) { exit(1) }
+            if !generate_commons(&metaprogram, "code/generated-commons-game.odin",   main_package, game_package,   "game")        { exit(1) }
+            if !generate_commons(&metaprogram, "code/generated-commons-render.odin", main_package, render_package, "render")      { exit(1) }
+            if !generate_platform_api_bindings(&metaprogram, "code/generated-platform_api.odin", main_package)                    { exit(1) }
             
             build_meander()
             build_optimizations(optimize)
@@ -182,6 +184,8 @@ main :: proc () {
 }
 
 ////////////////////////////////////////////////
+
+exit :: runtime.exit
 
 // @note the platform checks these lock files when hot-reloading
 @(deferred_out=delete_build_lock)
