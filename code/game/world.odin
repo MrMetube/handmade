@@ -175,84 +175,94 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     
     ////////////////////////////////////////////////
     
-    // @todo(viktor): by how much should we expand the sim region?
-    sim_bounds := rectangle_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
-    
-    dt := input.delta_time
-    simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.simulation_center, sim_bounds, input.delta_time)
-    
-    check_for_joining_player(state, input, simulation.region, mode)
-    
-    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
-    
-    last_camera_p := mode.camera.p
-    camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
-    if camera_entity != nil {
-        mode.debug_light_p = camera_entity.p + {0,0,1}
-        update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
+    if mode.show_lighting {
+        output_lighting(render_group, &mode.test_lighting)
+        if input.fkey_pressed[1] {
+            mode.show_lighting = false
+        }
+    } else {
+        // @todo(viktor): by how much should we expand the sim region?
+        sim_bounds := rectangle_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
+        
+        dt := input.delta_time
+        simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.simulation_center, sim_bounds, input.delta_time)
+        
+        check_for_joining_player(state, input, simulation.region, mode)
+        
+        simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
+        
+        last_camera_p := mode.camera.p
+        camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
+        if camera_entity != nil {
+            mode.debug_light_p = camera_entity.p + {0,0,1}
+            update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
+        }
+        
+        push_light(render_group, mode.debug_light_p, .5, 1, 1)
+        
+        frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
+        // @todo undo this
+        // update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
+        
+        if ShowSimulationBounds {
+            world_transform := default_flat_transform()
+            push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
+        }
+        
+        if ShowRenderFrustum {
+            near: f32 = 1
+            far:  f32 =  20
+            min: v2 = 0
+            max: v2 = render_group.screen_size
+            
+            bitmap := &render_group.commands.white_bitmap
+            thickness: f32 = 0.02
+            cn := srgb_to_linear(Orange)
+                cf := srgb_to_linear(Red)
+            
+            near_min := unproject_with_transform(render_group, render_group.game_cam, min, near)
+            near_max := unproject_with_transform(render_group, render_group.game_cam, max, near)
+            far_min  := unproject_with_transform(render_group, render_group.game_cam, min, far)
+            far_max  := unproject_with_transform(render_group, render_group.game_cam, max, far)
+            
+            p0 := V4(far_max, 0)
+            p1 := V4(far_min.x, far_max.yz, 0)
+            p2 := V4(near_max, 0)
+            p3 := V4(near_min.x, near_max.yz, 0)
+            p4 := V4(far_max.x, far_min.yz, 0)
+            p5 := V4(far_min, 0)
+            p6 := V4(near_max.x, near_min.yz, 0)
+            p7 := V4(near_min, 0)
+            
+            c0 := v4_to_rgba(store_color(cf))
+            c1 := v4_to_rgba(store_color(cn))
+            
+            push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
+            push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)
+            
+            push_line_segment(render_group, bitmap, p3, p1, c1, c0, thickness)
+            push_line_segment(render_group, bitmap, p3, p2, c1, c1, thickness)
+            push_line_segment(render_group, bitmap, p3, p7, c1, c1, thickness)
+            
+            push_line_segment(render_group, bitmap, p5, p1, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p5, p4, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p5, p7, c0, c1, thickness)
+            
+            push_line_segment(render_group, bitmap, p6, p2, c1, c1, thickness)
+            push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
+            push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
+        }
+        
+        end_sim(&simulation)
+        
+        ////////////////////////////////////////////////
+        
+        if input.fkey_pressed[1] {
+            lighting_test(render_group, &mode.test_lighting)
+            mode.show_lighting = true
+        }
     }
-    
-    push_light(render_group, mode.debug_light_p, .5, 1, 1)
-    
-    frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
-    // @todo undo this
-    // update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
-    
-    if ShowSimulationBounds {
-        world_transform := default_flat_transform()
-        push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
-    }
-    
-    if ShowRenderFrustum {
-        near: f32 = 1
-        far:  f32 =  20
-        min: v2 = 0
-        max: v2 = render_group.screen_size
-        
-        bitmap := &render_group.commands.white_bitmap
-        thickness: f32 = 0.02
-        cn := srgb_to_linear(Orange)
-        cf := srgb_to_linear(Red)
-        
-        near_min := unproject_with_transform(render_group, render_group.game_cam, min, near)
-        near_max := unproject_with_transform(render_group, render_group.game_cam, max, near)
-        far_min  := unproject_with_transform(render_group, render_group.game_cam, min, far)
-        far_max  := unproject_with_transform(render_group, render_group.game_cam, max, far)
-        
-        p0 := V4(far_max, 0)
-        p1 := V4(far_min.x, far_max.yz, 0)
-        p2 := V4(near_max, 0)
-        p3 := V4(near_min.x, near_max.yz, 0)
-        p4 := V4(far_max.x, far_min.yz, 0)
-        p5 := V4(far_min, 0)
-        p6 := V4(near_max.x, near_min.yz, 0)
-        p7 := V4(near_min, 0)
-        
-        c0 := v4_to_rgba(store_color(cf))
-        c1 := v4_to_rgba(store_color(cn))
-        
-        push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
-        push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
-        push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)
-        
-        push_line_segment(render_group, bitmap, p3, p1, c1, c0, thickness)
-        push_line_segment(render_group, bitmap, p3, p2, c1, c1, thickness)
-        push_line_segment(render_group, bitmap, p3, p7, c1, c1, thickness)
-        
-        push_line_segment(render_group, bitmap, p5, p1, c0, c0, thickness)
-        push_line_segment(render_group, bitmap, p5, p4, c0, c0, thickness)
-        push_line_segment(render_group, bitmap, p5, p7, c0, c1, thickness)
-        
-        push_line_segment(render_group, bitmap, p6, p2, c1, c1, thickness)
-        push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
-        push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
-    }
-    
-    end_sim(&simulation)
-    
-    ////////////////////////////////////////////////
-    
-    lighting_test(render_group)
     
     push_end_depth_peel(render_group)
     

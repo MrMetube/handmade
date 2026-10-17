@@ -10,13 +10,14 @@ Input :: struct {
     // @note(viktor): this is for debugging only
     mouse: struct {
         buttons: [Mouse_Button] InputButton,
-        p:     v2,
-        wheel: f32, // @todo(viktor): this seems to always be 0
+        p:       v2,
+        wheel:   f32, // @todo(viktor): this seems to always be 0
     },
     
-    shift_down, 
-    alt_down, 
+    shift_down:   bool, 
+    alt_down:     bool, 
     control_down: bool,
+    fkey_pressed: [13] bool, // @note 1 is F1, etc. ..., for clarity - 0 is not used!
 }
 
 @(common) 

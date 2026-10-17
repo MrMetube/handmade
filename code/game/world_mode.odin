@@ -27,6 +27,11 @@ World_Mode :: struct {
     camera_pitch: f32,
     camera_orbit: f32,
     camera_dolly: f32,
+    
+    ////////////////////////////////////////////////
+    
+    show_lighting: bool,
+    test_lighting: LightingSolution,
 }
 
 Game_Camera :: struct {

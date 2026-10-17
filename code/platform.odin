@@ -395,11 +395,15 @@ main :: proc () {
                     new_keyboard_controller ^= {}
                     new_keyboard_controller.is_connected = true
                     
-                    for &button, index in new_keyboard_controller.buttons {
-                        button.ended_down = old_keyboard_controller.buttons[index].ended_down
+                    for &new_button, kind in new_keyboard_controller.buttons {
+                        old_button := old_keyboard_controller.buttons[kind]
+                        new_button.ended_down = old_button.ended_down
                     }
                     
-                    if process_pending_messages(&GlobalPlatformState, new_keyboard_controller, render_state) {
+                    // @placement cant we just clear the whole new_input?
+                    new_input.fkey_pressed = false
+                    
+                    if process_pending_messages(&GlobalPlatformState, new_input, new_keyboard_controller, render_state) {
                         running = false
                     }
                 }
@@ -1171,7 +1175,7 @@ process_win_keyboard_message :: proc (new_state: ^InputButton, is_down: bool) {
     }
 }
 
-process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^InputController, render_state: ^Render_State) -> bool {
+process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard_controller: ^InputController, render_state: ^Render_State) -> bool {
     quit_requested: bool
     message: win.MSG
     for {
@@ -1226,17 +1230,17 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.buttons[.start],          is_down)
             case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.buttons[.back],           is_down)
             case win.VK_L:
-            if is_down {
-                if state.replaying_index != 0 {
-                    end_replaying_input(state)
-                } else if state.recording_index == 0 {
-                    assert(state.replaying_index == 0)
-                    begin_recording_input(state, 1) 
-                } else {
-                    end_recording_input(state)
-                    begin_replaying_input(state, 1)
+                if is_down {
+                    if state.replaying_index != 0 {
+                        end_replaying_input(state)
+                    } else if state.recording_index == 0 {
+                        assert(state.replaying_index == 0)
+                        begin_recording_input(state, 1) 
+                    } else {
+                        end_recording_input(state)
+                        begin_replaying_input(state, 1)
+                    }
                 }
-            }
             
             // @note debug keys
             case win.VK_OEM_PLUS:
@@ -1258,6 +1262,10 @@ process_pending_messages :: proc (state: ^PlatformState, keyboard_controller: ^I
             
             case win.VK_F4:     if is_down && alt_down { quit_requested = true }
             case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
+            
+            case win.VK_F1..=win.VK_F12:
+                index := vk_code - win.VK_F1 + 1
+                input.fkey_pressed[index] = is_down && !was_down
             }
             
           case:

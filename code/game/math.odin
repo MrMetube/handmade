@@ -342,8 +342,8 @@ rotate :: proc (v: $V/[$N] $T, angle: T) -> V {
     return result
 }
 
-dot :: proc (a: $V, b: V) -> element_type(V) {
-    result: element_type(V)
+dot :: proc (a: $V, b: V) -> intrinsics.type_elem_type(V) {
+    result: intrinsics.type_elem_type(V)
     when intrinsics.type_is_simd_vector(V) {
         result = simd.reduce_add_pairs(a * b)
     } else {
@@ -377,13 +377,13 @@ project :: proc (v, axis: $V) -> V {
     return v - 1 * dot(v, axis) * axis
 }
 
-length :: proc (vec: $V) -> element_type(V) {
+length :: proc (vec: $V /[$N] $E) -> E {
     length_squared := length_squared(vec)
     result := square_root(length_squared)
     return result
 }
 
-length_squared :: proc (vec: $V) -> element_type(V) {
+length_squared :: proc (vec: $V /[$N] $E) -> E {
     result := dot(vec, vec)
     return result
 }

@@ -277,10 +277,3 @@ RawAny :: struct {
     data: rawptr,
 	id:   typeid,
 }
-
-////////////////////////////////////////////////
-
-element_type   :: intrinsics.type_elem_type
-is_simd_vector :: intrinsics.type_is_simd_vector
-is_array       :: intrinsics.type_is_array
-is_integer     :: intrinsics.type_is_integer
