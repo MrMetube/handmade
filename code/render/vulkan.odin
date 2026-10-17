@@ -490,7 +490,7 @@ create_psos :: proc (vulkan: ^Vulkan) {
             gpu.color_target_desc(format = .rgba8_unorm),
         },
         depth_format   = .d32_float,
-        rasterization  = { cull = .counter_clockwise }
+        rasterization  = { cull = .counter_clockwise },
     )
     
     vulkan.peel_composite_pso = create_graphics_pso(vulkan.device,
@@ -725,6 +725,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
     ////////////////////////////////////////////////
     
     // compute_light_transport(vulkan, commands, frame)
+    unused(compute_light_transport)
     
     // gpu.barrier(commands, { .color_output }, { .color_write }, { .fragment }, { .shader_read }) // @todo real barrier
     
@@ -831,8 +832,6 @@ compute_light_transport :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, f
     {
         gpu.barrier(commands, { .fragment }, { .shader_read, .shader_write }) // @todo real masks
         
-        // @todo This probably needs to use all 4 depth peels, eventually.
-        source      := &vulkan.depth_peel_resolve_buffers[0]
         destination := &vulkan.light_buffers[0]
         
         gpu.begin_render_pass(commands, colors = {
@@ -845,6 +844,7 @@ compute_light_transport :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, f
         gpu.bind_pso(commands, vulkan.depth_peel_to_lighting_pso)
         
         root := gpu.bump_allocate(&frame.allocator, RootDepthPeelToLighting)
+        // @todo This probably needs to use all 4 depth peels, eventually.
         root.cpu^ = { source_resolve_buffer = 0 }
         
         gpu.draw(commands, root.gpu, 3)
@@ -932,7 +932,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
         
         {
             descriptor := cast(u32) TextureDescriptor.depth_peel_begin
-            for &buffer, index in vulkan.depth_peel_buffers {
+            for &buffer in vulkan.depth_peel_buffers {
                 buffer.depth = create_render_target(vulkan, descriptor, gpu.texture_desc(
                     extent = render_dim,
                     format = .d32_float,
@@ -955,7 +955,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
         
         if vulkan.active_sample_count != 1 {
             descriptor := cast(u32) TextureDescriptor.resolve_begin
-            for &buffer, index in vulkan.depth_peel_resolve_buffers {
+            for &buffer in vulkan.depth_peel_resolve_buffers {
                 buffer.depth = create_render_target(vulkan, descriptor, gpu.texture_desc(
                     extent = render_dim,
                     format = .d32_float,
@@ -1077,7 +1077,7 @@ end_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_
     gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
     if vulkan.active_sample_count == 1 { return }
     
-    from := vulkan.depth_peel_buffers[peel_index]
+    from := peel_index
     to   := vulkan.depth_peel_resolve_buffers[peel_index]
     
     gpu.begin_render_pass(commands,
@@ -1094,7 +1094,7 @@ end_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_
     
     root := gpu.bump_allocate(allocator, RootMultisampleResolve)
     root.cpu^ = {
-        peel_index   = peel_index,
+        peel_index   = from,
         sample_count = vulkan.active_sample_count,
     }
     

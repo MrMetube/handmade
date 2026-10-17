@@ -105,23 +105,22 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4 }
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
 
-// @todo(viktor): Naming vec_max max_vec
-@(require_results) min_vec :: proc (a,b: [$N] $E) -> [N] E {
-    result: [N] E
+min_per_lane :: proc (a,b: [$N] $E) -> [N] E {
+    result: [N] E = ---
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = min(a[i], b[i])
     }
     return result
 }
-@(require_results) max_vec :: proc (a,b: [$N] $E) -> [N] E {
-    result: [N] E
+max_per_lane :: proc (a,b: [$N] $E) -> [N] E {
+    result: [N] E = ---
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = max(a[i], b[i])
     }
     return result
 }
-@(require_results) abs_vec :: proc (a: [$N] $E) -> [N] E {
-    result: [N] E
+abs_per_lane :: proc (a: [$N] $E) -> [N] E {
+    result: [N] E = ---
     #no_bounds_check #unroll for i in 0..<N {
         result[i] = abs(a[i])
     }
@@ -129,8 +128,8 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4 }
 }
 
 
-vec_max :: proc (a: $T, b: T) -> T {
-    result: T
+max_lane :: proc (a: $T, b: T) -> T {
+    result: T = ---
     when intrinsics.type_is_simd_vector(T) {
         result = simd.max(a, b)
     } else {
@@ -139,8 +138,8 @@ vec_max :: proc (a: $T, b: T) -> T {
     return result
 }
 
-vec_min :: proc (a: $T, b: T) -> T {
-    result: T
+min_lane :: proc (a: $T, b: T) -> T {
+    result: T = ---
     when intrinsics.type_is_simd_vector(T) {
         result = simd.min(a, b)
     } else {
@@ -153,17 +152,6 @@ swap :: proc (a, b: ^$T ) { a^, b^ = b^, a^ }
 
 unused :: proc (_: $T) {}
 
-
-absolute_difference :: proc (a, b: $T) -> T {
-    result: T
-    when T == v3 {
-        result = abs_vec(a - b)
-    } else {
-        result = abs(a - b)
-    }
-    return result
-}
-
 @(disabled=ODIN_DISABLE_ASSERT)
 assert :: proc (condition: bool, message := #caller_expression(condition), loc := #caller_location, prefix:= "Assertion failed") {
     if !condition {
@@ -173,12 +161,14 @@ assert :: proc (condition: bool, message := #caller_expression(condition), loc :
         }
         
         when ODIN_DEBUG {
-             runtime.debug_trap()
+             debugger_breakpoint()
         } else {
             runtime.trap()
         }
     }
 }
+
+debugger_breakpoint :: runtime.debug_trap
 
 slice_from_parts :: proc { slice_from_parts_type, slice_from_parts_type_of_data_pointer }
 slice_from_parts_type :: proc ($T: typeid, data: pmm, #any_int count: i64) -> [] T {

@@ -6,7 +6,7 @@ import "core:os"
 
 import "../code/render/shared"
 
-create_shader_pack_file :: proc (shader_pack_path: string) {
+create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) {
     Shaders :: shared.Shaders
     Stage :: enum { vertex, fragment }
     
@@ -35,7 +35,7 @@ create_shader_pack_file :: proc (shader_pack_path: string) {
                 append(cmd, "-fvk-use-c-layout")
                 append(cmd, "-capability", "spvDescriptorHeapEXT")
                 if !optimize { append(cmd, "-g") }
-                // @todo -O<level>
+                if optimize { append(cmd, "-O2") }
                 append(cmd, "-entry", fmt.tprintf("%sMain", stage))
                 
                 read_end, write_end, pipe_error := os.pipe(); assert(pipe_error == nil)

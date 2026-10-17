@@ -32,6 +32,7 @@ World_Mode :: struct {
     
     show_lighting: bool,
     test_lighting: LightingSolution,
+    test_textures: LightingTextures,
 }
 
 Game_Camera :: struct {

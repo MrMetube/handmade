@@ -419,15 +419,7 @@ push_line_segment_default :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transfo
 }
 push_line_segment_direct :: proc (group: ^RenderGroup, bitmap: ^Bitmap, from_p, to_p: v4, c0, c1: Color, thickness: f32) {
     perp := cross(group.debug_cam.z, to_p.xyz - from_p.xyz)
-    perp_length := length(perp)
-    
-    when false { 
-        if perp_length < thickness {
-            perp = group.debug_cam.y
-        } else {
-        } 
-    }
-    perp /= perp_length
+    perp = normalize_or_zero(perp)
     
     d := V4(perp, 0) * thickness
     
@@ -744,57 +736,43 @@ LightingElement :: struct {
 }
 
 LightingSolution :: struct {
-    light_elements: [dynamic; 8192*2] LightingElement,
+    elements: [dynamic; 16384] LightingElement,
+    textures: LightingTextures,
 }
 
-lighting_test :: #force_no_inline proc (group: ^RenderGroup, solution: ^LightingSolution) {
+LightingTextures :: struct {
+    pnext:  [16384] LightingTexel,       /// p = 16384 * (3 * 4 + 4)
+    c:      [16384] Color, // a is unsed /// c = 16384 * 4
+    //       z     y     x
+    lookup: [32] [256] [256] u16,        /// l = 256 * 256 * 32 * 2
+    
+    /// p / 1024
+    /// c / 1024
+    /// l / 1024
+    /// (p + c + l) / 1024
+}
+
+LightingTexel :: struct {
+    p:    v3,
+    next: u32,
+}
+
+lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
-    light_elements := &solution.light_elements
-    clear(light_elements)
+    elements := &solution.elements
+    clear(elements)
     
     extract_reflectors_from_verts(group, solution)
-    
-    // @note Compute ambient occlusion
-    OcclusionIterationCount = clamp(OcclusionIterationCount, 0, 5)
-    for _ in 0..<OcclusionIterationCount {
-        for &destination in light_elements {
-            shadow: f32 = 1
-            
-            for &source in light_elements {
-                v := source.p - destination.p
-                v_len_squared := length_squared(v)
-                v_len := square_root(v_len_squared)
-                
-                if v_len < 0.0001 { continue }
-                v *= 1 / v_len
-                
-                apparent_source_amount      := abs(dot(source.n, v))
-                apparent_destination_amount := clamp_01(4 * dot(destination.n, v))
-                emitter_area                := Pi * square(source.r)
-                apparent_source_area        := emitter_area / v_len_squared
-                
-                s := (1.0 - reciprocal_square_root(apparent_source_area + 1)) * apparent_source_amount * apparent_destination_amount
-                
-                shadow += source.visibility * s
-            }
-            
-            destination.shadow = clamp_01(shadow)
-        }
-        
-        for &destination in light_elements {
-            destination.visibility = 1 - destination.shadow
-        }
-    }
     
     camera_p := group.last_setup.camera_p
         
     LightingIterationCount = clamp(LightingIterationCount, 1, 16)
     
     // @note Compute lighting
-    rays: [32] v3
+    rays: [8] v3
     for _ in 0..<LightingIterationCount {
-        for &destination, destination_index in light_elements {
+        for &destination in elements {
             to_camera := camera_p - destination.p
             to_camera = normalize_or_zero(to_camera)
             
@@ -805,9 +783,10 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup, solution: ^Lighting
             }
             closest_hit: [len(rays)] f32 = +Infinity
             
-            for &source in light_elements {
-                light_c  := source.front_emission_c
-                to_light := source.p - destination.p
+            for &source in elements {
+                light_c  := source.reflect_c * source.front_emission_c
+                
+                to_light := source.p - destination.p 
                 light_distance := length(to_light)
                 if light_distance > 0 {
                     to_light *= 1.0 / light_distance
@@ -815,7 +794,7 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup, solution: ^Lighting
                     ref_n := destination.n
                     diffuse_c  := cast(f32) 1
                     specular_c := 1.0 - diffuse_c
-                    specular_power := 1 + (15 * cast(f32) 1)
+                    // specular_power := 1 + (15 * cast(f32) 1)
                     distance_falloff := 1 / (1 + square(light_distance))
                     
                     cos_angle            := clamp_01(dot(to_light, ref_n)) 
@@ -830,31 +809,27 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup, solution: ^Lighting
                     specular_light := specular_contribution * light_c
                     
                     total_light := diffuse_light + specular_light
-                    result      := destination.reflect_c * total_light
+                    result      := total_light
                     
-                    if true {
-                        for ray, ray_index in rays {
-                            ray_source_n := dot(ray, source.n)
-                            if ray_source_n < -0.001 {
-                                point_on_plane_from_destination := source.p - destination.p
-                                d     := -dot(source.n, point_on_plane_from_destination)
-                                t_ray := -d / ray_source_n
+                    for ray, ray_index in rays {
+                        ray_source_n := dot(ray, source.n)
+                        if ray_source_n < -0.001 {
+                            point_on_plane_from_destination := source.p - destination.p
+                            d     := -dot(source.n, point_on_plane_from_destination)
+                            t_ray := -d / ray_source_n
+                            
+                            if t_ray > 0 && closest_hit[ray_index] > t_ray {
+                                ray_point_on_plane := t_ray * ray
+                                distance_squared   := length_squared(ray_point_on_plane - point_on_plane_from_destination)
                                 
-                                if t_ray > 0 && closest_hit[ray_index] > t_ray {
-                                    ray_point_on_plane := t_ray * ray
-                                    distance_squared   := length_squared(ray_point_on_plane - point_on_plane_from_destination)
-                                    
-                                    cone_r := 0.25 * t_ray
-                                    
-                                    if distance_squared < square(source.r + cone_r) {
-                                        closest_hit[ray_index] = t_ray
-                                        accumulated += result
-                                    }
+                                cone_r := 0.25 * t_ray
+                                
+                                if distance_squared < square(source.r + cone_r) {
+                                    closest_hit[ray_index] = t_ray
+                                    accumulated += result
                                 }
                             }
                         }
-                    } else {
-                        accumulated += result
                     }
                 }
             }
@@ -864,7 +839,7 @@ lighting_test :: #force_no_inline proc (group: ^RenderGroup, solution: ^Lighting
         
         correction := 1 / cast(f32) (LightingIterationCount * len(rays))
         
-        for &destination in light_elements {
+        for &destination in elements {
             destination.front_emission_c += correction * destination.accumulated_c
         }
     }
@@ -877,7 +852,7 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
     commands := group.commands
     quads    := group.current_quads
     
-    light_elements := &solution.light_elements
+    elements := &solution.elements
     
     bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset:][:quads.quad_count]
     vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
@@ -898,7 +873,7 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
         span20 := ve2p - ve0p
         span30 := ve3p - ve0p
         
-        element := append_into(light_elements)
+        element := append_into(elements)
         element^ = {}
         
         element.p = ve0p + 0.5 * span20
@@ -908,7 +883,7 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
         color := rgba_to_v4(ve0.color)
         element.reflect_c        = 0.95 * color.rgb
         element.transparency     = color.a
-        element.front_emission_c = max_emission_value * ve0.emission * color.rgb
+        element.front_emission_c = max_emission_value * ve0.emission
         element.visibility       = 1
         
         element.bitmap = bitmap
@@ -922,7 +897,7 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
     commands := group.commands
     quads    := group.current_quads
     
-    light_elements := &solution.light_elements
+    elements := &solution.elements
     
     bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset:][:quads.quad_count]
     vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
@@ -944,13 +919,12 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
         }
         
         span01 := ps[1] - ps[0]
-        span02 := ps[2] - ps[0]
         span03 := ps[3] - ps[0]
         
         r := 0.3 * min(length(span03), length(span01))
         
         for vertex_index in 0..<4 {
-            element := append_into(light_elements)
+            element := append_into(elements)
             element^ = {}
             
             v := vs[vertex_index]
@@ -968,7 +942,7 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
             color := rgba_to_v4(v.color)
             element.reflect_c        = 0.95 * color.rgb
             element.transparency     = color.a
-            element.front_emission_c = max_emission_value * v.emission * color.rgb
+            element.front_emission_c = max_emission_value * v.emission
             element.visibility       = 1
             
             element.bitmap = bitmap
@@ -979,20 +953,24 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
     }
 }
 
-output_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
-    if ShowReflectors {
-        output_lighting_quads(group, solution)
+output_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
+    if textures != nil {
+        output_texture_debug(group, solution, textures)
     } else {
-        output_lighting_verts(group, solution)
+        if ShowReflectors {
+            output_lighting_quads(group, solution)
+        } else {
+            output_lighting_verts(group, solution)
+        }
     }
 }
 
 output_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
-    light_elements := &solution.light_elements
+    elements := &solution.elements
     
-    for element in light_elements {
+    for element in elements {
         ps := element.ps
         cs := element.cs
         bitmap := element.bitmap
@@ -1007,7 +985,7 @@ output_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution)
             bitmap = &group.commands.white_bitmap
             
             min: u32
-            abs_n := abs_vec(element.n)
+            abs_n := abs_per_lane(element.n)
             if abs_n.x < abs_n.y {
                 min = abs_n.x < abs_n.z ? 0 : 2
             } else {
@@ -1046,17 +1024,39 @@ output_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution)
     }
 }
 
+output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
+    timed_function()
+    
+    lookup_dimensions := uv3 { len(textures.lookup[0][0]), len(textures.lookup[0]), len(textures.lookup) }
+    for z in 0..<lookup_dimensions.z {
+        for y in 0..<lookup_dimensions.y {
+            for x in 0..<lookup_dimensions.x {
+                index := textures.lookup[z][y][x]
+                for index != 0 {
+                    pnext := textures.pnext[index]
+                    defer index = cast(u16) pnext.next
+                    
+                    p := pnext.p
+                    c := rgba_to_v4(textures.c[index])
+                    
+                    push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
+                }
+            }
+        }
+    }
+}
+
 output_lighting_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
-    light_elements := &solution.light_elements
+    elements := &solution.elements
     
-    for element_index: int; element_index < len(light_elements); element_index += 4 {
+    for element_index: int; element_index < len(elements); element_index += 4 {
         es := [4] LightingElement {
-            light_elements[element_index+0],
-            light_elements[element_index+1],
-            light_elements[element_index+2],
-            light_elements[element_index+3],
+            elements[element_index+0],
+            elements[element_index+1],
+            elements[element_index+2],
+            elements[element_index+3],
         }
         
         ps := es[0].ps
@@ -1076,5 +1076,43 @@ output_lighting_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution)
         cs[3] = v4_to_rgba(V4(front_emissions[3] * rgba_to_v4(cs[3]).rgb, rgba_to_v4(cs[3]).a))
         
         push_quad(group, bitmap, **ps, **es[0].ts, **cs)
+    }
+}
+
+output_lighting_textures :: proc (solution: ^LightingSolution, textures: ^LightingTextures) {
+    timed_function()
+    
+    textures.lookup = 0
+    
+    bounds := rectangle_inverted_infinity(Rectangle3)
+    for element in solution.elements {
+        bounds.min = min_per_lane(bounds.min, element.p.xyz)
+        bounds.max = max_per_lane(bounds.max, element.p.xyz)
+    }
+    
+    bounds     = add_radius(bounds, 0.1)
+    dimension := get_dimension(bounds)
+    
+    lookup_dimensions := v3 { cast(f32) len(textures.lookup[0][0]), cast(f32) len(textures.lookup[0]), cast(f32) len(textures.lookup) }
+    inv_cell_dimension := lookup_dimensions / dimension
+    
+    pack_index: u32
+    for element in solution.elements {
+        voxel_p     := (element.p - bounds.min) * inv_cell_dimension
+        voxel_index := truncate(u32, voxel_p)
+        
+        lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
+        
+        front_emission := clamp_01(element.front_emission_c)
+        c := v4_to_rgba(V4(front_emission, 1))
+        
+        pack_index += 1
+        
+        pnext := &textures.pnext[pack_index]
+        pnext.p    = element.p
+        pnext.next = cast(u32) lookup_at^
+        lookup_at^ = cast(u16) pack_index
+        
+        textures.c[pack_index] = c
     }
 }

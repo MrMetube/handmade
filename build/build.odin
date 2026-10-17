@@ -55,7 +55,7 @@ main :: proc () {
     make_directory_if_not_exists("data/build")
     
     shader_pack_path := "build/shaders.data"
-    create_shader_pack_file(shader_pack_path)
+    create_shader_pack_file(shader_pack_path, optimize)
     
     metaprogram: Metaprogram
     metaprogram_init(&metaprogram)
@@ -99,7 +99,7 @@ main :: proc () {
         append(cmd, fmt.tprintf(`-pdb-name:build/game-%d.pdb`, random_number()))
         
         build_meander()
-        build_optimizations(true || optimize)
+        build_optimizations(optimize)
         build_native(native)
         
         build_pedantic(PedanticGame)

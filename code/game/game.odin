@@ -15,8 +15,7 @@ TimestepPercentage:       f32 = 100
 
 ShowReflectors:           b32 = false
 ShowVisibility:           b32 = false
-LightingIterationCount:   i32 = 2
-OcclusionIterationCount:  i32 = 0
+LightingIterationCount:   i32 = 4
 
 ////////////////////////////////////////////////
 
@@ -170,11 +169,6 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
                 count := cast(f32) LightingIterationCount
                 debug_record_value(&count, "Lighting Iterations")
                 LightingIterationCount = cast(i32) count
-            }
-            {
-                count := cast(f32) OcclusionIterationCount
-                debug_record_value(&count, "Occlusion Iterations")
-                OcclusionIterationCount = cast(i32) count
             }
         }
     }

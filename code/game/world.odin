@@ -176,7 +176,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     ////////////////////////////////////////////////
     
     if mode.show_lighting {
-        output_lighting(render_group, &mode.test_lighting)
+        output_lighting(render_group, &mode.test_lighting, &mode.test_textures)
         if input.fkey_pressed[1] {
             mode.show_lighting = false
         }
@@ -191,7 +191,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
         
-        last_camera_p := mode.camera.p
+        // @todo undo this
+        // last_camera_p := mode.camera.p
         camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
         if camera_entity != nil {
             mode.debug_light_p = camera_entity.p + {0,0,1}
@@ -200,9 +201,10 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         push_light(render_group, mode.debug_light_p, .5, 1, 1)
         
-        frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
         // @todo undo this
+        // frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
         // update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
+        unused(update_and_render_particle_systems)
         
         if ShowSimulationBounds {
             world_transform := default_flat_transform()
@@ -260,6 +262,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         if input.fkey_pressed[1] {
             lighting_test(render_group, &mode.test_lighting)
+            output_lighting_textures(&mode.test_lighting, &mode.test_textures)
             mode.show_lighting = true
         }
     }
