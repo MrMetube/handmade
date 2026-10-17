@@ -108,18 +108,22 @@ get_last_write_time :: proc (filename: cstring16) -> (last_write_time: u64) {
 ////////////////////////////////////////////////
 // reimplement to allow the deferred_out to work
 
+begin_timed_block :: proc (name: string, loc := #caller_location) {
+    game.begin_timed_block(name, loc)
+}
+
 end_timed_block :: proc () {
     game.end_timed_block()
 }
 
 @(deferred_none=end_timed_block)
 timed_block :: proc (name: string, loc := #caller_location) {
-    game.begin_timed_block(name, loc)
+    begin_timed_block(name, loc)
 }
 
 @(deferred_out = end_timed_block)
 timed_function :: proc (loc := #caller_location) { 
-    game.begin_timed_block(loc.procedure, loc)
+    begin_timed_block(loc.procedure, loc)
 }
 
 debug_end_data_block :: proc () {

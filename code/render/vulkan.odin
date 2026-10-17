@@ -742,23 +742,20 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             c_buffer.cpu^      = entry.c^
             lookup_buffer.cpu^ = entry.lookup^
             
-            
-            pnext_texture  := get_texture(vulkan, .lighting_pnext)
-            c_texture      := get_texture(vulkan, .lighting_c)
-            lookup_texture := get_texture(vulkan, .lighting_lookup)
-            
-            assert(pnext_texture.texture  != nil)
-            assert(c_texture.texture      != nil)
-            assert(lookup_texture.texture != nil)
-            
-            // @todo dont call this inside a render pass and fix dependency_flags=by_region
-            gpu.barrier(commands, { .fragment }, { .shader_read }, { .transfer }, { .transfer_write })
-            
-            gpu.copy_memory_to_texture(commands, gpu.gpu_range(pnext_buffer),  pnext_texture.texture)
-            gpu.copy_memory_to_texture(commands, gpu.gpu_range(c_buffer),      c_texture.texture)
-            gpu.copy_memory_to_texture(commands, gpu.gpu_range(lookup_buffer), lookup_texture.texture)
-            
-            gpu.barrier(commands, { .transfer }, { .transfer_write }, { .fragment }, { .shader_read })
+            if false {
+                pnext_texture  := get_texture(vulkan, .lighting_pnext)
+                c_texture      := get_texture(vulkan, .lighting_c)
+                lookup_texture := get_texture(vulkan, .lighting_lookup)
+                
+                // @todo dont call this inside a render pass and fix dependency_flags=by_region
+                gpu.barrier(commands, { .fragment }, { .shader_read }, { .transfer }, { .transfer_write })
+                
+                gpu.copy_memory_to_texture(commands, gpu.gpu_range(pnext_buffer),  pnext_texture.texture)
+                gpu.copy_memory_to_texture(commands, gpu.gpu_range(c_buffer),      c_texture.texture)
+                gpu.copy_memory_to_texture(commands, gpu.gpu_range(lookup_buffer), lookup_texture.texture)
+                
+                gpu.barrier(commands, { .transfer }, { .transfer_write }, { .fragment }, { .shader_read })
+            }
         }
         
         if advance {

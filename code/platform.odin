@@ -623,7 +623,7 @@ main :: proc () {
         }
         ////////////////////////////////////////////////
         when INTERNAL {
-            game.begin_timed_block("debug collation")
+            begin_timed_block("debug collation")
             
             game_memory.reloaded_executable = false
             executable_needs_to_be_reloaded := needs_to_be_reloaded(game_dll)
@@ -684,7 +684,7 @@ main :: proc () {
                 }
             }
             
-            game.end_timed_block()
+            end_timed_block()
         }
         ////////////////////////////////////////////////
         { timed_block("prepare render")
@@ -1179,22 +1179,27 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
     quit_requested: bool
     message: win.MSG
     for {
-        // @note We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
-        first  :: min(win.WM_PAINT, win.WM_MOUSEMOVE)
-        second :: max(win.WM_PAINT, win.WM_MOUSEMOVE)
-        last   :: max(u32)
-        
-        game.begin_timed_block("win.PeekMessageW")
-        has_message := win.PeekMessageW(&message, nil, 0, first - 1, win.PM_REMOVE)
-        if !has_message {
-            has_message = win.PeekMessageW(&message, nil, first + 1, second - 1, win.PM_REMOVE)
-            if !has_message {
-                has_message = win.PeekMessageW(&message, nil, second + 1, last, win.PM_REMOVE)
+        {
+            // @note We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
+            timed_block("win.PeekMessageW")
+            
+            // @note These must be in sorted order!
+            skip_messages := [?] win.DWORD {
+                win.WM_PAINT,
+                win.WM_MOUSEMOVE,
+                max(win.DWORD),
             }
+            
+            has_message: win.BOOL
+            last_message: win.DWORD
+            for skip in skip_messages {
+                has_message = win.PeekMessageW(&message, nil, last_message, skip - 1, win.PM_REMOVE)
+                last_message = skip + 1
+                if has_message { break }
+            }
+            
+            if !has_message { break }
         }
-        game.end_timed_block()
-        
-        if !has_message { break }
         
         switch message.message {
           case win.WM_QUIT:
@@ -1275,6 +1280,7 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
             win.DispatchMessageW(&message)
         }
     }
+    
     return quit_requested
 }
 

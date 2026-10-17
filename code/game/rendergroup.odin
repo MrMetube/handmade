@@ -756,8 +756,6 @@ LightingSolution :: struct {
     textures: LightingTextures,
 }
 
-/// 1024 * 8
-
 LightingTextures :: struct {
     pnext:  [8192] v4,       /// p = 8192 * (3 * 4 + 4)
     c:      [8192] Color, // a is unsed /// c = 8192 * 4
@@ -975,8 +973,8 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
 
 output_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     if textures != nil {
-        // output_texture_debug(group, solution, textures)
-        output_lighting_textures(group, solution, textures)
+        output_texture_debug(group, solution, textures)
+        // output_lighting_textures(group, solution, textures)
     } else {
         if ShowReflectors {
             output_lighting_quads(group, solution)
