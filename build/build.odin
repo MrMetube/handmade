@@ -13,7 +13,7 @@ PedanticGame     :: false
 PedanticRender   :: false
 PedanticPlatform :: false
 
-optimize :: false
+optimize :: !false
 native   :: true
 internal :: true
 

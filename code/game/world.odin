@@ -175,8 +175,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     
     ////////////////////////////////////////////////
     
-    if mode.show_lighting {
-        output_lighting(render_group, &mode.test_lighting, &mode.test_textures)
+    if mode.show_lighting && false {
+        render_lighting(render_group, &mode.test_lighting, &mode.test_textures)
         if input.fkey_pressed[1] {
             mode.show_lighting = false
         }

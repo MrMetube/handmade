@@ -3,6 +3,7 @@ static const f32 max_light_intensity = 10.0;
 #define square(value) (value*value)
 #define clamp01(value) (clamp(value, 0, 1))
 #define length_squared(value) (dot(value, value))
+#define rgba_to_v4 unpackUnorm4x8ToFloat
 
 typedef uint16_t u16;
 typedef uint     u32;
@@ -60,10 +61,6 @@ enum TextureDescriptor : u32 {
     
     light_buffer_begin,
     light_buffer_end = light_buffer_begin+light_buffer_count, // @cleanup
-    
-    lighting_pnext,
-    lighting_c,
-    lighting_lookup,
     
     first_dynamic_texture,
     // count = first_dynamic_texture + max_vulkan_textures,

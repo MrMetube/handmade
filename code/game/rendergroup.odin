@@ -752,29 +752,30 @@ LightingElement :: struct {
 }
 
 LightingSolution :: struct {
-    elements: [dynamic; 8192*2] LightingElement,
+    elements: [dynamic; 8192] LightingElement,
     textures: LightingTextures,
 }
 
 LightingTextures :: struct {
-    pnext:  [8192*2] v4,       /// p = 8192*2 * (3 * 4 + 4)
-    c:      [8192*2] Color, // a is unsed /// c = 8192*2 * 4
-    //       z     y     x
-    lookup: [32] [256] [256] u16,        /// l = 256 * 256 * 32 * 2
+    pnext:  [8192] LightingTexel,                                                  /// p = 8192 * (3 * 4 + 4)
+    c:      [8192] Color, // a is unsed                                            /// c = 8192 * 4
+    lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16, /// l = 32 * 32 * 32 * 2
+    // @volatile see zbias.slang
     
-    /// p / 1024
-    /// c / 1024
-    /// l / 1024
+    /// p
+    /// c
+    /// l
     /// (p + c + l) / 1024
-    min_corner:         v3,
-    voxel_dimension: v3,
+    min_corner:          v3,
+    voxel_dimension:     v3,
     inv_voxel_dimension: v3,
 }
 
 @(common)
-lookup_dimensions :: uv3 { len(LightingTextures{}.lookup[0][0]), len(LightingTextures{}.lookup[0]), len(LightingTextures{}.lookup) }
+lookup_dimensions :: uv3 { 32, 32, 32 }
 
-LightingTexel :: struct {
+@(common)
+LightingTexel :: struct { // @volatile see zbias.slang
     p:    v3,
     next: u32,
 }
@@ -975,20 +976,20 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
     }
 }
 
-output_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
+render_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     if textures != nil {
-        output_texture_debug(group, solution, textures)
+        render_texture_debug(group, solution, textures)
         // output_lighting_textures(group, solution, textures)
     } else {
         if ShowReflectors {
-            output_lighting_quads(group, solution)
+            render_lighting_quads(group, solution)
         } else {
-            output_lighting_verts(group, solution)
+            render_lighting_verts(group, solution)
         }
     }
 }
 
-output_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
+render_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
     elements := &solution.elements
@@ -1047,7 +1048,7 @@ output_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution)
     }
 }
 
-output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
+render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     timed_function()
     
     for z in 0..<lookup_dimensions.z {
@@ -1058,9 +1059,9 @@ output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
                 if false {
                     for index != 0 {
                         pnext := textures.pnext[index]
-                        defer index = cast(u16) pnext.w
+                        defer index = cast(u16) pnext.next
                         
-                        p := pnext.xyz
+                        p := pnext.p
                         c := rgba_to_v4(textures.c[index])
                         
                         push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
@@ -1070,11 +1071,11 @@ output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
                         c: v4
                         count: f32
                         for index != 0 {
-                            pnext := textures.pnext[index]
-                            defer index = cast(u16) pnext.w
-                            
-                            c += rgba_to_v4(textures.c[index])
-                            count += 1
+                                pnext := textures.pnext[index]
+                                defer index = cast(u16) pnext.next
+                                
+                                c += rgba_to_v4(textures.c[index])
+                                count += 1
                         }
                         
                         c *= 1 / count
@@ -1088,7 +1089,7 @@ output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
     }
 }
 
-output_lighting_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
+render_lighting_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
     elements := &solution.elements
@@ -1150,8 +1151,8 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         pack_index += 1
         
         pnext := &textures.pnext[pack_index]
-        pnext.xyz  = element.p
-        pnext.w    = cast(f32) lookup_at^
+        pnext.p    = element.p
+        pnext.next = cast(u32) lookup_at^
         lookup_at^ = cast(u16) pack_index
         textures.c[pack_index] = c
     }
