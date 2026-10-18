@@ -4,7 +4,7 @@ package shared_render
 ShaderPackHeader :: struct #packed {
     magic:   [4] u8,
     version: u32,
-    infos:    [Shaders] struct #packed { 
+    infos:   [Shaders] struct #packed { 
         vertex_offset:   u64, 
         vertex_count:    u64,
         fragment_offset: u64, 

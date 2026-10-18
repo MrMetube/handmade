@@ -10,8 +10,8 @@ struct TexturedVertex {
 
 struct Root {
     float4x4        projection;
-    TexturedVertex* vertices;
-    u32*            textures;
+    TexturedVertex  *vertices;
+    u32             *textures;
     v3              camera_p;
     v3              fog_direction;
     v3              fog_color;
@@ -26,7 +26,9 @@ struct Root {
     v3 voxel_min_corner;
     v3 voxel_inverse_cell_dimension;
     
-    u32 __padding2[5];
+    v4   *lighting_pnext;
+    uint *lighting_c;
+    u16  *lighting_lookup;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Root> root;
@@ -123,16 +125,21 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
         discard;
     }
     
+    v4 surface_reflect  = 0;
+    surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
+    surface_reflect.a   = modulated.a;
+    
+    
+    
     v3 voxel_p = root.voxel_inverse_cell_dimension * (input.world_p - root.voxel_min_corner);
     iv3 voxel_index = iv3(floor(voxel_p));
-    voxel_index = iv3(190, 154, 3);
     
     u16 light_index = texture_lookup.Load(iv4(voxel_index, 0));
     v3 average_light = v3(0,0,0);
     f32 light_count = 0;
     while (light_index != 0) {
-        v4  pnext = texture_pnext.Load(iv2(light_index, 0));
-        v4 color  = texture_c.Load(iv2(light_index, 0));
+        v4 pnext = texture_pnext.Load(iv2(light_index, 0));
+        v4 color = texture_c.Load(iv2(light_index, 0));
         
         v3 p = pnext.xyz;
         
@@ -147,13 +154,30 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
         average_light *= 1.0 / light_count;
     }
     
-    FragmentOutput output;
-    v4 surface_reflect  = 0;
-    surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
-    surface_reflect.a   = modulated.a;
+    if (root.lighting_lookup != nullptr) {
+        // average_light = v3(1, 0, 0);
+    }
+    average_light = 1;
+    if (root.lighting_lookup != nullptr) {
+        iv3 expected_first = iv3(212, 69, 0);
+        voxel_index = expected_first;
+        
+        i32 vi = voxel_index.x + voxel_index.y * 256 + voxel_index.z * 256 * 256;
+        if (vi >= 0 && vi < 256 * 256 * 32) {
+            u16 alt_light_index = root.lighting_lookup[vi];
+            
+            if (light_index > 0 && light_index < 16 * 1024) {
+                v4 color = root.lighting_c[light_index];
+                average_light = color.rgb;
+            } else if (light_index == 0) {
+                average_light = v3(1, 0, 0);
+            }
+        }
+    }
     
     surface_reflect.rgb *= average_light;
     
+    FragmentOutput output;
     output.surface_reflect = surface_reflect;
     
     return output;

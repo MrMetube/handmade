@@ -752,13 +752,13 @@ LightingElement :: struct {
 }
 
 LightingSolution :: struct {
-    elements: [dynamic; 8192] LightingElement,
+    elements: [dynamic; 8192*2] LightingElement,
     textures: LightingTextures,
 }
 
 LightingTextures :: struct {
-    pnext:  [8192] v4,       /// p = 8192 * (3 * 4 + 4)
-    c:      [8192] Color, // a is unsed /// c = 8192 * 4
+    pnext:  [8192*2] v4,       /// p = 8192*2 * (3 * 4 + 4)
+    c:      [8192*2] Color, // a is unsed /// c = 8192*2 * 4
     //       z     y     x
     lookup: [32] [256] [256] u16,        /// l = 256 * 256 * 32 * 2
     
@@ -766,7 +766,11 @@ LightingTextures :: struct {
     /// c / 1024
     /// l / 1024
     /// (p + c + l) / 1024
+    min_corner:         v3,
+    voxel_dimension: v3,
+    inv_voxel_dimension: v3,
 }
+
 @(common)
 lookup_dimensions :: uv3 { len(LightingTextures{}.lookup[0][0]), len(LightingTextures{}.lookup[0]), len(LightingTextures{}.lookup) }
 
@@ -1050,14 +1054,34 @@ output_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
         for y in 0..<lookup_dimensions.y {
             for x in 0..<lookup_dimensions.x {
                 index := textures.lookup[z][y][x]
-                for index != 0 {
-                    pnext := textures.pnext[index]
-                    defer index = cast(u16) pnext.w
-                    
-                    p := pnext.xyz
-                    c := rgba_to_v4(textures.c[index])
-                    
-                    push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
+                
+                if false {
+                    for index != 0 {
+                        pnext := textures.pnext[index]
+                        defer index = cast(u16) pnext.w
+                        
+                        p := pnext.xyz
+                        c := rgba_to_v4(textures.c[index])
+                        
+                        push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
+                    }
+                } else {
+                    if index != 0 {
+                        c: v4
+                        count: f32
+                        for index != 0 {
+                            pnext := textures.pnext[index]
+                            defer index = cast(u16) pnext.w
+                            
+                            c += rgba_to_v4(textures.c[index])
+                            count += 1
+                        }
+                        
+                        c *= 1 / count
+                        p := textures.min_corner + textures.voxel_dimension * (cast(v3) uv3{x, y, z} + 0.5)
+                        
+                        push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
+                    }
                 }
             }
         }
@@ -1111,12 +1135,11 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
     bounds     = add_radius(bounds, 0.1)
     dimension := get_dimension(bounds)
     
-    lookup_dimensions := v3 { cast(f32) len(textures.lookup[0][0]), cast(f32) len(textures.lookup[0]), cast(f32) len(textures.lookup) }
-    inv_cell_dimension := lookup_dimensions / dimension
+    inv_voxel_dimension := cast(v3) lookup_dimensions / dimension
     
     pack_index: u32
     for element in solution.elements {
-        voxel_p     := (element.p - bounds.min) * inv_cell_dimension
+        voxel_p     := (element.p - bounds.min) * inv_voxel_dimension
         voxel_index := truncate(u32, voxel_p)
         
         lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
@@ -1130,9 +1153,12 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         pnext.xyz  = element.p
         pnext.w    = cast(f32) lookup_at^
         lookup_at^ = cast(u16) pack_index
-        
         textures.c[pack_index] = c
     }
     
-    push_lighting(group, textures, bounds.min, inv_cell_dimension)
+    textures.min_corner          = bounds.min
+    textures.voxel_dimension     = dimension / cast(v3) lookup_dimensions
+    textures.inv_voxel_dimension = inv_voxel_dimension
+    
+    push_lighting(group, textures, textures.min_corner, textures.inv_voxel_dimension)
 }

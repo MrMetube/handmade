@@ -16,6 +16,7 @@ shader_pack_path := #config(shader_pack_path, "unset")
 ////////////////////////////////////////////////
 
 frame_heap_size          :: 32 * Megabyte
+ligting_heap_size        :: 16 * Megabyte
 texture_upload_heap_size :: 64 * Megabyte
 texture_heap_size        ::  2 * Gigabyte
 frames_in_flight         :: 2
@@ -32,7 +33,7 @@ Vulkan :: struct {
     
     frames:           [frames_in_flight] Frame,
     next_frame_index: u32,
-
+    
     texture_upload_heap:      gpu.GpuHeap,
     texture_upload_allocator: gpu.BumpAllocator,
     
@@ -66,11 +67,19 @@ Vulkan :: struct {
     peel_composite_buffer:      RenderTarget,
     light_buffers:              [dynamic; 10] [LightBufferKind] RenderTarget,
     
+    debug_light_buffer_index:   i32,
+    debug_light_buffer_texture: i32,
+    
+    
     voxel_min_corner:             v3,
     voxel_inverse_cell_dimension: v3,
     
-    debug_light_buffer_index:   i32,
-    debug_light_buffer_texture: i32,
+    lighting_heap: gpu.GpuHeap,
+    lighting_bump: gpu.BumpAllocator,
+    
+    pnext_buffer:  gpu.GpuCpuRange(v4),
+    c_buffer:      gpu.GpuCpuRange(Color),
+    lookup_buffer: gpu.GpuCpuRange(u16),
 }
 
 Frame :: struct {
@@ -180,7 +189,9 @@ RootZBias :: struct #all_or_none {
     voxel_min_corner:             v3,
     voxel_inverse_cell_dimension: v3,
     
-    _padding: [5] u32,
+    lighting_pnext:  [^] v4,
+    lighting_c:      [^] Color,
+    lighting_lookup: [^] u16,
 }
 #assert(size_of(RootZBias) % 32 == 0)
 
@@ -233,6 +244,9 @@ init_vulkan :: proc (vulkan: ^Vulkan, window: pmm) {
 
     vulkan.texture_upload_heap      = gpu.create_gpu_heap(device, texture_upload_heap_size)
     vulkan.texture_upload_allocator = gpu.bump_allocator(vulkan.texture_upload_heap.range)
+    
+    vulkan.lighting_heap = gpu.create_gpu_heap(device, ligting_heap_size)
+    vulkan.lighting_bump = gpu.bump_allocator(vulkan.lighting_heap.range)
     
     vulkan.texture_descriptor_heap = gpu.create_texture_descriptor_heap(device, cast(u32) TextureDescriptor.count)
     vulkan.sampler_descriptor_heap = gpu.create_sampler_descriptor_heap(device, len(Sampler))
@@ -350,21 +364,13 @@ vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture
     if set_as_nil_texture {
         descriptor = .nil_texture
     } else {
-        // @todo inline
-        allocate_texture_descriptor :: proc (vulkan: ^Vulkan) -> TextureDescriptor {
-            index: TextureDescriptor
-            if len(vulkan.free_texture) > 0 {
-                index = pop(&vulkan.free_texture)
-            } else {
-                assert(vulkan.next_texture < .count)
-                index = vulkan.next_texture
-                vulkan.next_texture += .one
-            }
-            
-            return index
+        if len(vulkan.free_texture) > 0 {
+            descriptor = pop(&vulkan.free_texture)
+        } else {
+            assert(vulkan.next_texture < .count)
+            descriptor = vulkan.next_texture
+            vulkan.next_texture += .one
         }
-
-        descriptor = allocate_texture_descriptor(vulkan)
     }
     gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, cast(u32) descriptor, placed.texture, .sampled)
     
@@ -723,7 +729,9 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 voxel_min_corner             = vulkan.voxel_min_corner,
                 voxel_inverse_cell_dimension = vulkan.voxel_inverse_cell_dimension,
                 
-                _padding  = {},
+                lighting_pnext  = vulkan.pnext_buffer.gpu,
+                lighting_c      = vulkan.c_buffer.gpu,
+                lighting_lookup = vulkan.lookup_buffer.gpu,
             }
             gpu.draw(commands, root.gpu, entry.quad_count * 6)
         
@@ -734,15 +742,23 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             vulkan.voxel_min_corner             = entry.voxel_min_corner
             vulkan.voxel_inverse_cell_dimension = entry.voxel_inverse_cell_dimension
             
-            pnext_buffer  := gpu.bump_allocate(&frame.allocator, type_of(entry.pnext^))
-            c_buffer      := gpu.bump_allocate(&frame.allocator, type_of(entry.c^))
-            lookup_buffer := gpu.bump_allocate(&frame.allocator, type_of(entry.lookup^))
+            // @note This is only called once per creation, not per frame.
+            gpu.bump_reset(&vulkan.lighting_bump)
             
-            pnext_buffer.cpu^  = entry.pnext^
-            c_buffer.cpu^      = entry.c^
-            lookup_buffer.cpu^ = entry.lookup^
             
-            if false {
+            lookup_count := lookup_dimensions.x * lookup_dimensions.y * lookup_dimensions.z
+            
+            vulkan.pnext_buffer  = gpu.bump_allocate(&vulkan.lighting_bump, [] v4, len(entry.pnext^))
+            vulkan.c_buffer      = gpu.bump_allocate(&vulkan.lighting_bump, [] Color, len(entry.c^))
+            vulkan.lookup_buffer = gpu.bump_allocate(&vulkan.lighting_bump, [] u16, lookup_count)
+            
+            copy(vulkan.pnext_buffer.cpu,  entry.pnext^[:])
+            copy(vulkan.c_buffer.cpu,      entry.c^[:])
+            copy(vulkan.lookup_buffer.cpu, slice_from_parts(u16, entry.lookup, lookup_count))
+            
+            if false { // @todo Can we just use the buffers? or do we actually "sample" from the textures?
+                gpu.end_render_pass(commands) // @todo do we need to restart the depth peel pass?
+                
                 pnext_texture  := get_texture(vulkan, .lighting_pnext)
                 c_texture      := get_texture(vulkan, .lighting_c)
                 lookup_texture := get_texture(vulkan, .lighting_lookup)
@@ -750,11 +766,13 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 // @todo dont call this inside a render pass and fix dependency_flags=by_region
                 gpu.barrier(commands, { .fragment }, { .shader_read }, { .transfer }, { .transfer_write })
                 
-                gpu.copy_memory_to_texture(commands, gpu.gpu_range(pnext_buffer),  pnext_texture.texture)
-                gpu.copy_memory_to_texture(commands, gpu.gpu_range(c_buffer),      c_texture.texture)
-                gpu.copy_memory_to_texture(commands, gpu.gpu_range(lookup_buffer), lookup_texture.texture)
+                gpu.copy_memory_to_texture(commands, gpu.gpu_range(vulkan.pnext_buffer),  pnext_texture.texture)
+                gpu.copy_memory_to_texture(commands, gpu.gpu_range(vulkan.c_buffer),      c_texture.texture)
+                gpu.copy_memory_to_texture(commands, gpu.gpu_range(vulkan.lookup_buffer), lookup_texture.texture)
                 
                 gpu.barrier(commands, { .transfer }, { .transfer_write }, { .fragment }, { .shader_read })
+                
+                begin_depth_peel_pass(vulkan, commands, peel_index, .load)
             }
         }
         
