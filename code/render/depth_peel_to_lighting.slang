@@ -31,9 +31,9 @@ FragmentOutput fragmentMain(VertexOutput input) {
     SamplerState sampler = SamplerDescriptorHeap[Sampler.Linear];
     
     Texture2DMS<f32> depth_texture           = get_resolve_depth_buffer(root.source_resolve_buffer);
-    Texture2DMS<v4>  surface_reflect_texture = get_resolve_color_buffer(root.source_resolve_buffer, depth_peel.surface_reflect);
-    Texture2DMS<v4>  emission_texture        = get_resolve_color_buffer(root.source_resolve_buffer, depth_peel.emission);
-    Texture2DMS<v4>  normal_lp_texture       = get_resolve_color_buffer(root.source_resolve_buffer, depth_peel.normal_lp);
+    Texture2DMS<v4>  surface_reflect_texture = get_resolve_color_buffer(root.source_resolve_buffer, DepthPeelKind.surface_reflect);
+    Texture2DMS<v4>  emission_texture        = get_resolve_color_buffer(root.source_resolve_buffer, DepthPeelKind.emission);
+    Texture2DMS<v4>  normal_lp_texture       = get_resolve_color_buffer(root.source_resolve_buffer, DepthPeelKind.normal_lp);
 
     u32 width, height, sample_count;
     depth_texture.GetDimensions(width, height, sample_count);

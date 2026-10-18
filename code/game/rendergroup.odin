@@ -53,7 +53,7 @@ RenderCommands :: struct {
     
     entries: [dynamic] RenderEntry,
     
-    vertex_buffer:      [dynamic] Textured_Vertex,
+    vertex_buffer:      [dynamic] TexturedVertex,
     quad_bitmap_buffer: [dynamic] ^Bitmap,
     
     white_bitmap: Bitmap,
@@ -69,7 +69,7 @@ RenderGroup :: struct {
     
     last_setup: RenderSetup,
     
-    current_quads: ^Textured_Quads,
+    current_quads: ^TexturedQuads,
     
     game_cam:  RenderTransform,
     debug_cam: RenderTransform,
@@ -108,7 +108,7 @@ RenderEntryKind :: enum u8 {
 RenderEntry :: struct {
     kind: RenderEntryKind,
     
-    textured_quads: Textured_Quads,
+    textured_quads: TexturedQuads,
     lighting:       Lighting,
 }
 
@@ -117,7 +117,6 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     
     clip_rect:           Rectangle2i,
     
-    // @volatile shader inputs
     projection:       m4,
     camera_p:         v3,
     fog_direction:    v3,
@@ -130,7 +129,7 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     debug_light_p: v3,
 }
 
-Textured_Quads :: struct {
+TexturedQuads :: struct {
     setup: RenderSetup,
     
     quad_count:    u32,
@@ -147,23 +146,23 @@ Lighting :: struct {
     lookup: ^type_of(LightingTextures{}.lookup),
 }
 
-@(common)
-Textured_Vertex :: struct {
+@(common, shader)
+TexturedVertex :: struct {
     p:     v4,
-    n:     Packed_Normal,
-    uv:    Packed_UV,
-    color: Color,
+    n:     PackedNormal `shader:"u32"`,
+    uv:    PackedUV     `shader:"u32"`,
+    color: Color        `shader:"u32"`,
     emission: f32,
 }
 
-Packed_Normal :: bit_field u32 {
+PackedNormal :: bit_field u32 {
     x: i16 | 10,
     y: i16 | 10,
     z: i16 | 10,
     _: i16 |  2,
 }
 
-Packed_UV :: distinct [2] u16
+PackedUV :: distinct [2] u16
 
 ////////////////////////////////////////////////
 
@@ -368,25 +367,25 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     // @note(viktor): reorder from quad ordering to triangle strip ordering
     // :QuadWinding:
     append(&group.commands.vertex_buffer, 
-        Textured_Vertex {p3, pack(n3), pack(t3), c3, emission},
-        Textured_Vertex {p0, pack(n0), pack(t0), c0, emission},
-        Textured_Vertex {p2, pack(n2), pack(t2), c2, emission},
-        Textured_Vertex {p1, pack(n1), pack(t1), c1, emission},
+        TexturedVertex {p3, pack(n3), pack(t3), c3, emission},
+        TexturedVertex {p0, pack(n0), pack(t0), c0, emission},
+        TexturedVertex {p2, pack(n2), pack(t2), c2, emission},
+        TexturedVertex {p1, pack(n1), pack(t1), c1, emission},
     )
 }
 
 @(common)
 pack :: proc { pack_normal, pack_uv }
-pack_normal :: proc (normal: v3) -> Packed_Normal {
-    result := Packed_Normal {
+pack_normal :: proc (normal: v3) -> PackedNormal {
+    result := PackedNormal {
         x = round(i16, clamp(normal.x, -1, 1) * 511),
         y = round(i16, clamp(normal.y, -1, 1) * 511),
         z = round(i16, clamp(normal.z, -1, 1) * 511),
     }
     return result
 }
-pack_uv :: proc (uv: v2) -> Packed_UV {
-    result := Packed_UV {
+pack_uv :: proc (uv: v2) -> PackedUV {
+    result := PackedUV {
         round(u16, clamp(uv.x, 0, 1) * cast(f32) max(u16)),
         round(u16, clamp(uv.y, 0, 1) * cast(f32) max(u16)),
     }
@@ -394,7 +393,7 @@ pack_uv :: proc (uv: v2) -> Packed_UV {
 }
 @(common)
 unpack :: proc { unpack_normal, unpack_uv }
-unpack_normal :: proc (normal: Packed_Normal) -> v3 {
+unpack_normal :: proc (normal: PackedNormal) -> v3 {
     result := v3 {
         cast(f32) normal.x / 511.0,
         cast(f32) normal.y / 511.0,
@@ -402,7 +401,7 @@ unpack_normal :: proc (normal: Packed_Normal) -> v3 {
     }
     return result
 }
-unpack_uv :: proc (uv: Packed_UV) -> v2 {
+unpack_uv :: proc (uv: PackedUV) -> v2 {
     result := v2 {
         cast(f32) uv.x / cast(f32) max(u16),
         cast(f32) uv.y / cast(f32) max(u16),
@@ -410,7 +409,7 @@ unpack_uv :: proc (uv: Packed_UV) -> v2 {
     return result
 }
 
-get_current_quads :: proc (group: ^RenderGroup) -> ^Textured_Quads {
+get_current_quads :: proc (group: ^RenderGroup) -> ^TexturedQuads {
     if group.current_quads == nil {
         entry := push_render_entry(group, .Textured_Quads)
         group.current_quads = &entry.textured_quads
@@ -774,8 +773,8 @@ LightingTextures :: struct {
 @(common)
 lookup_dimensions :: uv3 { 32, 32, 32 }
 
-@(common)
-LightingTexel :: struct { // @volatile see zbias.slang
+@(common, shader)
+LightingTexel :: struct {
     p:    v3,
     next: u32,
 }
@@ -927,7 +926,7 @@ extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingS
     
     for bitmap, quad_index in bitmaps {
         // :QuadWinding:
-        vs := [4] Textured_Vertex {
+        vs := [4] TexturedVertex {
             vertices[quad_index*4 + 0],
             vertices[quad_index*4 + 1],
             vertices[quad_index*4 + 3],

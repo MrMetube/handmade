@@ -281,7 +281,7 @@ main :: proc () {
         // @todo decide what our sizes should be
         push_buffer := make(frame_allocator, u8, 32*Megabyte)
         render_commands.entries            = make_array_allocator(frame_allocator, RenderEntry, 1024)
-        render_commands.vertex_buffer      = make_array_allocator(frame_allocator, Textured_Vertex, 1 << 20)
+        render_commands.vertex_buffer      = make_array_allocator(frame_allocator, TexturedVertex, 1 << 20)
         render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
         
         // @todo Check if the software renderer handles this correctly because of the lanewidth

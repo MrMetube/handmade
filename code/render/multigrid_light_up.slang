@@ -30,10 +30,10 @@ struct FragmentOutput {
 FragmentOutput fragmentMain(VertexOutput input) {
     SamplerState sampler = SamplerDescriptorHeap[u32(Sampler.Linear)];
     
-    v3 source_front_emission  = manual_sample(get_light_buffer(root.source_index, light_buffer.front_emission),  sampler, input.uv);
-    v3 source_back_emission   = manual_sample(get_light_buffer(root.source_index, light_buffer.back_emission),   sampler, input.uv);
-    v3 source_surface_color   = manual_sample(get_light_buffer(root.source_index, light_buffer.surface_color),   sampler, input.uv);
-    v3 source_normal_xy_depth = manual_sample(get_light_buffer(root.source_index, light_buffer.normal_xy_depth), sampler, input.uv);
+    v3 source_front_emission  = manual_sample(get_light_buffer(root.source_index, LightBufferKind.front_emission),  sampler, input.uv);
+    v3 source_back_emission   = manual_sample(get_light_buffer(root.source_index, LightBufferKind.back_emission),   sampler, input.uv);
+    v3 source_surface_color   = manual_sample(get_light_buffer(root.source_index, LightBufferKind.surface_color),   sampler, input.uv);
+    v3 source_normal_xy_depth = manual_sample(get_light_buffer(root.source_index, LightBufferKind.normal_xy_depth), sampler, input.uv);
     
     FragmentOutput output;
     

@@ -27,9 +27,9 @@ struct FragmentOutput {
 
 [shader("fragment")]
 FragmentOutput fragmentMain(VertexOutput input) {
-    Texture2DMS<v4>  reflect   = get_peel_color_buffer(root.peel_index, depth_peel.surface_reflect);
-    Texture2DMS<v4>  emission  = get_peel_color_buffer(root.peel_index, depth_peel.emission);
-    Texture2DMS<v4>  normal_lp = get_peel_color_buffer(root.peel_index, depth_peel.normal_lp);
+    Texture2DMS<v4>  reflect   = get_peel_color_buffer(root.peel_index, DepthPeelKind.surface_reflect);
+    Texture2DMS<v4>  emission  = get_peel_color_buffer(root.peel_index, DepthPeelKind.emission);
+    Texture2DMS<v4>  normal_lp = get_peel_color_buffer(root.peel_index, DepthPeelKind.normal_lp);
     Texture2DMS<f32> depth     = get_peel_depth_buffer(root.peel_index);
     
     iv2 pixel = iv2(input.position.xy);

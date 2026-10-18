@@ -1,13 +1,5 @@
 #include "shared.slang"
 
-struct TexturedVertex {
-    v4  p;
-    u32 n;
-    u32 uv;
-    u32 color;
-    f32 emission;
-};
-
 struct Root {
     float4x4        projection;
     TexturedVertex  *vertices;
@@ -29,11 +21,6 @@ struct Root {
     LightingTexel *lighting_pnext;
     uint          *lighting_c;
     u16           *lighting_lookup;
-};
-
-struct LightingTexel { // @volatile see rendergroup.odin
-    v3  p;
-    u32 next;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Root> root;

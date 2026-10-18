@@ -56,9 +56,6 @@ main :: proc () {
     make_directory_if_not_exists("data")
     make_directory_if_not_exists("data/build")
     
-    shader_pack_path := "build/shaders.data"
-    if !create_shader_pack_file(shader_pack_path, optimize) { exit(1) }
-    
     metaprogram: Metaprogram
     metaprogram_init(&metaprogram)
     custom_attribute_flag := metaprogram_custom_attribute_flag(&metaprogram)
@@ -70,6 +67,11 @@ main :: proc () {
     if !metaprogram_collect_plugin_data(&metaprogram, main_package)   { exit(1) }
     if !metaprogram_collect_plugin_data(&metaprogram, game_package)   { exit(1) }
     if !metaprogram_collect_plugin_data(&metaprogram, render_package) { exit(1) }
+    
+    if !generate_shader_structs(&metaprogram, "code/render/generated.slang") { exit(1) }
+    
+    shader_pack_path := "build/shaders.data"
+    if !create_shader_pack_file(shader_pack_path, optimize) { exit(1) }
     
     pedantic_packages: [dynamic; 4] string
     if PedanticGame     { append(&pedantic_packages, game_package)   }

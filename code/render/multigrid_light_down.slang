@@ -5,14 +5,6 @@ struct Root {
     u32 our_index;
 };
 
-struct LightValue {
-    v3 front_emission;
-    v3 back_emission;
-    v3 surface_color;
-    v3 n;
-    v3 p;
-}
-
 [[vk::binding(0, 0)]] ConstantBuffer<Root> root;
 
 struct VertexOutput {
@@ -34,13 +26,21 @@ struct FragmentOutput {
     v3 back_emission  : SV_Target1;
 };
 
+struct LightValue {
+    v3 front_emission;
+    v3 back_emission;
+    v3 surface_color;
+    v3 n;
+    v3 p;
+}
+
 [shader("fragment")]
 FragmentOutput fragmentMain(VertexOutput input) {
     v2 uv_step;
     {
         // @note All textures are of the same size
         u32 width, height;
-        get_light_buffer(root.parent_index, light_buffer.front_emission).GetDimensions(width, height);
+        get_light_buffer(root.parent_index, LightBufferKind.front_emission).GetDimensions(width, height);
         uv_step = 1.0 / v2(width, height);
     }
     
@@ -51,8 +51,8 @@ FragmentOutput fragmentMain(VertexOutput input) {
     LightValue up    = parent_sample(sampler, input.uv + v2( 0, -uv_step.y)); 
     LightValue down  = parent_sample(sampler, input.uv + v2( 0, +uv_step.y)); 
     
-    v3 ref_color           = get_light_buffer(root.our_index, light_buffer.surface_color).Sample(sampler,   input.uv).rgb;
-    v3 our_normal_xy_depth = get_light_buffer(root.our_index, light_buffer.normal_xy_depth).Sample(sampler, input.uv).rgb;
+    v3 ref_color           = get_light_buffer(root.our_index, LightBufferKind.surface_color).Sample(sampler,   input.uv).rgb;
+    v3 our_normal_xy_depth = get_light_buffer(root.our_index, LightBufferKind.normal_xy_depth).Sample(sampler, input.uv).rgb;
     
     v3 ref_n = reconstruct_normal(our_normal_xy_depth);
     v3 ref_p = reconstruct_position(our_normal_xy_depth, input.uv);
@@ -96,9 +96,9 @@ v3 transfer_light(v3 light_p, v3 light_n, v3 light_emission, v3 ref_p, v3 ref_n,
 
 LightValue parent_sample(SamplerState sampler, v2 uv) {
     LightValue result;
-    result.front_emission = manual_sample(get_light_buffer(root.parent_index, light_buffer.front_emission),  sampler, uv);
-    result.back_emission  = manual_sample(get_light_buffer(root.parent_index, light_buffer.back_emission),   sampler, uv);
-    v3 normal_xy_depth    = manual_sample(get_light_buffer(root.parent_index, light_buffer.normal_xy_depth), sampler, uv);
+    result.front_emission = manual_sample(get_light_buffer(root.parent_index, LightBufferKind.front_emission),  sampler, uv);
+    result.back_emission  = manual_sample(get_light_buffer(root.parent_index, LightBufferKind.back_emission),   sampler, uv);
+    v3 normal_xy_depth    = manual_sample(get_light_buffer(root.parent_index, LightBufferKind.normal_xy_depth), sampler, uv);
     
     result.n = reconstruct_normal(normal_xy_depth);
     result.p = reconstruct_position(normal_xy_depth, uv);
