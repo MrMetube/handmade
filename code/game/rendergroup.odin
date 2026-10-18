@@ -138,20 +138,19 @@ TexturedQuads :: struct {
 
 @(common)
 Lighting :: struct {
-    voxel_min_corner:             v3,
-    voxel_inverse_cell_dimension: v3,
+    voxel_min_corner:        v3,
+    inverse_voxel_dimension: v3,
     
-    pnext:  ^type_of(LightingTextures{}.pnext),
-    c:      ^type_of(LightingTextures{}.c),
+    t:      ^type_of(LightingTextures{}.t),
     lookup: ^type_of(LightingTextures{}.lookup),
 }
 
 @(common, shader)
 TexturedVertex :: struct {
-    p:     v4,
-    n:     PackedNormal `shader:"u32 %v"`,
-    uv:    PackedUV     `shader:"u32 %v"`,
-    color: Color        `shader:"u32 %v"`,
+    p:        v4,
+    n:        PackedNormal,
+    uv:       PackedUV,
+    color:    Color,
     emission: f32,
 }
 
@@ -269,15 +268,14 @@ push_depth_clear      :: proc (group: ^RenderGroup) { push_render_entry(group, .
 push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_entry(group, .BeginPeels) }
 push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_entry(group, .EndPeels)   }
 
-push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures, voxel_min_corner: v3, voxel_inverse_cell_dimension: v3) {
+push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures, voxel_min_corner: v3, inverse_voxel_dimension: v3) {
     entry := push_render_entry(group, .Lighting)
     
-    entry.lighting.pnext  = &source.pnext
-    entry.lighting.c      = &source.c
+    entry.lighting.t      = &source.t
     entry.lighting.lookup = &source.lookup
     
-    entry.lighting.voxel_min_corner             = voxel_min_corner
-    entry.lighting.voxel_inverse_cell_dimension = voxel_inverse_cell_dimension
+    entry.lighting.voxel_min_corner        = source.voxel_min_corner
+    entry.lighting.inverse_voxel_dimension = source.inverse_voxel_dimension
 }
 
 push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true, debug_light_p: v3 = 0) {
@@ -748,6 +746,9 @@ LightingElement :: struct {
     ps: [4] v4,
     ts: [4] v2,
     cs: [4] Color,
+    
+    incident_light:             v3,
+    average_direction_to_light: v3,
 }
 
 LightingSolution :: struct {
@@ -756,27 +757,27 @@ LightingSolution :: struct {
 }
 
 LightingTextures :: struct {
-    pnext:  [8192] LightingTexel,                                                  /// p = 8192 * (3 * 4 + 4)
-    c:      [8192] Color, // a is unsed                                            /// c = 8192 * 4
-    lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16, /// l = 32 * 32 * 32 * 2
+    t: [8192] LightingTexel,                                                       /// t = 8192 * ((3 * 4 + 4) + 4 + (4*4))
+    lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16, /// l = 8 * 8 * 16 * 2
     // @volatile see zbias.slang
     
-    /// p
-    /// c
+    /// t
     /// l
-    /// (p + c + l) / 1024
-    min_corner:          v3,
-    voxel_dimension:     v3,
-    inv_voxel_dimension: v3,
+    /// (t + l) / 1024
+    voxel_min_corner:        v3,
+    voxel_dimension:         v3,
+    inverse_voxel_dimension: v3,
 }
 
 @(common)
-lookup_dimensions :: uv3 { 32, 32, 32 }
+lookup_dimensions :: uv3 { 8, 8, 16 }
 
 @(common, shader)
 LightingTexel :: struct {
-    p:    v3,
+    d:    v4,    // w is unused, this does not need to be a full v4
+    p:    v3,    // this could be a smaller, relative position/offset in a voxel than a v4
     next: u32,
+    c:    Color, // a is unused
 }
 
 lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
@@ -792,74 +793,83 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     LightingIterationCount = clamp(LightingIterationCount, 1, 16)
     
     // @note Compute lighting
-    rays: [8] v3
     for _ in 0..<LightingIterationCount {
-        for &destination in elements {
+        ray_count :: 8
+        
+        for &destination, destination_index in elements {
             to_camera := camera_p - destination.p
             to_camera = normalize_or_zero(to_camera)
             
-            accumulated: v3
-            series := seed_random_series(1234)
-            for &ray in rays {
-                ray = normalize_or_zero(destination.n + random_bilateral(&series, v3))
-            }
-            closest_hit: [len(rays)] f32 = +Infinity
+            accum_c: v3
             
-            for &source in elements {
-                light_c  := source.reflect_c * source.front_emission_c
+            series := seed_random_series(1234)
+            for ray_index in 0..<ray_count {
+                ray_d       := normalize_or_zero(destination.n + random_bilateral(&series, v3))
+                closest_hit := +Infinity
                 
-                to_light := source.p - destination.p 
-                light_distance := length(to_light)
-                if light_distance > 0 {
-                    to_light *= 1.0 / light_distance
-                    
-                    ref_n := destination.n
-                    diffuse_c  := cast(f32) 1
-                    specular_c := 1.0 - diffuse_c
-                    // specular_power := 1 + (15 * cast(f32) 1)
-                    distance_falloff := 1 / (1 + square(light_distance))
-                    
-                    cos_angle            := clamp_01(dot(to_light, ref_n)) 
-                    diffuse_contribution := distance_falloff * diffuse_c * cos_angle
-                    
-                    reflected             := -to_camera + 2 * dot(to_camera, ref_n) * ref_n
-                    cos_reflected_angle   := clamp_01(dot(to_light, reflected))
-                    // cos_reflected_angle   = power(cos_reflected_angle, specular_power)
-                    specular_contribution := specular_c * cos_reflected_angle
-                    
-                    diffuse_light  := diffuse_contribution  * light_c
-                    specular_light := specular_contribution * light_c
-                    
-                    total_light := diffuse_light + specular_light
-                    result      := total_light
-                    
-                    for ray, ray_index in rays {
-                        ray_source_n := dot(ray, source.n)
+                source_hit := len(elements)
+                for &source, source_index in elements {
+                    if source_index != destination_index {
+                        ray_source_n := dot(ray_d, source.n)
+                        
                         if ray_source_n < -0.001 {
                             point_on_plane_from_destination := source.p - destination.p
                             d     := -dot(source.n, point_on_plane_from_destination)
                             t_ray := -d / ray_source_n
                             
-                            if t_ray > 0 && closest_hit[ray_index] > t_ray {
-                                ray_point_on_plane := t_ray * ray
+                            if t_ray > 0 && closest_hit > t_ray {
+                                ray_point_on_plane := t_ray * ray_d
                                 distance_squared   := length_squared(ray_point_on_plane - point_on_plane_from_destination)
                                 
                                 cone_r := 0.25 * t_ray
                                 
                                 if distance_squared < square(source.r + cone_r) {
-                                    closest_hit[ray_index] = t_ray
-                                    accumulated += result
+                                    closest_hit = t_ray
+                                    source_hit = source_index
                                 }
                             }
                         }
                     }
                 }
+                
+                if source_hit != len(elements) {
+                    source := elements[source_hit]
+                        
+                    to_light := source.p - destination.p 
+                    light_distance := length(to_light)
+                    if light_distance > 0 {
+                        to_light *= 1.0 / light_distance
+                        
+                        light_c  := source.reflect_c * source.front_emission_c
+                        
+                        ref_n := destination.n
+                        diffuse_c  := cast(f32) 1
+                        specular_c := 1.0 - diffuse_c
+                        // specular_power := 1 + (15 * cast(f32) 1)
+                        distance_falloff := 1 / (1 + square(light_distance))
+                        
+                        cos_angle            := clamp_01(dot(to_light, ref_n)) 
+                        diffuse_contribution := distance_falloff * diffuse_c * cos_angle
+                        
+                        reflected             := -to_camera + 2 * dot(to_camera, ref_n) * ref_n
+                        cos_reflected_angle   := clamp_01(dot(to_light, reflected))
+                        // cos_reflected_angle   = power(cos_reflected_angle, specular_power)
+                        specular_contribution := specular_c * cos_reflected_angle
+                        
+                        diffuse_light  := diffuse_contribution  * light_c
+                        specular_light := specular_contribution * light_c
+                        
+                        total_light := diffuse_light + specular_light
+                        
+                        accum_c += total_light
+                    }
+                }
             }
             
-            destination.accumulated_c = destination.visibility * accumulated
+            destination.accumulated_c = destination.visibility * accum_c
         }
         
-        correction := 1 / cast(f32) (LightingIterationCount * len(rays))
+        correction := 1 / cast(f32) (LightingIterationCount * ray_count)
         
         for &destination in elements {
             destination.front_emission_c += correction * destination.accumulated_c
@@ -1057,11 +1067,11 @@ render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
                 
                 if false {
                     for index != 0 {
-                        pnext := textures.pnext[index]
-                        defer index = cast(u16) pnext.next
+                        t := textures.t[index]
+                        defer index = cast(u16) t.next
                         
-                        p := pnext.p
-                        c := rgba_to_v4(textures.c[index])
+                        p := t.p
+                        c := rgba_to_v4(t.c)
                         
                         push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
                     }
@@ -1070,15 +1080,15 @@ render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
                         c: v4
                         count: f32
                         for index != 0 {
-                                pnext := textures.pnext[index]
-                                defer index = cast(u16) pnext.next
-                                
-                                c += rgba_to_v4(textures.c[index])
-                                count += 1
+                            t := textures.t[index]
+                            defer index = cast(u16) t.next
+                            
+                            c += rgba_to_v4(t.c)
+                            count += 1
                         }
                         
                         c *= 1 / count
-                        p := textures.min_corner + textures.voxel_dimension * (cast(v3) uv3{x, y, z} + 0.5)
+                        p := textures.voxel_min_corner + textures.voxel_dimension * (cast(v3) uv3{x, y, z} + 0.5)
                         
                         push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
                     }
@@ -1149,16 +1159,17 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         
         pack_index += 1
         
-        pnext := &textures.pnext[pack_index]
-        pnext.p    = element.p
-        pnext.next = cast(u32) lookup_at^
+        t := &textures.t[pack_index]
+        t.p = element.p
+        t.c = c
+        // t.d = xxx
+        t.next = cast(u32) lookup_at^
         lookup_at^ = cast(u16) pack_index
-        textures.c[pack_index] = c
     }
     
-    textures.min_corner          = bounds.min
-    textures.voxel_dimension     = dimension / cast(v3) lookup_dimensions
-    textures.inv_voxel_dimension = inv_voxel_dimension
+    textures.voxel_min_corner        = bounds.min
+    textures.voxel_dimension         = dimension / cast(v3) lookup_dimensions
+    textures.inverse_voxel_dimension = inv_voxel_dimension
     
-    push_lighting(group, textures, textures.min_corner, textures.inv_voxel_dimension)
+    push_lighting(group, textures, textures.voxel_min_corner, textures.inverse_voxel_dimension)
 }

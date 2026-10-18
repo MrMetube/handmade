@@ -1,8 +1,18 @@
+// @volatile see vulkan.odin
+static const u32 max_textures = 256;
+static const u32 max_depth_peels     = 4;
+
+static const u32 depth_peel_and_resolve_target_stride = DepthPeelKind.__count;
+static const u32 depth_peel_and_resolve_target_count  = 4 * depth_peel_and_resolve_target_stride;
+static const u32 light_buffer_stride = LightBufferKind.__count;
+static const u32 light_buffer_count  = 10 * light_buffer_stride;
+
 #include "generated.slang"
 
 static const f32 max_light_intensity = 10.0;
 
 #define square(value) (value*value)
+#define square_root(value) (sqrt(value))
 #define clamp01(value) (clamp(value, 0, 1))
 #define length_squared(value) (dot(value, value))
 #define rgba_to_v4 unpackUnorm4x8ToFloat
@@ -69,7 +79,7 @@ v3 unpack_normal3(v2 n) {
 }  
 
 v3 extend_normal3(v2 n2) {
-    f32 nz     = sqrt(1 - square(n2.x) -square(n2.y));
+    f32 nz     = square_root(1 - square(n2.x) -square(n2.y));
     v3  result = v3(n2, nz);
     return result;
 }

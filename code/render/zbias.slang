@@ -96,43 +96,28 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
     if (root.lighting_lookup != nullptr) {
         v3 average_light = v3(0,0,0);
         
-        v3 voxel_p = root.voxel_inverse_cell_dimension * (input.world_p - root.voxel_min_corner);
-        iv3 voxel_index = iv3(floor(voxel_p));
+        v3 voxel_p = root.inverse_voxel_dimension * (input.world_p - root.voxel_min_corner) - v3(0.5, 0.5, 0.5);
+        v3 voxel_floor    = floor(voxel_p);
+        v3 voxel_fraction = voxel_p - voxel_floor;
+        iv3 voxel_index = iv3(voxel_floor);
         
-        v4 light_sum = 0/* sum_voxel_light(voxel_index) */;
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1,-1,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1,-1, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1,-1, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1, 0,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1, 0, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1, 0, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1, 1,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1, 1, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3(-1, 1, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0,-1,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0,-1, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0,-1, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0, 0,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0, 0, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0, 0, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0, 1,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0, 1, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 0, 1, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1,-1,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1,-1, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1,-1, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1, 0,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1, 0, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1, 0, 1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1, 1,-1));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1, 1, 0));
-        light_sum += sum_voxel_light(input, voxel_index + iv3( 1, 1, 1));
+        v3 l000 = sum_voxel_light(input, voxel_index);
+        v3 l001 = sum_voxel_light(input, voxel_index + iv3( 0, 0, 1));
+        v3 l010 = sum_voxel_light(input, voxel_index + iv3( 0, 1, 0));
+        v3 l011 = sum_voxel_light(input, voxel_index + iv3( 0, 1, 1));
+        v3 l100 = sum_voxel_light(input, voxel_index + iv3( 1, 0, 0));
+        v3 l101 = sum_voxel_light(input, voxel_index + iv3( 1, 0, 1));
+        v3 l110 = sum_voxel_light(input, voxel_index + iv3( 1, 1, 0));
+        v3 l111 = sum_voxel_light(input, voxel_index + iv3( 1, 1, 1));
+        v3  l00 = lerp(l000, l001, voxel_fraction.z);
+        v3  l01 = lerp(l010, l011, voxel_fraction.z);
+        v3  l10 = lerp(l100, l101, voxel_fraction.z);
+        v3  l11 = lerp(l110, l111, voxel_fraction.z);
+        v3   l0 = lerp(l00,  l01,  voxel_fraction.y);
+        v3   l1 = lerp(l10,  l11,  voxel_fraction.y);
+        v3    l = lerp(l0,   l1,   voxel_fraction.x);
         
-        if (light_sum.a != 0) {
-            surface_reflect.rgb *= light_sum.rgb / light_sum.a;
-        } else {
-            surface_reflect.rgb = 0;
-        }
+        surface_reflect.rgb *= l;
     }
     
     FragmentOutput output;
@@ -141,29 +126,34 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
     return output;
 }
 
-v4 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
-    i32 vi = voxel_index.x + voxel_index.y * 32 + voxel_index.z * 32 * 32;
-    if (vi < 0 || vi > 32 * 32 * 32) return v4(0,0,0, 0);
+v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
+    i32 vi = voxel_index.x + voxel_index.y * 8 + voxel_index.z * 8 * 8;
+    if (vi < 0 || vi > 8 * 8 * 16) return 0;
     
     u16 light_index = root.lighting_lookup[vi];
-    if (light_index == 0) return v4(0,0,0, 0);
+    if (light_index == 0) return 0;
     
     v4 result = 0;
     
     while (light_index != 0) {
-        LightingTexel texel = root.lighting_pnext[light_index];
-        v4 light_c = rgba_to_v4(root.lighting_c[light_index]);
+        LightingTexel *light = &root.lighting_t[light_index];
+        v4 light_c = rgba_to_v4(light.c);
         
-        v3 light_p  = texel.p;
-        light_index = u16(texel.next);
+        v3 light_p  = light.p;
+        v3 light_d  = light.d.xyz;
+        light_index = u16(light.next);
         
         v3 delta = light_p - input.world_p;
-        f32 distance_squared = length_squared(delta);
-        f32 contribution = clamp01(1.0 - distance_squared);
+        f32 contribution = clamp01(1 - 0.5 * length(delta));
+        // contribution *= clamp01(dot(light_d, input.world_n));
         
         result.rgb += contribution * light_c.rgb;
         result.a   += contribution;
     }
     
-    return result;
+    if (result.a > 1) {
+        result.rgb *= 1 / result.a;
+    }
+    
+    return result.rgb;
 }

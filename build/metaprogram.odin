@@ -525,13 +525,11 @@ generate_shader_structs :: proc (mp: ^Metaprogram, output_path: string) -> bool 
         typedef int3     iv3;
         typedef int4     iv4;
         typedef float4x4 m4;
-
-        // @volatile see vulkan.odin
-        static const u32 max_vulkan_textures = 256;
-        static const u32 depth_peel_and_resolve_target_stride = DepthPeelKind.__count;
-        static const u32 depth_peel_and_resolve_target_count  = 4 * depth_peel_and_resolve_target_stride;
-        static const u32 light_buffer_stride = LightBufferKind.__count;
-        static const u32 light_buffer_count  = 10 * light_buffer_stride;
+        
+        typedef u32      Color;
+        typedef u32      PackedNormal;
+        typedef u32      PackedUV;
+        
         ////////////////////////////////////////////////
         ```
     
@@ -544,31 +542,45 @@ generate_shader_structs :: proc (mp: ^Metaprogram, output_path: string) -> bool 
             generated_fprintf(out, "struct %s {{", it.name)
             
             for field in it.stype.fields.list {
-                field_name := read_pos(mp, field.names[0].pos, field.names[0].end)
-                field_type := read_pos(mp, field.type.pos, field.type.end)
-                
-                type: any = field_type
+                field_name := field.names[0].derived_expr.(^ast.Ident).name
                 
                 fmt.fprintf(out, "    ")
+                
                 if field.tag.text != "" {
                     tag_content := field.tag.text[1:len(field.tag.text)-1]
                     tag_format   := reflect.struct_tag_get(auto_cast tag_content, "shader")
                     fmt.fprintf(out, tag_format, field_name)
+                } else if multi, mok := field.type.derived_expr.(^ast.Multi_Pointer_Type); mok {
+                    type_name := multi.elem.derived_expr.(^ast.Ident).name
+                    fmt.fprintf(out, "%v *%v", type_name, field_name)
+                } else if array, aok := field.type.derived_expr.(^ast.Array_Type); aok {
+                    element_type := array.elem.derived_expr.(^ast.Ident).name
+                    if basic_len, lok := array.len.derived_expr.(^ast.Basic_Lit); lok {
+                        array_length := basic_len.tok.text
+                        fmt.fprintf(out, "%v %v[%v]", element_type, field_name, array_length)
+                    } else if ident_len, ilok := array.len.derived_expr.(^ast.Ident); ilok {
+                        fmt.fprintf(out, "%v %v[%v]", element_type, field_name, ident_len.name)
+                    } else {
+                        fmt.println(array.len.derived_expr)
+                        unimplemented()
+                    }
+                } else if ident, iok := field.type.derived_expr.(^ast.Ident); iok {
+                    fmt.fprintf(out, "%v %v", ident.name, field_name)
                 } else {
-                    fmt.fprintf(out, "%v %v", type, field_name)
+                    fmt.fprintf(out, "%v %v", "'unimplemented type' ", field_name)
                 }
                 fmt.fprintf(out, ";\n")
             }
         
         case .Enum:
-            base := it.etype.base_type
-            generated_fprintf(out, "enum %s : %s {{", it.name, read_pos(mp, base.pos, base.end))
+            base_name := it.etype.base_type.derived_expr.(^ast.Ident).name
+            generated_fprintf(out, "enum %s : %s {{", it.name, base_name)
             
             for field in it.etype.fields {
                 name:  string
                 value: string
                 if fv, vok := field.derived.(^ast.Field_Value); vok {
-                    name = read_pos(mp, fv.field.pos, fv.field.end)
+                    name  = read_pos(mp, fv.field.pos, fv.field.end)
                     value = read_pos(mp, fv.value.pos, fv.value.end)
                 } else if ident, iok := field.derived.(^ast.Ident); iok {
                     name = read_pos(mp, ident.pos, ident.end)

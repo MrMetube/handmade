@@ -56,7 +56,7 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
         v3 light_n = extend_normal3(light_np.xy);
         
         light_c = clamp01(light_c / max_light_intensity);
-        light_c = sqrt(sqrt(light_c));
+        light_c = square_root(square_root(light_c));
         
         v3 to_camera = v3(0, 0, 1); // @todo actually compute this!
         

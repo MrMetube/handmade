@@ -18,9 +18,7 @@ ligting_heap_size        ::  1 * Megabyte // @todo We do know the exact amount o
 texture_upload_heap_size :: 64 * Megabyte
 texture_heap_size        ::  2 * Gigabyte
 frames_in_flight         :: 2
-max_depth_peels          :: 4
 
-max_vulkan_textures :: 256
 
 Debug_vulkan_depth_peel_index: i32 = -1 // -1 composites all layers
 
@@ -69,15 +67,14 @@ Vulkan :: struct {
     debug_light_buffer_texture: i32,
     
     
-    voxel_min_corner:             v3,
-    voxel_inverse_cell_dimension: v3,
+    voxel_min_corner:        v3,
+    inverse_voxel_dimension: v3,
     
     lighting_heap: gpu.GpuHeap,
     lighting_bump: gpu.BumpAllocator,
     
-    pnext_buffer:  gpu.GpuCpuRange(LightingTexel),
-    c_buffer:      gpu.GpuCpuRange(Color),
-    lookup_buffer: gpu.GpuCpuRange(u16),
+    lighting_t:      gpu.GpuCpuRange(LightingTexel),
+    lighting_lookup: gpu.GpuCpuRange(u16),
 }
 
 Frame :: struct {
@@ -102,6 +99,9 @@ FrameUploads :: struct {
 ////////////////////////////////////////////////
 
 // @volatile see shared.slang
+max_textures    :: 256
+max_depth_peels :: 4
+
 depth_peel_and_resolve_target_stride :: len(DepthPeelKind)
 depth_peel_and_resolve_target_count  :: max_depth_peels * depth_peel_and_resolve_target_stride
 
@@ -124,7 +124,7 @@ TextureDescriptor :: enum u32 {
     light_buffer_end = light_buffer_begin + light_buffer_count,
     
     first_dynamic_texture,
-    count = first_dynamic_texture + max_vulkan_textures,
+    count = first_dynamic_texture + max_textures,
     
     one = 1, // @note remove with :TextureHandleOffset:
 }
@@ -160,14 +160,13 @@ DepthPeelKind :: enum u32 {
 @(shader)
 RootZBias :: struct #all_or_none {
     projection: m4,
-    vertices:   [^] TexturedVertex `shader:"TexturedVertex *%v"`,
-    textures:   [^] u32            `shader:"u32 *%v"`,
+    vertices:   [^] TexturedVertex,
+    textures:   [^] u32,
     
-    lighting_pnext:  [^] LightingTexel `shader:"LightingTexel *%v"`,
-    lighting_c:      [^] Color         `shader:"u32 *%v"`,
-    lighting_lookup: [^] u16           `shader:"u16 *%v"`,
-    voxel_min_corner:             v3,
-    voxel_inverse_cell_dimension: v3,
+    lighting_t:              [^] LightingTexel,
+    lighting_lookup:         [^] u16,
+    voxel_min_corner:        v3,
+    inverse_voxel_dimension: v3,
     
     camera_p:         v3,
     fog_direction:    v3,
@@ -180,14 +179,15 @@ RootZBias :: struct #all_or_none {
     previous_depth:   TextureDescriptor,
     alpha_threshold:  f32,
     
+    _padding: [1] u32,
 }
 #assert(size_of(RootZBias) % 32 == 0)
 
 // @todo compress descriptors
 @(shader)
 RootPeelComposite :: struct #all_or_none {
-    peels:                 [max_depth_peels] TextureDescriptor `shader:"u32 %v [4]"`,
-    npls:                  [max_depth_peels] TextureDescriptor `shader:"u32 %v [4]"`,
+    peels:                 [max_depth_peels] TextureDescriptor,
+    npls:                  [max_depth_peels] TextureDescriptor,
     light_normal_xy_depth: TextureDescriptor,
     light_emission:        TextureDescriptor,
     peel_count:            u32,
@@ -689,10 +689,10 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             
         case .Textured_Quads:
             timed_block("textured quads")
-            entry := entry.textured_quads
-            if entry.quad_count == 0 { continue }
+            quads := entry.textured_quads
+            if quads.quad_count == 0 { continue }
             
-            setup := &entry.setup
+            setup := &quads.setup
             render_rect := rectangle_zero_min_dimension(render_commands.dimension)
             clip := get_intersection(setup.clip_rect, render_rect)
             if !has_area(clip) { continue }
@@ -706,7 +706,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             root.cpu^ = {
                 projection       = setup.projection,
                 vertices         = uploads.vertices.gpu,
-                textures         = &uploads.textures.gpu[entry.bitmap_offset],
+                textures         = &uploads.textures.gpu[quads.bitmap_offset],
                 camera_p         = setup.camera_p,
                 fog_direction    = setup.fog_direction,
                 fog_color        = setup.fog_color,
@@ -714,38 +714,37 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 fog_end          = setup.fog_end,
                 clip_alpha_begin = setup.clip_alpha_begin,
                 clip_alpha_end   = setup.clip_alpha_end,
-                vertex_base      = entry.bitmap_offset * 4,
+                vertex_base      = quads.bitmap_offset * 4,
                 previous_depth   = peel_index != 0 ? get_depth_peel_read_buffer(vulkan, peel_index-1)[.depth].descriptor : .nil_texture,
                 alpha_threshold  = peel_index != 0 && peel_index == depth_peel_count - 1 ? 0.9 : 0.02,
                 
-                voxel_min_corner             = vulkan.voxel_min_corner,
-                voxel_inverse_cell_dimension = vulkan.voxel_inverse_cell_dimension,
+                voxel_min_corner        = vulkan.voxel_min_corner,
+                inverse_voxel_dimension = vulkan.inverse_voxel_dimension,
                 
-                lighting_pnext  = vulkan.pnext_buffer.gpu,
-                lighting_c      = vulkan.c_buffer.gpu,
-                lighting_lookup = vulkan.lookup_buffer.gpu,
+                lighting_t      = vulkan.lighting_t.gpu,
+                lighting_lookup = vulkan.lighting_lookup.gpu,
+                
+                _padding = {}
             }
-            gpu.draw(commands, root.gpu, entry.quad_count * 6)
+            gpu.draw(commands, root.gpu, quads.quad_count * 6)
         
         case .Lighting:
             timed_block("lighting transfer")
-            entry := entry.lighting
+            lighting := entry.lighting
             
-            vulkan.voxel_min_corner             = entry.voxel_min_corner
-            vulkan.voxel_inverse_cell_dimension = entry.voxel_inverse_cell_dimension
+            vulkan.voxel_min_corner        = lighting.voxel_min_corner
+            vulkan.inverse_voxel_dimension = lighting.inverse_voxel_dimension
             
             // @note This is only called once per creation, not per frame.
             gpu.bump_reset(&vulkan.lighting_bump)
             
             lookup_count := lookup_dimensions.x * lookup_dimensions.y * lookup_dimensions.z
             
-            vulkan.pnext_buffer  = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingTexel, len(entry.pnext^))
-            vulkan.c_buffer      = gpu.bump_allocate(&vulkan.lighting_bump, [] Color,         len(entry.c^))
-            vulkan.lookup_buffer = gpu.bump_allocate(&vulkan.lighting_bump, [] u16, lookup_count)
+            vulkan.lighting_t      = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingTexel, len(lighting.t^))
+            vulkan.lighting_lookup = gpu.bump_allocate(&vulkan.lighting_bump, [] u16, lookup_count)
             
-            copy(vulkan.pnext_buffer.cpu,  entry.pnext^[:])
-            copy(vulkan.c_buffer.cpu,      entry.c^[:])
-            copy(vulkan.lookup_buffer.cpu, slice_from_parts(u16, entry.lookup, lookup_count))
+            copy(vulkan.lighting_t.cpu,      lighting.t^[:])
+            copy(vulkan.lighting_lookup.cpu, slice_from_parts(u16, lighting.lookup, lookup_count))
         }
         
         if advance {
