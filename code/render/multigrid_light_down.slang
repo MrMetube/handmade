@@ -1,11 +1,6 @@
 #include "shared.slang"
 
-struct Root {
-    u32 parent_index;
-    u32 our_index;
-};
-
-[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
+[[vk::binding(0, 0)]] ConstantBuffer<RootMultigridLightDown> root;
 
 struct VertexOutput {
     v4 position : SV_Position;

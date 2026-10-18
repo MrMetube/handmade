@@ -1,29 +1,6 @@
 #include "shared.slang"
 
-struct Root {
-    float4x4        projection;
-    TexturedVertex  *vertices;
-    u32             *textures;
-    v3              camera_p;
-    v3              fog_direction;
-    v3              fog_color;
-    f32             fog_begin;
-    f32             fog_end;
-    f32             clip_alpha_begin;
-    f32             clip_alpha_end;
-    u32             vertex_base;
-    u32             previous_depth;
-    f32             alpha_threshold;
-    
-    v3 voxel_min_corner;
-    v3 voxel_inverse_cell_dimension;
-    
-    LightingTexel *lighting_pnext;
-    uint          *lighting_c;
-    u16           *lighting_lookup;
-};
-
-[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
+[[vk::binding(0, 0)]] ConstantBuffer<RootZBias> root;
 
 struct VertexOutput {
     v4  fragment_p : SV_Position;

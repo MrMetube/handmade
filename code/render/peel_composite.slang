@@ -1,14 +1,6 @@
 #include "shared.slang"
 
-struct Root {
-    u32 peels[4];
-    u32 npls[4];
-    u32 light_normal_xy_depth;
-    u32 light_emission;
-    u32 peel_count;
-};
-
-[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
+[[vk::binding(0, 0)]] ConstantBuffer<RootPeelComposite> root;
 
 struct VertexOutput {
     v4 position : SV_Position;

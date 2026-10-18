@@ -1,11 +1,6 @@
 #include "shared.slang"
 
-struct Root {
-    u32 texture;
-    u32 sampler;
-};
-
-[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
+[[vk::binding(0, 0)]] ConstantBuffer<RootFinalStretch> root;
 
 struct VertexOutput {
     v4 position : SV_Position;

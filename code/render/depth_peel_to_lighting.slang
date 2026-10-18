@@ -1,10 +1,6 @@
 #include "shared.slang"
 
-struct Root {
-    u32 source_resolve_buffer;
-};
-
-[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
+[[vk::binding(0, 0)]] ConstantBuffer<RootDepthPeelToLighting> root;
 
 struct VertexOutput {
     v4 position : SV_Position;

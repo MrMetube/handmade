@@ -9,8 +9,6 @@ import gpu "./no_graphics_api"
 
 import "./shared"
 
-// :VulkanRenderer: The platform should own shader loading and expose the paths
-// through the game/platform API rather than this renderer-owned config.
 shader_pack_path := #config(shader_pack_path, "unset")
 
 ////////////////////////////////////////////////
@@ -159,16 +157,18 @@ DepthPeelKind :: enum u32 {
 
 ////////////////////////////////////////////////
 
-// :VulkanRenderer: Generate the Slang declarations from the Odin definitions.
-// Keep these in lockstep with the C-layout SPIR-V declarations in vulkan.slang.
-//
-// These Roots as well as TexturedVertex:
-//
-
+@(shader)
 RootZBias :: struct #all_or_none {
-    projection:       m4,
-    vertices:         [^] TexturedVertex,
-    textures:         [^] u32,
+    projection: m4,
+    vertices:   [^] TexturedVertex `shader:"TexturedVertex *%v"`,
+    textures:   [^] u32            `shader:"u32 *%v"`,
+    
+    lighting_pnext:  [^] LightingTexel `shader:"LightingTexel *%v"`,
+    lighting_c:      [^] Color         `shader:"u32 *%v"`,
+    lighting_lookup: [^] u16           `shader:"u16 *%v"`,
+    voxel_min_corner:             v3,
+    voxel_inverse_cell_dimension: v3,
+    
     camera_p:         v3,
     fog_direction:    v3,
     fog_color:        v3,
@@ -180,43 +180,43 @@ RootZBias :: struct #all_or_none {
     previous_depth:   TextureDescriptor,
     alpha_threshold:  f32,
     
-    voxel_min_corner:             v3,
-    voxel_inverse_cell_dimension: v3,
-    
-    lighting_pnext:  [^] LightingTexel,
-    lighting_c:      [^] Color,
-    lighting_lookup: [^] u16,
 }
 #assert(size_of(RootZBias) % 32 == 0)
 
 // @todo compress descriptors
+@(shader)
 RootPeelComposite :: struct #all_or_none {
-    peels:                 [max_depth_peels] TextureDescriptor,
-    npls:                  [max_depth_peels] TextureDescriptor,
+    peels:                 [max_depth_peels] TextureDescriptor `shader:"u32 %v [4]"`,
+    npls:                  [max_depth_peels] TextureDescriptor `shader:"u32 %v [4]"`,
     light_normal_xy_depth: TextureDescriptor,
     light_emission:        TextureDescriptor,
     peel_count:            u32,
 }
 
+@(shader)
 RootMultisampleResolve :: struct #all_or_none {
     peel_index:   u32,
     sample_count: u32,
 }
 
+@(shader)
 RootFinalStretch :: struct #all_or_none {
     texture: TextureDescriptor,
     sampler: Sampler,
 }
 
+@(shader)
 RootMultigridLightUp :: struct #all_or_none {
     source_index: u32,
 }
 
+@(shader)
 RootMultigridLightDown :: struct #all_or_none {
     parent_index: u32,
     our_index:    u32,
 }
 
+@(shader)
 RootDepthPeelToLighting :: struct #all_or_none {
     source_resolve_buffer: u32,
 }

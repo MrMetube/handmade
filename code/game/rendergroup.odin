@@ -149,9 +149,9 @@ Lighting :: struct {
 @(common, shader)
 TexturedVertex :: struct {
     p:     v4,
-    n:     PackedNormal `shader:"u32"`,
-    uv:    PackedUV     `shader:"u32"`,
-    color: Color        `shader:"u32"`,
+    n:     PackedNormal `shader:"u32 %v"`,
+    uv:    PackedUV     `shader:"u32 %v"`,
+    color: Color        `shader:"u32 %v"`,
     emission: f32,
 }
 

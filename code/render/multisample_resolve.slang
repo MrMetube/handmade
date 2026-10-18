@@ -1,11 +1,6 @@
 #include "shared.slang"
 
-struct Root {
-    u32 peel_index;
-    u32 sample_count;
-};
-
-[[vk::binding(0, 0)]] ConstantBuffer<Root> root;
+[[vk::binding(0, 0)]] ConstantBuffer<RootMultisampleResolve> root;
 
 struct VertexOutput {
     v4 position : SV_Position;

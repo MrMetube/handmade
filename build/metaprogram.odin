@@ -524,6 +524,7 @@ generate_shader_structs :: proc (mp: ^Metaprogram, output_path: string) -> bool 
         typedef int2     iv2;
         typedef int3     iv3;
         typedef int4     iv4;
+        typedef float4x4 m4;
 
         // @volatile see vulkan.odin
         static const u32 max_vulkan_textures = 256;
@@ -548,13 +549,15 @@ generate_shader_structs :: proc (mp: ^Metaprogram, output_path: string) -> bool 
                 
                 type: any = field_type
                 
+                fmt.fprintf(out, "    ")
                 if field.tag.text != "" {
                     tag_content := field.tag.text[1:len(field.tag.text)-1]
-                    tag_value   := reflect.struct_tag_get(auto_cast tag_content, "shader")
-                    type = tag_value
+                    tag_format   := reflect.struct_tag_get(auto_cast tag_content, "shader")
+                    fmt.fprintf(out, tag_format, field_name)
+                } else {
+                    fmt.fprintf(out, "%v %v", type, field_name)
                 }
-                
-                fmt.fprintf(out, "    %s %s;\n", type, field_name)
+                fmt.fprintf(out, ";\n")
             }
         
         case .Enum:
