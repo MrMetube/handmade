@@ -14,7 +14,6 @@ ShowRenderFrustum:        b32 = false
 TimestepPercentage:       f32 = 100
 
 ShowReflectors:           b32 = false
-ShowVisibility:           b32 = false
 LightingIterationCount:   i32 = 4
 
 ////////////////////////////////////////////////
@@ -162,7 +161,6 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         }
         
         { debug_data_block("Lighting")
-            debug_record_value(&ShowVisibility, "Show Visibility")
             debug_record_value(&ShowReflectors, "Show Reflectors")
             
             { // @todo just add a dragging handling to i32s already

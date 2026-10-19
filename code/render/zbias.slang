@@ -145,7 +145,7 @@ v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
         
         v3 delta = light_p - input.world_p;
         f32 contribution = clamp01(1 - 0.5 * length(delta));
-        // contribution *= clamp01(dot(light_d, input.world_n));
+        contribution *= clamp01(dot(light_d, input.world_n));
         
         result.rgb += contribution * light_c.rgb;
         result.a   += contribution;

@@ -169,14 +169,14 @@ clamp :: proc (value: $T, min, max: T) -> T {
 
     return result
 }
-clamp_01 :: proc (value: $T) -> T { return clamp(value, cast(T) 0, cast(T) 1) }
+clamp01 :: proc (value: $T) -> T { return clamp(value, cast(T) 0, cast(T) 1) }
 
 clamp_01_map_to_range :: proc (min: $T, t, max: T ) -> T {
     result: T = 0
     range := max - min
     if range != 0 {
         percent := (t-min) / range
-        result = clamp_01(percent)
+        result = clamp01(percent)
     }
     return result
 }
@@ -424,7 +424,7 @@ linear_to_srgb_exact4 :: proc (l: v4) -> (s: v4) {
 }
 linear_to_srgb_exact3 :: proc (l: v3) -> (s: v3) {
     l := l
-    l = clamp_01(l)
+    l = clamp01(l)
     #no_bounds_check  #unroll for i in 0..<len(l) {
         if l[i] <= 0.0031308 {
             s[i] = 12.92 * l[i]

@@ -252,24 +252,24 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         // @todo(viktor): We will probably need a creation-time system for guaranteeing no overlapping occupation.
         body.occupying = occupying
         
-        // append(&body.pieces, VisiblePiece{
-        //     asset     = .Shadow,
-        //     dimension = {0, hero_height*1},
-        //     color     = {1,1,1,0.5},
-        // }) 
-        // append(&body.pieces, VisiblePiece{
-        //     asset     = .Cape,
-        //     dimension = {0, hero_height*1.2},
-        //     color     = 1,
-        //     flags     = { .SquishAxis, .BobUpAndDown },
-        // })
-        // append(&body.pieces, VisiblePiece{
-        //     asset     = .Torso,
-        //     dimension = {0, hero_height*1.2},
-        //     offset    = {0, -0.1, 0},
-        //     color     = 1,
-        //     flags     = { .SquishAxis },
-        // })
+        append(&body.pieces, VisiblePiece{
+            asset     = .Shadow,
+            dimension = {0, hero_height*1},
+            color     = {1,1,1,0.5},
+        }) 
+        append(&body.pieces, VisiblePiece{
+            asset     = .Cape,
+            dimension = {0, hero_height*1.2},
+            color     = 1,
+            flags     = { .SquishAxis, .BobUpAndDown },
+        })
+        append(&body.pieces, VisiblePiece{
+            asset     = .Torso,
+            dimension = {0, hero_height*1.2},
+            offset    = {0, -0.1, 0},
+            color     = 1,
+            flags     = { .SquishAxis },
+        })
         
     end_entity(mode, body, p)
     
@@ -283,14 +283,14 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         
         hero_height :: 3
         // @todo(viktor): should render above the body
-        // append(&head.pieces, VisiblePiece{
-        //     asset     = .Head,
-        //     dimension = {0, hero_height*1.2},
-        //     offset    = {0, -0.7, 0},
-        //     color     = 1,
-        // })
-        // 
-        // init_hitpoints(head, 3)
+        append(&head.pieces, VisiblePiece{
+            asset     = .Head,
+            dimension = {0, hero_height*1.2},
+            offset    = {0, -0.7, 0},
+            color     = 1,
+        })
+        
+        init_hitpoints(head, 3)
         
         if mode.camera.following_id == 0 {
             mode.camera.following_id = head.id
@@ -311,12 +311,12 @@ add_hero :: proc (mode: ^World_Mode, region: ^SimRegion, occupying: TraversableR
         glove.angle_swipe_offset = 1
         glove.angle_current_offset = 0.3
         
-        // append(&head.pieces, VisiblePiece{
-        //     asset     = .Sword,
-        //     dimension = {0, 0.25*hero_height},
-        //     offset    = 0,
-        //     color     = 1,
-        // })
+        append(&head.pieces, VisiblePiece{
+            asset     = .Sword,
+            dimension = {0, 0.25*hero_height},
+            offset    = 0,
+            color     = 1,
+        })
         
     end_entity(mode, glove, p)
 }
@@ -343,8 +343,6 @@ add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Travers
         dimension = {0, height},
         color     = 1,
     })
-    
-    add_piece_light(entity, {0, 0, 0.1}, .1, {1, 1, 0}, .3)
     
     init_hitpoints(entity, 3)
 }

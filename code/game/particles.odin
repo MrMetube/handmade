@@ -68,7 +68,7 @@ update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderG
         if ShowGrid {
             for row, y in world.cells {
                 for cell, x in row {
-                    alpha := clamp_01(0.1 * cell.density)
+                    alpha := clamp01(0.1 * cell.density)
                     color := v4{1,1,1, alpha}
                     position := (vec_cast(f32, x, y, 0) + {0.5,0.5,0})*grid_scale + grid_origin
                     push_rectangle_outline(render_group, rectangle_center_dimension(position.xy, grid_scale), default_flat_transform(), color, 0.05)
@@ -109,7 +109,7 @@ update_and_render_fire :: proc (system: ^Particle_System, render_group: ^RenderG
         particle.dp    += particle_ddp * dt
         particle.color += particle.dcolor * dt
         // @todo(viktor): should we just clamp colors in the renderer?
-        color : lane_v4 = clamp_01(particle.color)
+        color : lane_v4 = clamp01(particle.color)
         // if color.a > 0.9 {
         //     color.a = 0.9 * clamp_01_map_to_range(cast(lane_f32) 1, color.a, 0.9)
         // }
