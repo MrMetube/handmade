@@ -724,11 +724,17 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 
 ////////////////////////////////////////////////
 
+light_element_limit :: 16 * 1024
+
+@(common)
+lookup_dimensions :: uv3 { 8, 8, 16 }
+
 LightingElement :: struct {
     // @note Static information.
     p: v3,
     n: v3,
-    r: f32,
+    width, height:  f32,
+    x_axis, y_axis: v3,
     reflect_c:    v3,
     transparency: f32,
     
@@ -740,33 +746,25 @@ LightingElement :: struct {
     // @note Gather
     incident_light:             v3,
     average_direction_to_light: v3,
-    
-    bitmap: ^Bitmap,
-    ps: [4] v4,
-    ts: [4] v2,
-    cs: [4] Color,
 }
 
 LightingSolution :: struct {
-    elements: [dynamic; 8192] LightingElement,
+    elements: [dynamic; light_element_limit] LightingElement,
     textures: LightingTextures,
 }
 
 LightingTextures :: struct {
-    t:      [8192] LightingTexel,                                                  /// t = 8192 * ((3 * 4 + 4) + 4 + (4*4))
+    t:      [light_element_limit] LightingTexel,                                   /// t = (16 * 1024) * ((3 * 4 + 4) + 4 + (4*4))
     lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16, /// l = 8 * 8 * 16 * 2
     // @volatile see zbias.slang
     
-    /// t
+    /// t / 1024
     /// l
     /// (t + l) / 1024
     voxel_min_corner:        v3,
     voxel_dimension:         v3,
     inverse_voxel_dimension: v3,
 }
-
-@(common)
-lookup_dimensions :: uv3 { 8, 8, 16 }
 
 @(common, shader)
 LightingTexel :: struct {
@@ -779,68 +777,75 @@ LightingTexel :: struct {
 lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
-    extract_reflectors_from_verts(group, solution)
+    extract_reflectors_from_quads(group, solution)
     compute_light_propagation(solution)
     gather_final_lighting(solution)
 }
 
-extract_reflectors_from_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
+extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     max_emission_value :: 10
     
     commands := group.commands
     quads    := group.current_quads
     
-    clear(&solution.elements)
+    elements := &solution.elements
+    clear(elements)
+    
+    x_sub_count :: 3
+    y_sub_count :: 3
+    assert(x_sub_count * y_sub_count * cast(int) quads.quad_count <= cap(solution.elements))
     
     bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset:][:quads.quad_count]
     vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
     
     for bitmap, quad_index in bitmaps {
         // :QuadWinding:
-        vs := [4] TexturedVertex {
-            vertices[quad_index*4 + 0],
-            vertices[quad_index*4 + 1],
-            vertices[quad_index*4 + 3],
-            vertices[quad_index*4 + 2],
-        }
+        ve0 := &vertices[quad_index*4 + 0]
+        ve1 := &vertices[quad_index*4 + 1]
+        ve2 := &vertices[quad_index*4 + 3]
+        ve3 := &vertices[quad_index*4 + 2]
         
-        ps := [4] v3 {
-            vs[0].p.xyz + {0, 0, vs[0].p.w},
-            vs[1].p.xyz + {0, 0, vs[1].p.w},
-            vs[2].p.xyz + {0, 0, vs[2].p.w},
-            vs[3].p.xyz + {0, 0, vs[3].p.w},
-        }
+        ve0p := ve0.p.xyz + {0, 0, ve0.p.w}
+        ve1p := ve1.p.xyz + {0, 0, ve1.p.w}
+        ve2p := ve2.p.xyz + {0, 0, ve2.p.w}
+        ve3p := ve3.p.xyz + {0, 0, ve3.p.w}
         
-        span01 := ps[1] - ps[0]
-        span03 := ps[3] - ps[0]
+        span01 := ve1p - ve0p
+        span03 := ve3p - ve0p
         
-        r := 0.3 * min(length(span03), length(span01))
+        x_axis := span01
+        y_axis := span03
         
-        for vertex_index in 0..<4 {
-            element := append_into(&solution.elements)
-            element^ = {}
-            
-            v := vs[vertex_index]
-            
-            switch vertex_index {
-            case 0: element.p = ps[0] + 0.25 * span01 + 0.25 * span03
-            case 1: element.p = ps[1] - 0.25 * span01 + 0.25 * span03
-            case 2: element.p = ps[2] - 0.25 * span01 - 0.25 * span03
-            case 3: element.p = ps[3] + 0.25 * span01 - 0.25 * span03
+        width  := length(x_axis)
+        height := length(y_axis)
+        
+        x_axis = safe_ratio_0(x_axis, width)
+        y_axis = safe_ratio_0(y_axis, height) 
+        
+        sub_width  := width  / x_sub_count
+        sub_height := height / y_sub_count
+        
+        for y_sub in 0..<y_sub_count {
+            for x_sub in 0..<x_sub_count {
+                element := append_into(elements)
+                element^ = {}
+                
+                element.p = ve0p + 
+                    (cast(f32) x_sub + 0.5) * sub_width  * x_axis + 
+                    (cast(f32) y_sub + 0.5) * sub_height * y_axis
+                
+                element.width  = sub_width
+                element.height = sub_height
+                element.x_axis = x_axis
+                element.y_axis = y_axis
+                
+                element.n = unpack_normal(ve0.n)
+                
+                color := rgba_to_v4(ve0.color)
+                element.reflect_c      = 0.95 * color.rgb
+                element.transparency   = color.a
+                element.emission_color = max_emission_value * ve0.emission
             }
-            
-            element.r = r
-            
-            element.n  = unpack_normal(v.n)
-            color     := rgba_to_v4(v.color)
-            element.reflect_c      = 0.95 * color.rgb
-            element.transparency   = color.a
-            element.emission_color = max_emission_value * v.emission
-            
-            element.bitmap = bitmap
-            element.ps = { vs[0].p, vs[1].p, vs[2].p, vs[3].p }
-            element.ts = { unpack_uv(vs[0].uv), unpack_uv(vs[1].uv), unpack_uv(vs[2].uv), unpack_uv(vs[3].uv) }
-            element.cs = { vs[0].color, vs[1].color, vs[2].color, vs[3].color }
         }
     }
 }
@@ -908,29 +913,30 @@ gather_final_lighting :: proc (solution: ^LightingSolution) {
     }
 }
 
-cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_d: v3) -> (v3, int) {
+cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
     result: v3
     result_index := len(solution.elements)
     
     closest_hit := +Infinity
     for &source, source_index in solution.elements {
         if source_index != skip_index {
-            ray_source_n := dot(ray_d, source.n)
+            ray_source_n := dot(ray_direction, source.n)
             
             if ray_source_n < -0.001 {
-                point_on_plane := source.p - ray_origin
+                origin_from_plane := ray_origin - source.p
                 
-                d     := -dot(source.n, point_on_plane)
-                t_ray := -d / ray_source_n
+                d := dot(source.n, origin_from_plane)
+                t := -d / ray_source_n
                 
-                if t_ray > 0 && closest_hit > t_ray {
-                    ray_point_on_plane := t_ray * ray_d
-                    distance_squared   := length_squared(ray_point_on_plane - point_on_plane)
+                if t > 0 && closest_hit > t {
+                    ray_point_from_plane := origin_from_plane + t * ray_direction
                     
-                    cone_r := 0.25 * t_ray
+                    x_check := 2 * dot(ray_point_from_plane, source.x_axis)
+                    y_check := 2 * dot(ray_point_from_plane, source.y_axis)
                     
-                    if distance_squared < square(source.r + cone_r) {
-                        closest_hit = t_ray
+                    if x_check >= -source.width  && x_check <= source.width &&
+                       y_check >= -source.height && y_check <= source.height {
+                        closest_hit = t
                         result = source.emission_color
                         result_index = source_index
                     }
@@ -945,15 +951,11 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_
 ////////////////////////////////////////////////
 
 render_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
-    if textures != nil {
+    if false && textures != nil {
         render_texture_debug(group, solution, textures)
         // output_lighting_textures(group, solution, textures)
     } else {
-        if ShowReflectors {
-            render_lighting_quads(group, solution)
-        } else {
-            render_lighting_verts(group, solution)
-        }
+        render_lighting_quads(group, solution)
     }
 }
 
@@ -961,52 +963,22 @@ render_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution)
     timed_function()
     
     for element in solution.elements {
-        ps := element.ps
-        cs := element.cs
-        bitmap := element.bitmap
+        ex := (0.5 * element.width  - 0.03) * element.x_axis
+        ey := (0.5 * element.height - 0.03) * element.y_axis
+        
+        // :QuadWinding:
+        ps: [4] v4
+        ps[0].xyz = element.p - ex - ey
+        ps[1].xyz = element.p + ex - ey
+        ps[2].xyz = element.p + ex + ey
+        ps[3].xyz = element.p - ex + ey
         
         emission := clamp01(element.emission_color)
+        c := v4_to_rgba(V4(emission, element.transparency))
         
-        if ShowReflectors {
-            bitmap = &group.commands.white_bitmap
-            
-            min: u32
-            abs_n := abs_per_lane(element.n)
-            if abs_n.x < abs_n.y {
-                min = abs_n.x < abs_n.z ? 0 : 2
-            } else {
-                min = abs_n.y < abs_n.z ? 1 : 2
-            }
-            
-            axis: v3
-            axis[min] = 1
-            
-            ex := cross(axis, element.n)
-            ey := -cross(ex, element.n)
-            
-            ex = normalize_or_zero(ex) * element.r
-            ey = normalize_or_zero(ey) * element.r
-            
-            // :QuadWinding:
-            ps[0].xyz = element.p + ex
-            ps[1].xyz = element.p + ey
-            ps[2].xyz = element.p - ex
-            ps[3].xyz = element.p - ey
-            ps[0].w = 0
-            ps[1].w = 0
-            ps[2].w = 0
-            ps[3].w = 0
-            
-            c := v4_to_rgba(V4(emission, element.transparency))
-            cs = c
-        } else {
-            cs[0] = v4_to_rgba(V4(emission * rgba_to_v4(cs[0]).rgb, rgba_to_v4(cs[0]).a))
-            cs[1] = v4_to_rgba(V4(emission * rgba_to_v4(cs[1]).rgb, rgba_to_v4(cs[1]).a))
-            cs[2] = v4_to_rgba(V4(emission * rgba_to_v4(cs[2]).rgb, rgba_to_v4(cs[2]).a))
-            cs[3] = v4_to_rgba(V4(emission * rgba_to_v4(cs[3]).rgb, rgba_to_v4(cs[3]).a))
-        }
+        bitmap := &group.commands.white_bitmap
         
-        push_quad(group, bitmap, **ps, **element.ts,**cs)
+        push_quad(group, bitmap, **ps, 0,0,0,0, c,c,c,c)
     }
 }
 
@@ -1048,39 +1020,6 @@ render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
                 }
             }
         }
-    }
-}
-
-render_lighting_verts :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
-    timed_function()
-    
-    elements := &solution.elements
-    
-    for element_index: int; element_index < len(elements); element_index += 4 {
-        es := [4] LightingElement {
-            elements[element_index+0],
-            elements[element_index+1],
-            elements[element_index+2],
-            elements[element_index+3],
-        }
-        
-        ps := es[0].ps
-        cs := es[0].cs
-        bitmap := es[0].bitmap
-        
-        emissions := [4] v3 {
-            clamp01(es[0].emission_color),
-            clamp01(es[1].emission_color),
-            clamp01(es[2].emission_color),
-            clamp01(es[3].emission_color),
-        }
-        
-        cs[0] = v4_to_rgba(V4(emissions[0] * rgba_to_v4(cs[0]).rgb, rgba_to_v4(cs[0]).a))
-        cs[1] = v4_to_rgba(V4(emissions[1] * rgba_to_v4(cs[1]).rgb, rgba_to_v4(cs[1]).a))
-        cs[2] = v4_to_rgba(V4(emissions[2] * rgba_to_v4(cs[2]).rgb, rgba_to_v4(cs[2]).a))
-        cs[3] = v4_to_rgba(V4(emissions[3] * rgba_to_v4(cs[3]).rgb, rgba_to_v4(cs[3]).a))
-        
-        push_quad(group, bitmap, **ps, **es[0].ts, **cs)
     }
 }
 

@@ -266,6 +266,7 @@ main :: proc () {
     load_game_lib(&game_dll)
     
     game.debug_set_event_recording(GlobalDebugTable, game_dll.is_valid)
+    render_state.game = auto_cast game
     
     // @todo make this like sixty seconds?
     // @todo remove MaxPossibleOverlap
@@ -653,7 +654,7 @@ main :: proc () {
                 game_memory.reloaded_executable = true
                 game.debug_set_event_recording(GlobalDebugTable, game_dll.is_valid)
                 
-                render_state.game = cast(type_of(render_state.game)) game
+                render_state.game = auto_cast game
             }
             
             if needs_to_be_reloaded(render_dll) {
@@ -711,49 +712,6 @@ main :: proc () {
         ////////////////////////////////////////////////
         { timed_block("render")
             render.render(&render_commands, draw_region, window_dim)
-        }
-        ////////////////////////////////////////////////
-        { timed_block("sleep at frame end")
-            
-            seconds_elapsed_for_frame := get_seconds_elapsed_until_now(last_counter)
-            for seconds_elapsed_for_frame < target_seconds_per_frame {
-                seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
-            }
-            
-            if seconds_elapsed_for_frame < target_seconds_per_frame {
-                // @note Sleep
-                if sleep_is_granular {
-                    sleep_ms := (target_seconds_per_frame-0.001 - seconds_elapsed_for_frame) * 1000
-                    if sleep_ms > 0 { 
-                        win.Sleep(cast(u32) sleep_ms)
-                    }
-                }
-                
-                test_seconds_elapsed := get_seconds_elapsed_until_now(last_counter)
-                if test_seconds_elapsed > target_seconds_per_frame {
-                    if test_seconds_elapsed - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                        print("Missed sleep - actual % target % over %\n", 
-                            view_seconds(seconds_elapsed_for_frame, precision = 3),
-                            view_seconds(target_seconds_per_frame, precision = 3),
-                            view_seconds(test_seconds_elapsed - desired_scheduler_ms, precision = 3),
-                        )
-                    }
-                }
-                
-                // @note Busy Waiting
-                for seconds_elapsed_for_frame < target_seconds_per_frame {
-                    seconds_elapsed_for_frame = get_seconds_elapsed_until_now(last_counter)
-                }
-            } else {
-                // @logging Missed frame, maybe because window was moved
-                if seconds_elapsed_for_frame - (desired_scheduler_ms * 0.001) > target_seconds_per_frame {
-                    print("Missed frame - actual % target % over %\n",
-                        view_seconds(seconds_elapsed_for_frame, precision = 3),
-                        view_seconds(target_seconds_per_frame, precision = 3),
-                        view_seconds(seconds_elapsed_for_frame - target_seconds_per_frame, precision = 3),
-                    )
-                }
-            }
         }
         ////////////////////////////////////////////////
         
@@ -1004,10 +962,6 @@ get_wall_clock :: proc () -> i64 {
 
 get_seconds_elapsed :: proc (start, end: i64) -> f32 {
     return cast(f32) (cast(f64) (end - start) / GlobalPlatformState.performance_counter_frequency)
-}
-get_seconds_elapsed_until_now :: proc (start: i64) -> f32 {
-    end := get_wall_clock()
-    return get_seconds_elapsed(start, end)
 }
 
 ////////////////////////////////////////////////   
