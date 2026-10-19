@@ -27,16 +27,11 @@ internal :: true
 /*
 Should the build script itself have flags or should it all be in the file?
 
-- Metaprogram Plugins
-  - print checker
-  - code gen
-  - (build HHAs)
-
 - Debug build with no optimizations then run
   - debug symbols and start debugger
 
 - GPU Debug
-  - build and start through renderdoc
+  - build and start through renderdoc/nsight
   
 - Optimized build then run 
   - o:speed, target, microarch
@@ -94,8 +89,7 @@ main :: proc () {
         
         if !generate_platform_api(&metaprogram, "code/game/generated-platform_api.odin", game_package, { .commons, .global, .opaques }) { exit(1) }
         
-        delete_all_like("build", `game-\d+\.rdi`)
-        delete_all_like("build", `game-\d+\.pdb`)
+        delete_all_like("build", `game-\d+\.rdi`, `game-\d+\.pdb`)
         
         create_build_lock("build/game.lock")
         
@@ -118,12 +112,11 @@ main :: proc () {
     if begin_build(cmd, render_dir, "render.dll") { // render
         if !check_printlikes(&metaprogram, render_package) { exit(1) }
         
-        if !generate_platform_api(&metaprogram, "code/render/generated-platform_api.odin", render_package, { .opaques })              { exit(1) }
-        if !generate_commons(&metaprogram,      "code/render/generated-commons-game.odin", render_package, game_package,   "../game") { exit(1) }
-        if !generate_game_and_render_api(&metaprogram, "code/render/generated-api.odin", game_package, "", render_package)            { exit(1) }
+        if !generate_platform_api(&metaprogram, "code/render/generated-platform_api.odin", render_package, { .opaques })    { exit(1) }
+        if !generate_commons(&metaprogram, "code/render/generated-commons.odin", render_package, {game_package, "../game"}) { exit(1) }
+        if !generate_api(&metaprogram, "code/render/generated-api.odin", game_package, "", render_package)                  { exit(1) }
         
-        delete_all_like("build", `render-\d+\.rdi`)
-        delete_all_like("build", `render-\d+\.pdb`)
+        delete_all_like("build", `render-\d+\.rdi`, `render-\d+\.pdb`)
         
         create_build_lock("build/render.lock")
         append(cmd, "-build-mode:dll")
@@ -141,6 +134,8 @@ main :: proc () {
     }
     
     procs_flush(procs)
+    delete_if_exists("build/game.lib")
+    delete_if_exists("build/render.lib")
     
     { // platform
         target :: "debug.exe"
@@ -149,11 +144,9 @@ main :: proc () {
         if begin_build(cmd, "code", target, .Skip) {
             if !check_printlikes(&metaprogram, main_package) { exit(1) }
             
-            // @todo(viktor): these could be run in parallel with each other and the build of the game
-            if !generate_game_and_render_api(&metaprogram, "code/generated-api.odin", game_package, render_package, main_package) { exit(1) }
-            if !generate_commons(&metaprogram, "code/generated-commons-game.odin",   main_package, game_package,   "game")        { exit(1) }
-            if !generate_commons(&metaprogram, "code/generated-commons-render.odin", main_package, render_package, "render")      { exit(1) }
-            if !generate_platform_api_bindings(&metaprogram, "code/generated-platform_api.odin", main_package)                    { exit(1) }
+            if !generate_api(&metaprogram,    "code/generated-api.odin", game_package, render_package, main_package)                            { exit(1) }
+            if !generate_commons(&metaprogram, "code/generated-commons.odin", main_package, {game_package, "game"}, {render_package, "render"}) { exit(1) }
+            if !generate_platform_bindings(&metaprogram, "code/generated-platform_api.odin", main_package)                                      { exit(1) }
             
             build_meander()
             build_optimizations(optimize)
@@ -173,7 +166,7 @@ main :: proc () {
                 append(cmd, fmt.tprintf("build/%v", target))
                 run_command(cmd, working_dir = "data", detached = true)
             } else if debug(target) {
-                prepare_debugger()
+                raddbg_begin()
                 raddbg_ipc("select_target", target)
                 raddbg_ipc("restart")
             }

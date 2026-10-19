@@ -64,8 +64,8 @@ begin_build :: proc (cmd: ^Cmd, package_directory: string, output_name: string, 
     return result
 }
 
-build_meander :: proc (debug := "-debug", Cast := "-vet-cast", shadowing := "-vet-shadowing", linker := "-linker:radlink") {
-    append(cmd, debug, Cast, shadowing, linker)
+build_meander :: proc (debug := "-debug", Cast := "-vet-cast", shadowing := "-vet-shadowing") {
+    append(cmd, debug, Cast, shadowing)
 }
 
 build_optimizations :: proc (optimize: bool, optimized := "-o:speed", unoptimized := "-o:none") {
@@ -127,7 +127,7 @@ argument_requests :: proc (action, target: string) -> bool {
     return false
 }
 
-prepare_debugger :: proc () {
+raddbg_begin :: proc () {
     if ok, _ := is_running(raddbg); ok {
         fmt.printf("Debugger is running, stopping it.\n")
         raddbg_ipc("kill_all")
@@ -314,26 +314,34 @@ make_file_if_not_exists :: proc (path: string, content: string) -> bool {
     return result
 }
 
-remove_if_exists :: proc (path: string) {
+delete_if_exists :: proc (path: string) {
     if os.exists(path) do os.remove(path)
 }
 
-delete_all_like :: proc (path, pattern: string) {
-    files := all_like(path, pattern, context.temp_allocator)
+delete_all_like :: proc (path: string, patterns: ..string) {
+    files := all_like(path, ..patterns, allocator = context.temp_allocator)
     for file in files {
         os.remove(file)
     }
 }
 
-all_like :: proc (path, pattern: string, allocator := context.temp_allocator) -> [] string {
+all_like :: proc (path: string, patterns: ..string, allocator := context.temp_allocator) -> [] string {
     dir, _ := os.read_all_directory_by_path(path, allocator)
-    reg, _ := regex.create(pattern, permanent_allocator = context.temp_allocator, temporary_allocator = context.temp_allocator)
+    
+    regex_allocator := context.temp_allocator
+    
+    regs := make([]regex.Regular_Expression, len(patterns), regex_allocator)
+    for &reg, index in regs {
+        reg, _ = regex.create(patterns[index], permanent_allocator = regex_allocator, temporary_allocator = regex_allocator)
+    }
     
     result := make([dynamic] string, allocator)
     for file in dir {
-        _, ok := regex.match(reg, file.name, permanent_allocator = context.temp_allocator, temporary_allocator = context.temp_allocator)
-        if ok {
-            append(&result, file.fullpath)
+        for reg in regs {
+            _, ok := regex.match(reg, file.name, permanent_allocator = regex_allocator, temporary_allocator = regex_allocator)
+            if ok {
+                append(&result, file.fullpath)
+            }
         }
     }
     

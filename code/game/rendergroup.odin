@@ -372,7 +372,6 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     )
 }
 
-@(common)
 pack :: proc { pack_normal, pack_uv }
 pack_normal :: proc (normal: v3) -> PackedNormal {
     result := PackedNormal {
@@ -389,7 +388,7 @@ pack_uv :: proc (uv: v2) -> PackedUV {
     }
     return result
 }
-@(common)
+
 unpack :: proc { unpack_normal, unpack_uv }
 unpack_normal :: proc (normal: PackedNormal) -> v3 {
     result := v3 {

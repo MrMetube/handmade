@@ -348,7 +348,7 @@ GeneratedHeader :: ```
         
         ```
 open_generated_file_and_write_header :: proc (path: string, package_name: string, loc := #caller_location) -> (^os.File, bool) {
-    remove_if_exists(path)
+    delete_if_exists(path)
     file, err2 := os.open(path, {.Create})
     if err2 != nil do return file, false
     
@@ -365,7 +365,7 @@ open_generated_file_and_write_header :: proc (path: string, package_name: string
 ////////////////////////////////////////////////
 
 // @todo just like api, allow for concatting multiple into one file instead
-generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string, source_package, source_path_from_output_path: string) -> bool {
+generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string, sources: ..struct{package_name, path_from_output_path: string}) -> bool {
     out, ok := open_generated_file_and_write_header(output_path, output_package)
     if !ok {
         fmt.println("ERROR: Could not extract declarations marked with @common into %v", output_package)
@@ -373,32 +373,36 @@ generate_commons :: proc (mp: ^Metaprogram, output_path, output_package: string,
     }
     defer os.close(out)
     
-    fmt.fprintf(out, `import "%v" %v`, source_path_from_output_path, "\n")
-    
-    commons, cok := mp.commons[source_package]
-    assert(cok)
-    
-    for file in commons {
-        fmt.fprint(out, "\n////////////////////////////////////////////////\n")
-        generated_fprintf(out, "// All commons exported from %s", file.file_name)
-        fmt.fprint(out, "\n")
-        
-        width: int
-        for info in file.infos {
-            width = max(width, len(info.name))
-        }
-        
-        for info in file.infos {
-            fmt.fprintf(out, "/* @generated */ %-*v :: %v.%v\n", width, info.name, source_package, info.name,)
-        }
+    for source in sources {
+        fmt.fprintf(out, `import "%v" %v`, source.path_from_output_path, "\n")
     }
     
-    fmt.printfln("INFO: generated %v commons for %v", source_package, output_package)
+    for source in sources {
+        commons, cok := mp.commons[source.package_name]
+        assert(cok)
+        
+        for file in commons {
+            fmt.fprint(out, "\n////////////////////////////////////////////////\n")
+            generated_fprintf(out, "// All commons exported from %s", file.file_name)
+            fmt.fprint(out, "\n")
+            
+            width: int
+            for info in file.infos {
+                width = max(width, len(info.name))
+            }
+            
+            for info in file.infos {
+                fmt.fprintf(out, "/* @generated */ %-*v :: %v.%v\n", width, info.name, source.package_name, info.name,)
+            }
+        }
+        
+        fmt.printfln("INFO: generated %v commons for %v", source.package_name, output_package)
+    }
     
     return true
 }
 
-generate_game_and_render_api :: proc (mp: ^Metaprogram, output_file, game_package, render_package, destination: string) -> bool {
+generate_api :: proc (mp: ^Metaprogram, output_file, game_package, render_package, destination: string) -> bool {
     game_no_stubs: map[string] bool
     game_no_stubs["update_and_render"]    = true
     game_no_stubs["output_sound_samples"] = true
@@ -646,7 +650,7 @@ generate_platform_api :: proc (mp: ^Metaprogram, path, package_name: string, tas
     return true
 }
 
-generate_platform_api_bindings :: proc (mp: ^Metaprogram, path, package_name: string) -> bool {
+generate_platform_bindings :: proc (mp: ^Metaprogram, path, package_name: string) -> bool {
     out, ok := open_generated_file_and_write_header(path, package_name)
     if !ok do return false
     defer os.close(out)
