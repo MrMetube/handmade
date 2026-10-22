@@ -47,8 +47,8 @@ deinit :: proc () {
 ////////////////////////////////////////////////
 
 @(export)
-allocate_texture :: proc (bitmap: Bitmap, set_as_nil_texture: bool) -> u32 {
-    result := vk_allocate_texture(&render_state.vulkan, bitmap, set_as_nil_texture)
+allocate_texture :: proc (bitmap: Bitmap) -> u32 {
+    result := vk_allocate_texture(&render_state.vulkan, bitmap)
     return result
 }
 
@@ -96,4 +96,7 @@ debug_data_block :: proc (name: string, loc := #caller_location) {
 
 debug_record_i32 :: proc (value: ^i32, name: string = #caller_expression(value)) {
     render_state.game.debug_record_i32(value, name)
+}
+debug_record_f32 :: proc (value: ^f32, name: string = #caller_expression(value)) {
+    render_state.game.debug_record_f32(value, name)
 }

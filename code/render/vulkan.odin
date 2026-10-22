@@ -53,8 +53,7 @@ Vulkan :: struct {
     multigrid_light_down_pso:   gpu.PSO,
     depth_peel_to_lighting_pso: gpu.PSO,
     
-    // :TextureHandleOffset:
-    textures:     [TextureDescriptor.count + .one] gpu.PlacedTexture,
+    textures:     [TextureDescriptor.count] gpu.PlacedTexture,
     next_texture:  TextureDescriptor,
     free_texture: [dynamic; TextureDescriptor.count] TextureDescriptor,
     
@@ -125,8 +124,6 @@ TextureDescriptor :: enum u32 {
     
     first_dynamic_texture,
     count = first_dynamic_texture + max_textures,
-    
-    one = 1, // @note remove with :TextureHandleOffset:
 }
 
 @(shader)
@@ -342,7 +339,7 @@ deinit_vulkan :: proc (vulkan: ^Vulkan) {
 
 ////////////////////////////////////////////////
 
-vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture := false) -> u32 {
+vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap) -> u32 {
     timed_function()
     
     placed := gpu.texture_allocate(&vulkan.texture_allocator, gpu.texture_desc(
@@ -353,17 +350,15 @@ vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture
     assert(placed.texture != nil)
     
     descriptor: TextureDescriptor
-    if set_as_nil_texture { // @todo get rid of this concept
-        descriptor = .nil_texture
+    if len(vulkan.free_texture) > 0 {
+        descriptor = pop(&vulkan.free_texture)
     } else {
-        if len(vulkan.free_texture) > 0 {
-            descriptor = pop(&vulkan.free_texture)
-        } else {
-            assert(vulkan.next_texture < .count)
-            descriptor = vulkan.next_texture
-            vulkan.next_texture += .one
-        }
+        assert(vulkan.next_texture < .count)
+        descriptor = vulkan.next_texture
+        vulkan.next_texture += auto_cast 1
     }
+    assert(descriptor != .nil_texture)
+    
     gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, cast(u32) descriptor, placed.texture, .sampled)
     
     texture_bytes := slice_to_bytes(bitmap.memory)
@@ -379,23 +374,7 @@ vk_allocate_texture :: proc (vulkan: ^Vulkan, bitmap: Bitmap, set_as_nil_texture
     vulkan.latest_completion.value += 1
     gpu.submit({ commands }, vulkan.latest_completion)
     
-    // :TextureHandleOffset:
-    //
-    // Handles passed to the game and platform are offset by 1, so that a 0 always means
-    // an invalid handle. 
-    // @todo Get rid of "set_as_nil_texture" which is used to set the "white pixel" texture.
-    // This requires that the game always provides a valid bitmap+handle for any renderer
-    // geometry instead of assuming anything about the handle of the white pixel, but I presume
-    // that that is already the case. But check anyways!
-    // That should remove all the offsetting and also simplify the TextureDescriptor meanings.
-    // TextureDescriptor could also keep a slot just for the white pixels, if that is not too
-    // game specific, but I feel like its fine. Then the platform has to pass the now 
-    // @(common) TextureDescriptor.white_pixel on the allocation, which must also ensure its
-    // slot is free. This code is then the same as the one that the fixed render_target from
-    // all the buffers want to use. They can then reuse it and explicitely pass an enum value
-    // instead of a raw u32.
-    //
-    texture_index := cast(u32) (descriptor + .one)
+    texture_index := cast(u32) descriptor
     vulkan.textures[texture_index] = placed
     
     return texture_index
@@ -427,9 +406,8 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
         case TextureOpDeallocate:
             deallocs += 1
             
-            // :TextureHandleOffset:
-            descriptor := cast(TextureDescriptor) op.handle - .one
-            assert(descriptor > .first_dynamic_texture)
+            descriptor := cast(TextureDescriptor) op.handle
+            assert(descriptor >= .first_dynamic_texture)
             
             texture := &vulkan.textures[op.handle]
             assert(texture.texture != nil)
@@ -600,7 +578,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
     if render_frame.render_view == nil { return }
     
     frame_index := vulkan.next_frame_index
-    vulkan.next_frame_index = (frame_index + 1) % cast(u32) frames_in_flight
+    vulkan.next_frame_index = (frame_index + 1) % frames_in_flight
     frame := &vulkan.frames[frame_index]
     if frame.completion.value != 0 { 
         timed_block("wait before render commands")
@@ -637,8 +615,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             
             uploads.textures = gpu.bump_allocate(&frame.allocator, [] u32, len(render_commands.quad_bitmap_buffer))
             for bitmap, index in render_commands.quad_bitmap_buffer {
-                texture_handle := max(0, bitmap.texture_handle-1)
-                uploads.textures.cpu[index] = texture_handle
+                uploads.textures.cpu[index] = bitmap.texture_handle
             }
         }
     }
@@ -652,40 +629,44 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
     ////////////////////////////////////////////////
     
     peel_index: u32
-    peel_header_restore: int
+    cursor_of_begin_peels: int
     begin_depth_peel_pass(vulkan, commands, peel_index, .clear, render_commands.clear_color)
     
     for cursor: int; cursor < len(render_commands.entries); {
         entry := render_commands.entries[cursor]
         
-        advance := true
+        return_to_begin_peels: bool
         
         switch entry.kind {
         case .None: unreachable()
         case .DepthClear:
+            // @todo the render entry DepthClear is not handled correctly it seems, so that the debug UI shows underlying depth layers of the game itself if its visible(see the profiler). I currently assume it is because, even though the depth is cleared, there is still a manual depth test against the previous depth peel, which then causes the weird issue to appear. the opengl renderer did not have this issue at all. so it must be a slopppy translation causing this issue.
+            
             timed_block("depth clear")
             gpu.end_render_pass(commands)
             begin_depth_peel_pass(vulkan, commands, peel_index, .load)
             
         case .BeginPeels:
             timed_block("begin peels")
-            peel_header_restore = cursor
+            cursor_of_begin_peels = cursor
             
         case .EndPeels:
             timed_block("end peels")
             end_depth_peel_pass(vulkan, commands, peel_index, &frame.allocator)
             
+            color_load_op := gpu.LoadOp.load
             if peel_index < depth_peel_count - 1 {
-                cursor  = peel_header_restore
-                advance = false
+                // continue loop
+                return_to_begin_peels = true
+                
+                color_load_op = .clear
                 
                 peel_index += 1
-                
-                begin_depth_peel_pass(vulkan, commands, peel_index, .clear, render_commands.clear_color)
             } else {
+                // break loop
                 peel_index = 0
-                begin_depth_peel_pass(vulkan, commands, peel_index, .load)
             }
+            begin_depth_peel_pass(vulkan, commands, peel_index, color_load_op, render_commands.clear_color)
             
         case .Textured_Quads:
             timed_block("textured quads")
@@ -747,7 +728,9 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             copy(vulkan.lighting_lookup.cpu, slice_from_parts(u16, lighting.lookup, lookup_count))
         }
         
-        if advance {
+        if return_to_begin_peels {
+            cursor = cursor_of_begin_peels
+        } else {
             cursor += 1
         }
     }
@@ -954,7 +937,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
         destroy_all_render_targets(vulkan)
         
         depth_peel_count := clamp(settings.depth_peel_count_hint, 1, cap(vulkan.depth_peel_buffers))
-        render_dim := uv3 { cast(u32) settings.dimension.x, cast(u32) settings.dimension.y, 1 } 
+        render_dim := uv3 { **cast(uv2) settings.dimension.xy, 1 } 
         
         vulkan.active_sample_count = 1
         if settings.multisampling_hint {
@@ -984,7 +967,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
                         ))
                     }
                     
-                    descriptor += .one
+                    descriptor += auto_cast 1
                 }
             }
         }
@@ -1007,7 +990,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
                         ))
                     }
                     
-                    descriptor += .one
+                    descriptor += auto_cast 1
                 }
             }
         }
@@ -1038,7 +1021,7 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
                 
                 for &target in buffer {
                     target = create_render_target(vulkan, descriptor, desc)
-                    descriptor += .one
+                    descriptor += auto_cast 1
                 }
                 
                 light_buffer_dim.xy = (light_buffer_dim.xy + 1) / 2
@@ -1054,24 +1037,28 @@ change_to_settings :: proc (vulkan: ^Vulkan, settings: RenderSettings) {
 ////////////////////////////////////////////////
 
 get_texture :: proc (vulkan: ^Vulkan, descriptor: TextureDescriptor) -> ^gpu.PlacedTexture {
-    // :TextureHandleOffset:
-    result := &vulkan.textures[descriptor + .one]
+    result := &vulkan.textures[descriptor]
     return result
 }
 
 create_render_target :: proc (vulkan: ^Vulkan, index: TextureDescriptor, desc: gpu.TextureDesc) -> RenderTarget {
-    placed := gpu.texture_allocate(&vulkan.texture_allocator, desc)
-    assert(placed.texture != nil)
-    
     slot := get_texture(vulkan, index)
-    assert(slot.texture == nil)
-    slot^ = placed
+    
+    if slot.texture == nil || (slot.texture.width != desc.extent.x || slot.texture.height != desc.extent.y || slot.texture.format != desc.format || slot.texture.type != desc.type) {
+        if slot.texture != nil {
+            gpu.texture_free(&vulkan.texture_allocator, slot)
+        }
+        assert(slot.texture == nil)
         
+        slot^ = gpu.texture_allocate(&vulkan.texture_allocator, desc)
+        assert(slot.texture != nil)
+    }
+    
     result := RenderTarget {
         descriptor  = index,
-        render_view = gpu.create_render_view(placed.texture)
+        render_view = gpu.create_render_view(slot.texture)
     }
-    gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, transmute(u32) index, placed.texture, .sampled)
+    gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, transmute(u32) index, slot.texture, .sampled)
     
     return result
 }
@@ -1080,8 +1067,7 @@ destroy_render_target :: proc (vulkan: ^Vulkan, target: ^RenderTarget) {
     if target.render_view == nil { return }
     assert(target.descriptor < .first_dynamic_texture)
     
-    // :TextureHandleOffset:
-    texture := &vulkan.textures[target.descriptor - .one]
+    texture := &vulkan.textures[target.descriptor]
     
     gpu.destroy_render_view(target.render_view)
     gpu.texture_free(&vulkan.texture_allocator, texture)
@@ -1097,57 +1083,59 @@ get_depth_peel_read_buffer :: proc (vulkan: ^Vulkan, index: u32) -> ^DepthPeelBu
     return result
 }
 
-begin_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_index: u32, color_load: gpu.LoadOp, render_commands_clear_color: v4 = {}) {
+begin_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_index: u32, color_load: gpu.LoadOp, actual_clear_color: v4 = {}) {
     timed_function()
     
-    depth_peel_count := cast(u32) len(vulkan.depth_peel_buffers)
-    
     clear_color: v4
-    if color_load == .clear && peel_index == depth_peel_count - 1 {
-        clear_color = render_commands_clear_color
+    if color_load == .clear && peel_index == cast(u32) len(vulkan.depth_peel_buffers) - 1 {
+        clear_color = actual_clear_color
         clear_color.a = 1
     }
     
     buffer := vulkan.depth_peel_buffers[peel_index]
+    pso := vulkan.active_sample_count == 1 ? vulkan.zbias_pso : vulkan.multisampled_zbias_pso
+    
     gpu.begin_render_pass(commands,
         colors = { gpu.color_attachment(render_view = buffer[.surface_reflect].render_view, load = color_load, clear = clear_color) },
-        depth = gpu.depth_attachment(render_view = buffer[.depth].render_view, load = .clear),
+        depth =    gpu.depth_attachment(render_view = buffer[.depth].render_view,           load = .clear,     clear = 1),
     )
-    gpu.set_depth_stencil(commands, depth_test = true, depth_write = true)
-    gpu.bind_pso(commands, vulkan.active_sample_count == 1 ? vulkan.zbias_pso : vulkan.multisampled_zbias_pso)
+    gpu.set_depth_stencil(commands, depth_test = true, depth_write = true, depth_compare = .less_equal)
+    gpu.bind_pso(commands, pso)
 }
 
 end_depth_peel_pass :: proc (vulkan: ^Vulkan, commands: gpu.CommandBuffer, peel_index: u32, allocator: ^gpu.BumpAllocator) {
     gpu.end_render_pass(commands)
+    
     gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
-    if vulkan.active_sample_count == 1 { return }
     
-    from := peel_index
-    to   := vulkan.depth_peel_resolve_buffers[peel_index]
-    
-    gpu.begin_render_pass(commands,
-        colors = {
-            gpu.color_attachment(render_view = to[.surface_reflect].render_view, load = .discard),
-            gpu.color_attachment(render_view = to[.emission].render_view,        load = .discard),
-            gpu.color_attachment(render_view = to[.normal_lp].render_view,       load = .discard),
-        },
-        depth = gpu.depth_attachment(render_view = to[.depth].render_view, load = .discard),
-    )
-    
-    gpu.set_depth_stencil(commands, depth_test = true, depth_write = true, depth_compare = .always)
-    gpu.bind_pso(commands, vulkan.multisample_resolve_pso)
-    
-    root := gpu.bump_allocate(allocator, RootMultisampleResolve)
-    root.cpu^ = {
-        peel_index   = from,
-        sample_count = vulkan.active_sample_count,
+    if vulkan.active_sample_count != 1 {
+        from := peel_index
+        to   := vulkan.depth_peel_resolve_buffers[peel_index]
+        
+        gpu.begin_render_pass(commands,
+            colors = {
+                gpu.color_attachment(render_view = to[.surface_reflect].render_view, load = .discard),
+                gpu.color_attachment(render_view = to[.emission].render_view,        load = .discard),
+                gpu.color_attachment(render_view = to[.normal_lp].render_view,       load = .discard),
+            },
+            depth = gpu.depth_attachment(render_view = to[.depth].render_view, load = .discard),
+        )
+        
+        gpu.set_depth_stencil(commands, depth_test = true, depth_write = true, depth_compare = .always)
+        gpu.bind_pso(commands, vulkan.multisample_resolve_pso)
+        
+        root := gpu.bump_allocate(allocator, RootMultisampleResolve)
+        root.cpu^ = {
+            peel_index   = from,
+            sample_count = vulkan.active_sample_count,
+        }
+        
+        gpu.draw(commands, root.gpu, 3)
+        
+        gpu.end_render_pass(commands)
+        
+        gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
     }
-    
-    gpu.draw(commands, root.gpu, 3)
-    
-    gpu.end_render_pass(commands)
-    
-    gpu.barrier(commands, { .color_output, .depth_stencil_tests }, { .color_write, .depth_stencil_write }, { .fragment }, { .shader_read })
 }
 
 ////////////////////////////////////////////////

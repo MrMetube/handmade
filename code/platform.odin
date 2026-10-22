@@ -290,7 +290,7 @@ main :: proc () {
         render_commands.white_bitmap.memory[0] = 255
         render_commands.white_bitmap.dimension = 1
         render_commands.white_bitmap.width_over_height = 1
-        render_commands.white_bitmap.texture_handle = render.allocate_texture(render_commands.white_bitmap, true)
+        render_commands.white_bitmap.texture_handle = render.allocate_texture(render_commands.white_bitmap)
         
         render_commands.dimension = back_buffer.dimension
         
