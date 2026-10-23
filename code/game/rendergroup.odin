@@ -43,6 +43,7 @@ RenderSettings :: struct {
     depth_peel_count_hint: u32,
     multisampling_hint:    bool,
     pixelation_hint:       bool,
+    lighting_disabled:     bool,
 }
 
 @(common)
@@ -726,8 +727,10 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 
 light_element_limit :: 16 * 1024
 
+// @volatile see zbias.slang
 @(common)
 lookup_dimensions :: uv3 { 8, 8, 16 }
+max_light_power :: 10.0
 
 LightingElement :: struct {
     // @note Static information.
@@ -857,7 +860,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
             if (emitter.emission_color.r + emitter.emission_color.g + emitter.emission_color.b) > min_emission {
                 series := seed_random_series(1234)
                 for _ in 0..<ray_count {
-                    emission_direction := normalize_or_zero(emitter.n + random_bilateral(&series, v3))
+                    emission_direction := sample_hemisphere(&series, emitter.n)
                     
                     _, hit_index := cast_ray(solution, emitter_index, emitter.p, emission_direction)
                     
@@ -888,15 +891,15 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
 gather_final_lighting :: proc (solution: ^LightingSolution) {
     ray_count :: 16
     
-    for &destination, destination_index in solution.elements {
+    for &element, element_index in solution.elements {
         incident_accumulated: v3
         incident_direction:   v3
         
         series := seed_random_series(1234)
         for _ in 0..<ray_count {
-            ray_direction := normalize_or_zero(destination.n + random_bilateral(&series, v3))
+            ray_direction := sample_hemisphere(&series, element.n)
             
-            incident_color, _ := cast_ray(solution, destination_index, destination.p, ray_direction)
+            incident_color, _ := cast_ray(solution, element_index, element.p, ray_direction)
             
             weighting := length(incident_color) // @note What should this weighting be?
             
@@ -904,44 +907,51 @@ gather_final_lighting :: proc (solution: ^LightingSolution) {
             incident_direction   += weighting * ray_direction
         }
         
-        destination.incident_light             = incident_accumulated * (1.0 / ray_count)
-        destination.average_direction_to_light = normalize_or_zero(incident_direction)
+        element.incident_light             = incident_accumulated * (1.0 / ray_count)
+        element.average_direction_to_light = normalize_or_zero(incident_direction)
     }
 }
 
+sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
+    // @todo Better hemisphere sampling, probably!
+    x := 0.5 * random_bilateral(series, v3)
+    result := normalize_or_zero(n + x)
+    return result
+}
+
 cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
-    result := cast(v3) 0.3
+    result_color := cast(v3) 0 // @todo Need a skylight method that works with our propagation.
     result_index := len(solution.elements)
     
     closest_hit := +Infinity
-    for &source, source_index in solution.elements {
-        if source_index != skip_index {
-            ray_source_n := dot(ray_direction, source.n)
+    for &element, element_index in solution.elements {
+        if element_index != skip_index {
+            ray_element_n := dot(ray_direction, element.n)
             
-            if ray_source_n < -0.001 {
-                origin_from_plane := ray_origin - source.p
+            if ray_element_n < -0.001 {
+                plane_to_origin := ray_origin - element.p
                 
-                d := dot(source.n, origin_from_plane)
-                t := -d / ray_source_n
+                d := dot(element.n, plane_to_origin)
+                t := -d / ray_element_n
                 
                 if t > 0 && closest_hit > t {
-                    ray_point_from_plane := origin_from_plane + t * ray_direction
+                    ray_point := plane_to_origin + t * ray_direction
                     
-                    x_check := 2 * dot(ray_point_from_plane, source.x_axis)
-                    y_check := 2 * dot(ray_point_from_plane, source.y_axis)
+                    x_check := 2 * dot(ray_point, element.x_axis)
+                    y_check := 2 * dot(ray_point, element.y_axis)
                     
-                    if x_check >= -source.width  && x_check <= source.width &&
-                       y_check >= -source.height && y_check <= source.height {
-                        closest_hit = t
-                        result = source.emission_color
-                        result_index = source_index
+                    if x_check >= -element.width  && x_check <= element.width &&
+                       y_check >= -element.height && y_check <= element.height {
+                        closest_hit  = t
+                        result_color = element.emission_color
+                        result_index = element_index
                     }
                 }
             }
         }
     }
     
-    return result, result_index
+    return result_color, result_index
 }
 
 ////////////////////////////////////////////////
@@ -986,37 +996,34 @@ render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
             for x in 0..<lookup_dimensions.x {
                 index := textures.lookup[z][y][x]
                 
-                if false {
+                if index != 0 {
+                    c := v4 {0,0,0, 1}
+                    count: f32
                     for index != 0 {
                         t := textures.t[index]
                         defer index = cast(u16) t.next
                         
-                        p := t.p
-                        c := rgba_to_v4(t.c)
-                        
-                        push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
+                        unpacked := rgba_to_v4(t.c)
+                        unpacked = decode_light_with_power(unpacked)
+                        c += unpacked
+                        count += 1
                     }
-                } else {
-                    if index != 0 {
-                        c: v4
-                        count: f32
-                        for index != 0 {
-                            t := textures.t[index]
-                            defer index = cast(u16) t.next
-                            
-                            c += rgba_to_v4(t.c)
-                            count += 1
-                        }
-                        
-                        c *= 1 / count
-                        p := textures.voxel_min_corner + textures.voxel_dimension * (cast(v3) uv3{x, y, z} + 0.5)
-                        
-                        push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
-                    }
+                    
+                    c.rgb *= 1 / count
+                    p := textures.voxel_min_corner + textures.voxel_dimension * (cast(v3) uv3{x, y, z} + 0.5)
+                    
+                    push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
                 }
             }
         }
     }
+}
+
+decode_light_with_power :: proc (encoded: v4) -> v4 {
+    result: v4
+    result.rgb = encoded.rgb * max_light_power * encoded.a
+    result.a   = 1
+    return result
 }
 
 output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
@@ -1041,8 +1048,13 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         
         lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
         
-        light := clamp01(element.incident_light)
-        c := v4_to_rgba(V4(light, 1))
+        light_power := length(element.incident_light.rgb)
+        incident_light: v4
+        if light_power > 0 {
+            light_color := element.incident_light.rgb / light_power
+            incident_light = V4(light_color, clamp01(light_power / max_light_power))
+        }
+        c := v4_to_rgba(incident_light)
         
         pack_index += 1
         
@@ -1055,7 +1067,7 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         lookup_at^ = cast(u16) pack_index
     }
     
-    if !false {
+    {
         lookup_range := rectangle_min_dimension(iv3{0,0,0}, cast(iv3) lookup_dimensions-1)
         for z in 0..<cast(i32) lookup_dimensions.z {
             for y in 0..<cast(i32) lookup_dimensions.y {

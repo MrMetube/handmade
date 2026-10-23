@@ -153,6 +153,7 @@ update_and_render :: proc (memory: ^GameMemory, input: ^Input, render_commands: 
         
         debug_record_value(&render_commands.multisampling_hint, "Multisampling")
         debug_record_value(&render_commands.pixelation_hint, "Pixelation")
+        debug_record_value(&render_commands.lighting_disabled, "Lighting Disabled")
         {
             count := cast(f32) render_commands.depth_peel_count_hint
             debug_record_value(&count, "Depth Peel Count")

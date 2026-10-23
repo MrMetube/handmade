@@ -529,6 +529,7 @@ generate_shader_structs :: proc (mp: ^Metaprogram, output_path: string) -> bool 
         typedef int3     iv3;
         typedef int4     iv4;
         typedef float4x4 m4;
+        typedef bool     b32;
         
         typedef u32      Color;
         typedef u32      PackedNormal;

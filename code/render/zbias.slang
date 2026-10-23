@@ -86,8 +86,7 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
     surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
     surface_reflect.a   = modulated.a;
     
-    
-    if (root.lighting_lookup != nullptr) {
+    if (!root.lighting_disabled && root.lighting_lookup != nullptr) {
         v3 average_light = v3(0,0,0);
         
         v3 voxel_p = root.inverse_voxel_dimension * (input.world_p - root.voxel_min_corner) - v3(0.5, 0.5, 0.5);
@@ -122,6 +121,7 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
 
 // @volatile see rendergroup.odin
 static const iv3 lookup_dimension = iv3(8, 8, 16);
+static const f32 max_light_power  = 10.0;
 
 v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
     voxel_index.x = clamp(voxel_index.x, 0, lookup_dimension.x-1);
@@ -135,17 +135,17 @@ v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
     
     while (light_index != 0) {
         LightingTexel *light = &root.lighting_t[light_index];
-        v4 light_c = rgba_to_v4(light.c);
         
         v3 light_p  = light.p;
-        v3 light_d  = light.d.xyz;
         light_index = u16(light.next);
+        v3 light_d  = light.d;
+        v4 light_c  = rgba_to_v4(light.c);
         
-        v3 delta = light_p - input.world_p;
-        f32 contribution = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
+        v3 delta                = light_p - input.world_p;
+        f32 contribution        = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
         f32 directional_falloff = clamp01(dot(light_d, input.world_n));
         
-        result.rgb += contribution * directional_falloff * light_c.rgb;
+        result.rgb += contribution * directional_falloff * light_c.rgb * light_c.a * max_light_power;
         result.a   += contribution;
     }
     

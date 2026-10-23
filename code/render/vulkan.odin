@@ -176,7 +176,8 @@ RootZBias :: struct #all_or_none {
     previous_depth:   TextureDescriptor,
     alpha_threshold:  f32,
     
-    _padding: [1] u32,
+    lighting_disabled: b32,
+    _padding: [0] u32,
 }
 #assert(size_of(RootZBias) % 32 == 0)
 
@@ -572,7 +573,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
         change_to_settings(vulkan, render_commands.settings)
     }
     
-    begin_timed_block("acquire frame")
+    begin_timed_block("wait for last frame")
     render_frame := gpu.acquire(vulkan.device)
     end_timed_block()
     if render_frame.render_view == nil { return }
@@ -705,6 +706,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 lighting_t      = vulkan.lighting_t.gpu,
                 lighting_lookup = vulkan.lighting_lookup.gpu,
                 
+                lighting_disabled = cast(b32) vulkan.settings.lighting_disabled,
                 _padding = {}
             }
             gpu.draw(commands, root.gpu, quads.quad_count * 6)

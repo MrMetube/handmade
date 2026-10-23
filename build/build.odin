@@ -17,6 +17,8 @@ optimize :: !false
 native   :: true
 internal :: true
 
+optimize_render :: false
+
 /* 
  @todo(viktor):
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
@@ -123,7 +125,7 @@ main :: proc () {
         append(cmd, fmt.tprintf(`-pdb-name:build/render-%d.pdb`, random_number()))
         
         build_meander()
-        build_optimizations(optimize)
+        build_optimizations(optimize_render && optimize)
         build_native(native)
         append(cmd, custom_attribute_flag)
         if internal { build_define("INTERNAL", "true") }
