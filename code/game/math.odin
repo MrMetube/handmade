@@ -402,6 +402,7 @@ normalize :: proc (vec: $V) -> V {
     result := vec / length(vec)
     return result
 }
+
 normalize_or_zero :: proc (vec: $V/[$N] $T) -> V {
     result: V = 0
     len_sq := length_squared(vec)
@@ -412,6 +413,30 @@ normalize_or_zero :: proc (vec: $V/[$N] $T) -> V {
         if len_sq > 0.0000001 {
             result = vec / square_root(len_sq)
         }
+    }
+    return result
+}
+
+min_per_lane :: proc (a: $T/ [$N] $E, b: T) -> T {
+    result: T = ---
+    #no_bounds_check #unroll for i in 0..<N {
+        result[i] = min(a[i], b[i])
+    }
+    return result
+}
+
+max_per_lane :: proc (a: $T/ [$N] $E, b: T) -> T {
+    result: T = ---
+    #no_bounds_check #unroll for i in 0..<N {
+        result[i] = max(a[i], b[i])
+    }
+    return result
+}
+
+abs_per_lane :: proc (a: $T/ [$N] $E) -> T {
+    result: T = ---
+    #no_bounds_check #unroll for i in 0..<N {
+        result[i] = abs(a[i])
     }
     return result
 }
@@ -676,22 +701,28 @@ intersects :: proc (a, b: Rectangle($T)) -> bool {
     return result
 }
 
-get_intersection :: proc (a, b: $R/Rectangle($T)) -> R {
-    result: R = ---
-    #no_bounds_check #unroll for i in 0..<len(T) {
-        result.min[i] = max(a.min[i], b.min[i])
-        result.max[i] = min(a.max[i], b.max[i])
+get_intersection :: proc (a: $R/Rectangle($T), b: R) -> R {
+    result := R {
+        min = max_per_lane(a.min, b.min),
+        max = min_per_lane(a.max, b.max),
     }
     
     return result
-    
 }
 
 get_union :: proc (a, b: $R/Rectangle($T)) -> R {
-    result: R = ---
-    #no_bounds_check #unroll for i in 0..<len(T) {
-        result.min[i] = min(a.min[i], b.min[i])
-        result.max[i] = max(a.max[i], b.max[i])
+    result := R {
+        min = min_per_lane(a.min, b.min),
+        max = max_per_lane(a.max, b.max),
+    }
+    
+    return result
+}
+
+get_union_with_point :: proc (a: $R/Rectangle($T), p: T) -> R {
+       result := R {
+        min = min_per_lane(a.min, p),
+        max = max_per_lane(a.max, p),
     }
     
     return result

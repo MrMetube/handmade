@@ -754,13 +754,9 @@ LightingSolution :: struct {
 }
 
 LightingTextures :: struct {
-    t:      [light_element_limit] LightingTexel,                                   /// t = (16 * 1024) * ((3 * 4 + 4) + 4 + (4*4))
-    lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16, /// l = 8 * 8 * 16 * 2
+    t:      [light_element_limit] LightingTexel,
+    lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16,
     // @volatile see zbias.slang
-    
-    /// t / 1024
-    /// l
-    /// (t + l) / 1024
     voxel_min_corner:        v3,
     voxel_dimension:         v3,
     inverse_voxel_dimension: v3,
@@ -798,7 +794,7 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
     bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset:][:quads.quad_count]
     vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
     
-    for bitmap, quad_index in bitmaps {
+    for _, quad_index in bitmaps {
         // :QuadWinding:
         ve0 := &vertices[quad_index*4 + 0]
         ve1 := &vertices[quad_index*4 + 1]
@@ -860,7 +856,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
         for &emitter, emitter_index in solution.elements {
             if (emitter.emission_color.r + emitter.emission_color.g + emitter.emission_color.b) > min_emission {
                 series := seed_random_series(1234)
-                for ray_index in 0..<ray_count {
+                for _ in 0..<ray_count {
                     emission_direction := normalize_or_zero(emitter.n + random_bilateral(&series, v3))
                     
                     _, hit_index := cast_ray(solution, emitter_index, emitter.p, emission_direction)
@@ -897,7 +893,7 @@ gather_final_lighting :: proc (solution: ^LightingSolution) {
         incident_direction:   v3
         
         series := seed_random_series(1234)
-        for ray_index in 0..<ray_count {
+        for _ in 0..<ray_count {
             ray_direction := normalize_or_zero(destination.n + random_bilateral(&series, v3))
             
             incident_color, _ := cast_ray(solution, destination_index, destination.p, ray_direction)
@@ -908,13 +904,13 @@ gather_final_lighting :: proc (solution: ^LightingSolution) {
             incident_direction   += weighting * ray_direction
         }
         
-        destination.incident_light             = incident_accumulated
+        destination.incident_light             = incident_accumulated * (1.0 / ray_count)
         destination.average_direction_to_light = normalize_or_zero(incident_direction)
     }
 }
 
 cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
-    result: v3
+    result := cast(v3) 0.3
     result_index := len(solution.elements)
     
     closest_hit := +Infinity
@@ -1030,8 +1026,7 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
     
     bounds := rectangle_inverted_infinity(Rectangle3)
     for element in solution.elements {
-        bounds.min = min_per_lane(bounds.min, element.p.xyz)
-        bounds.max = max_per_lane(bounds.max, element.p.xyz)
+        bounds = get_union_with_point(bounds, element.p)
     }
     
     bounds     = add_radius(bounds, 0.1)
@@ -1058,6 +1053,36 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         
         t.next     = cast(u32) lookup_at^
         lookup_at^ = cast(u16) pack_index
+    }
+    
+    if !false {
+        lookup_range := rectangle_min_dimension(iv3{0,0,0}, cast(iv3) lookup_dimensions-1)
+        for z in 0..<cast(i32) lookup_dimensions.z {
+            for y in 0..<cast(i32) lookup_dimensions.y {
+                for x in 0..<cast(i32) lookup_dimensions.x {
+                    index := &textures.lookup[z][y][x]
+                    
+                    if index^ == 0 {
+                        neighbour_range := rectangle_min_max(iv3{-1,-1,-1}, iv3{1,1,1})
+                        
+                        // @todo clamp?
+                        neighbour_range = get_intersection(add_offset(lookup_range, -iv3{x,y,z}), neighbour_range)
+                        
+                        neighbour: u16
+                        fill: for dz in neighbour_range.min.z ..= neighbour_range.max.z {
+                            for dy in neighbour_range.min.y ..= neighbour_range.max.y {
+                                for dx in neighbour_range.min.x ..= neighbour_range.max.x {
+                                    neighbour = textures.lookup[z+dz][y+dy][x+dx]
+                                    if neighbour != 0 { break fill }
+                                }
+                            }
+                        }
+                        
+                        index^ = neighbour
+                    }
+                }
+            }
+        }
     }
     
     textures.voxel_min_corner        = bounds.min

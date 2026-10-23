@@ -3,8 +3,6 @@ package game
 
 @(common="file")
 
-import "base:runtime"
-
 make_array :: proc (arena: ^Arena, $T: typeid, #any_int capacity: i32, params := DefaultPushParams) -> [dynamic] T {
     alloc := arena_allocator(arena)
     result := make_dynamic_array(alloc, T, 0, capacity, params)

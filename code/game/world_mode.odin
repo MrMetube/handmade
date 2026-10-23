@@ -514,7 +514,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: iv3, left_hole, right_hole
         
         x_dim := 3 * tile
         y_dim := 1 * tile
-        entity.collision_volume = grounded_collision(v3{x_dim, y_dim,1})
+        entity.collision_volume = grounded_collision(v3 { x_dim, y_dim, 1 })
         end_entity(mode, entity, result.p[-4+radius.x][-1+radius.y])
     }
     

@@ -53,18 +53,12 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
     
     output.texture = root.textures[quad_index];
     
-    
-    
     return output;
 }
 
 
-struct FragmentOutput {
-    v4 surface_reflect : SV_Target0;
-};
-
 [shader("fragment")]
-FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
+v4 fragmentMain(VertexOutput input) : SV_Target0 {
     SamplerState  sampler = SamplerDescriptorHeap[u32(Sampler.Linear)];
     Texture2D<v4> texture = ResourceDescriptorHeap[input.texture];
     
@@ -118,20 +112,24 @@ FragmentOutput fragmentMain(VertexOutput input) : SV_Target0 {
         v3    l = lerp(l0,   l1,   voxel_fraction.x);
         
         surface_reflect.rgb *= l;
+        // surface_reflect.rgb = l; // @todo
     }
     
-    FragmentOutput output;
-    output.surface_reflect = surface_reflect;
+    v4 result = surface_reflect;
     
-    return output;
+    return result;
 }
 
+// @volatile see rendergroup.odin
+static const iv3 lookup_dimension = iv3(8, 8, 16);
+
 v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
-    i32 vi = voxel_index.x + voxel_index.y * 8 + voxel_index.z * 8 * 8;
-    if (vi < 0 || vi > 8 * 8 * 16) return 0;
+    voxel_index.x = clamp(voxel_index.x, 0, lookup_dimension.x-1);
+    voxel_index.y = clamp(voxel_index.y, 0, lookup_dimension.y-1);
+    voxel_index.z = clamp(voxel_index.z, 0, lookup_dimension.z-1);
     
+    i32 vi = voxel_index.x + voxel_index.y * 8 + voxel_index.z * 8 * 8;
     u16 light_index = root.lighting_lookup[vi];
-    if (light_index == 0) return 0;
     
     v4 result = 0;
     
@@ -144,14 +142,14 @@ v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
         light_index = u16(light.next);
         
         v3 delta = light_p - input.world_p;
-        f32 contribution = clamp01(1 - 0.5 * length(delta));
-        contribution *= clamp01(dot(light_d, input.world_n));
+        f32 contribution = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
+        f32 directional_falloff = clamp01(dot(light_d, input.world_n));
         
-        result.rgb += contribution * light_c.rgb;
+        result.rgb += contribution * directional_falloff * light_c.rgb;
         result.a   += contribution;
     }
     
-    if (result.a > 1) {
+    if (result.a > 0) {
         result.rgb *= 1 / result.a;
     }
     

@@ -105,29 +105,6 @@ vec_cast :: proc { vcast_2, vcast_3, vcast_4 }
     return {cast(T) x, cast(T) y, cast(T) z, cast(T) w}
 }
 
-min_per_lane :: proc (a,b: [$N] $E) -> [N] E {
-    result: [N] E = ---
-    #no_bounds_check #unroll for i in 0..<N {
-        result[i] = min(a[i], b[i])
-    }
-    return result
-}
-max_per_lane :: proc (a,b: [$N] $E) -> [N] E {
-    result: [N] E = ---
-    #no_bounds_check #unroll for i in 0..<N {
-        result[i] = max(a[i], b[i])
-    }
-    return result
-}
-abs_per_lane :: proc (a: [$N] $E) -> [N] E {
-    result: [N] E = ---
-    #no_bounds_check #unroll for i in 0..<N {
-        result[i] = abs(a[i])
-    }
-    return result
-}
-
-
 max_lane :: proc (a: $T, b: T) -> T {
     result: T = ---
     when intrinsics.type_is_simd_vector(T) {
@@ -161,14 +138,14 @@ assert :: proc (condition: bool, message := #caller_expression(condition), loc :
         }
         
         when ODIN_DEBUG {
-             debugger_breakpoint()
+             breakpoint()
         } else {
             runtime.trap()
         }
     }
 }
 
-debugger_breakpoint :: runtime.debug_trap
+breakpoint :: runtime.debug_trap
 
 slice_from_parts :: proc { slice_from_parts_type, slice_from_parts_type_of_data_pointer }
 slice_from_parts_type :: proc ($T: typeid, data: pmm, #any_int count: i64) -> [] T {
