@@ -738,16 +738,14 @@ LightingElement :: struct {
     n: v3,
     width, height:  f32,
     x_axis, y_axis: v3,
-    reflect_c:    v3,
+    reflect_color:    v3,
     transparency: f32,
     
     // @note Propagation
     emission_color:       v3,
     next_emission_color:  v3,
-    next_emission_weight: f32,
     
     // @note Gather
-    incident_light:             v3,
     average_direction_to_light: v3,
 }
 
@@ -841,7 +839,7 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
                 element.n = unpack_normal(ve0.n)
                 
                 color := rgba_to_v4(ve0.color)
-                element.reflect_c      = 0.95 * color.rgb
+                element.reflect_color  = 0.95 * color.rgb
                 element.transparency   = color.a
                 element.emission_color = max_emission_value * ve0.emission
             }
@@ -851,80 +849,99 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
 
 compute_light_propagation :: proc (solution: ^LightingSolution) {
     LightingIterationCount = clamp(LightingIterationCount, 1, 16)
-    ray_count :: 8
+    ray_count := 64
+    light_power := 1.0 / cast(f32) ray_count
     
     min_emission: f32 = 0 // @todo Tune this to something higher than 0?
     
     for _ in 0..<LightingIterationCount {
         for &emitter, emitter_index in solution.elements {
             if (emitter.emission_color.r + emitter.emission_color.g + emitter.emission_color.b) > min_emission {
+                emission_color := emitter.emission_color * emitter.reflect_color
+                
                 series := seed_random_series(1234)
                 for _ in 0..<ray_count {
                     emission_direction := sample_hemisphere(&series, emitter.n)
                     
-                    _, hit_index := cast_ray(solution, emitter_index, emitter.p, emission_direction)
+                    _, hit_index := cast_ray(solution.elements[:], emitter_index, emitter.p, emission_direction)
                     
                     if hit_index != len(solution.elements) {
                         hit := &solution.elements[hit_index]
-                        
-                        angular_attenuation := clamp01(-dot(hit.n, emission_direction))
-                        light_color := angular_attenuation * emitter.emission_color
-                        
-                        hit.next_emission_color  += light_color
-                        hit.next_emission_weight += 1
+                        accumulate_sample(hit, emission_color, light_power, -emission_direction)
                     }
                 }
             }
         }
         
-        for &reflector in solution.elements {
-            if reflector.next_emission_weight > 0 {
-                reflector.emission_color = (1 / reflector.next_emission_weight) * reflector.reflect_c * reflector.next_emission_color
+        sky_ray_count :: 32
+        sky_color := v4 { .79, .95, 1.0,  1.0 / cast(f32) (sky_ray_count * LightingIterationCount) }
+        sun_color := v4 { 1.0, .99, .73, 10.0 / cast(f32) LightingIterationCount }
+        sun_direction := normalize_or_zero(v3 {1,1,1})
+        
+        for &reflector, element_index in solution.elements {
+            series := seed_random_series(1234)
+            for _ in 0..<sky_ray_count {
+                ray_direction := sample_hemisphere(&series, reflector.n)
+                
+                _, hit_index := cast_ray(solution.elements[:], element_index, reflector.p, ray_direction)
+                
+                if hit_index == len(solution.elements) {
+                    // @note Add some skylight here.
+                    used_color := sky_color
+                    accumulate_sample(&reflector, sky_color.rgb, sky_color.a, ray_direction)
+                }
             }
             
-            reflector.next_emission_color  = 0
-            reflector.next_emission_weight = 0
+            {
+                _, hit_index := cast_ray(solution.elements[:], element_index, reflector.p, sun_direction)
+                
+                if hit_index == len(solution.elements) {
+                    // @note Add some sunlight here.
+                    accumulate_sample(&reflector, sun_color.rgb, sun_color.a, sun_direction)
+                }
+            }
+            
+            reflector.emission_color += reflector.next_emission_color
+            reflector.next_emission_color = 0
         }
+        
+        ray_count /= 2
     }
 }
 
-gather_final_lighting :: proc (solution: ^LightingSolution) {
-    ray_count :: 16
+accumulate_sample :: proc (element: ^LightingElement, light_color: v3, light_power: f32, normal_to_light: v3) {
+    angular_falloff := clamp01(dot(element.n, normal_to_light))
     
+    power  := light_power * angular_falloff
+    weight := power * length(light_color)
+    
+    element.next_emission_color        += power  * light_color
+    element.average_direction_to_light += weight * normal_to_light
+}
+
+gather_final_lighting :: proc (solution: ^LightingSolution) {
     for &element, element_index in solution.elements {
-        incident_accumulated: v3
-        incident_direction:   v3
-        
-        series := seed_random_series(1234)
-        for _ in 0..<ray_count {
-            ray_direction := sample_hemisphere(&series, element.n)
-            
-            incident_color, _ := cast_ray(solution, element_index, element.p, ray_direction)
-            
-            weighting := length(incident_color) // @note What should this weighting be?
-            
-            incident_accumulated += incident_color
-            incident_direction   += weighting * ray_direction
-        }
-        
-        element.incident_light             = incident_accumulated * (1.0 / ray_count)
-        element.average_direction_to_light = normalize_or_zero(incident_direction)
+        element.average_direction_to_light = normalize_or_zero(element.average_direction_to_light)
     }
 }
 
 sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
     // @todo Better hemisphere sampling, probably!
-    x := 0.5 * random_bilateral(series, v3)
-    result := normalize_or_zero(n + x)
+    result := normalize_or_zero(random_bilateral(series, v3))
+    
+    if dot(result, n) < 0 {
+        result = -result
+    }
+    
     return result
 }
 
-cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
+cast_ray :: proc (elements: [] LightingElement, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
     result_color := cast(v3) 0 // @todo Need a skylight method that works with our propagation.
-    result_index := len(solution.elements)
+    result_index := len(elements)
     
     closest_hit := +Infinity
-    for &element, element_index in solution.elements {
+    for &element, element_index in elements {
         if element_index != skip_index {
             ray_element_n := dot(ray_direction, element.n)
             
@@ -1048,13 +1065,13 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
         
         lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
         
-        light_power := length(element.incident_light.rgb)
-        incident_light: v4
+        light_power := length(element.emission_color.rgb)
+        emission_color: v4
         if light_power > 0 {
-            light_color := element.incident_light.rgb / light_power
-            incident_light = V4(light_color, clamp01(light_power / max_light_power))
+            light_color := element.emission_color.rgb / light_power
+            emission_color = V4(light_color, clamp01(light_power / max_light_power))
         }
-        c := v4_to_rgba(incident_light)
+        c := v4_to_rgba(emission_color)
         
         pack_index += 1
         
