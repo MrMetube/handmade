@@ -18,10 +18,8 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
-    // @todo Move this to a mesh shader, which then emits 2 triangles to build the quad. Remember to reduce the invocation count on the cpu (quad_count and not quad_count * 4). This is independent of the QuadWinding, but we should still just clean that up, now that there is only one renderer.
-    // :QuadWinding:
-    // The command stream stores quads as triangle strips, but the PSO uses triangle lists. Flip the two triangles to match the Vulkan rasterizer winding after the Y coordinate conversion.
-    u32 quad_vertex_indices[6] = { 0u, 2u, 1u, 2u, 3u, 1u };
+    // @todo Move this to a mesh shader, which then emits 2 triangles to build the quad. Remember to reduce the invocation count on the cpu (quad_count and not quad_count * 4). 
+    u32 quad_vertex_indices[6] = { 0u, 1u, 2u, 0u, 2u, 3u };
     
     u32 quad_index             = vertex_id / 6u;
     u32 quad_vertex_index = quad_vertex_indices[vertex_id % 6u];
