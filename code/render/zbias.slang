@@ -23,10 +23,10 @@ void meshMain(out vertices VertexOutput output_vertices[4], out indices uv3 tria
     
     SetMeshOutputCounts(4, 2);
     for (u32 vertex_index = 0; vertex_index < 4; vertex_index += 1) {
-        TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + vertex_index];
+        TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4 + vertex_index];
         
-        v4 in_vertex = v4(vertex.p.xyz, 1.0f);
-        f32 z_bias = vertex.p.z;
+        v4 in_vertex = v4(vertex.p.xyz, 1.0);
+        f32 z_bias = vertex.p.w;
         
         v4 z_vertex = in_vertex;
         z_vertex.z += z_bias;
@@ -63,7 +63,7 @@ void meshMain(out vertices VertexOutput output_vertices[4], out indices uv3 tria
     triangles[1] = {0, 2, 3};
 }
 
-v3 unpack_vertex_normal(u32 n) {
+v3 unpack_vertex_normal(PackedNormal n) {
     v3 result = v3(iv3(
         i32(n << 22u) >> 22, 
         i32(n << 12u) >> 22, 
@@ -73,8 +73,8 @@ v3 unpack_vertex_normal(u32 n) {
     return result;
 }
 
-v2 unpack_vertex_uv(u32 uv) {
-    v2 result = v2(uv & 0xffffu, uv >> 16u);
+v2 unpack_vertex_uv(PackedUV uv) {
+    v2 result = v2(uv & 0xffffu, uv >> 16);
     result *= 1.0 / 65535.0;
     return result;
 }
@@ -116,31 +116,14 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
         v3 voxel_fraction = voxel_p - voxel_floor;
         iv3 voxel_index = iv3(voxel_floor);
         
-        /*
-        v3 l000 = sum_voxel_light(input, voxel_index);
-        v3 l001 = sum_voxel_light(input, voxel_index + iv3( 0, 0, 1));
-        v3 l010 = sum_voxel_light(input, voxel_index + iv3( 0, 1, 0));
-        v3 l011 = sum_voxel_light(input, voxel_index + iv3( 0, 1, 1));
-        v3 l100 = sum_voxel_light(input, voxel_index + iv3( 1, 0, 0));
-        v3 l101 = sum_voxel_light(input, voxel_index + iv3( 1, 0, 1));
-        v3 l110 = sum_voxel_light(input, voxel_index + iv3( 1, 1, 0));
-        v3 l111 = sum_voxel_light(input, voxel_index + iv3( 1, 1, 1));
-        v3  l00 = lerp(l000, l001, voxel_fraction.z);
-        v3  l01 = lerp(l010, l011, voxel_fraction.z);
-        v3  l10 = lerp(l100, l101, voxel_fraction.z);
-        v3  l11 = lerp(l110, l111, voxel_fraction.z);
-        v3   l0 = lerp(l00,  l01,  voxel_fraction.y);
-        v3   l1 = lerp(l10,  l11,  voxel_fraction.y);
-        v3    l = lerp(l0,   l1,   voxel_fraction.x);
-        */
-        
-        v3 l = sum_light(input);
-        surface_reflect.rgb *= l;
-        // surface_reflect.rgb = l; // @todo
+        if (input.light_index != 0) {
+            v3 l = sum_light(input);
+            
+            surface_reflect.rgb *= l;
+        }
     }
     
     v4 result = surface_reflect;
-    
     return result;
 }
 
@@ -153,14 +136,12 @@ v3 sum_light(VertexOutput input) {
     u32 light_count = input.light_count;
     v4 result = 0;
     
-    if (light_count > 4) light_count = 4; // @todo REMOVE THIS!
-    
-    while (light_count != 0) {
-        LightingTexel *light = &root.lighting_t[light_index];
+    while (light_count > 0) {
+        LightingTexel *light = &root.lighting_texels[light_index];
         
-        v3 light_p  = light.p;
-        v3 light_d  = light.d;
-        v4 light_c  = rgba_to_v4(light.c);
+        v3 light_p = light.p;
+        v3 light_d = light.d;
+        v4 light_c = rgba_to_v4(light.c);
         
         v3 delta                = light_p - input.world_p;
         f32 contribution        = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
@@ -171,39 +152,6 @@ v3 sum_light(VertexOutput input) {
         
         light_index += 1;
         light_count -= 1;
-    }
-    
-    if (result.a > 0) {
-        result.rgb *= 1 / result.a;
-    }
-    
-    return result.rgb;
-}
-
-v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
-    voxel_index.x = clamp(voxel_index.x, 0, lookup_dimension.x-1);
-    voxel_index.y = clamp(voxel_index.y, 0, lookup_dimension.y-1);
-    voxel_index.z = clamp(voxel_index.z, 0, lookup_dimension.z-1);
-    
-    i32 vi = voxel_index.x + voxel_index.y * 8 + voxel_index.z * 8 * 8;
-    u16 light_index = root.lighting_lookup[vi];
-    
-    v4 result = 0;
-    
-    while (light_index != 0) {
-        LightingTexel *light = &root.lighting_t[light_index];
-        
-        v3 light_p  = light.p;
-        light_index = u16(light.next);
-        v3 light_d  = light.d;
-        v4 light_c  = rgba_to_v4(light.c);
-        
-        v3 delta                = light_p - input.world_p;
-        f32 contribution        = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
-        f32 directional_falloff = clamp01(dot(light_d, input.world_n));
-        
-        result.rgb += contribution * directional_falloff * light_c.rgb * light_c.a * max_light_power;
-        result.a   += contribution;
     }
     
     if (result.a > 0) {

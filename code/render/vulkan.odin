@@ -72,7 +72,7 @@ Vulkan :: struct {
     lighting_heap: gpu.GpuHeap,
     lighting_bump: gpu.BumpAllocator,
     
-    lighting_t:      gpu.GpuCpuRange(LightingTexel),
+    lighting_texels: gpu.GpuCpuRange(LightingTexel),
     lighting_lookup: gpu.GpuCpuRange(u16),
 }
 
@@ -160,8 +160,8 @@ RootZBias :: struct #all_or_none {
     vertices:   [^] TexturedVertex,
     textures:   [^] u32,
     
-    lighting_t:              [^] LightingTexel,
-    lighting_lookup:         [^] u16,
+    lighting_texels: [^] LightingTexel,
+    lighting_lookup: [^] u16,
     voxel_min_corner:        v3,
     inverse_voxel_dimension: v3,
     
@@ -707,7 +707,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 voxel_min_corner        = vulkan.voxel_min_corner,
                 inverse_voxel_dimension = vulkan.inverse_voxel_dimension,
                 
-                lighting_t      = vulkan.lighting_t.gpu,
+                lighting_texels = vulkan.lighting_texels.gpu,
                 lighting_lookup = vulkan.lighting_lookup.gpu,
                 
                 lighting_disabled = cast(b32) vulkan.settings.lighting_disabled,
@@ -727,10 +727,10 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             
             lookup_count := lookup_dimensions.x * lookup_dimensions.y * lookup_dimensions.z
             
-            vulkan.lighting_t      = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingTexel, len(lighting.t^))
+            vulkan.lighting_texels = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingTexel, len(lighting.texels^))
             vulkan.lighting_lookup = gpu.bump_allocate(&vulkan.lighting_bump, [] u16, lookup_count)
             
-            copy(vulkan.lighting_t.cpu,      lighting.t^[:])
+            copy(vulkan.lighting_texels.cpu, lighting.texels^[:])
             copy(vulkan.lighting_lookup.cpu, slice_from_parts(u16, lighting.lookup, lookup_count))
         }
         

@@ -21,7 +21,6 @@ import win "core:sys/windows"
 ////////////////////////////////////////////////
 // Config
 
-// RenderDimension := iv2{960, 540}
 RenderDimension := iv2{1920, 1080}
 // RenderDimension := iv2{2560, 1440}
 

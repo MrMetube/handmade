@@ -71,6 +71,10 @@ chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: iv3, additi
 update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
     
+    if !mode.show_lighting {
+        enable_lighting(render_group)
+    }
+    
     when false {
         temp := begin_temporary_memory(&tran_state.arena)
         
@@ -260,10 +264,11 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         ////////////////////////////////////////////////
         
-        if input.fkey_pressed[1] {
+        // if input.fkey_pressed[1]
+        {
             lighting_test(render_group, &mode.test_lighting)
             output_lighting_textures(render_group, &mode.test_lighting, &mode.test_textures)
-            mode.show_lighting = true
+            // mode.show_lighting = true
         }
     }
     

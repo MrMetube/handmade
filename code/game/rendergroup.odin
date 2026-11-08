@@ -68,6 +68,9 @@ RenderGroup :: struct {
     
     screen_size: v2,
     
+    lighting_enabled: bool,
+    light_index:      u32,
+    
     last_setup: RenderSetup,
     
     current_quads: ^TexturedQuads,
@@ -142,7 +145,7 @@ Lighting :: struct {
     voxel_min_corner:        v3,
     inverse_voxel_dimension: v3,
     
-    t:      ^type_of(LightingTextures{}.t),
+    texels: ^type_of(LightingTextures{}.texels),
     lookup: ^type_of(LightingTextures{}.lookup),
 }
 
@@ -155,8 +158,27 @@ TexturedVertex :: struct {
     emission: f32,
     
     // @todo Doesn't need to be per-vertex - move this into a its own per-primitive buffer.
+    // @todo Could be compressed to u16s.
     light_index: u32,
     light_count: u32,
+}
+
+LightingSurface :: struct {
+    p: v3,
+    n: v3,
+    transparency:   f32,
+    width, height:  f32,
+    x_axis, y_axis: v3,
+    light_index: u32,
+    light_count: u32,
+}
+
+LightingPoint :: struct {
+    p: v3,
+    reflect_color:  v3,
+    // @todo Is it better to duplicate these or not?
+    n: v3,
+    surface_index: u32,
 }
 
 PackedNormal :: bit_field u32 {
@@ -186,6 +208,8 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         
         screen_size   = cast(v2) commands.dimension,
         generation_id = generation_id,
+        
+        light_index = 1,
     }
     
     setup := group.last_setup
@@ -232,6 +256,10 @@ render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
 
 ////////////////////////////////////////////////
 
+enable_lighting :: proc (group: ^RenderGroup) {
+    group.lighting_enabled = true
+}
+
 push_setup :: proc (group: ^RenderGroup, setup: RenderSetup) {
     group.last_setup = setup
     group.current_quads = nil
@@ -276,7 +304,7 @@ push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_entry(group, .
 push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures, voxel_min_corner: v3, inverse_voxel_dimension: v3) {
     entry := push_render_entry(group, .Lighting)
     
-    entry.lighting.t      = &source.t
+    entry.lighting.texels = &source.texels
     entry.lighting.lookup = &source.lookup
     
     entry.lighting.voxel_min_corner        = source.voxel_min_corner
@@ -357,24 +385,33 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 
 ////////////////////////////////////////////////
 
-push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0) {
+push_quad :: proc { push_quad_no_bias, push_quad_z_bias }
+push_quad_no_bias :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v3, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0) {
+    push_quad(group, bitmap, V4(p0, 0), V4(p1, 0), V4(p2, 0), V4(p3, 0), t0, t1, t2, t3, c0, c1, c2, c3, emission)
+}
+push_quad_z_bias  :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0) {
     entry := get_current_quads(group)
     entry.quad_count += 1
     
     // @todo(viktor): Just pass the normal down directly
     e10 := p1 - p0
-    e20 := p2 - p0
+    e30 := p3 - p0
     
     e10.z += e10.w
-    e20.z += e20.w
+    e30.z += e30.w
     
-    normal := cross(e10.xyz, e20.xyz)
+    normal := cross(e30.xyz, e10.xyz)
     normal = normalize_or_zero(normal)
     
     n0, n1, n2, n3: v3 = normal, normal, normal, normal
     
-    light_index: u32 = cast(u32) len(group.commands.vertex_buffer)
-    light_count: u32 = 4
+    light_index: u32
+    light_count: u32
+    if group.lighting_enabled {
+        light_index = group.light_index
+        light_count = 4
+        group.light_index += 4
+    }
     
     append(&group.commands.quad_bitmap_buffer,  bitmap)
     append(&group.commands.vertex_buffer,
@@ -405,17 +442,16 @@ pack_uv :: proc (uv: v2) -> PackedUV {
 unpack :: proc { unpack_normal, unpack_uv }
 unpack_normal :: proc (normal: PackedNormal) -> v3 {
     result := v3 {
-        cast(f32) normal.x / 511.0,
-        cast(f32) normal.y / 511.0,
-        cast(f32) normal.z / 511.0,
+        cast(f32) normal.x,
+        cast(f32) normal.y,
+        cast(f32) normal.z,
     }
+    result *= 1.0 / 511.0
     return result
 }
 unpack_uv :: proc (uv: PackedUV) -> v2 {
-    result := v2 {
-        cast(f32) uv.x / cast(f32) max(u16),
-        cast(f32) uv.y / cast(f32) max(u16),
-    }
+    result := cast(v2) uv
+    result *= 1.0 /  cast(f32) max(u16)
     return result
 }
 
@@ -540,10 +576,13 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle    != 0)
     
-    p := V4(p.xy - radius, p.z - height, 0)
-    x := v4{ 2*radius,        0,      0, 0 }
-    y := v4{        0, 2*radius,      0, 0 }
-    z := v4{        0,        0, height, 0 }
+    p := p
+    p.xy -= radius
+    p.z  -= height
+    
+    x := 2*radius * v3{1,0,0}
+    y := 2*radius * v3{0,1,0}
+    z :=   height * v3{0,0,1}
     
     t0 := v2{0, 0}
     t1 := v2{1, 0}
@@ -552,12 +591,12 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     
     c := v4_to_rgba(store_color(color))
     
-    push_quad(group, bitmap, p  , p+y  , p+y+z  , p+z  , t0, t1, t2, t3, c, c, c, c, emission) // -x
-    push_quad(group, bitmap, p  , p+z  , p+x+z  , p+x  , t0, t1, t2, t3, c, c, c, c, emission) // -y
-    push_quad(group, bitmap, p  , p+x  , p+x+y  , p+y  , t0, t1, t2, t3, c, c, c, c, emission) // -z
-    push_quad(group, bitmap, p+x, p+x+z, p+x+y+z, p+x+y, t0, t1, t2, t3, c, c, c, c, emission) // +x
-    push_quad(group, bitmap, p+y, p+x+y, p+x+y+z, p+y+z, t0, t1, t2, t3, c, c, c, c, emission) // +y
-    push_quad(group, bitmap, p+z, p+y+z, p+x+y+z, p+x+z, t0, t1, t2, t3, c, c, c, c, emission) // +z
+    push_quad(group, bitmap, p   , p   +y,   p   +y+z, p     +z, t0, t1, t2, t3, c, c, c, c, emission)
+    push_quad(group, bitmap, p   , p     +z, p +x  +z, p +x,     t0, t1, t2, t3, c, c, c, c, emission)
+    push_quad(group, bitmap, p   , p +x,     p +x+y  , p   +y,   t0, t1, t2, t3, c, c, c, c, emission)
+    push_quad(group, bitmap, p +x, p +x  +z, p +x+y+z, p +x+y,   t0, t1, t2, t3, c, c, c, c, emission)
+    push_quad(group, bitmap, p +y, p +x+y,   p +x+y+z, p +  y+z, t0, t1, t2, t3, c, c, c, c, emission)
+    push_quad(group, bitmap, p +z, p   +y+z, p +x+y+z, p +x  +z, t0, t1, t2, t3, c, c, c, c, emission)
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -568,45 +607,39 @@ push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Trans
     p := project_with_transform(transform, rect.min)
     dimension := get_dimension(rect)
     
+    x := dimension.x * v3{1,0,0}
+    y := dimension.y * v3{0,1,0}
+    
+    t: v2 = 0.5
+    
     color := color
     color = srgb_to_linear(color)
     color = store_color(color)
     c := v4_to_rgba(color)
     
-    p0 := V4(p, 0)
-    p1 := V4(p + {0, dimension.y, 0}, 0)
-    p2 := V4(p + {dimension.x, dimension.y, 0}, 0)
-    p3 := V4(p + {dimension.x, 0, 0}, 0)
-    
-    t: v2 = 0.5
-    push_quad(group, &group.commands.white_bitmap, p0, p1, p2, p3, t, t, t, t, c, c, c, c)
+    push_quad(group, &group.commands.white_bitmap, p, p+y, p+x+y, p+x, t, t, t, t, c, c, c, c)
 }
 
-push_rectangle_outline :: proc { push_rectangle_outline2, push_rectangle_outline3 }
-push_rectangle_outline2 :: proc (group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: v2 = 0.1) {
-    push_rectangle_outline(group, Rect3(rec, 0, 0), transform, color, thickness)
-}
-push_rectangle_outline3 :: proc (group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: v2 = 0.1) {
-    center         := get_center(rec)
-    half_dimension := get_dimension(rec) * 0.5
+push_rectangle_outline :: proc (group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: v2 = 0.1) {
+    rec := Rect3(rec, 0, 0)
+    dimension := get_dimension(rec)
     
-    center_top    := center + {0, half_dimension.y, 0}
-    center_bottom := center - {0, half_dimension.y, 0}
-    center_left   := center - {half_dimension.x, 0, 0}
-    center_right  := center + {half_dimension.x, 0, 0}
+    p := rec.min
+    x := dimension.x * v3{1, 0, 0}
+    y := dimension.y * v3{0, 1, 0}
     
     half_thickness := thickness * 0.5
     
-    half_dim_horizontal := v3{half_dimension.x+half_thickness.x, half_thickness.y, half_dimension.z}
-    half_dim_vertical   := v3{half_thickness.x, half_dimension.y-half_thickness.y, half_dimension.z}
+    horizontal_thickness := v3{half_thickness.x,  half_thickness.y, 0}
+    vertical_thickness   := v3{half_thickness.x, -half_thickness.y, 0}
     
-    // Top and Bottom
-    push_rectangle(group, rectangle_center_half_dimension(center_top,    half_dim_horizontal), transform, color)
-    push_rectangle(group, rectangle_center_half_dimension(center_bottom, half_dim_horizontal), transform, color)
+    // Bottom and Top
+    push_rectangle3(group, add_radius(rectangle_min_dimension(p,   x), horizontal_thickness), transform, color)
+    push_rectangle3(group, add_radius(rectangle_min_dimension(p+y, x), horizontal_thickness), transform, color)
     
     // Left and Right
-    push_rectangle(group, rectangle_center_half_dimension(center_left,  half_dim_vertical), transform, color)
-    push_rectangle(group, rectangle_center_half_dimension(center_right, half_dim_vertical), transform, color)
+    push_rectangle3(group, add_radius(rectangle_min_dimension(p,   y), vertical_thickness), transform, color)
+    push_rectangle3(group, add_radius(rectangle_min_dimension(p+x, y), vertical_thickness), transform, color)
 }
 
 push_volume_outline :: proc (group: ^RenderGroup, rec: Rectangle3, transform: Transform, color:= v4{1,1,1,1}, thickness: f32 = 0.1) {
@@ -714,32 +747,17 @@ light_element_limit :: 16 * 1024
 lookup_dimensions :: uv3 { 32, 32, 32 }
 max_light_power :: 10.0
 
-LightingElement :: struct {
-    // @note Static information.
-    p: v3,
-    n: v3,
-    width, height:  f32,
-    x_axis, y_axis: v3,
-    reflect_color:    v3,
-    transparency: f32,
-    
-    // @note Propagation
-    emission_color:       v3,
-    next_emission_color:  v3,
-    
-    // @note Gather
-    average_direction_to_light: v3,
-    
-    pack_index: u32,
-}
-
 LightingSolution :: struct {
-    elements: [dynamic; light_element_limit] LightingElement,
-    textures: LightingTextures,
+    surfaces:      [dynamic; light_element_limit] LightingSurface,
+    points:        [dynamic; light_element_limit] LightingPoint,
+    
+    emission_color_0:           [light_element_limit] v3,
+    emission_color_1:           [light_element_limit] v3,
+    average_direction_to_light: [light_element_limit] v3,
 }
 
 LightingTextures :: struct {
-    t:      [light_element_limit] LightingTexel,
+    texels: [light_element_limit] LightingTexel,
     lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16,
     // @volatile see zbias.slang
     voxel_min_corner:        v3,
@@ -760,7 +778,6 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     
     extract_reflectors_from_quads(group, solution)
     compute_light_propagation(solution)
-    gather_final_lighting(solution)
 }
 
 extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
@@ -769,71 +786,88 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
     commands := group.commands
     quads    := group.current_quads
     
-    elements := &solution.elements
-    clear(elements)
+    surfaces      := &solution.surfaces
+    points        := &solution.points
+    clear(surfaces)
+    clear(points)
+    
+    // @note Point 0 is never used-
+    append_nothing(points) 
     
     x_sub_count :: 2
     y_sub_count :: 2
-    assert(x_sub_count * y_sub_count * cast(int) quads.quad_count <= cap(solution.elements))
+    assert(x_sub_count * y_sub_count * cast(int) quads.quad_count <= cap(solution.points))
     
-    bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset:][:quads.quad_count]
     vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
     
-    for _, quad_index in bitmaps {
-        ve0 := &vertices[quad_index*4 + 0]
-        ve1 := &vertices[quad_index*4 + 1]
-        ve2 := &vertices[quad_index*4 + 2]
-        ve3 := &vertices[quad_index*4 + 3]
+    for vertex_index: u32; vertex_index < cast(u32) len(vertices); vertex_index += 4 {
+        ve0 := &vertices[vertex_index + 0]
+        ve1 := &vertices[vertex_index + 1]
+        ve2 := &vertices[vertex_index + 2]
+        ve3 := &vertices[vertex_index + 3]
         
-        ve0p := ve0.p.xyz + {0, 0, ve0.p.w}
-        ve1p := ve1.p.xyz + {0, 0, ve1.p.w}
-        ve2p := ve2.p.xyz + {0, 0, ve2.p.w}
-        ve3p := ve3.p.xyz + {0, 0, ve3.p.w}
-        
-        span01 := ve1p - ve0p
-        span03 := ve3p - ve0p
-        
-        x_axis := span01
-        y_axis := span03
-        
-        width  := length(x_axis)
-        height := length(y_axis)
-        
-        x_axis = safe_ratio_0(x_axis, width)
-        y_axis = safe_ratio_0(y_axis, height) 
-        
-        sub_width  := width  / x_sub_count
-        sub_height := height / y_sub_count
-        
-        ve0.light_count = x_sub_count * y_sub_count
-        ve1.light_count = x_sub_count * y_sub_count
-        ve2.light_count = x_sub_count * y_sub_count
-        ve3.light_count = x_sub_count * y_sub_count
-        
-        pack_index := ve0.light_index
-        for y_sub in 0..<y_sub_count {
-            for x_sub in 0..<x_sub_count {
-                element := append_into(elements)
-                element^ = {}
-                
-                element.p = ve0p + 
-                    (cast(f32) x_sub + 0.5) * sub_width  * x_axis + 
-                    (cast(f32) y_sub + 0.5) * sub_height * y_axis
-                
-                element.width  = sub_width
-                element.height = sub_height
-                element.x_axis = x_axis
-                element.y_axis = y_axis
-                
-                element.n = unpack_normal(ve0.n)
-                
-                color := rgba_to_v4(ve0.color)
-                element.reflect_color  = 0.95 * color.rgb
-                element.transparency   = color.a
-                element.emission_color = max_emission_value * ve0.emission
-                
-                element.pack_index = pack_index
-                pack_index += 1
+        if ve0.light_index != 0 {
+            ve0p := ve0.p.xyz + {0, 0, ve0.p.w}
+            ve1p := ve1.p.xyz + {0, 0, ve1.p.w}
+            ve2p := ve2.p.xyz + {0, 0, ve2.p.w}
+            ve3p := ve3.p.xyz + {0, 0, ve3.p.w}
+            
+            span01 := ve1p - ve0p
+            span03 := ve3p - ve0p
+            
+            x_axis := span01
+            y_axis := span03
+            
+            width  := length(x_axis)
+            height := length(y_axis)
+            
+            x_axis = safe_ratio_0(x_axis, width)
+            y_axis = safe_ratio_0(y_axis, height) 
+            
+            sub_width  := width  / x_sub_count
+            sub_height := height / y_sub_count
+            
+            ve0.light_count = x_sub_count * y_sub_count
+            ve1.light_count = x_sub_count * y_sub_count
+            ve2.light_count = x_sub_count * y_sub_count
+            ve3.light_count = x_sub_count * y_sub_count
+            
+            surface_index := cast(u32) len(surfaces)
+            surface := append_into(surfaces)
+            surface ^ = {}
+            
+            surface.p = ve0p + .5 * width * x_axis + .5 * height * y_axis
+            surface.n = unpack(ve0.n)
+            
+            surface.width  = width
+            surface.height = height
+            surface.x_axis = x_axis
+            surface.y_axis = y_axis
+            
+            color := rgba_to_v4(ve0.color)
+            surface.transparency   = color.a
+            
+            surface.light_index = ve0.light_index
+            surface.light_count = ve0.light_count
+            
+            assert(x_sub_count * y_sub_count == surface.light_count)
+            for y_sub in 0..<y_sub_count {
+                for x_sub in 0..<x_sub_count {
+                    point_index := len(points)
+                    point := append_into(points)
+                    point ^ = {}
+                    
+                    point.p = ve0p + (cast(f32) x_sub + 0.5) * sub_width  * x_axis +  (cast(f32) y_sub + 0.5) * sub_height * y_axis
+                    
+                    point.n             = surface.n
+                    point.surface_index = surface_index
+                    point.reflect_color = 0.95 * color.rgb
+                    
+                    solution.emission_color_0[point_index] = max_emission_value * ve0.emission
+                    // @todo just zero all intermediates at once
+                    solution.emission_color_1[point_index] = {}
+                    solution.average_direction_to_light[point_index] = {}
+                }
             }
         }
     }
@@ -846,20 +880,41 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
     
     min_emission: f32 = 0 // @todo Tune this to something higher than 0?
     
+    source_emission_color      := solution.emission_color_0[:]
+    destination_emission_color := solution.emission_color_1[:]
+    
     for _ in 0..<LightingIterationCount {
-        for &emitter, emitter_index in solution.elements {
-            if (emitter.emission_color.r + emitter.emission_color.g + emitter.emission_color.b) > min_emission {
-                emission_color := emitter.emission_color * emitter.reflect_color
+        for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
+            point := &solution.points[point_index]
+            emission_color := source_emission_color[point_index]
+            
+            if (emission_color.r + emission_color.g + emission_color.b) > min_emission {
+                emission_color *= point.reflect_color
                 
                 series := seed_random_series(1234)
                 for _ in 0..<ray_count {
-                    emission_direction := sample_hemisphere(&series, emitter.n)
+                    emission_direction := sample_hemisphere(&series, point.n)
                     
-                    _, hit_index := cast_ray(solution.elements[:], emitter_index, emitter.p, emission_direction)
+                    ray_p, hit_index := cast_ray(solution, point_index, point.p, emission_direction)
                     
-                    if hit_index != len(solution.elements) {
-                        hit := &solution.elements[hit_index]
-                        accumulate_sample(hit, emission_color, light_power, -emission_direction)
+                    if hit_index < len(solution.surfaces) {
+                        hit_surface := &solution.surfaces[hit_index]
+                        
+                        closest_distance_squared: f32 = +Infinity
+                        closest_point_index: u32
+                        for test_index in 0..<hit_surface.light_count {
+                            point := solution.points[test_index]
+                            distance_squared := length_squared(point.p - ray_p)
+                            
+                            if closest_distance_squared > distance_squared {
+                                closest_distance_squared = distance_squared
+                                closest_point_index = test_index
+                            }
+                        }
+                        
+                        if closest_point_index != 0 {
+                            accumulate_sample(hit_surface, &destination_emission_color[closest_point_index], &solution.average_direction_to_light[closest_point_index], emission_color, light_power, -emission_direction)
+                        }
                     }
                 }
             }
@@ -870,50 +925,51 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
         sun_color := v4 { 1.0, .99, .73, 10.0 / cast(f32) LightingIterationCount }
         sun_direction := normalize_or_zero(v3 {1,1,1})
         
-        for &reflector, element_index in solution.elements {
-            series := seed_random_series(1234)
-            for _ in 0..<sky_ray_count {
-                ray_direction := sample_hemisphere(&series, reflector.n)
+        for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
+            when false {
+                series := seed_random_series(1234)
+                for _ in 0..<sky_ray_count {
+                    ray_direction := sample_hemisphere(&series, point.n)
+                    
+                    hit_index := cast_ray(solution, point_index, point.p, ray_direction)
+                    
+                    if hit_index == len(solution.surfaces) {
+                        // @note Add some skylight here.
+                        accumulate_sample(&point, sky_color.rgb, sky_color.a, ray_direction)
+                    }
+                }
                 
-                _, hit_index := cast_ray(solution.elements[:], element_index, reflector.p, ray_direction)
-                
-                if hit_index == len(solution.elements) {
-                    // @note Add some skylight here.
-                    accumulate_sample(&reflector, sky_color.rgb, sky_color.a, ray_direction)
+                {
+                    hit_index := cast_ray(solution, point_index, point.p, sun_direction)
+                    
+                    if hit_index == len(solution.surfaces) {
+                        // @note Add some sunlight here.
+                        accumulate_sample(&point, sun_color.rgb, sun_color.a, sun_direction)
+                    }
                 }
             }
             
-            {
-                _, hit_index := cast_ray(solution.elements[:], element_index, reflector.p, sun_direction)
-                
-                if hit_index == len(solution.elements) {
-                    // @note Add some sunlight here.
-                    accumulate_sample(&reflector, sun_color.rgb, sun_color.a, sun_direction)
-                }
-            }
-            
-            reflector.emission_color += reflector.next_emission_color
-            reflector.next_emission_color = 0
+            source_emission_color[point_index] += destination_emission_color[point_index]
+            destination_emission_color[point_index] = 0
         }
         
         ray_count /= 2
     }
+    
+    for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
+        direction := &solution.average_direction_to_light[point_index]
+        direction^ = normalize_or_zero(direction^)
+    }
 }
 
-accumulate_sample :: proc (element: ^LightingElement, light_color: v3, light_power: f32, normal_to_light: v3) {
-    angular_falloff := clamp01(dot(element.n, normal_to_light))
+accumulate_sample :: proc (surface: ^LightingSurface, destination_emission_color: ^v3, average_direction_to_light: ^v3, light_color: v3, light_power: f32, normal_to_light: v3) {
+    angular_falloff := clamp01(dot(surface.n, normal_to_light))
     
     power  := light_power * angular_falloff
     weight := power * length(light_color)
     
-    element.next_emission_color        += power  * light_color
-    element.average_direction_to_light += weight * normal_to_light
-}
-
-gather_final_lighting :: proc (solution: ^LightingSolution) {
-    for &element in solution.elements {
-        element.average_direction_to_light = normalize_or_zero(element.average_direction_to_light)
-    }
+    destination_emission_color^ += power  * light_color
+    average_direction_to_light^ += weight * normal_to_light
 }
 
 sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
@@ -927,39 +983,39 @@ sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
     return result
 }
 
-cast_ray :: proc (elements: [] LightingElement, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
-    result_color := cast(v3) 0 // @todo Need a skylight method that works with our propagation.
-    result_index := len(elements)
+cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
+    result_index := len(solution.surfaces)
+    result_p: v3
     
     closest_hit := +Infinity
-    for &element, element_index in elements {
-        if element_index != skip_index {
-            ray_element_n := dot(ray_direction, element.n)
+    for &surface, surface_index in solution.surfaces {
+        if surface_index != skip_index {
+            ray_surface_n := dot(ray_direction, surface.n)
             
-            if ray_element_n < -0.001 {
-                plane_to_origin := ray_origin - element.p
+            if ray_surface_n < -0.001 {
+                plane_to_origin := ray_origin - surface.p
                 
-                d := dot(element.n, plane_to_origin)
-                t := -d / ray_element_n
+                d := dot(surface.n, plane_to_origin)
+                t := -d / ray_surface_n
                 
                 if t > 0 && closest_hit > t {
                     ray_point := plane_to_origin + t * ray_direction
                     
-                    x_check := 2 * dot(ray_point, element.x_axis)
-                    y_check := 2 * dot(ray_point, element.y_axis)
+                    x_check := 2 * dot(ray_point, surface.x_axis)
+                    y_check := 2 * dot(ray_point, surface.y_axis)
                     
-                    if x_check >= -element.width  && x_check <= element.width &&
-                       y_check >= -element.height && y_check <= element.height {
-                        closest_hit  = t
-                        result_color = element.emission_color
-                        result_index = element_index
+                    if x_check >= -surface.width  && x_check <= surface.width &&
+                       y_check >= -surface.height && y_check <= surface.height {
+                        closest_hit = t
+                        result_p = ray_point
+                        result_index = surface_index
                     }
                 }
             }
         }
     }
     
-    return result_color, result_index
+    return result_p, result_index
 }
 
 ////////////////////////////////////////////////
@@ -974,25 +1030,21 @@ render_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textu
 }
 
 render_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
-    timed_function()
-    
+    /*
     for element in solution.elements {
         x := (0.5 * element.width  - 0.03) * element.x_axis
         y := (0.5 * element.height - 0.03) * element.y_axis
         
-        ps: [4] v4
-        ps[0].xyz = element.p - x - y
-        ps[1].xyz = element.p + x - y
-        ps[2].xyz = element.p + x + y
-        ps[3].xyz = element.p - x + y
+        p := element.p
         
         emission := clamp01(element.emission_color)
         c := v4_to_rgba(V4(emission, element.transparency))
         
         bitmap := &group.commands.white_bitmap
         
-        push_quad(group, bitmap, **ps, 0,0,0,0, c,c,c,c)
+        push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
     }
+    */
 }
 
 render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
@@ -1007,10 +1059,10 @@ render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
                     c := v4 {0,0,0, 1}
                     count: f32
                     for index != 0 {
-                        t := textures.t[index]
-                        defer index = cast(u16) t.next
+                        texel := textures.texels[index]
+                        defer index = cast(u16) texel.next
                         
-                        unpacked := rgba_to_v4(t.c)
+                        unpacked := rgba_to_v4(texel.c)
                         unpacked = decode_light_with_power(unpacked)
                         c += unpacked
                         count += 1
@@ -1041,59 +1093,23 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
     bounds: Rectangle3
     dimension: v3
     inv_voxel_dimension: v3
-    if false {
-        bounds = rectangle_inverted_infinity(Rectangle3)
-        for element in solution.elements {
-            bounds = get_union_with_point(bounds, element.p)
-        }
+    for point_index in 0..<len(solution.points) {
+        point := solution.points[point_index]
+        source_emission_color := solution.emission_color_0[point_index]
         
-        bounds    = add_radius(bounds, 0.1)
-        dimension = get_dimension(bounds)
-        
-        inv_voxel_dimension = cast(v3) lookup_dimensions / dimension
-        
-        pack_index: u32
-        for element in solution.elements {
-            voxel_p     := (element.p - bounds.min) * inv_voxel_dimension
-            voxel_index := truncate(u32, voxel_p)
-            
-            lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
-            
-            light_power := length(element.emission_color.rgb)
-            emission_color: v4
-            if light_power > 0 {
-                light_color := element.emission_color.rgb / light_power
-                emission_color = V4(light_color, clamp01(light_power / max_light_power))
-            }
-            c := v4_to_rgba(emission_color)
-            
-            pack_index += 1
-            
-            t := &textures.t[pack_index]
-            t.p = element.p
-            t.c = c
-            t.d.xyz = element.average_direction_to_light
-            
-            t.next     = cast(u32) lookup_at^
-            lookup_at^ = cast(u16) pack_index
+        light_power := length(source_emission_color.rgb)
+        emission_color: v4
+        if light_power > 0 {
+            light_color := source_emission_color.rgb / light_power
+            emission_color = V4(light_color, clamp01(light_power / max_light_power))
         }
-    } else {
-        for element, element_index in solution.elements {
-            light_power := length(element.emission_color.rgb)
-            emission_color: v4
-            if light_power > 0 {
-                light_color := element.emission_color.rgb / light_power
-                emission_color = V4(light_color, clamp01(light_power / max_light_power))
-            }
-            c := v4_to_rgba(emission_color)
-            
-            
-            pack_index := element.pack_index
-            t := &textures.t[pack_index]
-            t.p = element.p
-            t.c = c
-            t.d.xyz = element.average_direction_to_light
-        }
+        c := v4_to_rgba(emission_color)
+        
+        
+        texel := &textures.texels[point_index]
+        texel.p = point.p
+        texel.c = c
+        texel.d.xyz = solution.average_direction_to_light[point_index]
     }
     
     {
