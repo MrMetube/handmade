@@ -10,16 +10,19 @@ struct VertexOutput {
     v3  world_n;
     f32 fog_distance;
     nointerpolation u32 texture;
+    
+    // @todo Let the fragment stage read these values directly out of the vertices buffer.
+    nointerpolation u32 light_index;
+    nointerpolation u32 light_count;
 };
 
 [shader("vertex")]
 VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
-    // The command stream stores quads as triangle strips, but NoGraphicsAPI's
-    // current graphics PSO uses triangle lists. Flip the two triangles to
-    // match the Vulkan rasterizer winding after the Y coordinate conversion.
-    
+    // @todo Move this to a mesh shader, which then emits 2 triangles to build the quad. Remember to reduce the invocation count on the cpu (quad_count and not quad_count * 4). This is independent of the QuadWinding, but we should still just clean that up, now that there is only one renderer.
     // :QuadWinding:
+    // The command stream stores quads as triangle strips, but the PSO uses triangle lists. Flip the two triangles to match the Vulkan rasterizer winding after the Y coordinate conversion.
     u32 quad_vertex_indices[6] = { 0u, 2u, 1u, 2u, 3u, 1u };
+    
     u32 quad_index             = vertex_id / 6u;
     u32 quad_vertex_index = quad_vertex_indices[vertex_id % 6u];
     TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + quad_vertex_index];
@@ -41,21 +44,38 @@ VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
     output.fragment_p.y *= -1;
     output.fragment_p.z = 0.5 * (output.fragment_p.z + output.fragment_p.w);
     
-    output.uv = v2(vertex.uv & 0xffffu, vertex.uv >> 16u) / 65535.0f;
+    output.uv = unpack_vertex_uv(vertex.uv);
     output.color = rgba_to_v4(vertex.color);
     
     output.fog_distance = dot(z_vertex.xyz - root.camera_p, root.fog_direction);
     
     output.world_p = z_vertex.xyz;
     
-    v3 normal = v3(iv3(i32(vertex.n << 22u) >> 22, i32(vertex.n << 12u) >> 22, i32(vertex.n << 2u) >> 22));
-    output.world_n = v3(normal) / 511.0f;
+    output.world_n = unpack_vertex_normal(vertex.n);
     
     output.texture = root.textures[quad_index];
+    
+    output.light_index = vertex.light_index;
+    output.light_count = vertex.light_count;
     
     return output;
 }
 
+v3 unpack_vertex_normal(u32 n) {
+    v3 result = v3(iv3(
+        i32(n << 22u) >> 22, 
+        i32(n << 12u) >> 22, 
+        i32(n <<  2u) >> 22)
+    );
+    result *= 1.0 / 511.0;
+    return result;
+}
+
+v2 unpack_vertex_uv(u32 uv) {
+    v2 result = v2(uv & 0xffffu, uv >> 16u);
+    result *= 1.0 / 65535.0;
+    return result;
+}
 
 [shader("fragment")]
 v4 fragmentMain(VertexOutput input) : SV_Target0 {
@@ -94,6 +114,7 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
         v3 voxel_fraction = voxel_p - voxel_floor;
         iv3 voxel_index = iv3(voxel_floor);
         
+        /*
         v3 l000 = sum_voxel_light(input, voxel_index);
         v3 l001 = sum_voxel_light(input, voxel_index + iv3( 0, 0, 1));
         v3 l010 = sum_voxel_light(input, voxel_index + iv3( 0, 1, 0));
@@ -109,7 +130,9 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
         v3   l0 = lerp(l00,  l01,  voxel_fraction.y);
         v3   l1 = lerp(l10,  l11,  voxel_fraction.y);
         v3    l = lerp(l0,   l1,   voxel_fraction.x);
+        */
         
+        v3 l = sum_light(input);
         surface_reflect.rgb *= l;
         // surface_reflect.rgb = l; // @todo
     }
@@ -120,8 +143,40 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
 }
 
 // @volatile see rendergroup.odin
-static const iv3 lookup_dimension = iv3(8, 8, 16);
+static const iv3 lookup_dimension = iv3(32, 32, 32);
 static const f32 max_light_power  = 10.0;
+
+v3 sum_light(VertexOutput input) {
+    u32 light_index = input.light_index;
+    u32 light_count = input.light_count;
+    v4 result = 0;
+    
+    if (light_count > 4) light_count = 4; // @todo REMOVE THIS!
+    
+    while (light_count != 0) {
+        LightingTexel *light = &root.lighting_t[light_index];
+        
+        v3 light_p  = light.p;
+        v3 light_d  = light.d;
+        v4 light_c  = rgba_to_v4(light.c);
+        
+        v3 delta                = light_p - input.world_p;
+        f32 contribution        = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
+        f32 directional_falloff = clamp01(dot(light_d, input.world_n));
+        
+        result.rgb += contribution * directional_falloff * light_c.rgb * light_c.a * max_light_power;
+        result.a   += contribution;
+        
+        light_index += 1;
+        light_count -= 1;
+    }
+    
+    if (result.a > 0) {
+        result.rgb *= 1 / result.a;
+    }
+    
+    return result.rgb;
+}
 
 v3 sum_voxel_light(VertexOutput input, iv3 voxel_index) {
     voxel_index.x = clamp(voxel_index.x, 0, lookup_dimension.x-1);

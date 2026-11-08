@@ -9,9 +9,9 @@ import "core:os"
 // @study does radlink also accept this linker flag?
 platform_flags := [] string { /* "-subsystem:windows", */ `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 
-PedanticGame     :: false
-PedanticRender   :: false
-PedanticPlatform :: false
+pedantic_game     :: false
+pedantic_render   :: false
+pedantic_platform :: false
 
 optimize :: !false
 native   :: true
@@ -19,26 +19,11 @@ internal :: true
 
 optimize_render :: false
 
-/* 
- @todo(viktor):
+/* @todo
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
  - get rid of INTERNAL define
  */
  
-////////////////////////////////////////////////
-/*
-Should the build script itself have flags or should it all be in the file?
-
-- Debug build with no optimizations then run
-  - debug symbols and start debugger
-
-- GPU Debug
-  - build and start through renderdoc/nsight
-  
-- Optimized build then run 
-  - o:speed, target, microarch
-
-*/
 ////////////////////////////////////////////////
 
 code_dir       :: "code"
@@ -71,9 +56,9 @@ main :: proc () {
     if !create_shader_pack_file(shader_pack_path, optimize) { exit(1) }
     
     pedantic_packages: [dynamic; 4] string
-    if PedanticGame     { append(&pedantic_packages, game_package)   }
-    if PedanticRender   { append(&pedantic_packages, render_package) }
-    if PedanticPlatform { append(&pedantic_packages, main_package)   }
+    if pedantic_game     { append(&pedantic_packages, game_package)   }
+    if pedantic_render   { append(&pedantic_packages, render_package) }
+    if pedantic_platform { append(&pedantic_packages, main_package)   }
     append(&pedantic_packages, "hha")
     
     if begin_build(cmd, "code/asset_builder", "asset_builder.exe") { // hha
@@ -102,8 +87,8 @@ main :: proc () {
         build_optimizations(optimize)
         build_native(native)
         
-        build_pedantic(PedanticGame)
-        build_very_pedantic(PedanticGame, ..pedantic_packages[:])
+        build_pedantic(pedantic_game)
+        build_very_pedantic(pedantic_game, ..pedantic_packages[:])
         
         append(cmd, custom_attribute_flag)
         if internal { build_define("INTERNAL", "true") }
@@ -127,6 +112,10 @@ main :: proc () {
         build_meander()
         build_optimizations(optimize_render && optimize)
         build_native(native)
+        
+        build_pedantic(pedantic_render)
+        build_very_pedantic(pedantic_render, ..pedantic_packages[:])
+        
         append(cmd, custom_attribute_flag)
         if internal { build_define("INTERNAL", "true") }
         
@@ -154,8 +143,8 @@ main :: proc () {
             build_optimizations(optimize)
             build_native(native)
             
-            build_pedantic(PedanticPlatform)
-            build_very_pedantic(PedanticPlatform, ..pedantic_packages[:])
+            build_pedantic(pedantic_platform)
+            build_very_pedantic(pedantic_platform, ..pedantic_packages[:])
             
             append(cmd, custom_attribute_flag)
             if internal { build_define("INTERNAL", "true") }

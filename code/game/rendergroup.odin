@@ -153,6 +153,10 @@ TexturedVertex :: struct {
     uv:       PackedUV,
     color:    Color,
     emission: f32,
+    
+    // @todo Doesn't need to be per-vertex - move this into a its own per-primitive buffer.
+    light_index: u32,
+    light_count: u32,
 }
 
 PackedNormal :: bit_field u32 {
@@ -362,14 +366,17 @@ push_quad :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0,
     
     n0, n1, n2, n3: v3 = normal, normal, normal, normal
     
+    light_index: u32 = cast(u32) len(group.commands.vertex_buffer)
+    light_count: u32 = 4
+    
     append(&group.commands.quad_bitmap_buffer,  bitmap)
     // @note(viktor): reorder from quad ordering to triangle strip ordering
     // :QuadWinding:
     append(&group.commands.vertex_buffer, 
-        TexturedVertex {p3, pack(n3), pack(t3), c3, emission},
-        TexturedVertex {p0, pack(n0), pack(t0), c0, emission},
-        TexturedVertex {p2, pack(n2), pack(t2), c2, emission},
-        TexturedVertex {p1, pack(n1), pack(t1), c1, emission},
+        { p3, pack(n3), pack(t3), c3, emission, light_index, light_count },
+        { p0, pack(n0), pack(t0), c0, emission, light_index, light_count },
+        { p2, pack(n2), pack(t2), c2, emission, light_index, light_count },
+        { p1, pack(n1), pack(t1), c1, emission, light_index, light_count },
     )
 }
 
@@ -729,7 +736,7 @@ light_element_limit :: 16 * 1024
 
 // @volatile see zbias.slang
 @(common)
-lookup_dimensions :: uv3 { 8, 8, 16 }
+lookup_dimensions :: uv3 { 32, 32, 32 }
 max_light_power :: 10.0
 
 LightingElement :: struct {
@@ -747,6 +754,8 @@ LightingElement :: struct {
     
     // @note Gather
     average_direction_to_light: v3,
+    
+    pack_index: u32,
 }
 
 LightingSolution :: struct {
@@ -788,8 +797,8 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
     elements := &solution.elements
     clear(elements)
     
-    x_sub_count :: 3
-    y_sub_count :: 3
+    x_sub_count :: 2
+    y_sub_count :: 2
     assert(x_sub_count * y_sub_count * cast(int) quads.quad_count <= cap(solution.elements))
     
     bitmaps  := commands.quad_bitmap_buffer[quads.bitmap_offset:][:quads.quad_count]
@@ -822,6 +831,12 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
         sub_width  := width  / x_sub_count
         sub_height := height / y_sub_count
         
+        ve0.light_count = x_sub_count * y_sub_count
+        ve1.light_count = x_sub_count * y_sub_count
+        ve2.light_count = x_sub_count * y_sub_count
+        ve3.light_count = x_sub_count * y_sub_count
+        
+        pack_index := ve0.light_index
         for y_sub in 0..<y_sub_count {
             for x_sub in 0..<x_sub_count {
                 element := append_into(elements)
@@ -842,6 +857,9 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
                 element.reflect_color  = 0.95 * color.rgb
                 element.transparency   = color.a
                 element.emission_color = max_emission_value * ve0.emission
+                
+                element.pack_index = pack_index
+                pack_index += 1
             }
         }
     }
@@ -887,7 +905,6 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
                 
                 if hit_index == len(solution.elements) {
                     // @note Add some skylight here.
-                    used_color := sky_color
                     accumulate_sample(&reflector, sky_color.rgb, sky_color.a, ray_direction)
                 }
             }
@@ -920,7 +937,7 @@ accumulate_sample :: proc (element: ^LightingElement, light_color: v3, light_pow
 }
 
 gather_final_lighting :: proc (solution: ^LightingSolution) {
-    for &element, element_index in solution.elements {
+    for &element in solution.elements {
         element.average_direction_to_light = normalize_or_zero(element.average_direction_to_light)
     }
 }
@@ -1048,40 +1065,62 @@ output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSoluti
     
     textures.lookup = 0
     
-    bounds := rectangle_inverted_infinity(Rectangle3)
-    for element in solution.elements {
-        bounds = get_union_with_point(bounds, element.p)
-    }
-    
-    bounds     = add_radius(bounds, 0.1)
-    dimension := get_dimension(bounds)
-    
-    inv_voxel_dimension := cast(v3) lookup_dimensions / dimension
-    
-    pack_index: u32
-    for element in solution.elements {
-        voxel_p     := (element.p - bounds.min) * inv_voxel_dimension
-        voxel_index := truncate(u32, voxel_p)
-        
-        lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
-        
-        light_power := length(element.emission_color.rgb)
-        emission_color: v4
-        if light_power > 0 {
-            light_color := element.emission_color.rgb / light_power
-            emission_color = V4(light_color, clamp01(light_power / max_light_power))
+    bounds: Rectangle3
+    dimension: v3
+    inv_voxel_dimension: v3
+    if false {
+        bounds = rectangle_inverted_infinity(Rectangle3)
+        for element in solution.elements {
+            bounds = get_union_with_point(bounds, element.p)
         }
-        c := v4_to_rgba(emission_color)
         
-        pack_index += 1
+        bounds    = add_radius(bounds, 0.1)
+        dimension = get_dimension(bounds)
         
-        t := &textures.t[pack_index]
-        t.p = element.p
-        t.c = c
-        t.d.xyz = element.average_direction_to_light
+        inv_voxel_dimension = cast(v3) lookup_dimensions / dimension
         
-        t.next     = cast(u32) lookup_at^
-        lookup_at^ = cast(u16) pack_index
+        pack_index: u32
+        for element in solution.elements {
+            voxel_p     := (element.p - bounds.min) * inv_voxel_dimension
+            voxel_index := truncate(u32, voxel_p)
+            
+            lookup_at := &textures.lookup[voxel_index.z][voxel_index.y][voxel_index.x]
+            
+            light_power := length(element.emission_color.rgb)
+            emission_color: v4
+            if light_power > 0 {
+                light_color := element.emission_color.rgb / light_power
+                emission_color = V4(light_color, clamp01(light_power / max_light_power))
+            }
+            c := v4_to_rgba(emission_color)
+            
+            pack_index += 1
+            
+            t := &textures.t[pack_index]
+            t.p = element.p
+            t.c = c
+            t.d.xyz = element.average_direction_to_light
+            
+            t.next     = cast(u32) lookup_at^
+            lookup_at^ = cast(u16) pack_index
+        }
+    } else {
+        for element, element_index in solution.elements {
+            light_power := length(element.emission_color.rgb)
+            emission_color: v4
+            if light_power > 0 {
+                light_color := element.emission_color.rgb / light_power
+                emission_color = V4(light_color, clamp01(light_power / max_light_power))
+            }
+            c := v4_to_rgba(emission_color)
+            
+            
+            pack_index := element.pack_index
+            t := &textures.t[pack_index]
+            t.p = element.p
+            t.c = c
+            t.d.xyz = element.average_direction_to_light
+        }
     }
     
     {

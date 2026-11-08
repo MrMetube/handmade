@@ -707,7 +707,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 lighting_lookup = vulkan.lighting_lookup.gpu,
                 
                 lighting_disabled = cast(b32) vulkan.settings.lighting_disabled,
-                _padding = {}
+                _padding = {},
             }
             gpu.draw(commands, root.gpu, quads.quad_count * 6)
         
@@ -1058,7 +1058,7 @@ create_render_target :: proc (vulkan: ^Vulkan, index: TextureDescriptor, desc: g
     
     result := RenderTarget {
         descriptor  = index,
-        render_view = gpu.create_render_view(slot.texture)
+        render_view = gpu.create_render_view(slot.texture),
     }
     gpu.write_texture_descriptor(vulkan.texture_descriptor_heap, transmute(u32) index, slot.texture, .sampled)
     
