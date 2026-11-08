@@ -429,7 +429,7 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
 ////////////////////////////////////////////////
 
 recreate_psos :: proc (vulkan: ^Vulkan) {
-    spirvs: [shared.Shaders] struct { vertex, fragment: [] u8 }
+    spirvs: [shared.Shaders] Shader
     
     {
         pack, err := os.open(shader_pack_path)
@@ -439,13 +439,13 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
         read_value :: proc (r: io.Reader, $T: typeid) -> T {
             result: T
             n, err := io.read_ptr(r, &result, size_of(T))
-            assert(err == nil && n == size_of(T))
+            assert((err == nil || err == .EOF) && n == size_of(T))
             return result
         }
         
         read_slice_at :: proc (r: io.Reader, destination: [] u8, offset: u64) {
             n, err := io.read_at(r, destination, cast(i64) offset)
-            assert(err == nil && n == len(destination))
+            assert((err == nil || err == .EOF) && n == len(destination))
         }
         
         r := os.to_reader(pack)
@@ -457,17 +457,20 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
         for it, shader in header.infos {
             spirv := &spirvs[shader]
             
-            spirv.vertex   = make(context.allocator, u8, it.vertex_count)
-            spirv.fragment = make(context.allocator, u8, it.fragment_count)
+            // @todo calculate total spirv size and allocate one dynamic array of that size, then sub-slice and copy the spirv into it. Reduce this to one allocation and one delete call.
+            spirv.first_stage = make(context.allocator, u8, it.first_stage_count)
+            spirv.fragment    = make(context.allocator, u8, it.fragment_count)
             
-            read_slice_at(r, spirv.vertex,   it.vertex_offset)
-            read_slice_at(r, spirv.fragment, it.fragment_offset)
+            spirv.is_mesh_shader = cast(bool) it.is_mesh_shader
+            
+            read_slice_at(r, spirv.first_stage, it.first_stage_offset)
+            read_slice_at(r, spirv.fragment,    it.fragment_offset)
         }
     }
     
     defer for it in spirvs {
-        delete(it.vertex,   context.allocator)
-        delete(it.fragment, context.allocator)
+        delete(it.first_stage, context.allocator)
+        delete(it.fragment,    context.allocator)
     }
     
     ////////////////////////////////////////////////
@@ -475,22 +478,19 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
     destroy_all_psos(vulkan)
     
     vulkan.zbias_pso = create_graphics_pso(vulkan.device, 
-        spirvs[.zbias].vertex, 
-        spirvs[.zbias].fragment, 
+        spirvs[.zbias],
         color_targets = { gpu.color_target_desc(format = .bgra8_srgb) },
         depth_format   = .d32_float,
         rasterization  = { cull = .counter_clockwise },
     )
     
     vulkan.peel_composite_pso = create_graphics_pso(vulkan.device,
-        spirvs[.peel_composite].vertex, 
-        spirvs[.peel_composite].fragment, 
+        spirvs[.peel_composite],
         color_targets = { gpu.color_target_desc(format = .bgra8_srgb) },
     )
     
     vulkan.multisample_resolve_pso = create_graphics_pso(vulkan.device,
-        spirvs[.multisample_resolve].vertex, 
-        spirvs[.multisample_resolve].fragment, 
+        spirvs[.multisample_resolve],
         color_targets = {
             gpu.color_target_desc(format = .bgra8_srgb),
             gpu.color_target_desc(format = .rgba8_unorm),
@@ -500,14 +500,12 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
     )
     
     vulkan.final_stretch_pso = create_graphics_pso(vulkan.device,
-        spirvs[.final_stretch].vertex, 
-        spirvs[.final_stretch].fragment, 
+        spirvs[.final_stretch],
         color_targets = { gpu.color_target_desc(format = .bgra8_srgb) },
     )
     
     vulkan.multigrid_light_up_pso = create_graphics_pso(vulkan.device,
-        spirvs[.multigrid_light_up].vertex, 
-        spirvs[.multigrid_light_up].fragment, 
+        spirvs[.multigrid_light_up],
         color_targets = {
             gpu.color_target_desc(format = .rgba32_float),
             gpu.color_target_desc(format = .rgba32_float),
@@ -517,8 +515,7 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
     )
     
     vulkan.multigrid_light_down_pso = create_graphics_pso(vulkan.device,
-        spirvs[.multigrid_light_down].vertex, 
-        spirvs[.multigrid_light_down].fragment, 
+        spirvs[.multigrid_light_down],
         color_targets = {
             gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
             gpu.color_target_desc(format = .rgba32_float, blend = gpu.blend_state(enabled = true, color = {.one, .one, .add})),
@@ -526,8 +523,7 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
     )
     
     vulkan.depth_peel_to_lighting_pso = create_graphics_pso(vulkan.device,
-        spirvs[.depth_peel_to_lighting].vertex, 
-        spirvs[.depth_peel_to_lighting].fragment, 
+        spirvs[.depth_peel_to_lighting],
         color_targets = {
             gpu.color_target_desc(format = .rgba32_float),
             gpu.color_target_desc(format = .rgba32_float),
@@ -538,8 +534,7 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
     
     if vulkan.supported_sample_count > 1 {
         vulkan.multisampled_zbias_pso = create_graphics_pso(vulkan.device,
-            spirvs[.zbias].vertex, 
-            spirvs[.zbias].fragment,
+            spirvs[.zbias],
             color_targets  = { gpu.color_target_desc(format = .bgra8_srgb) },
             depth_format   = .d32_float,
             rasterization  = { cull = .counter_clockwise },
@@ -547,12 +542,16 @@ recreate_psos :: proc (vulkan: ^Vulkan) {
         )
     }
 }
-    
-// @note Bake my default arguments.
+
+Shader :: struct {
+    first_stage: [] u8,
+    fragment:    [] u8,
+    is_mesh_shader: bool,
+}
+
 create_graphics_pso :: proc (
     device: gpu.Device,
-    vertex:   [] u8,
-    fragment: [] u8,
+    shader: Shader,
     color_targets:  [] gpu.ColorTargetDesc,
     depth_format:   gpu.Format             = .undefined,
     stencil_format: gpu.Format             = .undefined,
@@ -560,7 +559,12 @@ create_graphics_pso :: proc (
     sample_count:   u32                    = 1,
     ) -> gpu.PSO {
     
-    result := gpu.create_graphics_pso(device, vertex, fragment, "main", "main", color_targets, depth_format, stencil_format, rasterization, sample_count)
+    result: gpu.PSO
+    if shader.is_mesh_shader {
+        result = gpu.create_mesh_pso(device, nil, shader.first_stage, shader.fragment, "", "main", "main", color_targets, depth_format, stencil_format, rasterization, sample_count)
+    } else {
+        result = gpu.create_graphics_pso(device, shader.first_stage, shader.fragment, "main", "main", color_targets, depth_format, stencil_format, rasterization, sample_count)
+    }
     return result
 }
 
@@ -709,7 +713,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 lighting_disabled = cast(b32) vulkan.settings.lighting_disabled,
                 _padding = {},
             }
-            gpu.draw(commands, root.gpu, quads.quad_count * 6)
+            gpu.draw_meshlets(commands, root.gpu, {quads.quad_count, 1, 1})
         
         case .Lighting:
             timed_block("lighting transfer")

@@ -5,10 +5,11 @@ ShaderPackHeader :: struct #packed {
     magic:   [4] u8,
     version: u32,
     infos:   [Shaders] struct #packed { 
-        vertex_offset:   u64, 
-        vertex_count:    u64,
-        fragment_offset: u64, 
-        fragment_count:  u64,
+        first_stage_offset: u64, 
+        first_stage_count:  u64,
+        fragment_offset:    u64, 
+        fragment_count:     u64,
+        is_mesh_shader:     b32,
     },
 }
 

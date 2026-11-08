@@ -1184,8 +1184,8 @@ create_raster_pso :: proc (device: Device, task_spirv, first_stage_spirv, fragme
             },
             flags = { .DESCRIPTOR_HEAP_EXT },
         },
-        stageCount = 1 + (len(task_spirv) != 0 ? 1 : 0) + (len(fragment_spirv) != 0 ? 1 : 0),
-        pStages    = &stages[len(task_spirv) != 0 ? 0 : 1],
+        stageCount = 1 + (task_spirv != nil ? 1 : 0) + (fragment_spirv != nil ? 1 : 0),
+        pStages    = &stages[task_spirv != nil ? 0 : 1],
         pVertexInputState   = mesh ? nil : &vk.PipelineVertexInputStateCreateInfo { sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO },
         pInputAssemblyState = mesh ? nil : &vk.PipelineInputAssemblyStateCreateInfo {
             sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,

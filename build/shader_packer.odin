@@ -7,30 +7,32 @@ import "core:os"
 import "../code/render/shared"
 
 create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) -> bool {
-    Shaders :: shared.Shaders
-    Stage :: enum { vertex, fragment }
-    
-    shaders := [Shaders] string {
-        .zbias                  = "code/render/zbias.slang",
-        .peel_composite         = "code/render/peel_composite.slang",
-        .multisample_resolve    = "code/render/multisample_resolve.slang",
-        .final_stretch          = "code/render/final_stretch.slang",
-        .multigrid_light_up     = "code/render/multigrid_light_up.slang",
-        .multigrid_light_down   = "code/render/multigrid_light_down.slang",
-        .depth_peel_to_lighting = "code/render/depth_peel_to_lighting.slang",
+    Stage  :: enum { mesh, vertex, fragment }
+    Shader :: struct {
+        stages: bit_set[Stage],
+        source:   string,
+        data:   [Stage] struct { spirv: [] u8, read_end: ^os.File }
     }
     
-    shader_spirv: [Shaders] [Stage] [] u8
+    shaders: [shared.Shaders] Shader = {
+        .zbias                  = { stages = { .mesh,   .fragment }, source = "code/render/zbias.slang" },
+        .peel_composite         = { stages = { .vertex, .fragment }, source = "code/render/peel_composite.slang" },
+        .multisample_resolve    = { stages = { .vertex, .fragment }, source = "code/render/multisample_resolve.slang" },
+        .final_stretch          = { stages = { .vertex, .fragment }, source = "code/render/final_stretch.slang" },
+        .multigrid_light_up     = { stages = { .vertex, .fragment }, source = "code/render/multigrid_light_up.slang" },
+        .multigrid_light_down   = { stages = { .vertex, .fragment }, source = "code/render/multigrid_light_down.slang" },
+        .depth_peel_to_lighting = { stages = { .vertex, .fragment }, source = "code/render/depth_peel_to_lighting.slang" },
+    }
+    
+    storage_buffer := make([dynamic] u8, 0, 128*1024*1024)
     
     {
-        read_ends: [Shaders] [Stage] ^os.File
-        
         procs: Procs
         
-        for source, shader in shaders {
-            for stage in Stage {
+        for &shader in shaders {
+            for stage in shader.stages {
                 append(cmd, "slangc")
-                append(cmd, source)
+                append(cmd, shader.source)
                 append(cmd, "-target", "spirv")
                 append(cmd, "-fvk-use-c-layout")
                 append(cmd, "-capability", "spvDescriptorHeapEXT")
@@ -38,31 +40,31 @@ create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) -> bo
                 if optimize { append(cmd, "-O2") }
                 append(cmd, "-entry", fmt.tprintf("%sMain", stage))
                 
-                read_end, write_end, pipe_error := os.pipe(); assert(pipe_error == nil)
+                read_end, write_end, error := os.pipe(); assert(error == nil)
                 
                 proc_index := len(procs)
                 run_command(cmd, async = &procs, stdout = write_end)
                 os.close(write_end)
                 
-                read_ends[shader][stage] = read_end
+                shader.data[stage].read_end = read_end
             }
         }
         
-        // @todo just allocate a single large buffer and copy/os.read the outputs into it after another and store string/slices into that big buffer
-        buf: [128*1024] u8
-        for stages, shader in read_ends {
-            for read_end, stage in stages {
-                bytes: [dynamic] u8
+        read_buffer: [4*1024] u8
+        for &shader in shaders {
+            for stage in shader.stages {
+                it := &shader.data[stage]
+                start := len(storage_buffer)
                 
                 for {
-                    n, err := os.read(read_end, buf[:])
-                    if n > 0 { append(&bytes, ..buf[:n]) }
+                    n, err := os.read(it.read_end, read_buffer[:])
+                    if n > 0 { append(&storage_buffer, ..read_buffer[:n]) }
                     if err == .Broken_Pipe || err == .EOF { break }
                     assert(err == nil)
                 }
-                os.close(read_end)
+                os.close(it.read_end)
                 
-                shader_spirv[shader][stage] = bytes[:]
+                it.spirv = storage_buffer[start:]
             }
         }
         
@@ -91,25 +93,30 @@ create_shader_pack_file :: proc (shader_pack_path: string, optimize: bool) -> bo
     
     data_offset := cast(u64) size_of(header)
     for &info, shader in header.infos {
-        it := shader_spirv[shader]
+        it := shaders[shader]
         
-        info.vertex_offset = data_offset
-        info.vertex_count  = cast(u64) len(it[.vertex])
-        data_offset += info.vertex_count
+        first_stage := .mesh in it.stages ? Stage.mesh : .vertex
+        
+        info.first_stage_offset = data_offset
+        info.first_stage_count  = cast(u64) len(it.data[first_stage].spirv)
+        data_offset += info.first_stage_count
         
         info.fragment_offset = data_offset
-        info.fragment_count  = cast(u64) len(it[.fragment])
+        info.fragment_count  = cast(u64) len(it.data[.fragment].spirv)
         data_offset += info.fragment_count
+        
+        info.is_mesh_shader = .mesh in it.stages
     }
     
     w := os.to_writer(file)
     write_value(w, header)
     
-    for it in shader_spirv {
-        write_bytes(w, it[.vertex])
-        write_bytes(w, it[.fragment])
+    for it in shaders {
+        first_stage := .mesh in it.stages ? Stage.mesh : .vertex
+        write_bytes(w, it.data[first_stage].spirv)
+        write_bytes(w, it.data[.fragment].spirv)
     }
     
-    fmt.printf("INFO: generated packed shader data at %q\n", full_path)
+    fmt.printf("INFO: generated packed shader data at %q (%v shaders)\n", full_path, len(shaders))
     return true
 }

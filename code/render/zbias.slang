@@ -16,47 +16,51 @@ struct VertexOutput {
     nointerpolation u32 light_count;
 };
 
-[shader("vertex")]
-VertexOutput vertexMain(u32 vertex_id : SV_VertexID) {
-    // @todo Move this to a mesh shader, which then emits 2 triangles to build the quad. Remember to reduce the invocation count on the cpu (quad_count and not quad_count * 4). 
-    u32 quad_vertex_indices[6] = { 0u, 1u, 2u, 0u, 2u, 3u };
+[shader("mesh")]
+[outputtopology("triangle")]
+[numthreads(1,1,1)]
+void meshMain(out vertices VertexOutput output_vertices[4], out indices uv3 triangles[2], u32 quad_index : SV_GroupID) {
     
-    u32 quad_index             = vertex_id / 6u;
-    u32 quad_vertex_index = quad_vertex_indices[vertex_id % 6u];
-    TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + quad_vertex_index];
+    SetMeshOutputCounts(4, 2);
+    for (u32 vertex_index = 0; vertex_index < 4; vertex_index += 1) {
+        TexturedVertex vertex = root.vertices[root.vertex_base + quad_index * 4u + vertex_index];
+        
+        v4 in_vertex = v4(vertex.p.xyz, 1.0f);
+        f32 z_bias = vertex.p.z;
+        
+        v4 z_vertex = in_vertex;
+        z_vertex.z += z_bias;
+        
+        v4 z_min_transform = mul(root.projection, in_vertex);
+        v4 z_max_transform = mul(root.projection, z_vertex);
+        
+        f32 modified_z = (z_min_transform.w / z_max_transform.w) * z_max_transform.z;
+        
+        VertexOutput output;
+        output.fragment_p = v4(z_min_transform.xy, modified_z, z_min_transform.w);
+        // Adapt RenderSetup's OpenGL clip space at the Vulkan shader boundary.
+        output.fragment_p.y *= -1;
+        output.fragment_p.z = 0.5 * (output.fragment_p.z + output.fragment_p.w);
+        
+        output.uv = unpack_vertex_uv(vertex.uv);
+        output.color = rgba_to_v4(vertex.color);
+        
+        output.fog_distance = dot(z_vertex.xyz - root.camera_p, root.fog_direction);
+        
+        output.world_p = z_vertex.xyz;
+        
+        output.world_n = unpack_vertex_normal(vertex.n);
+        
+        output.texture = root.textures[quad_index];
+        
+        output.light_index = vertex.light_index;
+        output.light_count = vertex.light_count;
+        
+        output_vertices[vertex_index] = output;
+    }
     
-    v4 in_vertex = v4(vertex.p.xyz, 1.0f);
-    f32 z_bias = vertex.p.z;
-    
-    v4 z_vertex = in_vertex;
-    z_vertex.z += z_bias;
-    
-    v4 z_min_transform = mul(root.projection, in_vertex);
-    v4 z_max_transform = mul(root.projection, z_vertex);
-    
-    f32 modified_z = (z_min_transform.w / z_max_transform.w) * z_max_transform.z;
-    
-    VertexOutput output;
-    output.fragment_p = v4(z_min_transform.xy, modified_z, z_min_transform.w);
-    // Adapt RenderSetup's OpenGL clip space at the Vulkan shader boundary.
-    output.fragment_p.y *= -1;
-    output.fragment_p.z = 0.5 * (output.fragment_p.z + output.fragment_p.w);
-    
-    output.uv = unpack_vertex_uv(vertex.uv);
-    output.color = rgba_to_v4(vertex.color);
-    
-    output.fog_distance = dot(z_vertex.xyz - root.camera_p, root.fog_direction);
-    
-    output.world_p = z_vertex.xyz;
-    
-    output.world_n = unpack_vertex_normal(vertex.n);
-    
-    output.texture = root.textures[quad_index];
-    
-    output.light_index = vertex.light_index;
-    output.light_count = vertex.light_count;
-    
-    return output;
+    triangles[0] = {0, 1, 2};
+    triangles[1] = {0, 2, 3};
 }
 
 v3 unpack_vertex_normal(u32 n) {
