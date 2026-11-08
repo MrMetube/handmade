@@ -246,11 +246,11 @@ metaprogram_collect_plugin_data :: proc (mp: ^Metaprogram, package_name: string)
         slice.sort_by(apis[:],         sort_infos)
         
         if len(file_commons) > 0 {
-            append(commons, File { file_name = file.fullpath, infos = file_commons})
+            append(commons, { file_name = file.fullpath, infos = file_commons})
             file_commons = make([dynamic] Info)
         }
         if len(apis) > 0 {
-            append(&mp.apis, File { file_name = file.fullpath, infos = apis})
+            append(&mp.apis, { file_name = file.fullpath, infos = apis})
             apis = make([dynamic] Info)
         }
     }

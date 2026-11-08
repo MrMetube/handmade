@@ -460,7 +460,7 @@ draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
         transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
         
         if contains(rect, layout.mouse_p) {
-            debug.next_hot_interaction = set_value_interaction(DebugId{ value = {&graph.root, viewed_element} }, &graph.root, viewed_element.guid)
+            debug.next_hot_interaction = set_value_interaction(DebugId{ { &graph.root, viewed_element } }, &graph.root, viewed_element.guid)
         }
         
         #partial switch value in element.type {
@@ -629,7 +629,7 @@ draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, ro
         if outline_color == 0 { outline_color = color * {.2, .2, .2, 1} }
         
         if text != "" {
-            id := DebugId{ value = {root_element, &frame} }
+            id := DebugId{ { root_element, &frame } }
             debug.next_hot_interaction = set_value_continously_interaction(id, &debug.viewed_frame_ordinal, frame_ordinal)
             add_tooltip(debug, text)
         }
@@ -762,7 +762,7 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
             add_tooltip(debug, tooltip)
             // @copypasta with draw_profile
             // @todo(viktor): if has children
-            id := DebugId { value = { graph_root, entry.element } }
+            id := DebugId { { graph_root, entry.element } }
             debug.next_hot_interaction = set_value_interaction(id, graph_root, entry.element.guid)
         }
         
@@ -840,7 +840,7 @@ draw_frame_bars :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
                 
                 // @copypasta with draw_profile
                 if node.first_child != nil {
-                    id := DebugId { value = { graph_root, &element } }
+                    id := DebugId { { graph_root, element } }
                     debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
                 }
             }
@@ -923,7 +923,7 @@ draw_profile_lane :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: 
             add_tooltip(debug, text)
             
             if node.first_child != nil {
-                id := DebugId { value = { graph_root, &element } }
+                id := DebugId { { graph_root, element } }
                 debug.next_hot_interaction = set_value_interaction(id, graph_root, element.guid)
             }
         }
@@ -1419,9 +1419,7 @@ clone_event_link :: proc (debug: ^DebugState, parent: ^DebugEventLink, source: ^
 }
 
 id_from_link :: proc (tree: ^DebugTree, link: ^DebugEventLink) -> DebugId {
-    result: DebugId
-    result.value[0] = tree
-    result.value[1] = link
+    result := DebugId { { tree, link } }
     return result
 }
 

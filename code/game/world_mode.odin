@@ -457,7 +457,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: iv3, left_hole, right_hole
             } else {
                 entity := begin_entity(mode)
                 entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
-                append(&entity.traversables, TraversablePoint{})
+                append(&entity.traversables, {})
                 append(&entity.pieces, VisiblePiece {
                     asset     = .Tuft,
                     dimension = {.75, wall_height},
@@ -489,7 +489,7 @@ add_standart_room :: proc (mode: ^World_Mode, tile_p: iv3, left_hole, right_hole
         
         entity := begin_entity(mode)
         entity.traversables = make_array(mode.world.arena, TraversablePoint, 1)
-        append(&entity.traversables, TraversablePoint{})
+        append(&entity.traversables, {})
         append(&entity.pieces, VisiblePiece {
             asset     = .Tuft,
             dimension = {1, floor_tile_height},

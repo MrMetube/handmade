@@ -496,7 +496,18 @@ create_device :: proc (
         if .WARNING in severity || .ERROR in severity {
             // Keep the library callback dependency-free. Applications can still install
             // their own messenger; this one makes validation failures debugger-visible.
-            fmt.eprintf("NoGraphicsAPI validation: %s\n", pCallbackData.pMessage)
+            
+            // @note @important Only to work around the driver claiming to not support the 1.1 Feature storageInputOutput16, but actually doing so.
+            extension := "storageInputOutput16"
+            message   := cast(string) pCallbackData.pMessage
+            
+            for i in 0..<len(message) - len(extension) {
+                if message[i:][:len(extension)] == extension {
+                    return false
+                }
+            }
+            
+            fmt.eprintf("NoGraphicsAPI validation: %s\n", message)
         }
         return false
     }
@@ -812,6 +823,9 @@ create_device :: proc (
         timestamps_supported:      bool,
         properties:                vk.PhysicalDeviceProperties,
         memory_properties:         vk.PhysicalDeviceMemoryProperties,
+        heap_properties:           vk.PhysicalDeviceDescriptorHeapPropertiesEXT,
+        vulkan12_properties:       vk.PhysicalDeviceVulkan12Properties,
+        
         unified_image_layouts:     bool,
         image_cube_array:          bool,
         texture_compression_bc:    bool,
@@ -819,25 +833,24 @@ create_device :: proc (
         texture_compression_etc2:  bool,
         storage_input_output16:    bool,
         khr_swapchain_mantenance1: bool,
-        heap_properties:           vk.PhysicalDeviceDescriptorHeapPropertiesEXT,
-        vulkan12_properties:       vk.PhysicalDeviceVulkan12Properties,
     }
-    selected: Candidate
-    has_selected: bool
+    
+    selected_candidate: union { Candidate }
     for physical_device in physical_devices {
         candidate: Candidate
         error = inspect_candidate(physical_device, device.surface, khr_surface_maintenance1, ext_surface_maintenance1, &candidate)
         if error == .unsupported { continue }
         if error != .none { return fail_device_creation(&device, error) }
         
-        if !has_selected || candidate.properties.deviceType == .DISCRETE_GPU {
-            selected = candidate
-            has_selected = true
+        if selected_candidate == nil || candidate.properties.deviceType == .DISCRETE_GPU {
+            selected_candidate = candidate
         }
         
         if candidate.properties.deviceType == .DISCRETE_GPU { break }
     }
-    if !has_selected { return fail_device_creation(&device, error) }
+    
+    selected, ok := selected_candidate.(Candidate)
+    if !ok { return fail_device_creation(&device, error) }
     
     device.physical_device               = selected.physical_device
     device.queue_family                  = selected.queue_family
@@ -939,7 +952,12 @@ create_device :: proc (
     enabled_features.mesh_shader.taskShader                             = true
     enabled_features.mesh_shader.meshShader                             = true
     enabled_features.swapchain_maintenance1.swapchainMaintenance1       = true
-
+    
+    // @important @note Added for Handmade Hero shaders.
+    enabled_features.core.features.shaderInt64 = true
+    enabled_features.vulkan12.shaderInt8       = true
+    enabled_features.vulkan12.uniformAndStorageBuffer8BitAccess = true
+    
     enabled_device_extensions: [dynamic; 7] cstring
     append(&enabled_device_extensions, vk.EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
     append(&enabled_device_extensions, vk.KHR_DEVICE_ADDRESS_COMMANDS_EXTENSION_NAME)
