@@ -31,13 +31,11 @@ freelist_push :: proc (list: ^FreeList($T), next: ^^T, params := DefaultPushPara
     
     if !ok {
         assert(list.arena != nil)
-        sub_params := params
-        sub_params.flags -= { .ClearToZero }
         result = push(list.arena, T, params)
-    }
-    
-    if .ClearToZero in params.flags {
-        result^ = {}
+    } else {
+        if .ClearToZero in params.flags {
+            result^ = {}
+        }
     }
     
     return result

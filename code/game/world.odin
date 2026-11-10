@@ -71,10 +71,6 @@ chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: iv3, additi
 update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
     
-    if !mode.show_lighting {
-        enable_lighting(render_group)
-    }
-    
     when false {
         temp := begin_temporary_memory(&tran_state.arena)
         
@@ -133,7 +129,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     y := get_column(camera_object, 1)
     z := get_column(camera_object, 2)
     near_clip_plane :: 0.1
-    push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true, near_clip_plane = near_clip_plane, debug_light_p = mode.debug_light_p)
+    push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true, near_clip_plane = near_clip_plane)
     
     ////////////////////////////////////////////////
     
@@ -174,17 +170,32 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         y = get_column(debug_camera_object, 1)
         z = get_column(debug_camera_object, 2)
         
-        push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length, debug_light_p = mode.debug_light_p)
+        push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
     }
     
     ////////////////////////////////////////////////
     
-    if mode.show_lighting {
-        render_lighting(render_group, &mode.test_lighting, &mode.test_textures)
-        if input.fkey_pressed[1] {
-            mode.show_lighting = false
+    recompute_lighting: bool
+    if input.fkey_pressed[3] {
+        if LightingIterationCount > 0 {
+            LightingIterationCount -= 1
+            recompute_lighting = true
         }
+    }
+    if input.fkey_pressed[4] {
+        LightingIterationCount += 1
+        recompute_lighting = true
+    }
+    
+    if input.fkey_pressed[1] {
+        mode.show_lighting = !mode.show_lighting
+    }
+    
+    if !recompute_lighting && mode.show_lighting {
+        render_lighting_points(render_group, &mode.test_lighting, &mode.test_textures)
     } else {
+        enable_lighting(render_group)
+        
         // @todo(viktor): by how much should we expand the sim region?
         sim_bounds := rectangle_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
         
@@ -198,12 +209,13 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         // @todo undo this
         // last_camera_p := mode.camera.p
         camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
+        debug_light_p: v3
         if camera_entity != nil {
-            mode.debug_light_p = camera_entity.p + {0,0,1}
+            debug_light_p = camera_entity.p + {0,0,1}
             update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
         }
         
-        push_light(render_group, mode.debug_light_p + {0, 0, 1}, .5, 1, 1)
+        push_light(render_group, debug_light_p, .5, 1, 1)
         
         // @todo undo this
         // frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
@@ -264,12 +276,8 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
         
         ////////////////////////////////////////////////
         
-        // if input.fkey_pressed[1]
-        {
-            lighting_test(render_group, &mode.test_lighting)
-            output_lighting_textures(render_group, &mode.test_lighting, &mode.test_textures)
-            // mode.show_lighting = true
-        }
+        lighting_test(render_group, &mode.test_lighting)
+        push_lighting_values(render_group, &mode.test_lighting, &mode.test_textures)
     }
     
     push_end_depth_peel(render_group)

@@ -129,8 +129,6 @@ RenderSetup :: struct { // @todo(viktor): rename this to some more camera-centri
     fog_color:        v3,
     clip_alpha_begin: f32,
     clip_alpha_end:   f32,
-    
-    debug_light_p: v3, // @cleanup
 }
 
 TexturedQuads :: struct {
@@ -142,11 +140,7 @@ TexturedQuads :: struct {
 
 @(common)
 Lighting :: struct {
-    voxel_min_corner:        v3,
-    inverse_voxel_dimension: v3,
-    
-    texels: ^type_of(LightingTextures{}.texels),
-    lookup: ^type_of(LightingTextures{}.lookup),
+    values: [] LightingValue,
 }
 
 @(common, shader)
@@ -301,17 +295,12 @@ push_depth_clear      :: proc (group: ^RenderGroup) { push_render_entry(group, .
 push_begin_depth_peel :: proc (group: ^RenderGroup) { push_render_entry(group, .BeginPeels) }
 push_end_depth_peel   :: proc (group: ^RenderGroup) { push_render_entry(group, .EndPeels)   }
 
-push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures, voxel_min_corner: v3, inverse_voxel_dimension: v3) {
+push_lighting :: proc (group: ^RenderGroup, source: ^LightingTextures) {
     entry := push_render_entry(group, .Lighting)
-    
-    entry.lighting.texels = &source.texels
-    entry.lighting.lookup = &source.lookup
-    
-    entry.lighting.voxel_min_corner        = source.voxel_min_corner
-    entry.lighting.inverse_voxel_dimension = source.inverse_voxel_dimension
+    entry.lighting.values = source.values[:]
 }
 
-push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true, debug_light_p: v3 = 0) {
+push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y := v3{0,1,0}, z := v3{0,0,1}, p := v3{0,0,0}, focal_length: f32 = 1, near_clip_plane: f32 = 0.1, far_clip_plane: f32 = 100, fog := false, clip_alpha := true) {
     aspect_width_over_height := safe_ratio_1(cast(f32) group.commands.dimension.x, cast(f32) group.commands.dimension.y)
     
     setup := group.last_setup
@@ -340,8 +329,6 @@ push_camera :: proc (group: ^RenderGroup, flags: Camera_Flags, x := v3{1,0,0}, y
         setup.fog_end   = 1
         setup.fog_direction = {0, 0, 0}
     }
-    
-    setup.debug_light_p = debug_light_p
     
     if clip_alpha {
         setup.clip_alpha_begin = near_clip_plane + 2.0
@@ -740,12 +727,7 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 
 ////////////////////////////////////////////////
 
-light_element_limit :: 16 * 1024
-
-// @volatile see zbias.slang
-@(common)
-lookup_dimensions :: uv3 { 32, 32, 32 }
-max_light_power :: 10.0
+light_element_limit :: 32 * 1024
 
 LightingSolution :: struct {
     surfaces:      [dynamic; light_element_limit] LightingSurface,
@@ -757,20 +739,17 @@ LightingSolution :: struct {
 }
 
 LightingTextures :: struct {
-    texels: [light_element_limit] LightingTexel,
-    lookup: [lookup_dimensions.z] [lookup_dimensions.y] [lookup_dimensions.x] u16,
-    // @volatile see zbias.slang
-    voxel_min_corner:        v3,
-    voxel_dimension:         v3,
-    inverse_voxel_dimension: v3,
+    values: [light_element_limit] LightingValue,
 }
 
 @(common, shader)
-LightingTexel :: struct {
-    p:    v3,    // this could be a smaller, relative position/offset in a voxel than a v4
-    next: u32,
-    d:    v3,
-    c:    Color, // a is unused
+LightingValue :: struct {
+    p: v3,
+    c: v3,
+    d: v2, 
+    // @note z is recoverable through |d.xyz| = 1
+    // => sqrt(x²+y²+z²) = 1 => x²+y²+z² = 1 => z² = 1-x²-y² => +/-z = sqrt(1-x²-y²)
+    // The sign of z is stored in c.r(color values are always positive, so the sign-bit is not used).
 }
 
 lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
@@ -781,6 +760,8 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
 }
 
 extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
+    timed_function()
+    
     max_emission_value :: 10
     
     commands := group.commands
@@ -845,7 +826,7 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
             surface.y_axis = y_axis
             
             color := rgba_to_v4(ve0.color)
-            surface.transparency   = color.a
+            surface.transparency = color.a
             
             surface.light_index = ve0.light_index
             surface.light_count = ve0.light_count
@@ -855,17 +836,15 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
                 for x_sub in 0..<x_sub_count {
                     point_index := len(points)
                     point := append_into(points)
-                    point ^ = {}
                     
-                    point.p = ve0p + (cast(f32) x_sub + 0.5) * sub_width  * x_axis +  (cast(f32) y_sub + 0.5) * sub_height * y_axis
-                    
+                    point.p             = ve0p + (cast(f32) x_sub + 0.5) * sub_width  * x_axis +  (cast(f32) y_sub + 0.5) * sub_height * y_axis
                     point.n             = surface.n
                     point.surface_index = surface_index
                     point.reflect_color = 0.95 * color.rgb
                     
                     solution.emission_color_0[point_index] = max_emission_value * ve0.emission
                     // @todo just zero all intermediates at once
-                    solution.emission_color_1[point_index] = {}
+                    solution.emission_color_1[point_index]           = {}
                     solution.average_direction_to_light[point_index] = {}
                 }
             }
@@ -874,19 +853,24 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
 }
 
 compute_light_propagation :: proc (solution: ^LightingSolution) {
-    LightingIterationCount = clamp(LightingIterationCount, 1, 16)
-    ray_count := 64
-    light_power := 1.0 / cast(f32) ray_count
+    timed_function()
     
+    LightingIterationCount = clamp(LightingIterationCount, 1, 32)
+    ray_count := 64
+    
+    light_retention: f32 = 0.5
     min_emission: f32 = 0 // @todo Tune this to something higher than 0?
     
     source_emission_color      := solution.emission_color_0[:]
     destination_emission_color := solution.emission_color_1[:]
     
     for _ in 0..<LightingIterationCount {
+        light_power := (1.0 - light_retention) / cast(f32) ray_count
         for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
             point := &solution.points[point_index]
             emission_color := source_emission_color[point_index]
+            
+            retained_color := emission_color
             
             if (emission_color.r + emission_color.g + emission_color.b) > min_emission {
                 emission_color *= point.reflect_color
@@ -902,9 +886,9 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
                         
                         closest_distance_squared: f32 = +Infinity
                         closest_point_index: u32
-                        for test_index in 0..<hit_surface.light_count {
-                            point := solution.points[test_index]
-                            distance_squared := length_squared(point.p - ray_p)
+                        for test_index in hit_surface.light_index..<hit_surface.light_index+hit_surface.light_count {
+                            test := solution.points[test_index]
+                            distance_squared := length_squared(test.p - ray_p)
                             
                             if closest_distance_squared > distance_squared {
                                 closest_distance_squared = distance_squared
@@ -913,63 +897,44 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
                         }
                         
                         if closest_point_index != 0 {
-                            accumulate_sample(hit_surface, &destination_emission_color[closest_point_index], &solution.average_direction_to_light[closest_point_index], emission_color, light_power, -emission_direction)
+                            // @todo inline
+                            accumulate_sample :: proc (point: ^LightingPoint, destination_emission_color: ^v3, average_direction_to_light: ^v3, light_color: v3, light_power: f32, normal_to_light: v3) -> v3 {
+                                angular_falloff := clamp01(dot(point.n, normal_to_light))
+                                
+                                power  := light_power * angular_falloff
+                                
+                                weight := power * length(light_color)
+                                result := power * light_color
+                                
+                                destination_emission_color^ += result
+                                average_direction_to_light^ += weight * normal_to_light
+                                
+                                return result
+                            }
+                            
+                            retained_color -= accumulate_sample(&solution.points[closest_point_index], &destination_emission_color[closest_point_index], &solution.average_direction_to_light[closest_point_index], emission_color, light_power, -emission_direction)
                         }
                     }
                 }
             }
+            
+            destination_emission_color[point_index] = retained_color
         }
         
-        sky_ray_count :: 32
-        sky_color := v4 { .79, .95, 1.0,  1.0 / cast(f32) (sky_ray_count * LightingIterationCount) }
-        sun_color := v4 { 1.0, .99, .73, 10.0 / cast(f32) LightingIterationCount }
-        sun_direction := normalize_or_zero(v3 {1,1,1})
-        
         for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-            when false {
-                series := seed_random_series(1234)
-                for _ in 0..<sky_ray_count {
-                    ray_direction := sample_hemisphere(&series, point.n)
-                    
-                    hit_index := cast_ray(solution, point_index, point.p, ray_direction)
-                    
-                    if hit_index == len(solution.surfaces) {
-                        // @note Add some skylight here.
-                        accumulate_sample(&point, sky_color.rgb, sky_color.a, ray_direction)
-                    }
-                }
-                
-                {
-                    hit_index := cast_ray(solution, point_index, point.p, sun_direction)
-                    
-                    if hit_index == len(solution.surfaces) {
-                        // @note Add some sunlight here.
-                        accumulate_sample(&point, sun_color.rgb, sun_color.a, sun_direction)
-                    }
-                }
-            }
-            
-            source_emission_color[point_index] += destination_emission_color[point_index]
+            source_emission_color[point_index] = destination_emission_color[point_index]
             destination_emission_color[point_index] = 0
         }
         
-        ray_count /= 2
+        if ray_count > 8 {
+            ray_count /= 2
+        }
     }
     
     for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-        direction := &solution.average_direction_to_light[point_index]
-        direction^ = normalize_or_zero(direction^)
+        average_direction_to_light := &solution.average_direction_to_light[point_index]
+        average_direction_to_light^ = normalize_or_zero(average_direction_to_light^)
     }
-}
-
-accumulate_sample :: proc (surface: ^LightingSurface, destination_emission_color: ^v3, average_direction_to_light: ^v3, light_color: v3, light_power: f32, normal_to_light: v3) {
-    angular_falloff := clamp01(dot(surface.n, normal_to_light))
-    
-    power  := light_power * angular_falloff
-    weight := power * length(light_color)
-    
-    destination_emission_color^ += power  * light_color
-    average_direction_to_light^ += weight * normal_to_light
 }
 
 sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
@@ -1007,7 +972,6 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_
                     if x_check >= -surface.width  && x_check <= surface.width &&
                        y_check >= -surface.height && y_check <= surface.height {
                         closest_hit = t
-                        result_p = ray_point
                         result_index = surface_index
                     }
                 }
@@ -1015,136 +979,52 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_
         }
     }
     
+    result_p = ray_origin + closest_hit * ray_direction
     return result_p, result_index
 }
 
 ////////////////////////////////////////////////
 
-render_lighting :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
-    if false && textures != nil {
-        render_texture_debug(group, solution, textures)
-        // output_lighting_textures(group, solution, textures)
-    } else {
-        render_lighting_quads(group, solution)
-    }
-}
-
-render_lighting_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
-    /*
-    for element in solution.elements {
-        x := (0.5 * element.width  - 0.03) * element.x_axis
-        y := (0.5 * element.height - 0.03) * element.y_axis
+render_lighting_points :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
+    timed_function()
+    
+    bitmap := &group.commands.white_bitmap
+    
+    element_width  := cast(f32) 0.25
+    element_height := cast(f32) 0.25
+    
+    for point_index in 0..<len(solution.points) {
+        point   := &solution.points[point_index]
+        surface := &solution.surfaces[point.surface_index]
         
-        p := element.p
+        p              := point.p
+        x_axis         := surface.x_axis
+        y_axis         := surface.y_axis
+        emission_color := solution.emission_color_0[point_index]
         
-        emission := clamp01(element.emission_color)
-        c := v4_to_rgba(V4(emission, element.transparency))
+        x := 0.5 * element_width  * x_axis
+        y := 0.5 * element_height * y_axis
         
-        bitmap := &group.commands.white_bitmap
+        emission := clamp01(emission_color)
+        c := v4_to_rgba(V4(emission, surface.transparency))
         
         push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
     }
-    */
 }
 
-render_texture_debug :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
+push_lighting_values :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     timed_function()
     
-    for z in 0..<lookup_dimensions.z {
-        for y in 0..<lookup_dimensions.y {
-            for x in 0..<lookup_dimensions.x {
-                index := textures.lookup[z][y][x]
-                
-                if index != 0 {
-                    c := v4 {0,0,0, 1}
-                    count: f32
-                    for index != 0 {
-                        texel := textures.texels[index]
-                        defer index = cast(u16) texel.next
-                        
-                        unpacked := rgba_to_v4(texel.c)
-                        unpacked = decode_light_with_power(unpacked)
-                        c += unpacked
-                        count += 1
-                    }
-                    
-                    c.rgb *= 1 / count
-                    p := textures.voxel_min_corner + textures.voxel_dimension * (cast(v3) uv3{x, y, z} + 0.5)
-                    
-                    push_cube_raw(group, &group.commands.white_bitmap, p, .1, .1, c)
-                }
-            }
-        }
-    }
-}
-
-decode_light_with_power :: proc (encoded: v4) -> v4 {
-    result: v4
-    result.rgb = encoded.rgb * max_light_power * encoded.a
-    result.a   = 1
-    return result
-}
-
-output_lighting_textures :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
-    timed_function()
-    
-    textures.lookup = 0
-    
-    bounds: Rectangle3
-    dimension: v3
-    inv_voxel_dimension: v3
     for point_index in 0..<len(solution.points) {
-        point := solution.points[point_index]
-        source_emission_color := solution.emission_color_0[point_index]
+        p := solution.points[point_index].p
+        c := solution.emission_color_0[point_index]
+        d := solution.average_direction_to_light[point_index]
         
-        light_power := length(source_emission_color.rgb)
-        emission_color: v4
-        if light_power > 0 {
-            light_color := source_emission_color.rgb / light_power
-            emission_color = V4(light_color, clamp01(light_power / max_light_power))
-        }
-        c := v4_to_rgba(emission_color)
+        c.r *= sign(d.z)
+        d.z *= sign(d.z)
         
-        
-        texel := &textures.texels[point_index]
-        texel.p = point.p
-        texel.c = c
-        texel.d.xyz = solution.average_direction_to_light[point_index]
+        textures.values[point_index] = { p, c, d.xy }
     }
     
-    {
-        lookup_range := rectangle_min_dimension(iv3{0,0,0}, cast(iv3) lookup_dimensions-1)
-        for z in 0..<cast(i32) lookup_dimensions.z {
-            for y in 0..<cast(i32) lookup_dimensions.y {
-                for x in 0..<cast(i32) lookup_dimensions.x {
-                    index := &textures.lookup[z][y][x]
-                    
-                    if index^ == 0 {
-                        neighbour_range := rectangle_min_max(iv3{-1,-1,-1}, iv3{1,1,1})
-                        
-                        // @todo clamp?
-                        neighbour_range = get_intersection(add_offset(lookup_range, -iv3{x,y,z}), neighbour_range)
-                        
-                        neighbour: u16
-                        fill: for dz in neighbour_range.min.z ..= neighbour_range.max.z {
-                            for dy in neighbour_range.min.y ..= neighbour_range.max.y {
-                                for dx in neighbour_range.min.x ..= neighbour_range.max.x {
-                                    neighbour = textures.lookup[z+dz][y+dy][x+dx]
-                                    if neighbour != 0 { break fill }
-                                }
-                            }
-                        }
-                        
-                        index^ = neighbour
-                    }
-                }
-            }
-        }
-    }
-    
-    textures.voxel_min_corner        = bounds.min
-    textures.voxel_dimension         = dimension / cast(v3) lookup_dimensions
-    textures.inverse_voxel_dimension = inv_voxel_dimension
-    
-    push_lighting(group, textures, textures.voxel_min_corner, textures.inverse_voxel_dimension)
+    push_lighting(group, textures)
 }

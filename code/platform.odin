@@ -1218,12 +1218,15 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
                     }
                 }
             
-            case win.VK_F4:     if is_down && alt_down { quit_requested = true }
-            case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
-            
             case win.VK_F1..=win.VK_F12:
                 index := vk_code - win.VK_F1 + 1
                 input.fkey_pressed[index] = is_down && !was_down
+                
+                if vk_code == win.VK_F4 {
+                    if is_down && alt_down { quit_requested = true }
+                }
+            
+            case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
             }
             
           case:

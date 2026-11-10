@@ -66,14 +66,10 @@ Vulkan :: struct {
     debug_light_buffer_texture: i32,
     
     
-    voxel_min_corner:        v3,
-    inverse_voxel_dimension: v3,
-    
     lighting_heap: gpu.GpuHeap,
     lighting_bump: gpu.BumpAllocator,
     
-    lighting_texels: gpu.GpuCpuRange(LightingTexel),
-    lighting_lookup: gpu.GpuCpuRange(u16),
+    lighting_values: gpu.GpuCpuRange(LightingValue),
 }
 
 Frame :: struct {
@@ -160,10 +156,7 @@ RootZBias :: struct #all_or_none {
     vertices:   [^] TexturedVertex,
     textures:   [^] u32,
     
-    lighting_texels: [^] LightingTexel,
-    lighting_lookup: [^] u16,
-    voxel_min_corner:        v3,
-    inverse_voxel_dimension: v3,
+    lighting_values: [^] LightingValue,
     
     camera_p:         v3,
     fog_direction:    v3,
@@ -704,11 +697,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
                 previous_depth   = peel_index != 0 ? get_depth_peel_read_buffer(vulkan, peel_index-1)[.depth].descriptor : .nil_texture,
                 alpha_threshold  = peel_index != 0 && peel_index == depth_peel_count - 1 ? 0.9 : 0.02,
                 
-                voxel_min_corner        = vulkan.voxel_min_corner,
-                inverse_voxel_dimension = vulkan.inverse_voxel_dimension,
-                
-                lighting_texels = vulkan.lighting_texels.gpu,
-                lighting_lookup = vulkan.lighting_lookup.gpu,
+                lighting_values = vulkan.lighting_values.gpu,
                 
                 lighting_disabled = cast(b32) vulkan.settings.lighting_disabled,
                 _padding = {},
@@ -719,19 +708,12 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             timed_block("lighting transfer")
             lighting := entry.lighting
             
-            vulkan.voxel_min_corner        = lighting.voxel_min_corner
-            vulkan.inverse_voxel_dimension = lighting.inverse_voxel_dimension
-            
             // @note This is only called once per creation, not per frame.
             gpu.bump_reset(&vulkan.lighting_bump)
             
-            lookup_count := lookup_dimensions.x * lookup_dimensions.y * lookup_dimensions.z
+            vulkan.lighting_values = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingValue, len(lighting.values))
             
-            vulkan.lighting_texels = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingTexel, len(lighting.texels^))
-            vulkan.lighting_lookup = gpu.bump_allocate(&vulkan.lighting_bump, [] u16, lookup_count)
-            
-            copy(vulkan.lighting_texels.cpu, lighting.texels^[:])
-            copy(vulkan.lighting_lookup.cpu, slice_from_parts(u16, lighting.lookup, lookup_count))
+            copy(vulkan.lighting_values.cpu, lighting.values)
         }
         
         if return_to_begin_peels {

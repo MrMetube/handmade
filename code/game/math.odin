@@ -284,7 +284,7 @@ Rect3 :: proc (xy: $R/Rectangle([2] $E), z_min, z_max: E) -> Rectangle([3] E) {
 V4 :: proc { V4_x_yzw, V4_xy_zw, V4_xyz_w, V4_x_y_zw, V4_x_yz_w, V4_xy_z_w }
 V4_x_yzw  :: proc (x: $T, yzw: [3] T) -> [4] T {
     result: [4] T = ---
-    result.x = x
+    result.x   = x
     result.yzw = yzw
     return result
 }
@@ -297,28 +297,28 @@ V4_xy_zw  :: proc (xy: [2] $T, zw: [2] T) -> [4] T {
 V4_xyz_w  :: proc (xyz: [3] $T, w: T) -> [4] T {
     result: [4] T = ---
     result.xyz = xyz
-    result.w = w
+    result.w   = w
     return result
 }
 V4_x_y_zw :: proc (x: $T, y: T, zw: [2] T) -> [4] T {
     result: [4] T = ---
-    result.x = x
-    result.y = y
+    result.x  = x
+    result.y  = y
     result.zw = zw
     return result
 }
 V4_x_yz_w :: proc (x: $T, yz: [2] T, w:T) -> [4] T {
     result: [4] T = ---
-    result.x = x
+    result.x  = x
     result.yz = yz
-    result.w = w
+    result.w  = w
     return result
 }
 V4_xy_z_w :: proc (xy: [2] $T, z, w: T) -> [4] T {
     result: [4] T = ---
     result.xy = xy
-    result.z = z
-    result.w = w
+    result.z  = z
+    result.w  = w
     return result
 }
 
@@ -356,7 +356,7 @@ dot :: proc (a: $V, b: V) -> intrinsics.type_elem_type(V) {
         result = simd.reduce_add_pairs(a * b)
     } else {
         #no_bounds_check #unroll for i in 0..<len(V) {
-            result += a[i] * b[i]
+            result = intrinsics.fused_mul_add(a[i], b[i], result)
         }
     }
     

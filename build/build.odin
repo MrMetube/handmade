@@ -124,11 +124,11 @@ main :: proc () {
         end_build(cmd, async = procs)
     }
     
-    procs_flush(procs)
-    delete_if_exists("build/game.lib")
-    delete_if_exists("build/render.lib")
+    defer delete_if_exists("build/game.lib")
+    defer delete_if_exists("build/render.lib")
     
     { // platform
+        
         target :: "debug.exe"
         build_succeeded: bool
         
@@ -150,13 +150,19 @@ main :: proc () {
             if internal { build_define("INTERNAL", "true") }
             append(cmd, ..platform_flags)
             build_succeeded = end_build(cmd)
+        } else {
+            procs_flush(procs) // wait for render and game builds to complete
         }
         
         if build_succeeded {
             if run(target) {
+                procs_flush(procs) // wait for render and game builds to complete
+            
                 append(cmd, fmt.tprintf("build/%v", target))
                 run_command(cmd, working_dir = "data", detached = true)
             } else if debug(target) {
+                procs_flush(procs) // wait for render and game builds to complete
+            
                 raddbg_begin()
                 raddbg_ipc("select_target", target)
                 raddbg_ipc("restart")

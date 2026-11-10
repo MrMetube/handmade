@@ -108,17 +108,9 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
     surface_reflect.rgb = lerp(modulated.rgb, root.fog_color, fog_amount);
     surface_reflect.a   = modulated.a;
     
-    if (!root.lighting_disabled && root.lighting_lookup != nullptr) {
-        v3 average_light = v3(0,0,0);
-        
-        v3 voxel_p = root.inverse_voxel_dimension * (input.world_p - root.voxel_min_corner) - v3(0.5, 0.5, 0.5);
-        v3 voxel_floor    = floor(voxel_p);
-        v3 voxel_fraction = voxel_p - voxel_floor;
-        iv3 voxel_index = iv3(voxel_floor);
-        
+    if (!root.lighting_disabled && root.lighting_values != nullptr) {
         if (input.light_index != 0) {
             v3 l = sum_light(input);
-            
             surface_reflect.rgb *= l;
         }
     }
@@ -127,27 +119,23 @@ v4 fragmentMain(VertexOutput input) : SV_Target0 {
     return result;
 }
 
-// @volatile see rendergroup.odin
-static const iv3 lookup_dimension = iv3(32, 32, 32);
-static const f32 max_light_power  = 10.0;
-
 v3 sum_light(VertexOutput input) {
     u32 light_index = input.light_index;
     u32 light_count = input.light_count;
     v4 result = 0;
     
     while (light_count > 0) {
-        LightingTexel *light = &root.lighting_texels[light_index];
+        LightingValue *light = &root.lighting_values[light_index];
         
-        v3 light_p = light.p;
-        v3 light_d = light.d;
-        v4 light_c = rgba_to_v4(light.c);
-        
-        v3 delta                = light_p - input.world_p;
-        f32 contribution        = 1 / (1 + length_squared(root.inverse_voxel_dimension * delta));
+        v3 light_d = v3(light.d.xy, square_root(1.0 - dot(light.d.xy, light.d.xy)));
+        if (light.c.r < 0) {
+            light.c.r = -light.c.r;
+            light_d.z = -light_d.z;
+        }
+        f32 contribution        = 1 / (1 + length_squared(light.p - input.world_p));
         f32 directional_falloff = clamp01(dot(light_d, input.world_n));
         
-        result.rgb += contribution * directional_falloff * light_c.rgb * light_c.a * max_light_power;
+        result.rgb += contribution * directional_falloff * light.c;
         result.a   += contribution;
         
         light_index += 1;
