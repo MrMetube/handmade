@@ -39,6 +39,9 @@ DebugState :: struct {
     frames:       [MaxFrameCount] DebugFrame,
     profile_root: ^DebugElement,
     
+    frame_time_short_term_average: f32,
+    frame_time_long_term_average:  f32,
+    
     viewed_frame_ordinal: i32,
     
     thread:           ^DebugThread,
@@ -88,6 +91,8 @@ DebugState :: struct {
     d_longest_frame_span: f32,
     total_clocks:         f32,
     d_total_clocks:       f32,
+    
+    sort_by: TopClocksSortBy,
     
     // Per-frame storage management
     per_frame_arena:       Arena,
@@ -219,6 +224,10 @@ DebugElement :: struct {
     guid:   DebugGUID,
     type:   DebugValue,
     frames: [MaxFrameCount] DebugElementFrame,
+    
+    // @note The averages are not stored per frame, therefore we can't show previous frames averages, when inspecting older frames timings.
+    short_term_average: f32,
+    long_term_average:  f32,
 }
 
 DebugStoredEvent :: struct {

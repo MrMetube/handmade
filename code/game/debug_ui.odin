@@ -78,6 +78,7 @@ DebugInteraction :: struct {
         DebugInteractionKind,
         DebugValue,
         DebugGUID,
+        TopClocksSortBy,
     },
 }
 
@@ -159,15 +160,28 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
     
     memory_stats := Platform.debug_get_memory_stats()
     
-    most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
-    info_text := format_string(debug.root_info, 
-        "% - % memory blocks, % used size / % total sizes",
-        view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
-        view_amount(memory_stats.block_count),
-        view_memory_size(memory_stats.total_used),
-        view_memory_size(memory_stats.total_size),
-    )
-    debug.root_group.name = info_text
+    {
+        most_recent_frame := debug.frames[debug.most_recent_frame_ordinal]
+        
+        short_term_k := time_smoothed_blend_factor(ShortTermAveragingDuration, input.delta_time)
+        long_term_k  := time_smoothed_blend_factor(LongTermAveragingDuration,  input.delta_time)
+        
+        debug.frame_time_short_term_average = linear_blend(most_recent_frame.seconds_elapsed, debug.frame_time_short_term_average, short_term_k)
+        debug.frame_time_long_term_average  = linear_blend(most_recent_frame.seconds_elapsed, debug.frame_time_long_term_average,  long_term_k)
+        
+        info_text := format_string(debug.root_info, 
+            "% | % | % - % memory blocks, % used size / % total sizes",
+            view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
+            view_seconds(debug.frame_time_short_term_average, precision = 3),
+            view_seconds(debug.frame_time_long_term_average, precision = 3),
+            
+            view_amount(memory_stats.block_count),
+            view_memory_size(memory_stats.total_used),
+            view_memory_size(memory_stats.total_size),
+        )
+        
+        debug.root_group.name = info_text
+    }
     
     interact(debug, input, mouse_p)
     
@@ -447,7 +461,7 @@ draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
             parent_text := debug_print("View Parent: %", parent_guid.name)
             action_button(layout, parent_text, set_value_interaction(id, &graph.root, parent_guid))
             text := debug_print("Viewing: %", viewed_element.guid.name)
-            action_button(layout, text, {}, backdrop_color = {})
+            action_button(layout, text, {}, {})
         end_ui_row(layout)
         
         ui_element := begin_ui_element_rectangle(layout, &graph.block.size)
@@ -457,20 +471,37 @@ draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
         rect := ui_element.bounds
         push_rectangle(&debug.render_group, rect, debug.backing_transform, {0,0,0,0.7})
         
-        transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
-        
-        if contains(rect, layout.mouse_p) {
-            debug.next_hot_interaction = set_value_interaction(DebugId{ { &graph.root, viewed_element } }, &graph.root, viewed_element.guid)
+        {
+            transient_clip_rect(&debug.render_group, get_clip_rect_with_transform(&debug.render_group, rect, debug.backing_transform))
+            
+            if contains(rect, layout.mouse_p) {
+                debug.next_hot_interaction = set_value_interaction(DebugId{ { &graph.root, viewed_element } }, &graph.root, viewed_element.guid)
+            }
+            
+            #partial switch value in element.type {
+            case ThreadProfileGraph:
+                draw_profile(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element)
+            case FrameBarsGraph:
+                draw_frame_bars(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element)
+            case TopClocksList:
+                draw_top_clocks(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element, debug.sort_by)
+            case: unreachable()
+            }
         }
         
-        #partial switch value in element.type {
-          case ThreadProfileGraph:
-            draw_profile(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element)
-          case FrameBarsGraph:
-            draw_frame_bars(debug, &graph.root, layout.mouse_p, layout.dt, rect, viewed_element)
-          case TopClocksList:
-            draw_top_clocks(debug, &graph.root, layout.mouse_p, rect, viewed_element)
-          case: unreachable()
+        if is_top_clocks {
+            begin_ui_row(layout)
+                sort_by_names := [TopClocksSortBy] string {
+                    .this_frame         = "This Frame",
+                    .short_term_average = "Short-Term Average",
+                    .long_term_average  = "Long-Term Average"
+                }
+                sorting_text := debug_print("Sorting:")
+                action_button(layout, sorting_text, {}, {})
+                for it in TopClocksSortBy {
+                    boolean_button(layout, sort_by_names[it], set_value_interaction(id, &debug.sort_by, it), debug.sort_by == it)
+                }
+            end_ui_row(layout)
         }
     }
 }
@@ -646,8 +677,27 @@ draw_frame_slider :: proc (debug: ^DebugState, mouse_p: v2, rect: Rectangle2, ro
     }
 }
 
-draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, rect: Rectangle2, root_element: ^DebugElement) {
+TopClocksSortBy :: enum {
+    this_frame,
+    short_term_average,
+    long_term_average,
+}
+
+ShortTermAveragingDuration :: 2
+LongTermAveragingDuration  :: 10
+
+time_smoothed_blend_factor :: proc (h: f32, delta_time: f32) -> f32 {
+    // h = the amount of time it takes for the filter to converge to 90% of a fixed input value
+    base := power(cast(f32) .1, 1 / h)
+    k := power(base, delta_time)
+    return k
+}
+
+draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2, dt: f32, rect: Rectangle2, root_element: ^DebugElement, sort_by: TopClocksSortBy) {
     timed_function()
+    
+    short_term_k := time_smoothed_blend_factor(ShortTermAveragingDuration, dt)
+    long_term_k  := time_smoothed_blend_factor(LongTermAveragingDuration,  dt)
     
     // @hack if root element is the profile root, it should also just work fine without special handling
     link_count: u32
@@ -712,21 +762,29 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         
         entry.element = element
         begin_debug_statistic(&entry.stats)
-            
+        
         frame := link.element.frames[debug.viewed_frame_ordinal]
         for event := frame.events.last; event != nil; event = event.next {
-            // duration_with_children := cast(f32) event.node.duration
             duration_without_children := cast(f32) (event.node.duration - event.node.duration_of_children)
             accumulate_debug_statistic(&entry.stats, duration_without_children)
         }
         
         end_debug_statistic(&entry.stats)
         
-        sort_entries[entry_index] = {
-            sort_key = -entry.stats.sum,
-            index = entry_index,
-        }
         total_time += entry.stats.sum
+        
+        if !debug.paused {
+            link.element.short_term_average = linear_blend(entry.stats.sum, link.element.short_term_average, short_term_k)
+            link.element.long_term_average  = linear_blend(entry.stats.sum, link.element.long_term_average,  long_term_k)
+        }
+        
+        sort_entry := &sort_entries[entry_index]
+        sort_entry.index = entry_index
+        switch sort_by {
+        case .this_frame:         sort_entry.sort_key = -entry.stats.sum
+        case .short_term_average: sort_entry.sort_key = -link.element.short_term_average
+        case .long_term_average:  sort_entry.sort_key = -link.element.long_term_average
+        }
     }
     
     { timed_block("sort top clocks")
@@ -741,8 +799,12 @@ draw_top_clocks :: proc (debug: ^DebugState, graph_root: ^DebugGUID, mouse_p: v2
         running_sum += entry.stats.sum
         
         // @todo(viktor): This wants to be a tabular view of the data
-        text := debug_print("% cycles / % % - % %% / % %% - %",
+        text := debug_print("% | % | % cycles / % % - % %% / % %% - %",
             view_amount(cast(u32) entry.stats.sum),
+            
+            view_amount(cast(u32) entry.element.short_term_average),
+            view_amount(cast(u32) entry.element.long_term_average),
+            
             view_amount(entry.stats.count),
             entry.stats.count == 1 ? "hit" : "hits",
             
@@ -1147,6 +1209,9 @@ interact :: proc (debug: ^DebugState, input: Input, mouse_p: v2) {
               case DebugValue: 
                 target := cast(^DebugValue) target 
                 target ^= value
+              case TopClocksSortBy: 
+                target := cast(^TopClocksSortBy) target 
+                target ^= value
               case i32: 
                 target := cast(^i32) target 
                 target ^= value
@@ -1297,6 +1362,9 @@ end_click_interaction :: proc (debug: ^DebugState, input: Input) {
         switch value in interaction.value {
           case DebugValue: 
             target := cast(^DebugValue) target 
+            target ^= value
+          case TopClocksSortBy: 
+            target := cast(^TopClocksSortBy) target 
             target ^= value
           case i32: 
             target := cast(^i32) target 
