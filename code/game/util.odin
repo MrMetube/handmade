@@ -230,6 +230,11 @@ find_most_significant_bit :: proc (value: $T) -> T {
 
 ////////////////////////////////////////////////
 
+Raw_Fixed_Capacity_Dynamic_Array :: struct($Capacity: uint, $T: typeid) {
+	data: [Capacity]T,
+	len:  int,
+}
+
 Raw_Dynamic_Array :: struct {
     data: rawptr,
     len:  int,

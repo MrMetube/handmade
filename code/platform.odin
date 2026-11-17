@@ -283,20 +283,21 @@ main :: proc () {
         render_commands.entries            = make_array_allocator(frame_allocator, RenderEntry, 1024)
         render_commands.vertex_buffer      = make_array_allocator(frame_allocator, TexturedVertex, 1 << 20)
         render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
+        render_commands.surfaces           = make_array_allocator(frame_allocator, LightingSurface, light_element_limit)
+        render_commands.light_points       = make_array_allocator(frame_allocator, LightingPoint,   light_element_limit)
+        render_commands.emission_color_0   = make_slice(frame_allocator,           v3,              light_element_limit)
         
-        // @todo Check if the software renderer handles this correctly because of the lanewidth
         render_commands.white_bitmap.memory = make(frame_allocator, Color, 1)
-        render_commands.white_bitmap.memory[0] = 255
-        render_commands.white_bitmap.dimension = 1
+        render_commands.white_bitmap.memory[0]         = {255, 255, 255, 255}
+        render_commands.white_bitmap.dimension         = 1
         render_commands.white_bitmap.width_over_height = 1
-        render_commands.white_bitmap.texture_handle = render.allocate_texture(render_commands.white_bitmap)
+        render_commands.white_bitmap.texture_handle    = render.allocate_texture(render_commands.white_bitmap)
         
         render_commands.dimension = back_buffer.dimension
         
         render_commands.multisampling_hint    = true
         render_commands.pixelation_hint       = !false
         render_commands.depth_peel_count_hint = 4
-        // render_commands.light_texture_dimension_power_of_2 = {9, 8, 1}
     }
     
     game_memory := GameMemory {
@@ -1240,6 +1241,8 @@ clear_render_commands :: proc (commands: ^RenderCommands) {
     clear(&commands.entries)
     clear(&commands.vertex_buffer)
     clear(&commands.quad_bitmap_buffer)
+    clear(&commands.surfaces)
+    clear(&commands.light_points)
 }
 
 aspect_ratio_fit :: proc (render_size: iv2, window_size: iv2) -> Rectangle2i {

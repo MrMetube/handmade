@@ -279,7 +279,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     if assets == nil { return }
     
     if memory.debug_state == nil {
-        memory.debug_state = debug_init(render_commands.dimension)
+        memory.debug_state = debug_init(render_commands.dimension, input.delta_time)
     }
     debug := memory.debug_state
     
@@ -324,7 +324,7 @@ debug_frame_end :: proc (memory: ^GameMemory, input: Input, render_commands: ^Re
     }
 }
 
-debug_init :: proc (dimension: iv2) -> (debug: ^DebugState) {
+debug_init :: proc (dimension: iv2, dt: f32) -> (debug: ^DebugState) {
     debug = bootstrap_arena(DebugState, "arena")
     
     debug.initialization_clock = read_cycle_counter()
@@ -359,6 +359,9 @@ debug_init :: proc (dimension: iv2) -> (debug: ^DebugState) {
     
     freelist_init(&debug.thread_free_list,      &debug.arena)
     freelist_init(&debug.stored_event_freelist, &debug.per_frame_arena)
+    
+    debug.frame_time_short_term_average = dt
+    debug.frame_time_long_term_average  = dt
     
     return debug
 }

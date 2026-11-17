@@ -53,7 +53,7 @@ set_len :: proc (array: ^[dynamic] $T, len: int) {
 }
 set_len_fixed :: proc (array: ^[dynamic; $N] $T, len: int) {
     assert(len <= cap(array))
-    raw := cast(^Raw_) array
+    raw := cast(^Raw_Fixed_Capacity_Dynamic_Array(N, T)) array
     raw.len = len
 }
 

@@ -166,8 +166,13 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
         short_term_k := time_smoothed_blend_factor(ShortTermAveragingDuration, input.delta_time)
         long_term_k  := time_smoothed_blend_factor(LongTermAveragingDuration,  input.delta_time)
         
-        debug.frame_time_short_term_average = linear_blend(most_recent_frame.seconds_elapsed, debug.frame_time_short_term_average, short_term_k)
-        debug.frame_time_long_term_average  = linear_blend(most_recent_frame.seconds_elapsed, debug.frame_time_long_term_average,  long_term_k)
+        if debug.frame_time_short_term_average == 0 { // @todo Better way to initialize to the first value, so that this converges faster on startup
+             debug.frame_time_short_term_average = most_recent_frame.seconds_elapsed
+             debug.frame_time_long_term_average  = most_recent_frame.seconds_elapsed
+        } else {
+            debug.frame_time_short_term_average = linear_blend(most_recent_frame.seconds_elapsed, debug.frame_time_short_term_average, short_term_k)
+            debug.frame_time_long_term_average  = linear_blend(most_recent_frame.seconds_elapsed, debug.frame_time_long_term_average,  long_term_k)
+        }
         
         info_text := format_string(debug.root_info, 
             "% | % | % - % memory blocks, % used size / % total sizes",
@@ -684,7 +689,7 @@ TopClocksSortBy :: enum {
 }
 
 ShortTermAveragingDuration :: 2
-LongTermAveragingDuration  :: 10
+LongTermAveragingDuration  :: 8
 
 time_smoothed_blend_factor :: proc (h: f32, delta_time: f32) -> f32 {
     // h = the amount of time it takes for the filter to converge to 90% of a fixed input value

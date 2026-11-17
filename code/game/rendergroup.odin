@@ -56,6 +56,9 @@ RenderCommands :: struct {
     
     vertex_buffer:      [dynamic] TexturedVertex,
     quad_bitmap_buffer: [dynamic] ^Bitmap,
+    surfaces:           [dynamic] LightingSurface,
+    light_points:       [dynamic] LightingPoint,
+    emission_color_0:   [] v3,
     
     white_bitmap: Bitmap,
 }
@@ -157,24 +160,6 @@ TexturedVertex :: struct {
     light_count: u32,
 }
 
-LightingSurface :: struct {
-    p: v3,
-    n: v3,
-    transparency:   f32,
-    width, height:  f32,
-    x_axis, y_axis: v3,
-    light_index: u32,
-    light_count: u32,
-}
-
-LightingPoint :: struct {
-    p: v3,
-    reflect_color:  v3,
-    // @todo Is it better to duplicate these or not?
-    n: v3,
-    surface_index: u32,
-}
-
 PackedNormal :: bit_field u32 {
     x: i16 | 10,
     y: i16 | 10,
@@ -191,6 +176,70 @@ UsedBitmapDim :: struct {
     align: v2,
     p:     v3,
     basis: v3,
+}
+
+////////////////////////////////////////////////
+
+@(common)
+light_element_limit :: 64 * 1024
+
+LightingSolution :: struct {
+    surfaces:         [] LightingSurface,
+    points:           [] LightingPoint,
+    emission_color_0: [] v3,
+    
+    emission_color_1:           [light_element_limit] v3,
+    average_direction_to_light: [light_element_limit] v3,
+    
+    last_is_valid:  bool,
+    last_emission:  [light_element_limit] v3,
+    last_direction: [light_element_limit] v3,
+}
+
+LightingTextures :: struct {
+    values: [light_element_limit] LightingValue,
+}
+
+@(common)
+LightingSurface :: struct {
+    p: v3,
+    n: v3,
+    transparency:   f32,
+    width, height:  f32,
+    x_axis, y_axis: v3,
+    light_index: u32,
+    light_count: u32,
+}
+
+/* 
+LightingBox :: struct {
+    min: v3,
+    max: v3,
+    
+    transparency: f32,
+    
+    light_index: u32,
+    light_count: u32,
+}
+*/
+
+@(common)
+LightingPoint :: struct {
+    p: v3,
+    reflect_color:  v3,
+    // @todo Is it better to duplicate these or not?
+    n: v3,
+    surface_index: u32,
+}
+
+@(common, shader)
+LightingValue :: struct {
+    p: v3,
+    c: v3,
+    d: v2, 
+    // @note z is recoverable through |d.xyz| = 1
+    // => sqrt(x²+y²+z²) = 1 => x²+y²+z² = 1 => z² = 1-x²-y² => +/-z = sqrt(1-x²-y²)
+    // The sign of z is stored in c.r(color values are always positive, so the sign-bit is not used).
 }
 
 ////////////////////////////////////////////////
@@ -560,14 +609,14 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
         light_index_store = nil
     }
     
-    
+    center := p
     p := p
     p.xy -= radius
     p.z  -= height
     
     x := 2*radius * v3{1,0,0}
     y := 2*radius * v3{0,1,0}
-    z :=   height * v3{0,0,1}
+    z :=   height * v3{0,0,1} // @todo This is stupid. It should be uniform.
     
     t0 := v2{0, 0}
     t1 := v2{1, 0}
@@ -589,14 +638,117 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
         }
         
         group.light_index += light_count * 6
+        
+        min_surface_index := cast(u32) len(group.commands.surfaces)
+        append(&group.commands.surfaces, LightingSurface {
+            p = p + 0*x +.5*y + .5*z,
+            n = {-1, 0, 0},
+            transparency = 0,
+            width  = 2*radius,
+            height = height,
+            x_axis = { 0,-1, 0 },
+            y_axis = { 0, 0, 1 },
+            light_index = light_index + 0*light_count,
+            light_count = light_count,
+        })
+
+        append(&group.commands.surfaces, LightingSurface {
+            p = p + x + .5*y + .5*z,
+            n = {1, 0, 0},
+            transparency = 0,
+            width  = 2*radius,
+            height = height,
+            x_axis = { 0, 1, 0},
+            y_axis = { 0, 0, 1},
+            light_index = light_index + 3*light_count,
+            light_count = light_count,
+        })
+        
+        append(&group.commands.surfaces, LightingSurface {
+            p = p +.5*x + 0*y + .5*z,
+            n = {0, -1, 0},
+            transparency = 0,
+            width  = 2*radius,
+            height = height,
+            x_axis = { 1, 0, 0 },
+            y_axis = { 0, 0, 1 },
+            light_index = light_index + 1*light_count,
+            light_count = light_count,
+        })
+        
+        append(&group.commands.surfaces, LightingSurface {
+            p = p +.5*x + y + .5*z,
+            n = {0, 1, 0},
+            transparency = 0,
+            width  = 2*radius,
+            height = height,
+            x_axis = {-1, 0, 0 },
+            y_axis = { 0, 0, 1 },
+            light_index = light_index + 4*light_count,
+            light_count = light_count,
+        })
+        
+        append(&group.commands.surfaces, LightingSurface {
+            p = p + .5*x + .5+y + 0*z,
+            n = {0, 0, -1},
+            transparency = 0,
+            width  = 2*radius,
+            height = 2*radius,
+            x_axis = { 0, 1, 0 },
+            y_axis = { 1, 0, 0 },
+            light_index = light_index + 2*light_count,
+            light_count = light_count,
+        })
+                
+        append(&group.commands.surfaces, LightingSurface {
+            p = p + .5*x + .5+y + z,
+            n = {0, 0, 1},
+            transparency = 0,
+            width  = 2*radius,
+            height = 2*radius,
+            x_axis = { 0, 1, 0 },
+            y_axis = {-1, 0, 0 },
+            light_index = light_index + 5*light_count,
+            light_count = light_count,
+        })
+        
+        if len(group.commands.light_points) == 0 {
+            // @note Point 0 is never used.
+            append_nothing(&group.commands.light_points) 
+        }
+        
+        for surface, offset in group.commands.surfaces[min_surface_index:][:6] {
+            x_sub_count :: 2
+            y_sub_count :: 2
+            
+            sub_width  := surface.width  / x_sub_count
+            sub_height := surface.height / y_sub_count
+            
+            assert(x_sub_count * y_sub_count == light_count)
+            for y_sub in 0..<y_sub_count {
+                for x_sub in 0..<x_sub_count {
+                    point_index := len(group.commands.light_points)
+                    point := append_into(&group.commands.light_points)
+                    
+                    point.p = (surface.p - .5 * surface.width * surface.x_axis - .5 * surface.height * surface.y_axis) + (cast(f32) x_sub + 0.5) * sub_width  * surface.x_axis +  (cast(f32) y_sub + 0.5) * sub_height * surface.y_axis
+                    point.n = surface.n
+                    point.surface_index = min_surface_index + cast(u32) offset
+                    point.reflect_color = 0.95 * color.rgb
+                    
+                    max_emission_value :: 10
+                    
+                    group.commands.emission_color_0[point_index] = max_emission_value * emission
+                }
+            }
+        }
     }
     
-    push_quad(group, bitmap, p   , p   +y,   p   +y+z, p     +z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 0*light_count, light_count)
-    push_quad(group, bitmap, p   , p     +z, p +x  +z, p +x,     t0, t1, t2, t3, c, c, c, c, emission, light_index + 1*light_count, light_count)
-    push_quad(group, bitmap, p   , p +x,     p +x+y  , p   +y,   t0, t1, t2, t3, c, c, c, c, emission, light_index + 2*light_count, light_count)
-    push_quad(group, bitmap, p +x, p +x  +z, p +x+y+z, p +x+y,   t0, t1, t2, t3, c, c, c, c, emission, light_index + 3*light_count, light_count)
-    push_quad(group, bitmap, p +y, p +x+y,   p +x+y+z, p +  y+z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 4*light_count, light_count)
-    push_quad(group, bitmap, p +z, p   +y+z, p +x+y+z, p +x  +z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 5*light_count, light_count)
+    push_quad(group, bitmap, p   , p   +y,   p   +y+z, p     +z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 0*light_count, light_count) // -x
+    push_quad(group, bitmap, p +x, p +x  +z, p +x+y+z, p +x+y,   t0, t1, t2, t3, c, c, c, c, emission, light_index + 1*light_count, light_count) // +x
+    push_quad(group, bitmap, p   , p     +z, p +x  +z, p +x,     t0, t1, t2, t3, c, c, c, c, emission, light_index + 2*light_count, light_count) // -y
+    push_quad(group, bitmap, p +y, p +x+y,   p +x+y+z, p +  y+z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 3*light_count, light_count) // +y
+    push_quad(group, bitmap, p   , p +x,     p +x+y  , p   +y,   t0, t1, t2, t3, c, c, c, c, emission, light_index + 4*light_count, light_count) // -z
+    push_quad(group, bitmap, p +z, p   +y+z, p +x+y+z, p +x  +z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 5*light_count, light_count) // +z
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -740,141 +892,43 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 
 ////////////////////////////////////////////////
 
-light_element_limit :: 64 * 1024
-
-LightingSolution :: struct {
-    surfaces:      [dynamic; light_element_limit] LightingSurface,
-    points:        [dynamic; light_element_limit] LightingPoint,
-    
-    emission_color_0:           [light_element_limit] v3,
-    emission_color_1:           [light_element_limit] v3,
-    average_direction_to_light: [light_element_limit] v3,
-    
-    last_is_valid:  bool,
-    last_emission:  [light_element_limit] v3,
-    last_direction: [light_element_limit] v3,
-}
-
-LightingTextures :: struct {
-    values: [light_element_limit] LightingValue,
-}
-
-@(common, shader)
-LightingValue :: struct {
-    p: v3,
-    c: v3,
-    d: v2, 
-    // @note z is recoverable through |d.xyz| = 1
-    // => sqrt(x²+y²+z²) = 1 => x²+y²+z² = 1 => z² = 1-x²-y² => +/-z = sqrt(1-x²-y²)
-    // The sign of z is stored in c.r(color values are always positive, so the sign-bit is not used).
-}
-
 lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
-    extract_reflectors_from_quads(group, solution)
-    compute_light_propagation(solution)
-}
-
-extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
-    timed_function()
-    
-    max_emission_value :: 10
-    
     commands := group.commands
-    quads    := group.current_quads
     
-    surfaces      := &solution.surfaces
-    points        := &solution.points
-    clear(surfaces)
-    clear(points)
+    point_count := cast(u32) len(commands.light_points)
+    solution.surfaces         = commands.surfaces[:]
+    solution.points           = commands.light_points[:]
+    solution.emission_color_0 = commands.emission_color_0[:point_count]
     
-    // @note Point 0 is never used-
-    append_nothing(points) 
+    {
+        debug_data_block("Renderer")
+        debug_data_block("Lighting")
+        
+        surface_count := cast(u32) len(commands.surfaces)
+        debug_record_value(&surface_count, "Light Surfaces")
+        debug_record_value(&point_count,   "Light Points")
+    }
     
     // @speed Just ping-pong these if we end up using it!
-    copy(solution.last_emission[:],  solution.emission_color_0[:])
-    copy(solution.last_direction[:], solution.average_direction_to_light[:])
+    copy(solution.last_direction[:point_count], solution.average_direction_to_light[:])
+    zero_slice(solution.average_direction_to_light[:point_count])
     
-    x_sub_count :: 2
-    y_sub_count :: 2
-    assert(x_sub_count * y_sub_count * cast(int) quads.quad_count <= cap(solution.points))
+    compute_light_propagation(solution)
     
-    vertices := commands.vertex_buffer[quads.bitmap_offset*4:][:quads.quad_count*4]
-    
-    for vertex_index: u32; vertex_index < cast(u32) len(vertices); vertex_index += 4 {
-        ve0 := &vertices[vertex_index + 0]
-        ve1 := &vertices[vertex_index + 1]
-        ve2 := &vertices[vertex_index + 2]
-        ve3 := &vertices[vertex_index + 3]
-        
-        if ve0.light_index != 0 {
-            ve0p := ve0.p.xyz + {0, 0, ve0.p.w}
-            ve1p := ve1.p.xyz + {0, 0, ve1.p.w}
-            ve2p := ve2.p.xyz + {0, 0, ve2.p.w}
-            ve3p := ve3.p.xyz + {0, 0, ve3.p.w}
-            
-            span01 := ve1p - ve0p
-            span03 := ve3p - ve0p
-            
-            x_axis := span01
-            y_axis := span03
-            
-            width  := length(x_axis)
-            height := length(y_axis)
-            
-            x_axis = safe_ratio_0(x_axis, width)
-            y_axis = safe_ratio_0(y_axis, height) 
-            
-            sub_width  := width  / x_sub_count
-            sub_height := height / y_sub_count
-            
-            ve0.light_count = x_sub_count * y_sub_count
-            ve1.light_count = x_sub_count * y_sub_count
-            ve2.light_count = x_sub_count * y_sub_count
-            ve3.light_count = x_sub_count * y_sub_count
-            
-            surface_index := cast(u32) len(surfaces)
-            surface := append_into(surfaces)
-            surface ^ = {}
-            
-            surface.p = ve0p + .5 * width * x_axis + .5 * height * y_axis
-            surface.n = unpack(ve0.n)
-            
-            surface.width  = width
-            surface.height = height
-            surface.x_axis = x_axis
-            surface.y_axis = y_axis
-            
-            color := rgba_to_v4(ve0.color)
-            surface.transparency = color.a
-            
-            surface.light_index = ve0.light_index
-            surface.light_count = ve0.light_count
-            
-            assert(x_sub_count * y_sub_count == surface.light_count)
-            for y_sub in 0..<y_sub_count {
-                for x_sub in 0..<x_sub_count {
-                    point_index := len(points)
-                    point := append_into(points)
-                    
-                    point.p = ve0p + (cast(f32) x_sub + 0.5) * sub_width  * x_axis +  (cast(f32) y_sub + 0.5) * sub_height * y_axis
-                    point.n = surface.n
-                    point.surface_index = surface_index
-                    point.reflect_color = 0.95 * color.rgb
-                    
-                    solution.emission_color_0[point_index] = max_emission_value * ve0.emission
-                    solution.emission_color_1[point_index] = solution.emission_color_0[point_index]
-                    // @todo just zero intermediates all at once
-                    solution.average_direction_to_light[point_index] = {}
-                }
-            }
-        }
-    }
+    copy(solution.last_emission[:point_count], solution.emission_color_0[:])
 }
 
 compute_light_propagation :: proc (solution: ^LightingSolution) {
     timed_function()
+    
+    ////////////////////////////////////////////////
+    
+    // @todo Before moving on, be sure to index 
+    // allocation management in the renderer!!!
+    
+    ////////////////////////////////////////////////
     
     LightingIterationCount = clamp(LightingIterationCount, 1, 32)
     ray_count := 64
