@@ -373,10 +373,10 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 ////////////////////////////////////////////////
 
 push_quad :: proc { push_quad_no_bias, push_quad_z_bias }
-push_quad_no_bias :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v3, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0) {
-    push_quad(group, bitmap, V4(p0, 0), V4(p1, 0), V4(p2, 0), V4(p3, 0), t0, t1, t2, t3, c0, c1, c2, c3, emission)
+push_quad_no_bias :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v3, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0, light_index: u32 = 0, light_count: u32 = 0) {
+    push_quad(group, bitmap, V4(p0, 0), V4(p1, 0), V4(p2, 0), V4(p3, 0), t0, t1, t2, t3, c0, c1, c2, c3, emission, light_index, light_count)
 }
-push_quad_z_bias  :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0) {
+push_quad_z_bias  :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0, light_index: u32 = 0, light_count: u32 = 0) {
     entry := get_current_quads(group)
     entry.quad_count += 1
     
@@ -391,14 +391,6 @@ push_quad_z_bias  :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3:
     normal = normalize_or_zero(normal)
     
     n0, n1, n2, n3: v3 = normal, normal, normal, normal
-    
-    light_index: u32
-    light_count: u32
-    if group.lighting_enabled {
-        light_index = group.light_index
-        light_count = 4
-        group.light_index += 4
-    }
     
     append(&group.commands.quad_bitmap_buffer,  bitmap)
     append(&group.commands.vertex_buffer,
@@ -544,24 +536,30 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     push_quad(group, bitmap, p0, p1, p2, p3, t0, t1, t2, t3, c, c, c, c)
 }
 
-push_light :: proc (group: ^RenderGroup, p: v3, radius: f32, color := v3{1, 1, 1}, emission: f32) {
-    push_cube_raw(group, &group.commands.white_bitmap, p + {0, 0, 0.5*radius}, radius, radius, V4(color, 1), emission) 
+push_light :: proc (group: ^RenderGroup, p: v3, radius: f32, color := v3{1, 1, 1}, emission: f32, light_index_store: ^u32) {
+    push_cube_raw(group, &group.commands.white_bitmap, p + {0, 0, 0.5*radius}, radius, radius, V4(color, 1), emission, light_index_store) 
 }
 
-push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}) {
+push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, light_index_store: ^u32) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     
     // @note(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap == nil || bitmap.texture_handle == 0 {
         load_bitmap(group.assets, id, false)
     } else {
-        push_cube_raw(group, bitmap, p, radius, height, color)
+        push_cube_raw(group, bitmap, p, radius, height, color, light_index_store = light_index_store)
     }
 }
 
-push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, emission: f32 = 0) {
+push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, emission: f32 = 0, light_index_store: ^u32) {
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle    != 0)
+    
+    light_index_store := light_index_store
+    if !group.lighting_enabled {
+        light_index_store = nil
+    }
+    
     
     p := p
     p.xy -= radius
@@ -578,12 +576,27 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     
     c := v4_to_rgba(store_color(color))
     
-    push_quad(group, bitmap, p   , p   +y,   p   +y+z, p     +z, t0, t1, t2, t3, c, c, c, c, emission)
-    push_quad(group, bitmap, p   , p     +z, p +x  +z, p +x,     t0, t1, t2, t3, c, c, c, c, emission)
-    push_quad(group, bitmap, p   , p +x,     p +x+y  , p   +y,   t0, t1, t2, t3, c, c, c, c, emission)
-    push_quad(group, bitmap, p +x, p +x  +z, p +x+y+z, p +x+y,   t0, t1, t2, t3, c, c, c, c, emission)
-    push_quad(group, bitmap, p +y, p +x+y,   p +x+y+z, p +  y+z, t0, t1, t2, t3, c, c, c, c, emission)
-    push_quad(group, bitmap, p +z, p   +y+z, p +x+y+z, p +x  +z, t0, t1, t2, t3, c, c, c, c, emission)
+    light_index: u32
+    light_count: u32
+    if light_index_store != nil {
+        light_count = 4
+        if light_index_store^ != 0 {
+            light_index = light_index_store^
+        } else {
+            // @todo "used" vs. "free"
+            light_index = group.light_index
+            light_index_store^ = light_index
+        }
+        
+        group.light_index += light_count * 6
+    }
+    
+    push_quad(group, bitmap, p   , p   +y,   p   +y+z, p     +z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 0*light_count, light_count)
+    push_quad(group, bitmap, p   , p     +z, p +x  +z, p +x,     t0, t1, t2, t3, c, c, c, c, emission, light_index + 1*light_count, light_count)
+    push_quad(group, bitmap, p   , p +x,     p +x+y  , p   +y,   t0, t1, t2, t3, c, c, c, c, emission, light_index + 2*light_count, light_count)
+    push_quad(group, bitmap, p +x, p +x  +z, p +x+y+z, p +x+y,   t0, t1, t2, t3, c, c, c, c, emission, light_index + 3*light_count, light_count)
+    push_quad(group, bitmap, p +y, p +x+y,   p +x+y+z, p +  y+z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 4*light_count, light_count)
+    push_quad(group, bitmap, p +z, p   +y+z, p +x+y+z, p +x  +z, t0, t1, t2, t3, c, c, c, c, emission, light_index + 5*light_count, light_count)
 }
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
@@ -736,6 +749,10 @@ LightingSolution :: struct {
     emission_color_0:           [light_element_limit] v3,
     emission_color_1:           [light_element_limit] v3,
     average_direction_to_light: [light_element_limit] v3,
+    
+    last_is_valid:  bool,
+    last_emission:  [light_element_limit] v3,
+    last_direction: [light_element_limit] v3,
 }
 
 LightingTextures :: struct {
@@ -774,6 +791,10 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
     
     // @note Point 0 is never used-
     append_nothing(points) 
+    
+    // @speed Just ping-pong these if we end up using it!
+    copy(solution.last_emission[:],  solution.emission_color_0[:])
+    copy(solution.last_direction[:], solution.average_direction_to_light[:])
     
     x_sub_count :: 2
     y_sub_count :: 2
@@ -843,8 +864,8 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
                     point.reflect_color = 0.95 * color.rgb
                     
                     solution.emission_color_0[point_index] = max_emission_value * ve0.emission
-                    // @todo just zero all intermediates at once
-                    solution.emission_color_1[point_index]           = {}
+                    solution.emission_color_1[point_index] = solution.emission_color_0[point_index]
+                    // @todo just zero intermediates all at once
                     solution.average_direction_to_light[point_index] = {}
                 }
             }
@@ -931,9 +952,18 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
         }
     }
     
+    last_emission  := solution.last_emission[:]
+    last_direction := solution.last_direction[:]
+    if !solution.last_is_valid {
+        solution.last_is_valid = true
+        last_emission  = solution.emission_color_0[:]
+        last_direction = solution.average_direction_to_light[:]
+    }
+    
     for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-        average_direction_to_light := &solution.average_direction_to_light[point_index]
-        average_direction_to_light^ = normalize_or_zero(average_direction_to_light^)
+        t :: 1. / 50.
+        solution.emission_color_0[point_index]           = linear_blend(last_emission[point_index],  solution.emission_color_0[point_index], t)
+        solution.average_direction_to_light[point_index] = normalize_or_zero(linear_blend(last_direction[point_index], normalize_or_zero(solution.average_direction_to_light[point_index]), t))
     }
 }
 

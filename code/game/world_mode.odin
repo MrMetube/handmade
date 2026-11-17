@@ -29,6 +29,7 @@ World_Mode :: struct {
     
     ////////////////////////////////////////////////
     
+    debug_light_index: u32,
     show_lighting: bool,
     test_lighting: LightingSolution,
     test_textures: LightingTextures,

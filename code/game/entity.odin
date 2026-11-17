@@ -78,6 +78,8 @@ VisiblePiece :: struct {
         cube,
         light,
     }],
+    
+    light_index: u32,
 }
 
 HitPointPartCount :: 4
@@ -256,7 +258,7 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
             shadow_transform.offset.y -= 0.5
             
             begin_timed_block("entity rendering pieces")
-            for piece in &entity.pieces {
+            for &piece in &entity.pieces {
                 offset := piece.offset
                 color  := piece.color
                 x_axis := entity.x_axis
@@ -282,11 +284,11 @@ update_and_render_entities :: proc (sim_region: ^SimRegion, dt: f32, render_grou
                 
                 if .light in piece.flags {
                     p := transform.offset + offset
-                    push_light(render_group, p, piece.dimension.x, color.rgb, piece.dimension.y)
+                    push_light(render_group, p, piece.dimension.x, color.rgb, piece.dimension.y, &piece.light_index)
                 }
                 if .cube in piece.flags {
                     p := transform.offset + offset
-                    push_cube_raw(render_group, &render_group.commands.white_bitmap, p, piece.dimension.x, piece.dimension.y, color)
+                    push_cube_raw(render_group, &render_group.commands.white_bitmap, p, piece.dimension.x, piece.dimension.y, color, 0, &piece.light_index)
                 } else {
                     bitmap_id := best_match_bitmap_from(render_group.assets, piece.asset, facing_match)
                     push_bitmap(render_group, bitmap_id, transform, piece.dimension.y, offset, color, x_axis = x_axis, y_axis = y_axis)
