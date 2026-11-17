@@ -1135,24 +1135,7 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
         {
             timed_block("win.PeekMessageW")
             
-            // @note These must be in sorted order!
-            skip_messages := [?] win.DWORD {
-                // @note We were previously skipping WM_PAINT, but it appearrs that it is generally dispatched directly to the window in almost all cases, so there is no sense generating an additional spurious call to PeekMessage to skip a message that (almost?) never goes through the main thread message loop.
-                // win.WM_PAINT,
-                
-                // @note We observed bad behaviour when skipping WM_MOUSEMOVE, so it _cannot_ be skipped or queued mouse movements at rapid speed seem to create a scenario where PeekMessage will take in the tens of millions of cycles just to return that it _doesn't_ have a message! (Or more specifically, 3 calls to PeekMessage were taking tens of millions of cycles, on the order of 5 million cycles per call.)
-                // win.WM_MOUSEMOVE,
-                max(win.DWORD),
-            }
-            
-            has_message: win.BOOL
-            last_message: win.DWORD
-            for skip in skip_messages {
-                has_message = win.PeekMessageW(&message, nil, last_message, skip - 1, win.PM_REMOVE)
-                last_message = skip + 1
-                if has_message { break }
-            }
-            
+            has_message := win.PeekMessageW(&message, nil, 0, 0, win.PM_REMOVE)
             if !has_message { break }
         }
         
@@ -1177,19 +1160,19 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
             if was_down == is_down { continue }
             
             switch vk_code {
-            case win.VK_W:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_up],       is_down)
-            case win.VK_A:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_left],     is_down)
-            case win.VK_S:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_down],     is_down)
-            case win.VK_D:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_right],    is_down)
-            case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_left],  is_down)
-            case win.VK_E:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_right], is_down)
-            case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.buttons[.button_up],      is_down)
-            case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.buttons[.button_down],    is_down)
-            case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.buttons[.button_left],    is_down)
-            case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.buttons[.button_right],   is_down)
-            case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.buttons[.start],          is_down)
-            case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.buttons[.back],           is_down)
-            case win.VK_L:
+              case win.VK_W:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_up],       is_down)
+              case win.VK_A:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_left],     is_down)
+              case win.VK_S:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_down],     is_down)
+              case win.VK_D:      process_win_keyboard_message(&keyboard_controller.buttons[.stick_right],    is_down)
+              case win.VK_Q:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_left],  is_down)
+              case win.VK_E:      process_win_keyboard_message(&keyboard_controller.buttons[.shoulder_right], is_down)
+              case win.VK_UP:     process_win_keyboard_message(&keyboard_controller.buttons[.button_up],      is_down)
+              case win.VK_DOWN:   process_win_keyboard_message(&keyboard_controller.buttons[.button_down],    is_down)
+              case win.VK_LEFT:   process_win_keyboard_message(&keyboard_controller.buttons[.button_left],    is_down)
+              case win.VK_RIGHT:  process_win_keyboard_message(&keyboard_controller.buttons[.button_right],   is_down)
+              case win.VK_SPACE:  process_win_keyboard_message(&keyboard_controller.buttons[.start],          is_down)
+              case win.VK_ESCAPE: process_win_keyboard_message(&keyboard_controller.buttons[.back],           is_down)
+              case win.VK_L:
                 if is_down {
                     if state.replaying_index != 0 {
                         end_replaying_input(state)
@@ -1203,7 +1186,7 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
                 }
             
             // @note debug keys
-            case win.VK_OEM_PLUS:
+              case win.VK_OEM_PLUS:
                 if is_down && render_state != nil {
                     if shift_down {
                         render_state.vulkan.debug_light_buffer_index   += 1
@@ -1211,7 +1194,7 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
                         render_state.vulkan.debug_light_buffer_texture += 1
                     }
                 }
-            case win.VK_OEM_MINUS: 
+              case win.VK_OEM_MINUS: 
                 if is_down && render_state != nil {
                     if shift_down {
                         render_state.vulkan.debug_light_buffer_index   -= 1
@@ -1220,7 +1203,7 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
                     }
                 }
             
-            case win.VK_F1..=win.VK_F12:
+              case win.VK_F1..=win.VK_F12:
                 index := vk_code - win.VK_F1 + 1
                 input.fkey_pressed[index] = is_down && !was_down
                 
@@ -1228,7 +1211,7 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
                     if is_down && alt_down { quit_requested = true }
                 }
             
-            case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
+              case win.VK_RETURN: if is_down && alt_down { toggle_fullscreen(message.hwnd) }
             }
             
           case:

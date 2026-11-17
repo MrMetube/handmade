@@ -391,13 +391,13 @@ vk_manage_textures :: proc (vulkan: ^Vulkan, last: ^TextureOp) {
     
     for operation := last; operation != nil; operation = operation.next {
         switch &op in operation.value {
-        case: unreachable()
+          case: unreachable()
         
-        case TextureOpAllocate:
+          case TextureOpAllocate:
             allocs += 1
             op.result ^= vk_allocate_texture(vulkan, op.bitmap)
             
-        case TextureOpDeallocate:
+          case TextureOpDeallocate:
             deallocs += 1
             
             descriptor := cast(TextureDescriptor) op.handle
@@ -636,19 +636,19 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
         return_to_begin_peels: bool
         
         switch entry.kind {
-        case .None: unreachable()
-        case .DepthClear:
+          case .None: unreachable()
+          case .DepthClear:
             // @todo the render entry DepthClear is not handled correctly it seems, so that the debug UI shows underlying depth layers of the game itself if its visible(see the profiler). I currently assume it is because, even though the depth is cleared, there is still a manual depth test against the previous depth peel, which then causes the weird issue to appear. the opengl renderer did not have this issue at all. so it must be a slopppy translation causing this issue.
             
             timed_block("depth clear")
             gpu.end_render_pass(commands)
             begin_depth_peel_pass(vulkan, commands, peel_index, .load)
             
-        case .BeginPeels:
+          case .BeginPeels:
             timed_block("begin peels")
             cursor_of_begin_peels = cursor
             
-        case .EndPeels:
+          case .EndPeels:
             timed_block("end peels")
             end_depth_peel_pass(vulkan, commands, peel_index, &frame.allocator)
             
@@ -666,7 +666,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             }
             begin_depth_peel_pass(vulkan, commands, peel_index, color_load_op, render_commands.clear_color)
             
-        case .Textured_Quads:
+          case .Textured_Quads:
             timed_block("textured quads")
             quads := entry.textured_quads
             if quads.quad_count == 0 { continue }
@@ -704,7 +704,7 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             }
             gpu.draw_meshlets(commands, root.gpu, {quads.quad_count, 1, 1})
         
-        case .Lighting:
+          case .Lighting:
             timed_block("lighting transfer")
             lighting := entry.lighting
             

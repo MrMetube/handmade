@@ -84,7 +84,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     room_center: iv3
     choice: u32
     // @todo undo this
-    screen_count :: 2 // 10
+    screen_count :: 1 // 10
     for screen_index in 0 ..< screen_count {
         room_radius := iv2 {7, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
         room_size := room_radius * 2 + 1

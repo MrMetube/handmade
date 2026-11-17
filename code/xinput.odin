@@ -7,7 +7,6 @@ XInputApi :: struct {
     SetState: proc (dwUserIndex: win.DWORD, pVibration: ^XINPUT_VIBRATION) -> win.DWORD,
 }
 
-// @todo(viktor): This whole process of making stubs and then trying to load a library and switching out the stubs with loaded function pointers is always the same. Can we use reflection or the metaprogram to generate this based on an API-struct?
 init_xInput :: proc () -> XInputApi {
     xinput := xinput_stub
     

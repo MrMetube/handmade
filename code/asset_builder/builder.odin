@@ -514,10 +514,7 @@ load_glyph_bitmap :: proc (font: ^SourceFont, codepoint: rune, info: ^BitmapInfo
     }
     
     w, h, xoff, yoff: i32
-    // @todo(viktor): works after odin dev-225-01
-    // mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale_factor, codepoint, &w, &h, &xoff, &yoff)[:w*h]
-    _mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale, codepoint, &w, &h, &xoff, &yoff)
-    mono_bitmap := _mono_bitmap[:w*h]
+    mono_bitmap := tt.GetCodepointBitmap(&font.font, 0, font.scale, codepoint, &w, &h, &xoff, &yoff)[:w*h]
     defer tt.FreeBitmap(raw_data(mono_bitmap), nil)
     
     // @note(viktor): add an apron for bilinear blending

@@ -38,12 +38,12 @@ DefaultAlignment :: 4
 
 DefaultPushParams :: PushParams {
     alignment = DefaultAlignment,
-    flags     = {.ClearToZero},
+    flags     = { .ClearToZero },
 }
 
 no_clear       :: proc () -> PushParams { return { DefaultAlignment, {} }}
 align_no_clear :: proc (#any_int alignment: umm, clear_to_zero: bool = false) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
-align_clear    :: proc (#any_int alignment: umm, clear_to_zero: bool = true ) -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
+align_clear    :: proc (#any_int alignment: umm, clear_to_zero: bool = true)  -> PushParams { return { alignment, clear_to_zero ? { .ClearToZero } : {} }}
 
 ////////////////////////////////////////////////
 
@@ -168,8 +168,7 @@ zero_slice :: proc (data: [] $T){
     zero(raw_data(data), len(data) * size_of(T))
 }
 
-// @note(viktor): This is generally not for production use, this is probably
-// only really something we need during testing, but who knows
+// @note This is generally not for production use, this is probably only really something we need during testing, but who knows.
 @(require_results)
 copy_string :: proc (arena: ^Arena, s: string) -> string {
     buffer := push_slice(arena, u8, len(s), no_clear())
@@ -312,15 +311,14 @@ arena_allocator_procedure :: proc(data: rawptr, mode: Allocator_Mode, size, alig
     }
     
     // Resize a memory region located at address `old_ptr` with size `old_size` to be `size` bytes in length and have the specified `alignment`, in case a re-alllocation occurs.
-    // @note(viktor): For resizes, we cannot free the allocation, but if its a shrinking we could return the same address (ignoring alignment changes). For now just always reallocate.
+    // @note For resizes, we cannot free the allocation, but if its a shrinking we could return the same address (ignoring alignment changes). For now just always reallocate.
     
     result := push_slice(arena, u8, size, params)
     error := result == nil ? Allocator_Error.Out_Of_Memory : nil
     
     if old_memory != nil {
-        // source := slice_from_parts(u8, old_memory, old_size)
-        source := (cast([^]u8) old_memory)[:old_size]
-        copy(result, source)
+        source := cast([^] u8) old_memory
+        copy(result, source[:old_size])
     }
     
     return result, error
