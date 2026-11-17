@@ -14,10 +14,9 @@ pedantic_render   :: false
 pedantic_platform :: false
 
 optimize :: !false
-native   :: true
 internal :: true
 
-optimize_render :: false
+render_optimized :: "-o:minimal"
 
 /* @todo
  - once we have our own "sin()" we can get rid of the c-runtime with "-no-crt"
@@ -63,7 +62,7 @@ main :: proc () {
     
     if begin_build(cmd, "code/asset_builder", "asset_builder.exe") { // hha
         build_meander()
-        build_native(native)
+        build_native(true)
         append(cmd, custom_attribute_flag)
         build_pedantic(true)
         build_very_pedantic(true, ..pedantic_packages[:])
@@ -85,7 +84,7 @@ main :: proc () {
         
         build_meander()
         build_optimizations(optimize)
-        build_native(native)
+        build_native(true)
         
         build_pedantic(pedantic_game)
         build_very_pedantic(pedantic_game, ..pedantic_packages[:])
@@ -110,8 +109,8 @@ main :: proc () {
         append(cmd, fmt.tprintf(`-pdb-name:build/render-%d.pdb`, random_number()))
         
         build_meander()
-        build_optimizations(optimize_render && optimize)
-        build_native(native)
+        build_optimizations(optimize, optimized = render_optimized)
+        build_native(true)
         
         build_pedantic(pedantic_render)
         build_very_pedantic(pedantic_render, ..pedantic_packages[:])
@@ -141,7 +140,7 @@ main :: proc () {
             
             build_meander()
             build_optimizations(optimize)
-            build_native(native)
+            build_native(true)
             
             build_pedantic(pedantic_platform)
             build_very_pedantic(pedantic_platform, ..pedantic_packages[:])

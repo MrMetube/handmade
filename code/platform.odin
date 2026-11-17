@@ -1133,13 +1133,15 @@ process_pending_messages :: proc (state: ^PlatformState, input: ^Input, keyboard
     message: win.MSG
     for {
         {
-            // @note We avoid asking for WM_PAINT and WM_MOUSEMOVE messages here so that Windows will not generate them (they are generated on-demand) since we don't actually care about either.
             timed_block("win.PeekMessageW")
             
             // @note These must be in sorted order!
             skip_messages := [?] win.DWORD {
-                win.WM_PAINT,
-                win.WM_MOUSEMOVE,
+                // @note We were previously skipping WM_PAINT, but it appearrs that it is generally dispatched directly to the window in almost all cases, so there is no sense generating an additional spurious call to PeekMessage to skip a message that (almost?) never goes through the main thread message loop.
+                // win.WM_PAINT,
+                
+                // @note We observed bad behaviour when skipping WM_MOUSEMOVE, so it _cannot_ be skipped or queued mouse movements at rapid speed seem to create a scenario where PeekMessage will take in the tens of millions of cycles just to return that it _doesn't_ have a message! (Or more specifically, 3 calls to PeekMessage were taking tens of millions of cycles, on the order of 5 million cycles per call.)
+                // win.WM_MOUSEMOVE,
                 max(win.DWORD),
             }
             

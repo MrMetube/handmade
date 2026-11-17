@@ -44,7 +44,7 @@ create_world :: proc (chunk_dim_in_meters: v3, arena: ^Arena) -> ^World {
     result := push(arena, World)
     result.chunk_dim_meters = chunk_dim_in_meters
     result.arena = arena
-    result.game_entropy = seed_random_series(123)
+    result.game_entropy = seed_random_series(1234)
     
     freelist_init(&result.chunk_freelist, result.arena)
     freelist_init(&result.block_freelist, result.arena)
@@ -70,6 +70,13 @@ chunk_position_from_tile_positon :: proc (mode: ^World_Mode, tile_p: iv3, additi
 
 update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
     timed_function()
+    
+    if mode.go_to_cutscene_at_the_start_of_the_next_frame {
+        // If this is done immediatly, we still have filled the rendergroup with commands. Specifically the Lighting Data is then still read by the renderer, but we already reused the game memory for the next mode and may also have unmapped parts of the freed memory.
+        play_intro_cutscene(state, tran_state)
+        return true
+    }
+    
     
     when false {
         temp := begin_temporary_memory(&tran_state.arena)
@@ -295,7 +302,7 @@ update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, ren
     }
     
     if !heroes_exist {
-        play_intro_cutscene(state, tran_state)
+        mode.go_to_cutscene_at_the_start_of_the_next_frame = true
     }
     
     return false

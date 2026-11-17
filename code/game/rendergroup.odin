@@ -740,7 +740,7 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 
 ////////////////////////////////////////////////
 
-light_element_limit :: 32 * 1024
+light_element_limit :: 64 * 1024
 
 LightingSolution :: struct {
     surfaces:      [dynamic; light_element_limit] LightingSurface,
@@ -858,8 +858,8 @@ extract_reflectors_from_quads :: proc (group: ^RenderGroup, solution: ^LightingS
                     point_index := len(points)
                     point := append_into(points)
                     
-                    point.p             = ve0p + (cast(f32) x_sub + 0.5) * sub_width  * x_axis +  (cast(f32) y_sub + 0.5) * sub_height * y_axis
-                    point.n             = surface.n
+                    point.p = ve0p + (cast(f32) x_sub + 0.5) * sub_width  * x_axis +  (cast(f32) y_sub + 0.5) * sub_height * y_axis
+                    point.n = surface.n
                     point.surface_index = surface_index
                     point.reflect_color = 0.95 * color.rgb
                     
@@ -908,6 +908,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
                         closest_distance_squared: f32 = +Infinity
                         closest_point_index: u32
                         for test_index in hit_surface.light_index..<hit_surface.light_index+hit_surface.light_count {
+                            // @todo Day 419: Moving to another room from the starting room triggers this assert, the test_index is larger than the actual point count(but not too large for the array itself).
                             test := solution.points[test_index]
                             distance_squared := length_squared(test.p - ray_p)
                             
@@ -939,7 +940,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
                 }
             }
             
-            destination_emission_color[point_index] = retained_color
+            destination_emission_color[point_index] += retained_color
         }
         
         for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
@@ -961,7 +962,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
     }
     
     for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-        t :: 1. / 50.
+        t :: 1. / 10.
         solution.emission_color_0[point_index]           = linear_blend(last_emission[point_index],  solution.emission_color_0[point_index], t)
         solution.average_direction_to_light[point_index] = normalize_or_zero(linear_blend(last_direction[point_index], normalize_or_zero(solution.average_direction_to_light[point_index]), t))
     }

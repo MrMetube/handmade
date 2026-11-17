@@ -3,7 +3,9 @@ package game
 
 World_Mode :: struct {
     world: ^World,
-
+    
+    go_to_cutscene_at_the_start_of_the_next_frame: bool,
+    
     camera: Game_Camera,
     ////////////////////////////////////////////////
     // General
@@ -59,7 +61,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     
     mode.last_used_entity_id = cast(EntityId) ReservedBrainId.FirstFree
     
-    mode.effects_entropy = seed_random_series(500)
+    mode.effects_entropy = seed_random_series(555)
     
     mode.tile_size_in_meters = 1.4
     mode.typical_floor_height = 5
@@ -82,10 +84,9 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     room_center: iv3
     choice: u32
     // @todo undo this
-    screen_count :: 1 // 10
+    screen_count :: 2 // 10
     for screen_index in 0 ..< screen_count {
-        // @todo undo this
-        room_radius := /* iv2 {7, 4} */ iv2{ 5, 3 } + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
+        room_radius := iv2 {7, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
         room_size := room_radius * 2 + 1
         
         switch choice {
@@ -97,7 +98,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
           case 5: room_center.y -= room_radius.y
         }
         
-        when false {
+        if !false {
             choice = random_between(&mode.world.game_entropy, u32, 0, 1)
         } else {
             choice = 3
@@ -347,6 +348,8 @@ add_snake_piece :: proc (mode: ^World_Mode, p: WorldPosition, occupying: Travers
         dimension = {0, height},
         color     = 1,
     })
+    
+    add_piece_light(entity, 0, 0.5, {1,1,0}, 1)
     
     init_hitpoints(entity, 3)
 }

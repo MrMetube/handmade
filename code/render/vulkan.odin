@@ -14,7 +14,7 @@ shader_pack_path := #config(shader_pack_path, "unset")
 ////////////////////////////////////////////////
 
 frame_heap_size          :: 32 * Megabyte
-ligting_heap_size        ::  1 * Megabyte // @todo We do know the exact amount of memory needed before hand.
+ligting_heap_size        ::  2 * Megabyte // @todo We do know the exact amount of memory needed before hand.
 texture_upload_heap_size :: 64 * Megabyte
 texture_heap_size        ::  2 * Gigabyte
 frames_in_flight         :: 2
@@ -54,7 +54,7 @@ Vulkan :: struct {
     depth_peel_to_lighting_pso: gpu.PSO,
     
     textures:     [TextureDescriptor.count] gpu.PlacedTexture,
-    next_texture:  TextureDescriptor,
+    next_texture: TextureDescriptor,
     free_texture: [dynamic; TextureDescriptor.count] TextureDescriptor,
     
     depth_peel_buffers:         [dynamic; max_depth_peels] DepthPeelBuffer,
@@ -712,7 +712,6 @@ render_commands :: proc (vulkan: ^Vulkan, render_commands: ^RenderCommands, draw
             gpu.bump_reset(&vulkan.lighting_bump)
             
             vulkan.lighting_values = gpu.bump_allocate(&vulkan.lighting_bump, [] LightingValue, len(lighting.values))
-            
             copy(vulkan.lighting_values.cpu, lighting.values)
         }
         
