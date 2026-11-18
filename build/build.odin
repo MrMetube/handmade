@@ -6,15 +6,15 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 
+optimize :: !false
+internal :: true
+
 // @study does radlink also accept this linker flag?
 platform_flags := [] string { /* "-subsystem:windows", */ `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
 
 pedantic_game     :: false
 pedantic_render   :: false
 pedantic_platform :: false
-
-optimize :: !false
-internal :: true
 
 render_optimized :: "-o:minimal"
 

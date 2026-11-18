@@ -283,9 +283,9 @@ main :: proc () {
         render_commands.entries            = make_array_allocator(frame_allocator, RenderEntry, 1024)
         render_commands.vertex_buffer      = make_array_allocator(frame_allocator, TexturedVertex, 1 << 20)
         render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
-        render_commands.surfaces           = make_array_allocator(frame_allocator, LightingSurface, light_element_limit)
-        render_commands.light_points       = make_array_allocator(frame_allocator, LightingPoint,   light_element_limit)
-        render_commands.emission_color_0   = make_slice(frame_allocator,           v3,              light_element_limit)
+        render_commands.light_boxes        = make_array_allocator(frame_allocator, LightingBox,   light_element_limit)
+        render_commands.light_points       = make_array_allocator(frame_allocator, LightingPoint, light_element_limit)
+        render_commands.emission_color_0   = make_slice(frame_allocator,           v3,            light_element_limit)
         
         render_commands.white_bitmap.memory = make(frame_allocator, Color, 1)
         render_commands.white_bitmap.memory[0]         = {255, 255, 255, 255}
@@ -1241,7 +1241,7 @@ clear_render_commands :: proc (commands: ^RenderCommands) {
     clear(&commands.entries)
     clear(&commands.vertex_buffer)
     clear(&commands.quad_bitmap_buffer)
-    clear(&commands.surfaces)
+    clear(&commands.light_boxes)
     clear(&commands.light_points)
 }
 

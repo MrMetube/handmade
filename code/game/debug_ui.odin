@@ -499,7 +499,7 @@ draw_element :: proc (layout: ^Layout, id: DebugId, element: ^DebugElement) {
                 sort_by_names := [TopClocksSortBy] string {
                     .this_frame         = "This Frame",
                     .short_term_average = "Short-Term Average",
-                    .long_term_average  = "Long-Term Average"
+                    .long_term_average  = "Long-Term Average",
                 }
                 sorting_text := debug_print("Sorting:")
                 action_button(layout, sorting_text, {}, {})

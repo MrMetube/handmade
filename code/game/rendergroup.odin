@@ -56,7 +56,7 @@ RenderCommands :: struct {
     
     vertex_buffer:      [dynamic] TexturedVertex,
     quad_bitmap_buffer: [dynamic] ^Bitmap,
-    surfaces:           [dynamic] LightingSurface,
+    light_boxes:        [dynamic] LightingBox,
     light_points:       [dynamic] LightingPoint,
     emission_color_0:   [] v3,
     
@@ -184,7 +184,7 @@ UsedBitmapDim :: struct {
 light_element_limit :: 64 * 1024
 
 LightingSolution :: struct {
-    surfaces:         [] LightingSurface,
+    surfaces:         [dynamic; light_element_limit] LightingSurface,
     points:           [] LightingPoint,
     emission_color_0: [] v3,
     
@@ -200,7 +200,6 @@ LightingTextures :: struct {
     values: [light_element_limit] LightingValue,
 }
 
-@(common)
 LightingSurface :: struct {
     p: v3,
     n: v3,
@@ -211,25 +210,21 @@ LightingSurface :: struct {
     light_count: u32,
 }
 
-/* 
+@(common)
 LightingBox :: struct {
     min: v3,
     max: v3,
-    
     transparency: f32,
     
-    light_index: u32,
-    light_count: u32,
+    light_index: [7] u32,
+    _padding:    [1] u32,
 }
-*/
 
 @(common)
 LightingPoint :: struct {
-    p: v3,
-    reflect_color:  v3,
-    // @todo Is it better to duplicate these or not?
-    n: v3,
-    surface_index: u32,
+    p:             v3,
+    reflect_color: v3,
+    n:             v3,
 }
 
 @(common, shader)
@@ -609,7 +604,6 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
         light_index_store = nil
     }
     
-    center := p
     p := p
     p.xy -= radius
     p.z  -= height
@@ -639,100 +633,45 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
         
         group.light_index += light_count * 6
         
-        min_surface_index := cast(u32) len(group.commands.surfaces)
-        append(&group.commands.surfaces, LightingSurface {
-            p = p + 0*x +.5*y + .5*z,
-            n = {-1, 0, 0},
+        box := LightingBox {
+            min = p,
+            max = p + x + y + z,
             transparency = 0,
-            width  = 2*radius,
-            height = height,
-            x_axis = { 0,-1, 0 },
-            y_axis = { 0, 0, 1 },
-            light_index = light_index + 0*light_count,
-            light_count = light_count,
-        })
-
-        append(&group.commands.surfaces, LightingSurface {
-            p = p + x + .5*y + .5*z,
-            n = {1, 0, 0},
-            transparency = 0,
-            width  = 2*radius,
-            height = height,
-            x_axis = { 0, 1, 0},
-            y_axis = { 0, 0, 1},
-            light_index = light_index + 3*light_count,
-            light_count = light_count,
-        })
-        
-        append(&group.commands.surfaces, LightingSurface {
-            p = p +.5*x + 0*y + .5*z,
-            n = {0, -1, 0},
-            transparency = 0,
-            width  = 2*radius,
-            height = height,
-            x_axis = { 1, 0, 0 },
-            y_axis = { 0, 0, 1 },
-            light_index = light_index + 1*light_count,
-            light_count = light_count,
-        })
-        
-        append(&group.commands.surfaces, LightingSurface {
-            p = p +.5*x + y + .5*z,
-            n = {0, 1, 0},
-            transparency = 0,
-            width  = 2*radius,
-            height = height,
-            x_axis = {-1, 0, 0 },
-            y_axis = { 0, 0, 1 },
-            light_index = light_index + 4*light_count,
-            light_count = light_count,
-        })
-        
-        append(&group.commands.surfaces, LightingSurface {
-            p = p + .5*x + .5+y + 0*z,
-            n = {0, 0, -1},
-            transparency = 0,
-            width  = 2*radius,
-            height = 2*radius,
-            x_axis = { 0, 1, 0 },
-            y_axis = { 1, 0, 0 },
-            light_index = light_index + 2*light_count,
-            light_count = light_count,
-        })
-                
-        append(&group.commands.surfaces, LightingSurface {
-            p = p + .5*x + .5+y + z,
-            n = {0, 0, 1},
-            transparency = 0,
-            width  = 2*radius,
-            height = 2*radius,
-            x_axis = { 0, 1, 0 },
-            y_axis = {-1, 0, 0 },
-            light_index = light_index + 5*light_count,
-            light_count = light_count,
-        })
+            light_index = {
+                (light_index + 0*light_count),
+                (light_index + 1*light_count),
+                (light_index + 2*light_count),
+                (light_index + 3*light_count),
+                (light_index + 4*light_count),
+                (light_index + 5*light_count),
+                (light_index + 6*light_count),
+            },
+        }
+        append(&group.commands.light_boxes, box)
         
         if len(group.commands.light_points) == 0 {
             // @note Point 0 is never used.
             append_nothing(&group.commands.light_points) 
         }
         
-        for surface, offset in group.commands.surfaces[min_surface_index:][:6] {
+        for surface_index in cast(u32) 0..<6 {
+            surface := get_box_surface(box.min, box.max, surface_index)
+            
             x_sub_count :: 2
             y_sub_count :: 2
             
-            sub_width  := surface.width  / x_sub_count
-            sub_height := surface.height / y_sub_count
-            
             assert(x_sub_count * y_sub_count == light_count)
             for y_sub in 0..<y_sub_count {
+                y_sub_ratio := -0.5 + cast(f32) y_sub
                 for x_sub in 0..<x_sub_count {
+                    x_sub_ratio := -0.5 + cast(f32) x_sub
+                    
                     point_index := len(group.commands.light_points)
                     point := append_into(&group.commands.light_points)
                     
-                    point.p = (surface.p - .5 * surface.width * surface.x_axis - .5 * surface.height * surface.y_axis) + (cast(f32) x_sub + 0.5) * sub_width  * surface.x_axis +  (cast(f32) y_sub + 0.5) * sub_height * surface.y_axis
+                    point.p = surface.p + x_sub_ratio * surface.half_width * surface.x_axis + y_sub_ratio * surface.half_height * surface.y_axis
+                    
                     point.n = surface.n
-                    point.surface_index = min_surface_index + cast(u32) offset
                     point.reflect_color = 0.95 * color.rgb
                     
                     max_emission_value :: 10
@@ -896,9 +835,29 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
     commands := group.commands
+    clear(&solution.surfaces)
+    
+    for box in commands.light_boxes {
+        for box_surface_index in cast(u32) 0..<6 {
+            box_surface := get_box_surface(box.min, box.max, box_surface_index)
+            
+            surface := LightingSurface {
+                p = box_surface.p,
+                n = box_surface.n,
+                transparency = box.transparency,
+                width  = 2 * box_surface.half_width,
+                height = 2 * box_surface.half_height,
+                x_axis = box_surface.x_axis,
+                y_axis = box_surface.y_axis,
+                light_index = box.light_index[box_surface_index],
+                light_count = box.light_index[box_surface_index+1] - box.light_index[box_surface_index],
+            }
+            
+            append(&solution.surfaces, surface)
+        }
+    }
     
     point_count := cast(u32) len(commands.light_points)
-    solution.surfaces         = commands.surfaces[:]
     solution.points           = commands.light_points[:]
     solution.emission_color_0 = commands.emission_color_0[:point_count]
     
@@ -906,9 +865,9 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
         debug_data_block("Renderer")
         debug_data_block("Lighting")
         
-        surface_count := cast(u32) len(commands.surfaces)
-        debug_record_value(&surface_count, "Light Surfaces")
-        debug_record_value(&point_count,   "Light Points")
+        box_count := cast(u32) len(commands.light_boxes)
+        debug_record_value(&box_count,   "Light Boxes")
+        debug_record_value(&point_count, "Light Points")
     }
     
     // @speed Just ping-pong these if we end up using it!
@@ -1078,22 +1037,23 @@ render_lighting_points :: proc (group: ^RenderGroup, solution: ^LightingSolution
     element_width  := cast(f32) 0.25
     element_height := cast(f32) 0.25
     
-    for point_index in 0..<len(solution.points) {
-        point   := &solution.points[point_index]
-        surface := &solution.surfaces[point.surface_index]
-        
-        p              := point.p
-        x_axis         := surface.x_axis
-        y_axis         := surface.y_axis
-        emission_color := solution.emission_color_0[point_index]
-        
-        x := 0.5 * element_width  * x_axis
-        y := 0.5 * element_height * y_axis
-        
-        emission := clamp01(emission_color)
-        c := v4_to_rgba(V4(emission, surface.transparency))
-        
-        push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
+    for surface in solution.surfaces {
+        for point_index in surface.light_index..<surface.light_index + surface.light_count {
+            point := &solution.points[point_index]
+            
+            p              := point.p
+            x_axis         := surface.x_axis
+            y_axis         := surface.y_axis
+            emission_color := solution.emission_color_0[point_index]
+            
+            x := 0.5 * element_width  * x_axis
+            y := 0.5 * element_height * y_axis
+            
+            emission := clamp01(emission_color)
+            c := v4_to_rgba(V4(emission, surface.transparency))
+            
+            push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
+        }
     }
 }
 
@@ -1112,4 +1072,56 @@ push_lighting_values :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
     }
     
     push_lighting(group, textures)
+}
+
+LightBoxSurface :: struct {
+    p: v3,
+    n: v3,
+    x_axis: v3,
+    y_axis: v3,
+    half_width:  f32,
+    half_height: f32,
+}
+
+get_box_surface :: proc (min, max: v3, surface_index: u32) -> LightBoxSurface {
+    result: LightBoxSurface
+    
+    axis     := surface_index >> 1
+    positive := cast(bool) (surface_index & 1)
+    
+    /* @note:
+    A P     x axis     y axis
+    0 0    0,-1, 0    0, 0, 1
+    0 1    0, 1, 0    0, 0, 1
+    
+    1 0    0, 0,-1    1, 0, 0
+    1 1    0, 0, 1    1, 0, 0
+    
+    2 0   -1, 0, 0    0, 1, 0
+    2 1    1, 0, 0    0, 1, 0
+    */
+    
+    min_corner := min
+    max_corner := max
+    
+    if positive {
+        result.n[axis] = 1
+        min_corner[axis] = max_corner[axis]
+    } else {
+        result.n[axis] = -1
+        max_corner[axis] = min_corner[axis]
+    }
+    
+    result.x_axis[(axis+1) % 3] = positive ? 1 : -1
+    result.y_axis[(axis+2) % 3] = 1
+    
+    span := max_corner - min_corner
+    width  := abs(dot(result.x_axis, span))
+    height := abs(dot(result.y_axis, span))
+    
+    result.p = linear_blend(min_corner, max_corner, .5)
+    result.half_width  = .5 * width
+    result.half_height = .5 * height
+    
+    return result
 }

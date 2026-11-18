@@ -97,6 +97,3 @@ debug_data_block :: proc (name: string, loc := #caller_location) {
 debug_record_i32 :: proc (value: ^i32, name: string = #caller_expression(value)) {
     render_state.game.debug_record_i32(value, name)
 }
-debug_record_f32 :: proc (value: ^f32, name: string = #caller_expression(value)) {
-    render_state.game.debug_record_f32(value, name)
-}
