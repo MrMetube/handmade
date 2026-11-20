@@ -155,9 +155,8 @@ TexturedVertex :: struct {
     emission: f32,
     
     // @todo Doesn't need to be per-vertex - move this into a its own per-primitive buffer.
-    // @todo Could be compressed to u16s.
-    light_index: u32,
-    light_count: u32,
+    light_index: u16,
+    light_count: u16,
 }
 
 PackedNormal :: bit_field u32 {
@@ -181,10 +180,10 @@ UsedBitmapDim :: struct {
 ////////////////////////////////////////////////
 
 @(common)
-light_element_limit :: 64 * 1024
+light_element_limit :: 32 * 1024
 
 LightingSolution :: struct {
-    surfaces:         [dynamic; light_element_limit] LightingSurface,
+    boxes:            [] LightingBox,
     points:           [] LightingPoint,
     emission_color_0: [] v3,
     
@@ -200,24 +199,18 @@ LightingTextures :: struct {
     values: [light_element_limit] LightingValue,
 }
 
-LightingSurface :: struct {
-    p: v3,
-    n: v3,
-    transparency:   f32,
-    width, height:  f32,
-    x_axis, y_axis: v3,
-    light_index: u32,
-    light_count: u32,
-}
-
 @(common)
 LightingBox :: struct {
-    min: v3,
-    max: v3,
+    // @speed separately store center,radius to maximize cache line usage
+    // read in cast_ray on every iteration
+    center: v3,
+    radius: v3,
+    
     transparency: f32,
     
-    light_index: [7] u32,
-    _padding:    [1] u32,
+    // written in cast_ray only rarely
+    light_index: [7] u16,
+    _padding:    [1] u16,
 }
 
 @(common)
@@ -417,10 +410,10 @@ push_clear :: proc (group: ^RenderGroup, color: v4) {
 ////////////////////////////////////////////////
 
 push_quad :: proc { push_quad_no_bias, push_quad_z_bias }
-push_quad_no_bias :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v3, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0, light_index: u32 = 0, light_count: u32 = 0) {
+push_quad_no_bias :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v3, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0, light_index: u16 = 0, light_count: u16 = 0) {
     push_quad(group, bitmap, V4(p0, 0), V4(p1, 0), V4(p2, 0), V4(p3, 0), t0, t1, t2, t3, c0, c1, c2, c3, emission, light_index, light_count)
 }
-push_quad_z_bias  :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0, light_index: u32 = 0, light_count: u32 = 0) {
+push_quad_z_bias  :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p0, p1, p2, p3: v4, t0, t1, t2, t3: v2, c0, c1, c2, c3: Color, emission: f32 = 0, light_index: u16 = 0, light_count: u16 = 0) {
     entry := get_current_quads(group)
     entry.quad_count += 1
     
@@ -619,23 +612,26 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     
     c := v4_to_rgba(store_color(color))
     
-    light_index: u32
-    light_count: u32
+    light_index: u16
+    light_count: u16
     if light_index_store != nil {
         light_count = 4
         if light_index_store^ != 0 {
-            light_index = light_index_store^
+            light_index = cast(u16) light_index_store^
         } else {
             // @todo "used" vs. "free"
-            light_index = group.light_index
-            light_index_store^ = light_index
+            light_index = cast(u16) group.light_index
+            light_index_store^ = cast(u32) light_index
         }
         
-        group.light_index += light_count * 6
+        group.light_index += cast(u32) light_count * 6
+        
+        radius := 0.5 * (x + y + z)
+        assert(abs_per_lane(radius) == radius)
         
         box := LightingBox {
-            min = p,
-            max = p + x + y + z,
+            center = p + radius,
+            radius = radius,
             transparency = 0,
             light_index = {
                 (light_index + 0*light_count),
@@ -655,7 +651,7 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
         }
         
         for surface_index in cast(u32) 0..<6 {
-            surface := get_box_surface(box.min, box.max, surface_index)
+            surface := get_box_surface(box.center, box.radius, surface_index)
             
             x_sub_count :: 2
             y_sub_count :: 2
@@ -835,29 +831,9 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     timed_function()
     
     commands := group.commands
-    clear(&solution.surfaces)
-    
-    for box in commands.light_boxes {
-        for box_surface_index in cast(u32) 0..<6 {
-            box_surface := get_box_surface(box.min, box.max, box_surface_index)
-            
-            surface := LightingSurface {
-                p = box_surface.p,
-                n = box_surface.n,
-                transparency = box.transparency,
-                width  = 2 * box_surface.half_width,
-                height = 2 * box_surface.half_height,
-                x_axis = box_surface.x_axis,
-                y_axis = box_surface.y_axis,
-                light_index = box.light_index[box_surface_index],
-                light_count = box.light_index[box_surface_index+1] - box.light_index[box_surface_index],
-            }
-            
-            append(&solution.surfaces, surface)
-        }
-    }
     
     point_count := cast(u32) len(commands.light_points)
+    solution.boxes            = commands.light_boxes[:]
     solution.points           = commands.light_points[:]
     solution.emission_color_0 = commands.emission_color_0[:point_count]
     
@@ -900,7 +876,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
     
     for _ in 0..<LightingIterationCount {
         light_power := (1.0 - light_retention) / cast(f32) ray_count
-        for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
+        for point_index in 1..<cast(u32) len(solution.points) { // @note Point 0 is never used.
             point := &solution.points[point_index]
             emission_color := source_emission_color[point_index]
             
@@ -913,14 +889,12 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
                 for _ in 0..<ray_count {
                     emission_direction := sample_hemisphere(&series, point.n)
                     
-                    ray_p, hit_index := cast_ray(solution, point_index, point.p, emission_direction)
+                    ray_p, first_point_index, point_count := cast_ray(solution, point_index, point.p, emission_direction)
                     
-                    if hit_index < len(solution.surfaces) {
-                        hit_surface := &solution.surfaces[hit_index]
-                        
+                    if first_point_index < cast(u16) len(solution.points) {
                         closest_distance_squared: f32 = +Infinity
-                        closest_point_index: u32
-                        for test_index in hit_surface.light_index..<hit_surface.light_index+hit_surface.light_count {
+                        closest_point_index: u16
+                        for test_index in first_point_index..<first_point_index+point_count {
                             // @todo Day 419: Moving to another room from the starting room triggers this assert, the test_index is larger than the actual point count(but not too large for the array itself).
                             test := solution.points[test_index]
                             distance_squared := length_squared(test.p - ray_p)
@@ -975,7 +949,7 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
     }
     
     for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-        t :: 1. / 10.
+        t :: 1. / 50.
         solution.emission_color_0[point_index]           = linear_blend(last_emission[point_index],  solution.emission_color_0[point_index], t)
         solution.average_direction_to_light[point_index] = normalize_or_zero(linear_blend(last_direction[point_index], normalize_or_zero(solution.average_direction_to_light[point_index]), t))
     }
@@ -992,31 +966,55 @@ sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
     return result
 }
 
-cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_direction: v3) -> (v3, int) {
-    result_index := len(solution.surfaces)
-    result_p: v3
+cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_direction: v3) -> (v3, u16, u16) {
+    timed_function()
+    
+    point_index := safe_truncate(u16, len(solution.points))
+    point_count: u16
+    result_p:    v3
     
     closest_hit := +Infinity
-    for &surface, surface_index in solution.surfaces {
-        if surface_index != skip_index {
-            ray_surface_n := dot(ray_direction, surface.n)
-            
-            if ray_surface_n < -0.001 {
-                plane_to_origin := ray_origin - surface.p
+    for box, box_index in solution.boxes {
+        if cast(u32) box_index != skip_index {
+            radius := box.radius
+            #no_bounds_check #unroll for axis in cast(u32) 0..<3 {
+                positive := ray_direction[axis] < 0
+                center := box.center
+                center[axis] += (positive ? 1 : -1) * radius[axis]
                 
-                d := dot(surface.n, plane_to_origin)
-                t := -d / ray_surface_n
+                plane_to_origin := ray_origin - center
+                
+                t := -plane_to_origin[axis] / ray_direction[axis]
                 
                 if t > 0 && closest_hit > t {
+                    /* @note:
+                    A P     x axis     y axis
+                    0 0    0,-1, 0    0, 0, 1
+                    0 1    0, 1, 0    0, 0, 1
+                    
+                    1 0    0, 0,-1    1, 0, 0
+                    1 1    0, 0, 1    1, 0, 0
+                    
+                    2 0   -1, 0, 0    0, 1, 0
+                    2 1    1, 0, 0    0, 1, 0
+                    */
+                    x_index := (axis+1) % 3
+                    y_index := (axis+2) % 3
+                    
+                    half_width  := radius[x_index]
+                    half_height := radius[y_index]
+                    
                     ray_point := plane_to_origin + t * ray_direction
                     
-                    x_check := 2 * dot(ray_point, surface.x_axis)
-                    y_check := 2 * dot(ray_point, surface.y_axis)
+                    x_check := abs(ray_point[x_index])
+                    y_check := abs(ray_point[y_index])
                     
-                    if x_check >= -surface.width  && x_check <= surface.width &&
-                       y_check >= -surface.height && y_check <= surface.height {
+                    if x_check <= half_width && y_check <= half_height {
                         closest_hit = t
-                        result_index = surface_index
+                        
+                        box_surface_index := (axis << 1) | (positive ? 1 : 0)
+                        point_index = box.light_index[box_surface_index]
+                        point_count = box.light_index[box_surface_index+1] - box.light_index[box_surface_index]
                     }
                 }
             }
@@ -1024,7 +1022,7 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: int, ray_origin, ray_
     }
     
     result_p = ray_origin + closest_hit * ray_direction
-    return result_p, result_index
+    return result_p, point_index, point_count
 }
 
 ////////////////////////////////////////////////
@@ -1037,22 +1035,27 @@ render_lighting_points :: proc (group: ^RenderGroup, solution: ^LightingSolution
     element_width  := cast(f32) 0.25
     element_height := cast(f32) 0.25
     
-    for surface in solution.surfaces {
-        for point_index in surface.light_index..<surface.light_index + surface.light_count {
-            point := &solution.points[point_index]
+    for box in solution.boxes {
+        for box_surface_index in cast(u32) 0..<6 {
+            box_surface := get_box_surface(box.center, box.radius, box_surface_index)
             
-            p              := point.p
-            x_axis         := surface.x_axis
-            y_axis         := surface.y_axis
-            emission_color := solution.emission_color_0[point_index]
+            x_axis := box_surface.x_axis
+            y_axis := box_surface.y_axis
             
             x := 0.5 * element_width  * x_axis
             y := 0.5 * element_height * y_axis
             
-            emission := clamp01(emission_color)
-            c := v4_to_rgba(V4(emission, surface.transparency))
-            
-            push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
+            for point_index in box.light_index[box_surface_index]..<box.light_index[box_surface_index+1] {
+                point := &solution.points[point_index]
+                
+                p := point.p
+                emission_color := solution.emission_color_0[point_index]
+                
+                emission := clamp01(emission_color)
+                c := v4_to_rgba(V4(emission, box.transparency))
+                
+                push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
+            }
         }
     }
 }
@@ -1083,45 +1086,23 @@ LightBoxSurface :: struct {
     half_height: f32,
 }
 
-get_box_surface :: proc (min, max: v3, surface_index: u32) -> LightBoxSurface {
+get_box_surface :: proc (center, radius: v3, surface_index: u32) -> LightBoxSurface {
     result: LightBoxSurface
     
     axis     := surface_index >> 1
     positive := cast(bool) (surface_index & 1)
     
-    /* @note:
-    A P     x axis     y axis
-    0 0    0,-1, 0    0, 0, 1
-    0 1    0, 1, 0    0, 0, 1
+    sign := positive ? cast(f32) 1 : -1
+    result.n[axis] = sign
     
-    1 0    0, 0,-1    1, 0, 0
-    1 1    0, 0, 1    1, 0, 0
-    
-    2 0   -1, 0, 0    0, 1, 0
-    2 1    1, 0, 0    0, 1, 0
-    */
-    
-    min_corner := min
-    max_corner := max
-    
-    if positive {
-        result.n[axis] = 1
-        min_corner[axis] = max_corner[axis]
-    } else {
-        result.n[axis] = -1
-        max_corner[axis] = min_corner[axis]
-    }
+    result.p = center
+    result.p[axis] += sign * radius[axis]
     
     result.x_axis[(axis+1) % 3] = positive ? 1 : -1
     result.y_axis[(axis+2) % 3] = 1
     
-    span := max_corner - min_corner
-    width  := abs(dot(result.x_axis, span))
-    height := abs(dot(result.y_axis, span))
-    
-    result.p = linear_blend(min_corner, max_corner, .5)
-    result.half_width  = .5 * width
-    result.half_height = .5 * height
+    result.half_width  = abs(dot(result.x_axis, radius))
+    result.half_height = abs(dot(result.y_axis, radius))
     
     return result
 }

@@ -176,9 +176,9 @@ overlay_debug_info :: proc (debug: ^DebugState, input: Input) {
         
         info_text := format_string(debug.root_info, 
             "% | % | % - % memory blocks, % used size / % total sizes",
-            view_seconds(most_recent_frame.seconds_elapsed, precision = 3),
-            view_seconds(debug.frame_time_short_term_average, precision = 3),
-            view_seconds(debug.frame_time_long_term_average, precision = 3),
+            view_seconds(most_recent_frame.seconds_elapsed),
+            view_seconds(debug.frame_time_short_term_average),
+            view_seconds(debug.frame_time_long_term_average),
             
             view_amount(memory_stats.block_count),
             view_memory_size(memory_stats.total_used),

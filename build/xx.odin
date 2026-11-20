@@ -142,7 +142,7 @@ raddbg_ipc :: proc (command: string, argument: string = "") {
     append(cmd, raddbg_path, "--ipc")
     append(cmd, command)
     if argument != "" { append(cmd, argument) }
-    run_command(cmd, detached = true)
+    run_command(cmd)
 }
 
 ////////////////////////////////////////////////
