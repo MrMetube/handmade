@@ -7,7 +7,10 @@ LightingSolution :: struct {
     points:           [] LightingPoint,
     emission_color_0: [] v3,
     
-    box_table: [light_element_limit] u16,
+    box_ref_count: u16,
+    box_table:     [light_element_limit] u16,
+    
+    sorting_a, sorting_b: [light_element_limit] u16,
     
     root_box_index: u16,
     
@@ -72,6 +75,7 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     
     commands := group.commands
     
+    solution.box_ref_count  = 0
     point_count := cast(u32) len(commands.light_points)
     solution.points           = commands.light_points[:]
     solution.emission_color_0 = commands.emission_color_0[:point_count]
@@ -116,40 +120,104 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
 }
 
 build_spatial_partition_for_lighting :: proc (solution: ^LightingSolution) {
-    solution.root_box_index = safe_truncate(u16, len(solution.boxes))
+    timed_function()
     
-    add_box :: proc (solution: ^LightingSolution, parent: ^LightingBox, kid: ^LightingBox) {
+    add_box_references :: proc (solution: ^LightingSolution, box_storage_indices: ..u16) -> u16 {
+        assert(solution.box_ref_count < len(solution.box_table))
         
+        result := solution.box_ref_count
+        
+        solution.box_ref_count += cast(u16) len(box_storage_indices)
+        copy(solution.box_table[result:], box_storage_indices)
+        
+        return result
     }
     
-    add_overlapping_boxes :: proc (solution: ^LightingSolution, parent: ^LightingBox, first_box, box_count: u16) {
-        for box_index in first_box ..< first_box+box_count {
-            box := get_box(solution, box_index)
-            
-            if intersects(rectangle_center_half_dimension(parent.center, parent.radius), rectangle_center_dimension(box.center, box.radius)) {
-                add_box(solution, parent, box)
+    add_box_storage :: proc (solution: ^LightingSolution) -> u16 {
+        result := safe_truncate(u16, len(solution.boxes))
+        _, ok := append_nothing(&solution.boxes)
+        assert(ok)
+        
+        return result
+    }
+    
+    split_box :: proc (solution: ^LightingSolution, parent: ^LightingBox, source_offset, source_count: u16, full_source, full_destination: [] u16, axis_index: u32) {
+        source      := full_source[source_offset : source_offset+source_count]
+        destination := full_destination[:source_count]
+        
+        kids := source
+        if source_count > 4 {
+            for attempt in 0..<3 {
+                classifier_direction: v3
+                classifier_direction[axis_index] = 1
+                
+                classifier_boundary := dot(parent.center, classifier_direction)
+                
+                bounds_a := box_inverted_infinity(Box3)
+                bounds_b := box_inverted_infinity(Box3)
+                
+                count_a, count_b: u16
+                end := source_count - 1
+                for box_ref in source {
+                    box := solution.boxes[box_ref]
+                    
+                    if dot(box.center, classifier_direction) < classifier_boundary {
+                        destination[count_a] = box_ref
+                        bounds_a = get_union(bounds_a, box_center_radius(box.center, box.radius))
+                        count_a += 1
+                    } else {
+                        destination[end - count_b] = box_ref
+                        bounds_b = get_union(bounds_b, box_center_radius(box.center, box.radius))
+                        count_b += 1
+                    }
+                }
+                
+                next_axis := (axis_index + 1) % 3
+                
+                if count_a > 0 && count_b > 0 {
+                    kid_a_box_index := add_box_storage(solution)
+                    kid_a := &solution.boxes[kid_a_box_index]
+                    kid_a^ = {
+                        center = get_center(bounds_a),
+                        radius = get_radius(bounds_a),
+                    }
+                    split_box(solution, kid_a, 0, count_a, full_destination, full_source, next_axis)
+                    
+                    kid_b_box_index := add_box_storage(solution)
+                    kid_b := &solution.boxes[kid_b_box_index]
+                    kid_b^ = {
+                        center = get_center(bounds_b),
+                        radius = get_radius(bounds_b),
+                    }
+                    split_box(solution, kid_b, count_a, count_b, full_destination, full_source, next_axis)
+                    
+                    kids = { kid_a_box_index, kid_b_box_index }
+                    break
+                }
             }
         }
+        
+        parent.kid_count = cast(u16) len(kids)
+        parent.first_kid = add_box_references(solution, ..kids)
+    }
+        
+    actual_box_count := safe_truncate(u16, len(solution.boxes))
+    
+    bounds := box_inverted_infinity(Box3)
+    for box, box_index in solution.boxes {
+        solution.sorting_a[box_index] = cast(u16) box_index
+        bounds = get_union(bounds, box_center_radius(box.center, box.radius))
     }
     
-    split_box :: proc (solution: ^LightingSolution, parent: ^LightingBox) {
-        kid_a: ^LightingBox
-        kid_b: ^LightingBox
+    solution.root_box_index = add_box_references(solution, add_box_storage(solution))
+    
+    root := get_box(solution, solution.root_box_index)
+    root ^= {
+        center = get_center(bounds),
+        radius = get_radius(bounds),
     }
     
-    box := append_into(&solution.boxes)
-    box ^= {
-        center = 0,
-        radius = -100000,
-        kid_count = safe_truncate(u16, len(solution.boxes)-1),
-        first_kid = 0,
-    }
-    
-    for box_index in 0..<len(solution.boxes) {
-        solution.box_table[box_index] = cast(u16) box_index
-    }
-    
-    split_box(solution, box)
+    split_box(solution, root, 0, actual_box_count, solution.sorting_a[:], solution.sorting_b[:], 0)
 }
 
 compute_light_propagation :: proc (solution: ^LightingSolution) {
@@ -283,8 +351,18 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_
     cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, get_box(solution, solution.root_box_index), &result)
     
     cast_ray_recurse :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_direction: v3, root_box: ^LightingBox, result: ^RayCastResult) {
-        
         solution.number_of_total_rays_cast += 1
+        /* @note:
+        A P     x axis     y axis
+        0 0    0,-1, 0    0, 0, 1
+        0 1    0, 1, 0    0, 0, 1
+        
+        1 0    0, 0,-1    1, 0, 0
+        1 1    0, 0, 1    1, 0, 0
+        
+        2 0   -1, 0, 0    0, 1, 0
+        2 1    1, 0, 0    0, 1, 0
+        */
         
         for box_index in root_box.first_kid ..< root_box.first_kid+root_box.kid_count {
             if cast(u32) box_index != skip_index {
@@ -292,49 +370,43 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_
                 
                 solution.number_of_times_a_box_got_considered_for_intersection += 1
                 
-                radius := box.radius
-                #no_bounds_check {
-                    axis_loop: for axis in cast(u16) 0..<3 {
-                        positive := ray_direction[axis] < 0
-                        center := box.center
-                        center[axis] += (positive ? 1 : -1) * radius[axis]
-                        
-                        plane_to_origin := ray_origin - center
-                        
-                        t := -plane_to_origin[axis] / ray_direction[axis]
-                        
-                        if t > 0 && result.t > t {
-                            /* @note:
-                            A P     x axis     y axis
-                            0 0    0,-1, 0    0, 0, 1
-                            0 1    0, 1, 0    0, 0, 1
+                if box.kid_count != 0 && contains(box_center_radius(box.center, box.radius), ray_origin) {
+                    cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, box, result)
+                } else {
+                    radius := box.radius
+                    #no_bounds_check {
+                        axis_loop: for axis in cast(u16) 0..<3 {
+                            positive := ray_direction[axis] < 0
+                            center := box.center
+                            center[axis] += (positive ? 1 : -1) * radius[axis]
                             
-                            1 0    0, 0,-1    1, 0, 0
-                            1 1    0, 0, 1    1, 0, 0
+                            plane_to_origin := ray_origin - center
                             
-                            2 0   -1, 0, 0    0, 1, 0
-                            2 1    1, 0, 0    0, 1, 0
-                            */
-                            x_index := (axis+1) % 3
-                            y_index := (axis+2) % 3
+                            t := -plane_to_origin[axis] / ray_direction[axis]
                             
-                            half_width  := abs(radius[x_index])
-                            half_height := abs(radius[y_index])
-                            
-                            ray_point := plane_to_origin + t * ray_direction
-                            
-                            x_check := abs(ray_point[x_index])
-                            y_check := abs(ray_point[y_index])
-                            
-                            if x_check <= half_width && y_check <= half_height {
-                                if box.kid_count == 0 {
-                                    result.t = t
-                                    result.box = box
-                                    result.box_surface_index = (axis << 1) | (positive ? 1 : 0)
-                                } else {
-                                    cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, box, result)
+                            if t > 0 && result.t > t {
+                                x_axis := (axis+1) % 3
+                                y_axis := (axis+2) % 3
+                                
+                                half_width  := radius[x_axis]
+                                half_height := radius[y_axis]
+                                
+                                ray_point := plane_to_origin + t * ray_direction
+                                
+                                x_check := abs(ray_point[x_axis])
+                                y_check := abs(ray_point[y_axis])
+                                
+                                if x_check <= half_width && y_check <= half_height {
+                                    if box.kid_count == 0 {
+                                        result.t = t
+                                        result.box = box
+                                        result.box_surface_index = (axis << 1) | (positive ? 1 : 0)
+                                    } else {
+                                        cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, box, result)
+                                    }
+                                    
+                                    break axis_loop
                                 }
-                                break axis_loop
                             }
                         }
                     }
@@ -346,7 +418,7 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_
     return result
 }
 
-get_box :: #force_inline proc (solution: ^LightingSolution, box_index: u16) -> ^LightingBox {
+get_box :: proc (solution: ^LightingSolution, box_index: u16) -> ^LightingBox {
     result := &solution.boxes[solution.box_table[box_index]]
     return result
 }

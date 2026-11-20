@@ -366,11 +366,11 @@ update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, 
             ok := true
             
             if .general_velocity_constraint in test.camera_behaviour {
-                ok &&= contains(test.camera_velocity_min, length(entity.dp), test.camera_velocity_max)
+                ok &&= contains(test.camera_velocity_min, test.camera_velocity_max, length(entity.dp))
             }
             
             if .directional_velocity_constraint in test.camera_behaviour {
-                ok &&= contains(test.camera_velocity_min, dot(test.camera_velocity_dir, entity.dp), test.camera_velocity_max)
+                ok &&= contains(test.camera_velocity_min, test.camera_velocity_max, dot(test.camera_velocity_dir, entity.dp))
             }
             
             if ok {

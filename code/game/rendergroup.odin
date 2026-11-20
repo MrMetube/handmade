@@ -645,7 +645,7 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
 
 push_rectangle :: proc { push_rectangle2, push_rectangle3 }
 push_rectangle2 :: proc (group: ^RenderGroup, rect: Rectangle2, transform: Transform, color := v4{1,1,1,1}) {
-    push_rectangle(group, Rect3(rect, 0, 0), transform, color)
+    push_rectangle(group, { V3(rect.min, 0), V3(rect.max, 0)}, transform, color)
 }
 push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Transform, color := v4{1,1,1,1}) {
     p := project_with_transform(transform, rect.min)
@@ -665,7 +665,7 @@ push_rectangle3 :: proc (group: ^RenderGroup, rect: Rectangle3, transform: Trans
 }
 
 push_rectangle_outline :: proc (group: ^RenderGroup, rec: Rectangle2, transform: Transform, color := v4{1,1,1,1}, thickness: v2 = 0.1) {
-    rec := Rect3(rec, 0, 0)
+    rec := Rectangle3{ V3(rec.min, 0), V3(rec.max, 0) }
     dimension := get_dimension(rec)
     
     p := rec.min

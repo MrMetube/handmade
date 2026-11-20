@@ -91,7 +91,7 @@ where size_of(T) > size_of(R), intrinsics.type_is_integer(T), intrinsics.type_is
     return result
 }
 
-@(require_results) rec_cast :: proc ($T: typeid, rec: $R/Rectangle([$N] $E)) -> Rectangle([N] T) where T != E {
+@(require_results) rec_cast :: proc ($T: typeid, rec: $R/ Box([$N] $E)) -> Box([N] T) where T != E {
     return { cast([N] T) rec.min, cast([N] T) rec.max}
 }
 vec_cast :: proc { vcast_2, vcast_3, vcast_4 }

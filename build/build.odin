@@ -6,7 +6,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 
-optimize :: !false
+optimize :: false
 internal :: true
 
 // @study does radlink also accept this linker flag?
