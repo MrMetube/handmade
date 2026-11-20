@@ -257,10 +257,9 @@ render_layered_scene :: proc (assets: ^Assets, render_group: ^RenderGroup, scene
     if render_group != nil {
         push_camera(render_group, {}, focal_length = focal_length, near_clip_plane = 0.1, far_clip_plane = 1000, clip_alpha = false)
         
-        if len(scene.layers) == 0 {
-            push_clear(render_group, 0)
-        }
+        push_clear(render_group, Black)
     }
+    
     
     for layer, layer_index in scene.layers {
         active := true

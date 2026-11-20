@@ -590,19 +590,29 @@ when LaneWidth != 1 {
 ////////////////////////////////////////////////
 // Rectangle operations
 
+box_min_dimension         :: proc { box_min_dimension_2, box_min_dimension_v }
+box_zero_min_dimension    :: proc { box_zero_min_dimension_2, box_zero_min_dimension_v }
+
+box_min_dimension_2       :: proc (x, y, w, h: $E)        -> Box([2] E) { return { {x, y},                   {w, h}                   } }
+box_min_dimension_v       :: proc (min, dimension: $T)    -> Box(T)     { return { min,                      min + dimension          } }
+box_zero_min_dimension_2  :: proc (w, h: $E)              -> Box([2] E) { return { 0,                        {w, h}                   } }
+box_zero_min_dimension_v  :: proc (dimension: $T)         -> Box(T)     { return { 0,                        dimension                } }
+box_min_max               :: proc (min, max: $T)          -> Box(T)     { return { min,                      max                      } }
+box_center_dimension      :: proc (center, dimension: $T) -> Box(T)     { return { center - (dimension / 2), center + (dimension / 2) } }
+box_zero_center_dimension :: proc (dimension: $T)         -> Box(T)     { return { -dimension / 2,           dimension / 2            } }
+box_min_radius            :: proc (min, radius: $T)       -> Box(T)     { return { min,                      min + 2*radius           } }
+box_center_radius         :: proc (center, radius: $T)    -> Box(T)     { return { center - radius,          center + radius          } }
+
 rectangle_min_dimension         :: proc { rectangle_min_dimension_2, rectangle_min_dimension_v }
 rectangle_zero_min_dimension    :: proc { rectangle_zero_min_dimension_2, rectangle_zero_min_dimension_v }
 
-rectangle_min_dimension_2       :: proc (x, y, w, h: $E)        -> Box([2] E) { return { {x, y},                   {w, h}                   } }
-rectangle_min_dimension_v       :: proc (min, dimension: $T)    -> Box(T)     { return { min,                      min + dimension          } }
-rectangle_zero_min_dimension_2  :: proc (w, h: $E)              -> Box([2] E) { return { 0,                        {w, h}                   } }
-rectangle_zero_min_dimension_v  :: proc (dimension: $T)         -> Box(T)     { return { 0,                        dimension                } }
-rectangle_zero_center_dimension :: proc (dimension: $T)         -> Box(T)     { return { -dimension / 2,           dimension / 2            } }
-rectangle_min_max               :: proc (min, max: $T)          -> Box(T)     { return { min,                      max                      } }
-rectangle_center_dimension      :: proc (center, dimension: $T) -> Box(T)     { return { center - (dimension / 2), center + (dimension / 2) } }
-
-box_center_radius :: proc (center: $T, radius: T) -> Box(T) { return { center - radius,  center + radius  } }
-
+rectangle_min_dimension_2       :: box_min_dimension_2
+rectangle_min_dimension_v       :: box_min_dimension_v
+rectangle_zero_min_dimension_2  :: box_zero_min_dimension_2
+rectangle_zero_min_dimension_v  :: box_zero_min_dimension_v
+rectangle_min_max               :: box_min_max
+rectangle_center_dimension      :: box_center_dimension
+rectangle_zero_center_dimension :: box_zero_center_dimension
 rectangle_center_half_dimension :: box_center_radius
 
 rectangle_origin_axis :: proc (origin, x_axis, y_axis: v2) -> Rectangle2i {

@@ -31,7 +31,8 @@ World_Mode :: struct {
     
     ////////////////////////////////////////////////
     
-    debug_light_index: u32,
+    debug_lighting: [light_points_per_chunk] LightPointState,
+    
     show_lighting: bool,
     test_lighting: LightingSolution,
     test_textures: LightingTextures,
@@ -84,7 +85,7 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
     room_center: iv3
     choice: u32
     // @todo undo this
-    screen_count :: 1 // 10
+    screen_count :: 2
     for screen_index in 0 ..< screen_count {
         room_radius := iv2 {7, 4} + {random_between(&mode.world.game_entropy, i32, 0, 3), random_between(&mode.world.game_entropy, i32, 0, 3)} // :RoomSize:
         room_size := room_radius * 2 + 1
@@ -188,6 +189,369 @@ play_world :: proc (state: ^State, tran_state: ^TransientState) {
         
     mode.particle_cache = push(&tran_state.arena, Particle_Cache)
     init_particle_cache(mode.particle_cache, tran_state.assets)
+}
+
+////////////////////////////////////////////////
+
+update_and_render_world :: proc (state: ^State, tran_state: ^TransientState, render_group: ^RenderGroup, input: ^Input, mode: ^World_Mode) -> (rerun: bool) {
+    timed_function()
+    
+    if mode.go_to_cutscene_at_the_start_of_the_next_frame {
+        // If this is done immediatly, we still have filled the rendergroup with commands. Specifically the Lighting Data is then still read by the renderer, but we already reused the game memory for the next mode and may also have unmapped parts of the freed memory.
+        play_intro_cutscene(state, tran_state)
+        return true
+    }
+    
+    
+    when false {
+        temp := begin_temporary_memory(&tran_state.arena)
+        
+        N: i32 : 5
+        works := push(temp.arena, World_Sim_Work, N*N)
+        for sim_x in 0..<N {
+            for sim_y in 0..<N {
+                middle :: N/2
+                if sim_x == middle && sim_y == middle { continue }
+                
+                work := &works[sim_x + sim_y * N]
+                work.dt = input.delta_time
+                work.mode = mode
+                work.center = mode.camera.p
+                work.center.chunk += {sim_x - middle, sim_y - middle, 0} * 70
+                work.bounds = sim_bounds
+                
+                when false {
+                    do_world_simulation_immediatly(work)
+                } else {
+                    Platform.enqueue_work(tran_state.high_priority_queue, work, do_world_simulation_immediatly)
+                }
+            }
+        }
+        
+        Platform.complete_all_work(tran_state.high_priority_queue)
+        end_temporary_memory(temp)
+    }
+    
+    ////////////////////////////////////////////////
+    
+    debug_set_mouse_p(input.mouse.p)
+    
+    push_begin_depth_peel(render_group)
+    
+    push_clear(render_group, DarkBlue)
+    
+    ////////////////////////////////////////////////
+    
+    focal_length :: 0.6
+    
+    mode.camera_pitch = 0.0125 * Tau
+    mode.camera_orbit = 0
+    mode.camera_dolly = 0
+    
+    camera_offset := mode.camera.offset
+    
+    delta_from_sim := world_distance(mode.world, mode.camera.p, mode.camera.simulation_center)
+    camera_offset += delta_from_sim
+    
+    camera_offset.z += mode.camera_dolly
+    
+    camera_object := xy_rotation(mode.camera_orbit) * yz_rotation(mode.camera_pitch)
+    camera_offset = multiply(camera_object, camera_offset)
+    x := get_column(camera_object, 0)
+    y := get_column(camera_object, 1)
+    z := get_column(camera_object, 2)
+    near_clip_plane :: 0.1
+    push_camera(render_group, flags = {}, x = x, y = y, z = z, p = camera_offset, focal_length = focal_length, fog = true, near_clip_plane = near_clip_plane)
+    
+    ////////////////////////////////////////////////
+    
+    if input != nil {
+        if was_pressed(input.mouse.buttons[.extra1]) {
+            mode.use_debug_camera = !mode.use_debug_camera
+        }
+    }
+    
+    if mode.use_debug_camera {
+        debug_offset := mode.camera.offset
+        
+        if input != nil {
+            dmousep := input.mouse.p - mode.debug_last_mouse_p
+            defer mode.debug_last_mouse_p = input.mouse.p
+            
+            if mode.use_debug_camera {
+                if is_down(input.mouse.buttons[.left]) {
+                    rotation_speed :: 0.001 * Tau
+                    mode.debug_camera_orbit += -dmousep.x * rotation_speed
+                    mode.debug_camera_pitch += dmousep.y * rotation_speed
+                } else if is_down(input.mouse.buttons[.right]) {
+                    zoom_speed := 0.005 * (debug_offset.z + mode.debug_camera_dolly)
+                    mode.debug_camera_dolly += -dmousep.y * zoom_speed
+                } else if is_down(input.mouse.buttons[.middle]) {
+                    mode.debug_camera_orbit = mode.camera_orbit
+                    mode.debug_camera_pitch = mode.camera_pitch
+                    mode.debug_camera_dolly = mode.camera_dolly
+                }
+            }
+        }
+        
+        debug_camera_object := xy_rotation(mode.debug_camera_orbit) * yz_rotation(mode.debug_camera_pitch)
+        debug_offset.z += mode.debug_camera_dolly
+        debug_offset = multiply(debug_camera_object, debug_offset)
+        
+        x = get_column(debug_camera_object, 0)
+        y = get_column(debug_camera_object, 1)
+        z = get_column(debug_camera_object, 2)
+        
+        push_camera(render_group, { .debug }, x, y, z, debug_offset, focal_length)
+    }
+    
+    ////////////////////////////////////////////////
+    
+    recompute_lighting: bool
+    if input.fkey_pressed[3] {
+        if LightingIterationCount > 0 {
+            LightingIterationCount -= 1
+            recompute_lighting = true
+        }
+    }
+    if input.fkey_pressed[4] {
+        LightingIterationCount += 1
+        recompute_lighting = true
+    }
+    
+    if input.fkey_pressed[1] {
+        mode.show_lighting = !mode.show_lighting
+    }
+    
+    if !recompute_lighting && mode.show_lighting {
+        render_lighting_points(render_group, &mode.test_lighting, &mode.test_textures)
+    } else {
+        // @todo(viktor): by how much should we expand the sim region?
+        sim_bounds := box_zero_center_dimension(mode.standard_room_dimension * {3, 3, 10})
+        
+        enable_lighting(render_group, box_zero_center_dimension(mode.standard_room_dimension * {1, 1, 10}))
+        
+        dt := input.delta_time
+        simulation := begin_sim(&tran_state.arena, mode.world, mode.camera.simulation_center, sim_bounds, input.delta_time)
+        
+        check_for_joining_player(state, input, simulation.region, mode)
+        
+        simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, render_group, state, input, mode.particle_cache)
+        
+        // @todo undo this
+        // last_camera_p := mode.camera.p
+        camera_entity := get_entity_by_id(simulation.region, mode.camera.following_id)
+        debug_light_p: v3
+        if camera_entity != nil {
+            debug_light_p = camera_entity.p + {0,0,1}
+            update_camera(simulation.region, mode.world, &mode.camera, camera_entity, dt)
+        }
+        
+        push_light(render_group, debug_light_p, .5, 1, 1, mode.debug_lighting[:])
+        
+        // @todo undo this
+        // frame_to_frame_camera_delta := world_distance(mode.world, last_camera_p, mode.camera.p)
+        // update_and_render_particle_systems(mode.particle_cache, render_group, dt, frame_to_frame_camera_delta)
+        unused(update_and_render_particle_systems)
+        
+        if ShowSimulationBounds {
+            world_transform := default_flat_transform()
+            push_volume_outline(render_group, simulation.region.bounds, world_transform, Salmon, 0.2)
+        }
+        
+        if ShowRenderFrustum {
+            near: f32 = 1
+            far:  f32 =  20
+            min: v2 = 0
+            max: v2 = render_group.screen_size
+            
+            bitmap := &render_group.commands.white_bitmap
+            thickness: f32 = 0.02
+            cn := srgb_to_linear(Orange)
+                cf := srgb_to_linear(Red)
+            
+            near_min := unproject_with_transform(render_group, render_group.game_cam, min, near)
+            near_max := unproject_with_transform(render_group, render_group.game_cam, max, near)
+            far_min  := unproject_with_transform(render_group, render_group.game_cam, min, far)
+            far_max  := unproject_with_transform(render_group, render_group.game_cam, max, far)
+            
+            p0 := V4(far_max, 0)
+            p1 := V4(far_min.x, far_max.yz, 0)
+            p2 := V4(near_max, 0)
+            p3 := V4(near_min.x, near_max.yz, 0)
+            p4 := V4(far_max.x, far_min.yz, 0)
+            p5 := V4(far_min, 0)
+            p6 := V4(near_max.x, near_min.yz, 0)
+            p7 := V4(near_min, 0)
+            
+            c0 := v4_to_rgba(store_color(cf))
+            c1 := v4_to_rgba(store_color(cn))
+            
+            push_line_segment(render_group, bitmap, p0, p1, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p0, p2, c0, c1, thickness)
+            push_line_segment(render_group, bitmap, p0, p4, c0, c0, thickness)
+            
+            push_line_segment(render_group, bitmap, p3, p1, c1, c0, thickness)
+            push_line_segment(render_group, bitmap, p3, p2, c1, c1, thickness)
+            push_line_segment(render_group, bitmap, p3, p7, c1, c1, thickness)
+            
+            push_line_segment(render_group, bitmap, p5, p1, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p5, p4, c0, c0, thickness)
+            push_line_segment(render_group, bitmap, p5, p7, c0, c1, thickness)
+            
+            push_line_segment(render_group, bitmap, p6, p2, c1, c1, thickness)
+            push_line_segment(render_group, bitmap, p6, p4, c1, c0, thickness)
+            push_line_segment(render_group, bitmap, p6, p7, c1, c1, thickness)
+        }
+        
+        lighting_test(render_group, &mode.test_lighting)
+        push_lighting_values(render_group, &mode.test_lighting, &mode.test_textures)
+        
+        end_sim(&simulation)
+    }
+    
+    push_end_depth_peel(render_group)
+    
+    ////////////////////////////////////////////////
+    
+    check_arena(mode.world.arena)
+    
+    heroes_exist: bool
+    for con_hero in state.controlled_heroes {
+        if con_hero.brain_id != 0 {
+            heroes_exist = true
+            break
+        }
+    }
+    
+    if !heroes_exist {
+        mode.go_to_cutscene_at_the_start_of_the_next_frame = true
+    }
+    
+    return false
+}
+
+////////////////////////////////////////////////
+
+World_Sim_Work :: struct {
+    mode: ^World_Mode,
+    dt: f32,
+    bounds: Rectangle3,
+    center: WorldPosition,
+}
+
+do_world_simulation_immediatly :: proc (data: pmm) {
+    timed_function()
+    
+    // @todo(viktor): with the new and improved Platform Api can we get back the polymorphic arguments so that the call site is better checked
+    using work := cast(^World_Sim_Work) data
+    
+    // @todo(viktor): It is inefficient to reallocate every time - this should be something that is passed in as a property of the worker thread
+    arena: Arena
+    defer clear_arena(&arena)
+    
+    simulation := begin_sim(&arena, mode.world, center, bounds, dt)
+    simulate(&simulation, dt, &mode.world.game_entropy, mode.typical_floor_height, nil,  nil, nil, nil)
+    end_sim(&simulation)
+}
+
+check_for_joining_player :: proc (state: ^State, input: ^Input, region: ^SimRegion, mode: ^World_Mode) {
+    timed_function()
+    
+    for controller, controller_index in input.controllers {
+        con_hero := &state.controlled_heroes[controller_index]
+        if con_hero.brain_id == 0 {
+            if was_pressed(controller.buttons[.start]) {
+                standing_on, ok := get_closest_traversable(region, {0, 0, 0}, {.Unoccupied} )
+                assert(ok) // @todo(viktor): Game UI that tells you there is no safe space...maybe keep trying on subsequent frames?
+                
+                brain_id := cast(BrainId) controller_index + cast(BrainId) ReservedBrainId.FirstHero
+                con_hero ^= { brain_id = brain_id }
+                add_hero(mode, region, standing_on, brain_id)
+            }
+        }
+    }
+}
+
+update_camera :: proc (region: ^SimRegion, world: ^World, camera: ^Game_Camera, entity: ^Entity, dt: f32) {
+    // @note(viktor): It is _mandatory_ that the camera "center" be the sim region center for this code to work properly, because it cannot add the offset from the sim center to the camera as a displacement or it will fail when moving between room at the changeover point.
+    assert(entity.id == camera.following_id)
+    
+    in_room: ^Entity
+    special: ^Entity
+    // @todo(viktor): Probably don't want to loop over all entities - maintain a separate list of room entities during unpack!
+    for &test in region.entities {
+        if test.brain_kind == .Room && entity_overlaps_entity(&test, entity) {
+            in_room = &test
+        }
+        
+        if test.camera_behaviour != {} && entity_overlaps_entity(&test, entity)  {
+            ok := true
+            
+            if .general_velocity_constraint in test.camera_behaviour {
+                ok &&= contains(test.camera_velocity_min, test.camera_velocity_max, length(entity.dp))
+            }
+            
+            if .directional_velocity_constraint in test.camera_behaviour {
+                ok &&= contains(test.camera_velocity_min, test.camera_velocity_max, dot(test.camera_velocity_dir, entity.dp))
+            }
+            
+            if ok {
+                special = &test
+            }
+        }
+    }
+    
+    if special != nil {
+        if special.id == camera.special {
+            camera.t_special += dt
+        } else {
+            camera.t_special = 0
+            camera.special = special.id
+        }
+    } else {
+        camera.special = 0
+    }
+    
+    if in_room != nil {
+        room_volume := add_offset(in_room.collision_volume, in_room.p)
+        
+        simulation_center := V3(get_center(room_volume).xy, room_volume.min.z)
+        
+        target_p := simulation_center
+        target_offset := v3{0, 0, 8}
+        if special != nil {
+            if .follow_player in special.camera_behaviour {
+                target_p = entity.p
+            }
+            
+            if camera.t_special > special.camera_min_time && .inspect in special.camera_behaviour {
+                target_p = special.p
+            }
+            
+            if camera.t_special > special.camera_min_time && .offset in special.camera_behaviour {
+                target_offset = special.camera_offset
+            }
+        }
+        
+        camera.simulation_center = map_into_worldspace(world, region.origin, simulation_center)
+        camera.target_p = map_into_worldspace(world, region.origin, target_p)
+        camera.target_offset = target_offset
+    }
+    
+    p        := world_distance(world, camera.p, camera.simulation_center)
+    target_p := world_distance(world, camera.target_p, camera.simulation_center)
+    offset        := camera.offset
+    target_offset := camera.target_offset
+    
+    delta_p := target_p - p
+    p += delta_p * dt
+    
+    delta_offset := target_offset - camera.offset
+    offset += delta_offset * dt
+    
+    camera.p = map_into_worldspace(world, region.origin, p)
+    camera.offset = offset
 }
 
 ////////////////////////////////////////////////

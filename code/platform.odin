@@ -514,7 +514,10 @@ main :: proc () {
         }
         ////////////////////////////////////////////////
         { timed_block("game updated")
-        
+            
+            // @cleanup
+            render_commands.light_point_index = 1
+            
             if !GlobalPause {
                 state := &GlobalPlatformState
                 if state.recording_index != 0 {
@@ -1235,7 +1238,6 @@ clear_render_commands :: proc (commands: ^RenderCommands) {
     clear(&commands.vertex_buffer)
     clear(&commands.quad_bitmap_buffer)
     clear(&commands.light_boxes)
-    clear(&commands.light_points)
 }
 
 aspect_ratio_fit :: proc (render_size: iv2, window_size: iv2) -> Rectangle2i {

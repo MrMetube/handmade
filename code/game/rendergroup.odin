@@ -57,8 +57,7 @@ RenderCommands :: struct {
     vertex_buffer:      [dynamic] TexturedVertex,
     quad_bitmap_buffer: [dynamic] ^Bitmap,
     light_boxes:        [dynamic] LightingBox,
-    light_points:       [dynamic] LightingPoint,
-    emission_color_0:   [] v3,
+    light_point_index: u16,
     
     white_bitmap: Bitmap,
 }
@@ -72,7 +71,7 @@ RenderGroup :: struct {
     screen_size: v2,
     
     lighting_enabled: bool,
-    light_index:      u32,
+    lighting_bounds:  Box3,
     
     last_setup: RenderSetup,
     
@@ -185,8 +184,6 @@ allocate_render_commands_buffers :: proc (commands: ^RenderCommands, allocator: 
     commands.vertex_buffer      = make_array_allocator(allocator, TexturedVertex, 1 << 20)
     commands.quad_bitmap_buffer = make_array_allocator(allocator, ^Bitmap, 1 << 20)
     commands.light_boxes        = make_array_allocator(allocator, LightingBox,   light_element_limit)
-    commands.light_points       = make_array_allocator(allocator, LightingPoint, light_element_limit)
-    commands.emission_color_0   = make_slice(allocator,           v3,            light_element_limit)
 }
 
 init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
@@ -196,8 +193,6 @@ init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^Rend
         
         screen_size   = cast(v2) commands.dimension,
         generation_id = generation_id,
-        
-        light_index = 1,
     }
     
     setup := group.last_setup
@@ -244,8 +239,9 @@ render_group_push_size :: proc (group: ^RenderGroup, $T: typeid) -> ^T {
 
 ////////////////////////////////////////////////
 
-enable_lighting :: proc (group: ^RenderGroup) {
+enable_lighting :: proc (group: ^RenderGroup, bounds: Box3) {
     group.lighting_enabled = true
+    group.lighting_bounds  = bounds
 }
 
 push_setup :: proc (group: ^RenderGroup, setup: RenderSetup) {
@@ -530,28 +526,30 @@ push_bitmap_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, transform: Transf
     push_quad(group, bitmap, p0, p1, p2, p3, t0, t1, t2, t3, c, c, c, c)
 }
 
-push_light :: proc (group: ^RenderGroup, p: v3, radius: f32, color := v3{1, 1, 1}, emission: f32, light_index_store: ^u32) {
-    push_cube_raw(group, &group.commands.white_bitmap, p + {0, 0, 0.5*radius}, radius, radius, V4(color, 1), emission, light_index_store) 
+push_light :: proc (group: ^RenderGroup, p: v3, radius: f32, color := v3{1, 1, 1}, emission: f32, light_store: [] LightPointState) {
+    push_cube_raw(group, &group.commands.white_bitmap, p + {0, 0, 0.5*radius}, radius, radius, V4(color, 1), emission, light_store) 
 }
 
-push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, light_index_store: ^u32) {
+push_cube :: proc (group: ^RenderGroup, id: BitmapId, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, light_store: [] LightPointState) {
     bitmap := get_bitmap(group.assets, id, group.generation_id)
     
     // @note(viktor): the handle is filled out always at the end of the frame in manage_textures
     if bitmap == nil || bitmap.texture_handle == 0 {
         load_bitmap(group.assets, id, false)
     } else {
-        push_cube_raw(group, bitmap, p, radius, height, color, light_index_store = light_index_store)
+        push_cube_raw(group, bitmap, p, radius, height, color, light_store = light_store)
     }
 }
 
-push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, emission: f32 = 0, light_index_store: ^u32) {
+push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, height: f32, color := v4{1, 1, 1, 1}, emission: f32 = 0, light_store: [] LightPointState = nil) {
     assert(bitmap.width_over_height != 0)
     assert(bitmap.texture_handle    != 0)
     
-    light_index_store := light_index_store
+    commands := group.commands
+    
+    light_store := light_store
     if !group.lighting_enabled {
-        light_index_store = nil
+        light_store = nil
     }
     
     p := p
@@ -571,67 +569,40 @@ push_cube_raw :: proc (group: ^RenderGroup, bitmap: ^Bitmap, p: v3, radius, heig
     
     light_index: u16
     light_count: u16
-    if light_index_store != nil {
-        light_count = 4
-        if light_index_store^ != 0 {
-            light_index = cast(u16) light_index_store^
-        } else {
-            // @todo "used" vs. "free"
-            light_index = cast(u16) group.light_index
-            light_index_store^ = cast(u32) light_index
-        }
+    if light_store != nil {
+        cube_bounds := box_min_radius(p, radius)
         
-        group.light_index += cast(u32) light_count * 6
-        
-        radius := 0.5 * (x + y + z)
-        assert(abs_per_lane(radius) == radius)
-        
-        box := LightingBox {
-            center = p + radius,
-            radius = radius,
-            transparency = 0,
-            light_index = {
-                (light_index + 0*light_count),
-                (light_index + 1*light_count),
-                (light_index + 2*light_count),
-                (light_index + 3*light_count),
-                (light_index + 4*light_count),
-                (light_index + 5*light_count),
-                (light_index + 6*light_count),
-            },
-        }
-        append(&group.commands.light_boxes, box)
-        
-        if len(group.commands.light_points) == 0 {
-            // @note Point 0 is never used.
-            append_nothing(&group.commands.light_points) 
-        }
-        
-        for surface_index in cast(u32) 0..<6 {
-            surface := get_box_surface(box.center, box.radius, surface_index)
+        if intersects(group.lighting_bounds, cube_bounds) {
+            light_index = commands.light_point_index
+            commands.light_point_index += light_points_per_chunk
+            assert(commands.light_point_index < light_element_limit)
             
-            x_sub_count :: 2
-            y_sub_count :: 2
+            light_count = light_points_per_chunk / 6
             
-            assert(x_sub_count * y_sub_count == light_count)
-            for y_sub in 0..<y_sub_count {
-                y_sub_ratio := -0.5 + cast(f32) y_sub
-                for x_sub in 0..<x_sub_count {
-                    x_sub_ratio := -0.5 + cast(f32) x_sub
-                    
-                    point_index := len(group.commands.light_points)
-                    point := append_into(&group.commands.light_points)
-                    
-                    point.p = surface.p + x_sub_ratio * surface.half_width * surface.x_axis + y_sub_ratio * surface.half_height * surface.y_axis
-                    
-                    point.n = surface.n
-                    point.reflect_color = 0.95 * color.rgb
-                    
-                    max_emission_value :: 10
-                    
-                    group.commands.emission_color_0[point_index] = max_emission_value * emission
-                }
+            radius := 0.5 * (x + y + z)
+            assert(abs_per_lane(radius) == radius)
+            
+            box := LightingBox {
+                storage = light_store,
+                
+                center = p + radius,
+                radius = radius,
+                
+                reflect_color = color.rgb,
+                transparency = 0,
+                emission = emission,
+                
+                light_index = {
+                    (light_index + 0*light_count),
+                    (light_index + 1*light_count),
+                    (light_index + 2*light_count),
+                    (light_index + 3*light_count),
+                    (light_index + 4*light_count),
+                    (light_index + 5*light_count),
+                    (light_index + 6*light_count),
+                },
             }
+            append(&commands.light_boxes, box)
         }
     }
     
@@ -809,9 +780,9 @@ render_lighting_points :: proc (group: ^RenderGroup, solution: ^LightingSolution
                 emission_color := solution.emission_color_0[point_index]
                 
                 emission := clamp01(emission_color)
-                c := v4_to_rgba(V4(emission, box.transparency))
+                c := v4_to_rgba(V4(emission, 1-box.transparency))
                 
-                push_quad(group, bitmap, p-x-y, p+x-y, p+x+y, p-x+y, 0,0,0,0, c,c,c,c)
+                push_quad(group, bitmap, p-x-y, p-x+y, p+x+y, p+x-y, 0,0,0,0, c,c,c,c)
             }
         }
     }
@@ -820,7 +791,7 @@ render_lighting_points :: proc (group: ^RenderGroup, solution: ^LightingSolution
 push_lighting_values :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     timed_function()
     
-    for point_index in 0..<len(solution.points) {
+    for point_index in 1..<len(solution.points) {
         p := solution.points[point_index].p
         c := solution.emission_color_0[point_index]
         d := solution.average_direction_to_light[point_index]

@@ -1,25 +1,22 @@
 package game
 
 light_element_limit :: 32 * 1024
+light_points_per_chunk :: cast(u16) 24
+light_chunk_count :: cast(u16) light_element_limit / light_points_per_chunk
 
 LightingSolution :: struct {
-    boxes:            [dynamic; light_element_limit] LightingBox,
-    points:           [] LightingPoint,
-    emission_color_0: [] v3,
+    boxes:  [dynamic; light_element_limit] LightingBox,
+    points: [dynamic; light_element_limit] LightingPoint,
     
     box_ref_count: u16,
     box_table:     [light_element_limit] u16,
+    root_box_index: u16,
     
     sorting_a, sorting_b: [light_element_limit] u16,
     
-    root_box_index: u16,
-    
+    emission_color_0:           [light_element_limit] v3,
     emission_color_1:           [light_element_limit] v3,
     average_direction_to_light: [light_element_limit] v3,
-    
-    last_is_valid:  bool,
-    last_emission:  [light_element_limit] v3,
-    last_direction: [light_element_limit] v3,
     
     using stats: struct {
         number_of_times_a_point_got_used_as_an_origin:         u32,
@@ -31,25 +28,37 @@ LightingSolution :: struct {
 ////////////////////////////////////////////////
 
 LightingBox :: struct {
+    storage: [] LightPointState,
+    
     // @speed separately store center,radius to maximize cache line usage
     // read in cast_ray on every iteration
     center: v3,
     radius: v3,
     
+    reflect_color: v3,
     transparency: f32,
+    emission:     f32,
     
     // written in cast_ray only rarely
     light_index: [7] u16,
     kid_count: u16,
     first_kid: u16,
-    
-    _pad: [2] u8,
 }
 
-LightingPoint :: struct {
-    p:             v3,
-    reflect_color: v3,
-    n:             v3,
+LightingPoint :: struct #raw_union {
+    using _: struct {
+        p:             v3,
+        reflect_color: v3,
+        n:             v3,
+    },
+    as_empty: struct {
+        next_free: u16,
+    },
+}
+
+LightPointState :: struct {
+    emission:  v3,
+    direction: v3,
 }
 
 ////////////////////////////////////////////////
@@ -75,18 +84,43 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
     
     commands := group.commands
     
+    zero(solution.boxes[:])
+    
     solution.box_ref_count  = 0
-    point_count := cast(u32) len(commands.light_points)
-    solution.points           = commands.light_points[:]
-    solution.emission_color_0 = commands.emission_color_0[:point_count]
     clear(&solution.boxes)
     append(&solution.boxes, ..commands.light_boxes[:])
+    clear(&solution.points)
     
     solution.stats = {}
     
-    // @speed Just ping-pong these if we end up using it!
-    copy(solution.last_direction[:point_count], solution.average_direction_to_light[:])
-    zero(solution.average_direction_to_light[:point_count])
+    // @todo Reload the previous emission / direction as a starting point for this frame's solution so taht light can propagate over frames instead of just being smoothed over frames?
+    original_box_count := len(commands.light_boxes)
+    for box in solution.boxes {
+        for surface_index in cast(u32) 0..<6 {
+            surface := get_box_surface(box.center, box.radius, surface_index)
+            
+            x_sub_count :: 2
+            y_sub_count :: 2
+            
+            for y_sub in 0..<y_sub_count {
+                y_sub_ratio := -0.5 + cast(f32) y_sub
+                for x_sub in 0..<x_sub_count {
+                    x_sub_ratio := -0.5 + cast(f32) x_sub
+                    
+                    point_index := len(solution.points)
+                    point := append_into(&solution.points)
+                    
+                    point.p = surface.p + x_sub_ratio * surface.half_width * surface.x_axis + y_sub_ratio * surface.half_height * surface.y_axis
+                    
+                    max_emission_value :: 10
+                    solution.emission_color_0[point_index] = max_emission_value * box.emission
+                    
+                    point.n = surface.n
+                    point.reflect_color = 0.95 * box.reflect_color.rgb
+                }
+            }
+        }
+    }
     
     build_spatial_partition_for_lighting(solution)
     
@@ -95,18 +129,49 @@ lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
         debug_data_block("Lighting")
         
         box_count := cast(u32) len(commands.light_boxes)
-        debug_record_value(&box_count,   "Command Light Boxes")
-        debug_record_value(&point_count, "Command Light Points")
+        debug_record_value(&box_count, "Command Light Boxes")
         
-        box_count   = cast(u32) len(solution.boxes)
-        point_count = cast(u32) len(solution.points)
-        debug_record_value(&box_count,   "Command Light Boxes")
-        debug_record_value(&point_count, "Command Light Points")
+        box_count = cast(u32) len(solution.boxes)
+        point_count := cast(u32) len(solution.points)
+        debug_record_value(&box_count,   "Solution Light Boxes")
+        debug_record_value(&point_count, "Solution Light Points")
     }
     
+    zero(solution.average_direction_to_light[:])
     compute_light_propagation(solution)
     
-    copy(solution.last_emission[:point_count], solution.emission_color_0[:])
+    for box in solution.boxes[:original_box_count] {
+        first_point := box.storage[0]
+        valid := first_point.direction != v3{0, 0, 0}
+        
+        if valid {
+            for local_index in 0 ..< box.light_index[6] - box.light_index[0] {
+                point_index := box.light_index[0] + local_index
+                
+                emission  := solution.emission_color_0[point_index]
+                direction := normalize_or_zero(solution.average_direction_to_light[point_index])
+                
+                t :: 1. / 10.
+                emission  = linear_blend(box.storage[local_index].emission,  emission,  t)
+                direction = linear_blend(box.storage[local_index].direction, direction, t)
+                direction = normalize_or_zero(direction)
+                
+                box.storage[local_index] = { emission, direction }
+                solution.average_direction_to_light[point_index] = direction
+            }
+        } else {
+            // @note Point 0 is never used.
+            for local_index in 0 ..< box.light_index[6] - box.light_index[0] {
+                point_index := box.light_index[0] + local_index
+                
+                emission  := solution.emission_color_0[point_index]
+                direction := normalize_or_zero(solution.average_direction_to_light[point_index])
+                
+                box.storage[local_index] = { emission, direction }
+                solution.average_direction_to_light[point_index] = direction
+            }
+        }
+    }
     
     {
         debug_data_block("Renderer")
@@ -241,7 +306,9 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
     
     for _ in 0..<LightingIterationCount {
         light_power := (1.0 - light_retention) / cast(f32) ray_count
-        for point_index in 1..<cast(u32) len(solution.points) { // @note Point 0 is never used.
+        
+        // @note Point 0 is never used.
+        for point_index in 1..<cast(u16) len(solution.points) {
             point := &solution.points[point_index]
             emission_color := source_emission_color[point_index]
             
@@ -302,7 +369,8 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
             destination_emission_color[point_index] += retained_color
         }
         
-        for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
+        // @note Point 0 is never used.
+        for point_index in 1..<len(solution.points) {
             source_emission_color[point_index] = destination_emission_color[point_index]
             destination_emission_color[point_index] = 0
         }
@@ -310,20 +378,6 @@ compute_light_propagation :: proc (solution: ^LightingSolution) {
         if ray_count > 8 {
             ray_count /= 2
         }
-    }
-    
-    last_emission  := solution.last_emission[:]
-    last_direction := solution.last_direction[:]
-    if !solution.last_is_valid {
-        solution.last_is_valid = true
-        last_emission  = solution.emission_color_0[:]
-        last_direction = solution.average_direction_to_light[:]
-    }
-    
-    for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-        t :: 1. / 50.
-        solution.emission_color_0[point_index]           = linear_blend(last_emission[point_index],  solution.emission_color_0[point_index], t)
-        solution.average_direction_to_light[point_index] = normalize_or_zero(linear_blend(last_direction[point_index], normalize_or_zero(solution.average_direction_to_light[point_index]), t))
     }
 }
 
@@ -344,13 +398,13 @@ RayCastResult :: struct {
     box_surface_index: u16,
 }
 
-cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_direction: v3) -> RayCastResult {
+cast_ray :: proc (solution: ^LightingSolution, skip_index: u16, ray_origin, ray_direction: v3) -> RayCastResult {
     timed_function()
     result := RayCastResult { t = +Infinity }
     
     cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, get_box(solution, solution.root_box_index), &result)
     
-    cast_ray_recurse :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_direction: v3, root_box: ^LightingBox, result: ^RayCastResult) {
+    cast_ray_recurse :: proc (solution: ^LightingSolution, skip_index: u16, ray_origin, ray_direction: v3, root_box: ^LightingBox, result: ^RayCastResult) {
         solution.number_of_total_rays_cast += 1
         /* @note:
         A P     x axis     y axis
@@ -365,7 +419,7 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_
         */
         
         for box_index in root_box.first_kid ..< root_box.first_kid+root_box.kid_count {
-            if cast(u32) box_index != skip_index {
+            if box_index != skip_index {
                 box := get_box(solution, box_index)
                 
                 solution.number_of_times_a_box_got_considered_for_intersection += 1
@@ -373,10 +427,11 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_
                 if box.kid_count != 0 && contains(box_center_radius(box.center, box.radius), ray_origin) {
                     cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, box, result)
                 } else {
-                    radius := box.radius
                     #no_bounds_check {
-                        axis_loop: for axis in cast(u16) 0..<3 {
+                        for axis in cast(u16) 0..<3 {
                             positive := ray_direction[axis] < 0
+                            
+                            radius := box.radius
                             center := box.center
                             center[axis] += (positive ? 1 : -1) * radius[axis]
                             
@@ -398,14 +453,14 @@ cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_
                                 
                                 if x_check <= half_width && y_check <= half_height {
                                     if box.kid_count == 0 {
-                                        result.t = t
-                                        result.box = box
+                                        result.t                 = t
+                                        result.box               = box
                                         result.box_surface_index = (axis << 1) | (positive ? 1 : 0)
                                     } else {
                                         cast_ray_recurse(solution, skip_index, ray_origin, ray_direction, box, result)
                                     }
                                     
-                                    break axis_loop
+                                    break
                                 }
                             }
                         }
