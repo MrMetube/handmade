@@ -10,7 +10,8 @@ optimize :: !false
 internal :: true
 
 // @study does radlink also accept this linker flag?
-platform_flags := [] string { /* "-subsystem:windows", */ `-extra-linker-flags:/STACK:0x100000,0x100000` /* get a 1MB stack instead of the default 4kB */ }
+// @note Get a 1MB stack instead of the default 4kB.
+platform_flags := [] string { `-extra-linker-flags:/STACK:0x100000,0x100000` }
 
 pedantic_game     :: false
 pedantic_render   :: false

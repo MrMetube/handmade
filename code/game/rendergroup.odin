@@ -180,57 +180,14 @@ UsedBitmapDim :: struct {
 ////////////////////////////////////////////////
 
 @(common)
-light_element_limit :: 32 * 1024
-
-LightingSolution :: struct {
-    boxes:            [] LightingBox,
-    points:           [] LightingPoint,
-    emission_color_0: [] v3,
-    
-    emission_color_1:           [light_element_limit] v3,
-    average_direction_to_light: [light_element_limit] v3,
-    
-    last_is_valid:  bool,
-    last_emission:  [light_element_limit] v3,
-    last_direction: [light_element_limit] v3,
+allocate_render_commands_buffers :: proc (commands: ^RenderCommands, allocator: Allocator) {
+    commands.entries            = make_array_allocator(allocator, RenderEntry, 1024)
+    commands.vertex_buffer      = make_array_allocator(allocator, TexturedVertex, 1 << 20)
+    commands.quad_bitmap_buffer = make_array_allocator(allocator, ^Bitmap, 1 << 20)
+    commands.light_boxes        = make_array_allocator(allocator, LightingBox,   light_element_limit)
+    commands.light_points       = make_array_allocator(allocator, LightingPoint, light_element_limit)
+    commands.emission_color_0   = make_slice(allocator,           v3,            light_element_limit)
 }
-
-LightingTextures :: struct {
-    values: [light_element_limit] LightingValue,
-}
-
-@(common)
-LightingBox :: struct {
-    // @speed separately store center,radius to maximize cache line usage
-    // read in cast_ray on every iteration
-    center: v3,
-    radius: v3,
-    
-    transparency: f32,
-    
-    // written in cast_ray only rarely
-    light_index: [7] u16,
-    _padding:    [1] u16,
-}
-
-@(common)
-LightingPoint :: struct {
-    p:             v3,
-    reflect_color: v3,
-    n:             v3,
-}
-
-@(common, shader)
-LightingValue :: struct {
-    p: v3,
-    c: v3,
-    d: v2, 
-    // @note z is recoverable through |d.xyz| = 1
-    // => sqrt(x²+y²+z²) = 1 => x²+y²+z² = 1 => z² = 1-x²-y² => +/-z = sqrt(1-x²-y²)
-    // The sign of z is stored in c.r(color values are always positive, so the sign-bit is not used).
-}
-
-////////////////////////////////////////////////
 
 init_render_group :: proc (group: ^RenderGroup, assets: ^Assets, commands: ^RenderCommands, generation_id: AssetGenerationId) {
     group ^= {
@@ -827,206 +784,6 @@ fit_camera_distance_to_half_dim :: proc (focal_length, monitor_half_dim_in_meter
 
 ////////////////////////////////////////////////
 
-lighting_test :: proc (group: ^RenderGroup, solution: ^LightingSolution) {
-    timed_function()
-    
-    commands := group.commands
-    
-    point_count := cast(u32) len(commands.light_points)
-    solution.boxes            = commands.light_boxes[:]
-    solution.points           = commands.light_points[:]
-    solution.emission_color_0 = commands.emission_color_0[:point_count]
-    
-    {
-        debug_data_block("Renderer")
-        debug_data_block("Lighting")
-        
-        box_count := cast(u32) len(commands.light_boxes)
-        debug_record_value(&box_count,   "Light Boxes")
-        debug_record_value(&point_count, "Light Points")
-    }
-    
-    // @speed Just ping-pong these if we end up using it!
-    copy(solution.last_direction[:point_count], solution.average_direction_to_light[:])
-    zero_slice(solution.average_direction_to_light[:point_count])
-    
-    compute_light_propagation(solution)
-    
-    copy(solution.last_emission[:point_count], solution.emission_color_0[:])
-}
-
-compute_light_propagation :: proc (solution: ^LightingSolution) {
-    timed_function()
-    
-    ////////////////////////////////////////////////
-    
-    // @todo Before moving on, be sure to index 
-    // allocation management in the renderer!!!
-    
-    ////////////////////////////////////////////////
-    
-    LightingIterationCount = clamp(LightingIterationCount, 1, 32)
-    ray_count := 64
-    
-    light_retention: f32 = 0.5
-    min_emission: f32 = 0 // @todo Tune this to something higher than 0?
-    
-    source_emission_color      := solution.emission_color_0[:]
-    destination_emission_color := solution.emission_color_1[:]
-    
-    for _ in 0..<LightingIterationCount {
-        light_power := (1.0 - light_retention) / cast(f32) ray_count
-        for point_index in 1..<cast(u32) len(solution.points) { // @note Point 0 is never used.
-            point := &solution.points[point_index]
-            emission_color := source_emission_color[point_index]
-            
-            retained_color := emission_color
-            
-            if (emission_color.r + emission_color.g + emission_color.b) > min_emission {
-                emission_color *= point.reflect_color
-                
-                series := seed_random_series(1234)
-                for _ in 0..<ray_count {
-                    emission_direction := sample_hemisphere(&series, point.n)
-                    
-                    ray_p, first_point_index, point_count := cast_ray(solution, point_index, point.p, emission_direction)
-                    
-                    if first_point_index < cast(u16) len(solution.points) {
-                        closest_distance_squared: f32 = +Infinity
-                        closest_point_index: u16
-                        for test_index in first_point_index..<first_point_index+point_count {
-                            // @todo Day 419: Moving to another room from the starting room triggers this assert, the test_index is larger than the actual point count(but not too large for the array itself).
-                            test := solution.points[test_index]
-                            distance_squared := length_squared(test.p - ray_p)
-                            
-                            if closest_distance_squared > distance_squared {
-                                closest_distance_squared = distance_squared
-                                closest_point_index = test_index
-                            }
-                        }
-                        
-                        if closest_point_index != 0 {
-                            // @todo inline
-                            accumulate_sample :: proc (point: ^LightingPoint, destination_emission_color: ^v3, average_direction_to_light: ^v3, light_color: v3, light_power: f32, normal_to_light: v3) -> v3 {
-                                angular_falloff := clamp01(dot(point.n, normal_to_light))
-                                
-                                power  := light_power * angular_falloff
-                                
-                                weight := power * length(light_color)
-                                result := power * light_color
-                                
-                                destination_emission_color^ += result
-                                average_direction_to_light^ += weight * normal_to_light
-                                
-                                return result
-                            }
-                            
-                            retained_color -= accumulate_sample(&solution.points[closest_point_index], &destination_emission_color[closest_point_index], &solution.average_direction_to_light[closest_point_index], emission_color, light_power, -emission_direction)
-                        }
-                    }
-                }
-            }
-            
-            destination_emission_color[point_index] += retained_color
-        }
-        
-        for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-            source_emission_color[point_index] = destination_emission_color[point_index]
-            destination_emission_color[point_index] = 0
-        }
-        
-        if ray_count > 8 {
-            ray_count /= 2
-        }
-    }
-    
-    last_emission  := solution.last_emission[:]
-    last_direction := solution.last_direction[:]
-    if !solution.last_is_valid {
-        solution.last_is_valid = true
-        last_emission  = solution.emission_color_0[:]
-        last_direction = solution.average_direction_to_light[:]
-    }
-    
-    for point_index in 1..<len(solution.points) { // @note Point 0 is never used.
-        t :: 1. / 50.
-        solution.emission_color_0[point_index]           = linear_blend(last_emission[point_index],  solution.emission_color_0[point_index], t)
-        solution.average_direction_to_light[point_index] = normalize_or_zero(linear_blend(last_direction[point_index], normalize_or_zero(solution.average_direction_to_light[point_index]), t))
-    }
-}
-
-sample_hemisphere :: proc (series: ^RandomSeries, n: v3) -> v3 {
-    // @todo Better hemisphere sampling, probably!
-    result := normalize_or_zero(random_bilateral(series, v3))
-    
-    if dot(result, n) < 0 {
-        result = -result
-    }
-    
-    return result
-}
-
-cast_ray :: proc (solution: ^LightingSolution, skip_index: u32, ray_origin, ray_direction: v3) -> (v3, u16, u16) {
-    timed_function()
-    
-    point_index := safe_truncate(u16, len(solution.points))
-    point_count: u16
-    result_p:    v3
-    
-    closest_hit := +Infinity
-    for box, box_index in solution.boxes {
-        if cast(u32) box_index != skip_index {
-            radius := box.radius
-            #no_bounds_check #unroll for axis in cast(u32) 0..<3 {
-                positive := ray_direction[axis] < 0
-                center := box.center
-                center[axis] += (positive ? 1 : -1) * radius[axis]
-                
-                plane_to_origin := ray_origin - center
-                
-                t := -plane_to_origin[axis] / ray_direction[axis]
-                
-                if t > 0 && closest_hit > t {
-                    /* @note:
-                    A P     x axis     y axis
-                    0 0    0,-1, 0    0, 0, 1
-                    0 1    0, 1, 0    0, 0, 1
-                    
-                    1 0    0, 0,-1    1, 0, 0
-                    1 1    0, 0, 1    1, 0, 0
-                    
-                    2 0   -1, 0, 0    0, 1, 0
-                    2 1    1, 0, 0    0, 1, 0
-                    */
-                    x_index := (axis+1) % 3
-                    y_index := (axis+2) % 3
-                    
-                    half_width  := radius[x_index]
-                    half_height := radius[y_index]
-                    
-                    ray_point := plane_to_origin + t * ray_direction
-                    
-                    x_check := abs(ray_point[x_index])
-                    y_check := abs(ray_point[y_index])
-                    
-                    if x_check <= half_width && y_check <= half_height {
-                        closest_hit = t
-                        
-                        box_surface_index := (axis << 1) | (positive ? 1 : 0)
-                        point_index = box.light_index[box_surface_index]
-                        point_count = box.light_index[box_surface_index+1] - box.light_index[box_surface_index]
-                    }
-                }
-            }
-        }
-    }
-    
-    result_p = ray_origin + closest_hit * ray_direction
-    return result_p, point_index, point_count
-}
-
-////////////////////////////////////////////////
-
 render_lighting_points :: proc (group: ^RenderGroup, solution: ^LightingSolution, textures: ^LightingTextures) {
     timed_function()
     
@@ -1076,6 +833,8 @@ push_lighting_values :: proc (group: ^RenderGroup, solution: ^LightingSolution, 
     
     push_lighting(group, textures)
 }
+
+////////////////////////////////////////////////
 
 LightBoxSurface :: struct {
     p: v3,

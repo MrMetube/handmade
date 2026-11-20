@@ -278,14 +278,7 @@ main :: proc () {
     
     render_commands: RenderCommands
     {
-        // @todo decide what our sizes should be
-        push_buffer := make(frame_allocator, u8, 32*Megabyte)
-        render_commands.entries            = make_array_allocator(frame_allocator, RenderEntry, 1024)
-        render_commands.vertex_buffer      = make_array_allocator(frame_allocator, TexturedVertex, 1 << 20)
-        render_commands.quad_bitmap_buffer = make_array_allocator(frame_allocator, ^Bitmap, 1 << 20)
-        render_commands.light_boxes        = make_array_allocator(frame_allocator, LightingBox,   light_element_limit)
-        render_commands.light_points       = make_array_allocator(frame_allocator, LightingPoint, light_element_limit)
-        render_commands.emission_color_0   = make_slice(frame_allocator,           v3,            light_element_limit)
+        allocate_render_commands_buffers(&render_commands, frame_allocator)
         
         render_commands.white_bitmap.memory = make(frame_allocator, Color, 1)
         render_commands.white_bitmap.memory[0]         = {255, 255, 255, 255}
@@ -330,7 +323,7 @@ main :: proc () {
     
     // @note Set the windows scheduler granularity to 1ms so that out win.Sleep can be more granular
     desired_scheduler_ms :: 1
-    sleep_is_granular := win.timeBeginPeriod(desired_scheduler_ms) == win.TIMERR_NOERROR
+    win.timeBeginPeriod(desired_scheduler_ms)/*  == win.TIMERR_NOERROR */
     
     running := true
     
